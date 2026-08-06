@@ -264,7 +264,15 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
       elif $filter != "" then map(select(._s | test($filter; "i")))
       else . end )
   | sort_by(-.number) | .[:$limit]
-')"
+')" || {
+    # `--session '['` kills jq on the regex, and the unchecked command
+    # substitution then left `selected` empty — which the block below
+    # renders as "no PRs for a session matching '['", exit 0. A bad
+    # pattern and a genuinely empty result must not look alike: one is
+    # an invocation error to fix, the other is an answer.
+    echo "pr-sessions: could not select rows — check the --session pattern ('$FILTER') is a valid regex." >&2
+    exit 2
+}
 
 if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"

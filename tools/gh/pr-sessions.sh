@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tools/gh/pr-sessions.sh
 #
+# >>> help
 # Which SESSION owns which PR, newest first.
 #
 # Every PR in this repo carries the same GitHub author, because every
@@ -62,6 +63,7 @@
 # Exit codes:
 #   0  listed (even if the result is empty)
 #   2  invocation problem (no gh/jq, not authenticated, bad flag)
+# <<< help
 
 set -uo pipefail
 
@@ -115,7 +117,16 @@ while [[ $# -gt 0 ]]; do
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
         /lastItem:*|--lastItem:*)  LAST_ITEM="${1#*:}"; LAST_ITEM_SET=1; shift ;;
         /lastDate:*|--lastDate:*)  LAST_DATE="${1#*:}"; LAST_DATE_SET=1; shift ;;
-        -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # Delimited by markers, not line numbers. `sed -n '3,36p'` meant
+        # every flag documented below line 36 — /lastItem, /lastDate,
+        # /unresolved, --by-session, --no-threads — was invisible to the
+        # --help the script's own error messages tell you to run. A help
+        # range pinned to line numbers goes stale the first time anything
+        # above it grows, and nothing complains.
+        -h|--help)
+            sed -n '/^# >>> help$/,/^# <<< help$/p' "$0" \
+                | sed '1d;$d' | sed 's/^# \{0,1\}//'
+            exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done

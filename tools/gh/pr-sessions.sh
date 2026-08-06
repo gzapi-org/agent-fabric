@@ -91,15 +91,25 @@ set_state() {
     STATE="$1"; STATE_SET="$2"
 }
 
+# A flag that takes a value must HAVE one. Without this, `-n` as the
+# final argument left `shift 2` with nothing to consume: shift fails,
+# consumes nothing, and — `set -e` being deliberately off — the loop
+# re-reads the same argument forever. A hung script is a worse failure
+# than a rejected one, and it looks like a slow network call.
+need_operand() {
+    [[ $# -ge 2 ]] || {
+        echo "pr-sessions: $1 needs a value (try --help)." >&2; exit 2; }
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -n|--limit)   LIMIT="${2:-}"; shift 2 ;;
+        -n|--limit)   need_operand "$@"; LIMIT="$2"; shift 2 ;;
         /OPEN|/open|--open)       set_state open   "$1"; shift ;;
         /MERGED|/merged|--merged) set_state merged "$1"; shift ;;
         /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
         /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
         --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
-        --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
+        --session)    need_operand "$@"; FILTER="$2"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
@@ -109,6 +119,16 @@ while [[ $# -gt 0 ]]; do
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done
+
+# -n reaches `$(( LIMIT * 20 ))`, and bash arithmetic re-evaluates the
+# CONTENTS of a variable as an expression — including command
+# substitution inside an array subscript. So `-n 'x[$(rm -rf …)]'` is
+# not a bad number, it is code execution. Validate before any
+# arithmetic, not at the point of use.
+if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "pr-sessions: -n/--limit needs a positive integer, got '$LIMIT'." >&2
+    exit 2
+fi
 
 # Validated whenever the flag was PASSED, not merely when non-empty.
 if [[ "$LAST_ITEM_SET" -eq 1 ]]; then

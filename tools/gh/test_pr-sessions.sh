@@ -396,15 +396,46 @@ run_env GH_MOCK_PRLIST_FAIL=1 -- /all
 assert_rc       "exits 2" 2
 assert_contains "names the likely cause" "could not list PRs"
 
-echo "pr-sessions: /lastItem beyond the fetch cap is not silently clamped"
-run /all /lastItem:600
-# Either the pool is honoured or the request is refused — what must not
-# happen is a silent 500-row clamp presented as a 600-row pool.
-if [[ "$RUN_RC" -eq 2 ]]; then
-    assert_contains "refusal explains the cap" "500"
+echo "pr-sessions: /lastItem beyond the derived cap is honoured, not clamped"
+# The mock records the --limit it was handed, so the claim is about the
+# fetch that actually went out rather than the rendered page.
+cat > "$SANDBOX/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+set -uo pipefail
+case "${1:-}" in
+  pr)
+    while [[ $# -gt 0 ]]; do
+      [[ "$1" == "--limit" ]] && printf '%s\n' "$2" > "$GH_MOCK_DIR/last-limit"
+      shift
+    done
+    cat "$GH_MOCK_DIR/pr-list.json" ;;
+  repo) printf '%s\n' "gzapi-org/gzapp" ;;
+  api)  printf '%s\n' '{}' ;;
+  *)    exit 1 ;;
+esac
+MOCK
+chmod +x "$SANDBOX/bin/gh"
+run /all /lastItem:600 --no-threads
+assert_rc "exits 0" 0
+requested="$(cat "$SANDBOX/fixtures/last-limit" 2>/dev/null || echo missing)"
+if [[ "$requested" == "600" ]]; then
+    pass "fetches the full 600-PR pool"
 else
-    assert_rc "honours the requested pool" 0
+    fail "silently clamped the pool" "gh pr list --limit was '$requested', wanted 600"
 fi
+
+echo "pr-sessions: a full /lastDate page warns that the window may be short"
+# The warning fires when the fetch came back full, so the fixture has to
+# fill the derived 200-row page.
+write_pr_list "$(jq -n --arg me "$ME" '[range(200) | {
+  number: (500 - .), state: "OPEN", headRefName: ($me + "/feat/w\(.)"),
+  title: "w", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null}]')"
+# -n 10 puts the derived fetch at its 200 floor, which the fixture fills
+# exactly.
+run /all -n 10 /lastDate:99d --no-threads
+assert_rc       "exits 0" 0
+assert_contains "warns that the window may be truncated" "may be"
+default_pr_list
 
 echo
 if [[ "$failures" -eq 0 ]]; then

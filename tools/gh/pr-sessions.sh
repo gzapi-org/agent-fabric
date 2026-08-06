@@ -189,14 +189,22 @@ fi
 # an empty list that reads as "you have no PRs" rather than "your PRs
 # are older than the window". So widen the fetch and trim after
 # filtering.
+#
+# 500 bounds the fetch this script INFERS for you. It is a guess about
+# how far back to look, so capping it is free.
+DERIVED_FETCH_CAP=500
 FETCH="$LIMIT"
 if [[ -n "$FILTER" || "$UNRESOLVED_ONLY" -eq 1 || -n "$CUTOFF" || -n "$LAST_ITEM" ]]; then
     FETCH=$(( LIMIT * 20 )); (( FETCH < 200 )) && FETCH=200
-    (( FETCH > 500 )) && FETCH=500
+    (( FETCH > DERIVED_FETCH_CAP )) && FETCH=$DERIVED_FETCH_CAP
 fi
-# A pool of N cannot be built from a fetch smaller than N.
+# An EXPLICIT /lastItem:N is not a guess — it is the pool the caller
+# asked for, and it is honoured whole. The cap used to apply here too,
+# so /lastItem:600 quietly built a 600-row pool out of 500 rows and
+# then filtered it, dropping matches without a word. `gh pr list
+# --limit` paginates, so there is nothing to clamp for.
 if [[ -n "$LAST_ITEM" ]] && (( LAST_ITEM > FETCH )); then
-    FETCH="$LAST_ITEM"; (( FETCH > 500 )) && FETCH=500
+    FETCH="$LAST_ITEM"
 fi
 
 # /unresolved filters on data that only exists AFTER the thread lookup,
@@ -215,6 +223,18 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
     echo "pr-sessions: could not list PRs (gh not authenticated, or not in a repo)." >&2
     exit 2
 }
+
+# A /lastDate window is only as complete as the rows fetched: if the
+# fetch came back full, older PRs inside the window may exist beyond it
+# and the pool is silently short. Say so rather than presenting a
+# truncated window as the window.
+if [[ -n "$CUTOFF" ]]; then
+    fetched="$(printf '%s' "$rows" | jq 'length' 2>/dev/null || echo 0)"
+    if (( fetched >= FETCH )); then
+        echo "pr-sessions: fetched the full $FETCH-PR page, so the ${LAST_DATE} window may be" >&2
+        echo "  truncated — PRs updated in it can exist further back. Raise it with /lastItem:N." >&2
+    fi
+fi
 
 # Session = first two path segments of the branch. A branch that does
 # not follow the convention (dependabot, a hand-made name) is reported

@@ -328,8 +328,23 @@ if [[ "$THREADS" -eq 1 ]]; then
             # unresolved" is exactly the reassuring answer you would act
             # on, and it would be a guess.
             [[ -z "$THREAD_JSON" ]] && THREAD_JSON="null"
+        else
+            # No repo context ⇒ no thread data. Same rule: unknown.
+            THREAD_JSON="null"
         fi
     fi
+fi
+
+# The THR column can honestly print "?" for an unknown count. The
+# /unresolved FILTER cannot: it must decide keep-or-drop per row, and
+# the only safe default — treat unknown as zero — deletes exactly the
+# rows the caller asked to see, then reports "no PRs with unresolved
+# review threads" as though the question had been answered. That is the
+# unknown-is-not-zero safeguard undone one stage later, so refuse.
+if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREAD_JSON" == "null" ]]; then
+    echo "pr-sessions: could not read review threads, so /unresolved cannot be answered." >&2
+    echo "  (gh api graphql failed, or the repository could not be resolved)" >&2
+    exit 2
 fi
 
 out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPED" \

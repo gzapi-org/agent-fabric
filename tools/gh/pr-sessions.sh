@@ -308,14 +308,21 @@ if [[ "$THREADS" -eq 1 ]]; then
                 q+=" comments(last: 1) { nodes { author { login } } } } } }"
             done <<< "$nums"
             q+=" } }"
+            # The PR author is bound BEFORE descending into the threads.
+            # Reading `.author.login` inside the thread pipeline compared
+            # each last-commenter against a field the thread node does
+            # not have — i.e. against null — so every unresolved thread
+            # counted as awaiting and every row wore a "!". The bang then
+            # said nothing the count had not already said.
             THREAD_JSON="$(gh api graphql -f query="$q" --jq '
                 [ .data.repository | to_entries[] | .value
+                  | (.author.login // "") as $pr_author
                   | { key: (.number | tostring),
                       value: {
                         unresolved: ([.reviewThreads.nodes[] | select(.isResolved == false)] | length),
                         awaiting:   ([.reviewThreads.nodes[]
                                       | select(.isResolved == false)
-                                      | select((.comments.nodes[0].author.login // "") != .author.login)] | length)
+                                      | select((.comments.nodes[0].author.login // "") != $pr_author)] | length)
                       } } ] | from_entries' 2>/dev/null)" || THREAD_JSON=""
             # A failed lookup must read as UNKNOWN, never as zero: "0
             # unresolved" is exactly the reassuring answer you would act

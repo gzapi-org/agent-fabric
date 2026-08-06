@@ -17,13 +17,24 @@
 # stay-in-your-own-lane rules turn on: never push to, rebase, delete or
 # answer reviews on another session's branch.
 #
+# DEFAULT SCOPE: run inside a clone, and it shows THAT clone's PRs.
+# Asking "which PRs are mine" from inside a working tree is the common
+# case, and the clone you are standing in already answers it — so that
+# is the default rather than something to remember a flag for. Pass
+# /all to see every session.
+#
+# (There is no unscoped-outside-a-repo case to describe: `gh pr list`
+# needs a repo context and fails first, so the script never gets that
+# far. The empty-ME branch below is belt-and-braces for a future
+# --repo flag, not a path you can reach today.)
+#
 # Usage:
-#   tools/gh/pr-sessions.sh                 # last 20 PRs, any state
-#   tools/gh/pr-sessions.sh -n 50           # last 50
+#   tools/gh/pr-sessions.sh                 # THIS clone's PRs (default)
+#   tools/gh/pr-sessions.sh /all            # every session
+#   tools/gh/pr-sessions.sh -n 50           # last 50 rows
 #   tools/gh/pr-sessions.sh --open          # open PRs only
-#   tools/gh/pr-sessions.sh --mine          # only this clone's session
 #   tools/gh/pr-sessions.sh --session gzapp-claude3
-#   tools/gh/pr-sessions.sh --by-session    # group under session headings
+#   tools/gh/pr-sessions.sh /all --by-session   # grouped, all sessions
 #
 # Exit codes:
 #   0  listed (even if the result is empty)
@@ -35,16 +46,18 @@ LIMIT=20
 STATE=all
 FILTER=""
 GROUPED=0
+SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--limit)   LIMIT="${2:-}"; shift 2 ;;
         --open)       STATE=open; shift ;;
         --merged)     STATE=merged; shift ;;
-        --mine)       FILTER="__MINE__"; shift ;;
-        --session)    FILTER="${2:-}"; shift 2 ;;
+        /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
+        --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
+        --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
-        -h|--help)    sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -55,10 +68,22 @@ for bin in gh jq; do
 done
 
 # This clone's session, derived the same way the branch prefix is built.
-ME="unknown/unknown"
+ME=""
 if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     ME="$(hostname -s)/$(basename "$root")"
 fi
+
+# Inside a clone with no explicit scope: show that clone's PRs. If ME
+# cannot be resolved there is nothing to infer, so fall through to
+# everything — unreachable today (gh needs a repo and fails earlier),
+# kept so the default cannot silently become "someone else's session"
+# if a --repo flag is ever added.
+DEFAULTED_TO_MINE=0
+if [[ "$SCOPE_EXPLICIT" -eq 0 && -n "$ME" ]]; then
+    FILTER="__MINE__"
+    DEFAULTED_TO_MINE=1
+fi
+[[ -z "$ME" ]] && ME="unknown/unknown"
 
 # -n bounds the ROWS SHOWN, not how far back we look. With a filter the
 # two differ sharply: `--mine -n 8` fetching only the newest 8 PRs
@@ -121,13 +146,17 @@ if [[ -z "${out//[$' \t\n']/}" ]]; then
     [[ "$FILTER" == "__MINE__" ]] && what="PRs for this clone ($ME)"
     [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && what="PRs for a session matching '$FILTER'"
     echo "pr-sessions: no $what in the last $FETCH ${STATE} PR(s)."
+    [[ "$DEFAULTED_TO_MINE" -eq 1 ]] && \
+        echo "  (scoped to this clone by default — pass /all to see every session)"
     exit 0
 fi
 
 printf '%s\n' "$out"
 
-if [[ "$GROUPED" -eq 0 ]]; then
-    echo
+echo
+if [[ "$DEFAULTED_TO_MINE" -eq 1 ]]; then
+    echo "  Scoped to this clone ($ME) — pass /all for every session."
+elif [[ "$GROUPED" -eq 0 ]]; then
     echo "  * = this clone ($ME).  Others belong to parallel sessions:"
     echo "  do not push to, rebase, delete, or answer reviews on their branches."
 fi

@@ -32,12 +32,24 @@
 #   tools/gh/pr-sessions.sh                 # THIS clone's PRs (default)
 #   tools/gh/pr-sessions.sh /all            # every session
 #   tools/gh/pr-sessions.sh -n 50           # last 50 rows
-#   tools/gh/pr-sessions.sh --open          # open PRs only
+#   tools/gh/pr-sessions.sh /OPEN           # open PRs only
+#   tools/gh/pr-sessions.sh /MERGED         # merged only  (/CLOSED too)
 #   tools/gh/pr-sessions.sh --session gzapp-claude3
 #   tools/gh/pr-sessions.sh /all --by-session   # grouped, all sessions
+#   tools/gh/pr-sessions.sh /lastItem:50    # pool = 50 most recent PRs
+#   tools/gh/pr-sessions.sh /lastDate:2d    # pool = updated in the last 2 days
+#   tools/gh/pr-sessions.sh /lastDate:6h /unresolved   # ...then filter
 #   tools/gh/pr-sessions.sh /unresolved     # only PRs with an open thread
 #   tools/gh/pr-sessions.sh /all /unresolved # ...across every session
+#
+# State is chosen at FETCH time, so like /lastItem and /lastDate it
+# narrows the pool before scope, /unresolved and -n ever see it.
 #   tools/gh/pr-sessions.sh --no-threads    # skip the review-thread lookup
+#
+# /lastItem and /lastDate narrow the POOL, and are applied BEFORE
+# everything else — session scope, /unresolved and -n all operate on
+# what they leave behind. That is what separates them from -n: -n trims
+# the printed page, these decide what was ever considered.
 #
 # The THR column counts UNRESOLVED review threads — the ones that
 # actually gate a merge under required_review_thread_resolution. A
@@ -53,27 +65,73 @@ set -uo pipefail
 
 LIMIT=20
 STATE=all
+STATE_SET=""      # which flag chose STATE, so a conflict can be named
 FILTER=""
 GROUPED=0
 THREADS=1
 UNRESOLVED_ONLY=0
+# _SET flags rather than an empty-string sentinel: `/lastItem:` and
+# `/lastDate:` PASS an empty value, and treating that as "unset" made a
+# malformed flag render as no filter at all — the whole list, looking
+# like a successful narrow. Passed-but-empty must be an error.
+LAST_ITEM=""; LAST_ITEM_SET=0     # /lastItem:N  — pool = N most recent PRs
+LAST_DATE=""; LAST_DATE_SET=0     # /lastDate:Nd — pool = updated within window
+CUTOFF=""                         # LAST_DATE resolved to an ISO instant
 SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
+
+# gh takes ONE --state. Two conflicting flags would otherwise resolve
+# to whichever came last, quietly showing a different set than asked.
+set_state() {
+    if [[ -n "$STATE_SET" && "$STATE" != "$1" ]]; then
+        echo "pr-sessions: $STATE_SET and $2 conflict — pick one state." >&2
+        exit 2
+    fi
+    STATE="$1"; STATE_SET="$2"
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--limit)   LIMIT="${2:-}"; shift 2 ;;
-        --open)       STATE=open; shift ;;
-        --merged)     STATE=merged; shift ;;
+        /OPEN|/open|--open)       set_state open   "$1"; shift ;;
+        /MERGED|/merged|--merged) set_state merged "$1"; shift ;;
+        /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
         /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
         --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
         --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
+        /lastItem:*|--lastItem:*)  LAST_ITEM="${1#*:}"; LAST_ITEM_SET=1; shift ;;
+        /lastDate:*|--lastDate:*)  LAST_DATE="${1#*:}"; LAST_DATE_SET=1; shift ;;
         -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done
+
+# Validated whenever the flag was PASSED, not merely when non-empty.
+if [[ "$LAST_ITEM_SET" -eq 1 ]]; then
+    [[ "$LAST_ITEM" =~ ^[1-9][0-9]*$ ]] || {
+        echo "pr-sessions: /lastItem needs a positive integer, got '$LAST_ITEM'." >&2; exit 2; }
+fi
+
+if [[ "$LAST_DATE_SET" -eq 1 ]]; then
+    # Nd / Nh / Nm. A bare number is REFUSED rather than assumed to be
+    # days: guessing the unit on a time filter silently changes which
+    # PRs you are looking at.
+    if [[ "$LAST_DATE" =~ ^([1-9][0-9]*)([dhm])$ ]]; then
+        n="${BASH_REMATCH[1]}"
+        case "${BASH_REMATCH[2]}" in
+            d) span="$n days ago" ;;
+            h) span="$n hours ago" ;;
+            m) span="$n minutes ago" ;;
+        esac
+        CUTOFF="$(date -u -d "$span" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || {
+            echo "pr-sessions: could not compute a cutoff for '$LAST_DATE'." >&2; exit 2; }
+    else
+        echo "pr-sessions: /lastDate needs <N>d, <N>h or <N>m — got '$LAST_DATE'." >&2
+        exit 2
+    fi
+fi
 
 if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREADS" -eq 0 ]]; then
     echo "pr-sessions: /unresolved needs the thread lookup — drop --no-threads." >&2
@@ -110,9 +168,13 @@ fi
 # are older than the window". So widen the fetch and trim after
 # filtering.
 FETCH="$LIMIT"
-if [[ -n "$FILTER" || "$UNRESOLVED_ONLY" -eq 1 ]]; then
+if [[ -n "$FILTER" || "$UNRESOLVED_ONLY" -eq 1 || -n "$CUTOFF" || -n "$LAST_ITEM" ]]; then
     FETCH=$(( LIMIT * 20 )); (( FETCH < 200 )) && FETCH=200
     (( FETCH > 500 )) && FETCH=500
+fi
+# A pool of N cannot be built from a fetch smaller than N.
+if [[ -n "$LAST_ITEM" ]] && (( LAST_ITEM > FETCH )); then
+    FETCH="$LAST_ITEM"; (( FETCH > 500 )) && FETCH=500
 fi
 
 # /unresolved filters on data that only exists AFTER the thread lookup,
@@ -137,7 +199,8 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
 # as "(unconventional)" rather than silently mis-attributed — a wrong
 # owner is worse than a visible unknown.
 selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
-        --argjson limit "$CANDIDATES" '
+        --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
+        --argjson lastitem "${LAST_ITEM:-0}" '
   def session:
     (.headRefName | split("/")) as $p
     | if ($p | length) >= 3 then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
@@ -153,6 +216,10 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
     else "CLOSED" end;
 
   [ .[] | . + {_s: session, _w: work} ]
+  | sort_by(-.number)
+  # POOL FIRST: /lastDate then /lastItem, before scope or anything else.
+  | ( if $cutoff != "" then map(select(.updatedAt >= $cutoff)) else . end )
+  | ( if $lastitem > 0 then .[:$lastitem] else . end )
   | ( if $filter == "__MINE__" then map(select(._s == $me))
       elif $filter != "" then map(select(._s | test($filter; "i")))
       else . end )

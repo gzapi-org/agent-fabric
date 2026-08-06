@@ -35,6 +35,13 @@
 #   tools/gh/pr-sessions.sh --open          # open PRs only
 #   tools/gh/pr-sessions.sh --session gzapp-claude3
 #   tools/gh/pr-sessions.sh /all --by-session   # grouped, all sessions
+#   tools/gh/pr-sessions.sh --no-threads    # skip the review-thread lookup
+#
+# The THR column counts UNRESOLVED review threads — the ones that
+# actually gate a merge under required_review_thread_resolution. A
+# trailing "!" means the last word in at least one of them is NOT the
+# PR author's, i.e. somebody is waiting on a reply. "2" without the
+# bang means you answered and simply have not resolved the threads.
 #
 # Exit codes:
 #   0  listed (even if the result is empty)
@@ -46,6 +53,7 @@ LIMIT=20
 STATE=all
 FILTER=""
 GROUPED=0
+THREADS=1
 SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +65,7 @@ while [[ $# -gt 0 ]]; do
         --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
         --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
+        --no-threads) THREADS=0; shift ;;
         -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
@@ -107,8 +116,8 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
 # not follow the convention (dependabot, a hand-made name) is reported
 # as "(unconventional)" rather than silently mis-attributed — a wrong
 # owner is worse than a visible unknown.
-out="$(printf '%s' "$rows" | jq -r --arg me "$ME" --arg filter "$FILTER" \
-        --argjson grouped "$GROUPED" --argjson limit "$LIMIT" '
+selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
+        --argjson limit "$LIMIT" '
   def session:
     (.headRefName | split("/")) as $p
     | if ($p | length) >= 3 then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
@@ -128,20 +137,9 @@ out="$(printf '%s' "$rows" | jq -r --arg me "$ME" --arg filter "$FILTER" \
       elif $filter != "" then map(select(._s | test($filter; "i")))
       else . end )
   | sort_by(-.number) | .[:$limit]
-  | if $grouped == 1 then
-      ( group_by(._s) | sort_by(-(map(.number) | max))
-        | map(
-            "\n\(.[0]._s)\(if .[0]._s == $me then "   <- this clone" else "" end)"
-            , ( sort_by(-.number)[]
-                | "  #\(.number)  \(st | pad(6))  \(.updatedAt[0:10])  \(._w)" )
-          ) | flatten | .[] )
-    else
-      ( sort_by(-.number)[]
-        | "\(._s | mark) #\(.number | tostring | pad(4))  \(st | pad(6))  \(.updatedAt[0:10])  \(._s | pad(30))  \(._w)" )
-    end
 ')"
 
-if [[ -z "${out//[$' \t\n']/}" ]]; then
+if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"
     [[ "$FILTER" == "__MINE__" ]] && what="PRs for this clone ($ME)"
     [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && what="PRs for a session matching '$FILTER'"
@@ -151,6 +149,84 @@ if [[ -z "${out//[$' \t\n']/}" ]]; then
     exit 0
 fi
 
+# ── unresolved review threads, one batched call ─────────────────────
+#
+# Only for the rows about to be PRINTED, and in a single aliased
+# GraphQL query rather than one request per PR: ~0.7s for the whole
+# page instead of N round trips.
+#
+# "Unresolved" is the right count because required_review_thread_
+# resolution is what actually gates the merge. The "!" refinement asks
+# a second question the raw count cannot: is the last comment in the
+# thread the PR author's? If it is not, somebody is waiting on YOU.
+THREAD_JSON='{}'
+if [[ "$THREADS" -eq 1 ]]; then
+    nums="$(printf '%s' "$selected" | jq -r '.[].number')"
+    if [[ -n "$nums" ]]; then
+        owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
+        if [[ -n "$owner_repo" ]]; then
+            q="{ repository(owner: \"${owner_repo%%/*}\", name: \"${owner_repo##*/}\") {"
+            while read -r n; do
+                [[ -z "$n" ]] && continue
+                q+=" p${n}: pullRequest(number: ${n}) { number author { login }"
+                q+=" reviewThreads(first: 100) { nodes { isResolved"
+                q+=" comments(last: 1) { nodes { author { login } } } } } }"
+            done <<< "$nums"
+            q+=" } }"
+            THREAD_JSON="$(gh api graphql -f query="$q" --jq '
+                [ .data.repository | to_entries[] | .value
+                  | { key: (.number | tostring),
+                      value: {
+                        unresolved: ([.reviewThreads.nodes[] | select(.isResolved == false)] | length),
+                        awaiting:   ([.reviewThreads.nodes[]
+                                      | select(.isResolved == false)
+                                      | select((.comments.nodes[0].author.login // "") != .author.login)] | length)
+                      } } ] | from_entries' 2>/dev/null)" || THREAD_JSON=""
+            # A failed lookup must read as UNKNOWN, never as zero: "0
+            # unresolved" is exactly the reassuring answer you would act
+            # on, and it would be a guess.
+            [[ -z "$THREAD_JSON" ]] && THREAD_JSON="null"
+        fi
+    fi
+fi
+
+out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPED" \
+        --argjson th "$THREAD_JSON" --argjson want "$THREADS" '
+  def mark: if (. == $me) then "*" else " " end;
+  def pad($n): . + (" " * ($n - length));
+  def lpad($n): (" " * ($n - length)) + .;
+  def st:
+    if .isDraft then "DRAFT"
+    elif .state == "OPEN" then "OPEN"
+    elif .state == "MERGED" then "MERGED"
+    else "CLOSED" end;
+  def threads:
+    if $want == 0 then ""
+    elif $th == null then "?"
+    else ($th[(.number | tostring)] // null) as $t
+      | if $t == null then "?"
+        elif $t.unresolved == 0 then "-"
+        else "\($t.unresolved)\(if $t.awaiting > 0 then "!" else "" end)"
+        end
+    end;
+
+  if $grouped == 1 then
+    ( group_by(._s) | sort_by(-(map(.number) | max))
+      | map(
+          "\n\(.[0]._s)\(if .[0]._s == $me then "   <- this clone" else "" end)"
+          , ( sort_by(-.number)[]
+              | "  #\(.number)  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._w)" )
+        ) | flatten | .[] )
+  else
+    ( sort_by(-.number)[]
+      | "\(._s | mark) #\(.number | tostring | pad(4))  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._s | pad(30))  \(._w)" )
+  end
+')"
+
+if [[ "$GROUPED" -eq 0 ]]; then
+    printf '  %-5s  %-6s  %3s  %-10s  %-30s  %s\n' \
+        PR STATE THR UPDATED SESSION WORK
+fi
 printf '%s\n' "$out"
 
 echo

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tools/gh/pr-sessions.sh
 #
+# >>> help
 # Which SESSION owns which PR, newest first.
 #
 # Every PR in this repo carries the same GitHub author, because every
@@ -62,6 +63,7 @@
 # Exit codes:
 #   0  listed (even if the result is empty)
 #   2  invocation problem (no gh/jq, not authenticated, bad flag)
+# <<< help
 
 set -uo pipefail
 
@@ -91,24 +93,53 @@ set_state() {
     STATE="$1"; STATE_SET="$2"
 }
 
+# A flag that takes a value must HAVE one. Without this, `-n` as the
+# final argument left `shift 2` with nothing to consume: shift fails,
+# consumes nothing, and — `set -e` being deliberately off — the loop
+# re-reads the same argument forever. A hung script is a worse failure
+# than a rejected one, and it looks like a slow network call.
+need_operand() {
+    [[ $# -ge 2 ]] || {
+        echo "pr-sessions: $1 needs a value (try --help)." >&2; exit 2; }
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -n|--limit)   LIMIT="${2:-}"; shift 2 ;;
+        -n|--limit)   need_operand "$@"; LIMIT="$2"; shift 2 ;;
         /OPEN|/open|--open)       set_state open   "$1"; shift ;;
         /MERGED|/merged|--merged) set_state merged "$1"; shift ;;
         /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
         /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
         --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
-        --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
+        --session)    need_operand "$@"; FILTER="$2"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
         /lastItem:*|--lastItem:*)  LAST_ITEM="${1#*:}"; LAST_ITEM_SET=1; shift ;;
         /lastDate:*|--lastDate:*)  LAST_DATE="${1#*:}"; LAST_DATE_SET=1; shift ;;
-        -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # Delimited by markers, not line numbers. `sed -n '3,36p'` meant
+        # every flag documented below line 36 — /lastItem, /lastDate,
+        # /unresolved, --by-session, --no-threads — was invisible to the
+        # --help the script's own error messages tell you to run. A help
+        # range pinned to line numbers goes stale the first time anything
+        # above it grows, and nothing complains.
+        -h|--help)
+            sed -n '/^# >>> help$/,/^# <<< help$/p' "$0" \
+                | sed '1d;$d' | sed 's/^# \{0,1\}//'
+            exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done
+
+# -n reaches `$(( LIMIT * 20 ))`, and bash arithmetic re-evaluates the
+# CONTENTS of a variable as an expression — including command
+# substitution inside an array subscript. So `-n 'x[$(rm -rf …)]'` is
+# not a bad number, it is code execution. Validate before any
+# arithmetic, not at the point of use.
+if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "pr-sessions: -n/--limit needs a positive integer, got '$LIMIT'." >&2
+    exit 2
+fi
 
 # Validated whenever the flag was PASSED, not merely when non-empty.
 if [[ "$LAST_ITEM_SET" -eq 1 ]]; then
@@ -169,14 +200,22 @@ fi
 # an empty list that reads as "you have no PRs" rather than "your PRs
 # are older than the window". So widen the fetch and trim after
 # filtering.
+#
+# 500 bounds the fetch this script INFERS for you. It is a guess about
+# how far back to look, so capping it is free.
+DERIVED_FETCH_CAP=500
 FETCH="$LIMIT"
 if [[ -n "$FILTER" || "$UNRESOLVED_ONLY" -eq 1 || -n "$CUTOFF" || -n "$LAST_ITEM" ]]; then
     FETCH=$(( LIMIT * 20 )); (( FETCH < 200 )) && FETCH=200
-    (( FETCH > 500 )) && FETCH=500
+    (( FETCH > DERIVED_FETCH_CAP )) && FETCH=$DERIVED_FETCH_CAP
 fi
-# A pool of N cannot be built from a fetch smaller than N.
+# An EXPLICIT /lastItem:N is not a guess — it is the pool the caller
+# asked for, and it is honoured whole. The cap used to apply here too,
+# so /lastItem:600 quietly built a 600-row pool out of 500 rows and
+# then filtered it, dropping matches without a word. `gh pr list
+# --limit` paginates, so there is nothing to clamp for.
 if [[ -n "$LAST_ITEM" ]] && (( LAST_ITEM > FETCH )); then
-    FETCH="$LAST_ITEM"; (( FETCH > 500 )) && FETCH=500
+    FETCH="$LAST_ITEM"
 fi
 
 # /unresolved filters on data that only exists AFTER the thread lookup,
@@ -196,19 +235,49 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
     exit 2
 }
 
+# A /lastDate window is only as complete as the rows fetched: if the
+# fetch came back full, older PRs inside the window may exist beyond it
+# and the pool is silently short. Say so rather than presenting a
+# truncated window as the window.
+if [[ -n "$CUTOFF" ]]; then
+    fetched="$(printf '%s' "$rows" | jq 'length' 2>/dev/null || echo 0)"
+    if (( fetched >= FETCH )); then
+        echo "pr-sessions: fetched the full $FETCH-PR page, so the ${LAST_DATE} window may be" >&2
+        echo "  truncated — PRs updated in it can exist further back. Raise it with /lastItem:N." >&2
+    fi
+fi
+
 # Session = first two path segments of the branch. A branch that does
 # not follow the convention (dependabot, a hand-made name) is reported
 # as "(unconventional)" rather than silently mis-attributed — a wrong
 # owner is worse than a visible unknown.
+#
+# "Follows the convention" is checked against the WHOLE shape,
+# <host>/<clone>/<type>/<desc>, not just "has enough slashes". Counting
+# segments alone reported `dependabot/nuget/apps/backend_dotnet/…` as a
+# session called "dependabot/nuget", and the footer then told you that
+# apparent owner was a parallel session to stay out of the way of. The
+# type segment is what separates the two populations, so it is matched
+# against the set this repo actually uses.
+#
+# The cost of the list is that a branch typed something new reads as
+# unconventional until the type is added here. That is the direction to
+# fail in: a visible unknown invites a look, a confident wrong owner
+# does not.
 selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
+  def types: ["feat","fix","docs","chore","ci","test","refactor","perf",
+              "build","style","contracts","i18n","spike"];
+  def conventional:
+    (.headRefName | split("/")) as $p
+    | ($p | length) >= 4 and (types | index($p[2]) != null);
   def session:
     (.headRefName | split("/")) as $p
-    | if ($p | length) >= 3 then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
+    | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
   def work:
     (.headRefName | split("/")) as $p
-    | if ($p | length) >= 3 then ($p[2:] | join("/")) else .headRefName end;
+    | if conventional then ($p[2:] | join("/")) else .headRefName end;
   def mark: if (. == $me) then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def st:
@@ -226,7 +295,15 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
       elif $filter != "" then map(select(._s | test($filter; "i")))
       else . end )
   | sort_by(-.number) | .[:$limit]
-')"
+')" || {
+    # `--session '['` kills jq on the regex, and the unchecked command
+    # substitution then left `selected` empty — which the block below
+    # renders as "no PRs for a session matching '['", exit 0. A bad
+    # pattern and a genuinely empty result must not look alike: one is
+    # an invocation error to fix, the other is an answer.
+    echo "pr-sessions: could not select rows — check the --session pattern ('$FILTER') is a valid regex." >&2
+    exit 2
+}
 
 if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"
@@ -262,21 +339,43 @@ if [[ "$THREADS" -eq 1 ]]; then
                 q+=" comments(last: 1) { nodes { author { login } } } } } }"
             done <<< "$nums"
             q+=" } }"
+            # The PR author is bound BEFORE descending into the threads.
+            # Reading `.author.login` inside the thread pipeline compared
+            # each last-commenter against a field the thread node does
+            # not have — i.e. against null — so every unresolved thread
+            # counted as awaiting and every row wore a "!". The bang then
+            # said nothing the count had not already said.
             THREAD_JSON="$(gh api graphql -f query="$q" --jq '
                 [ .data.repository | to_entries[] | .value
+                  | (.author.login // "") as $pr_author
                   | { key: (.number | tostring),
                       value: {
                         unresolved: ([.reviewThreads.nodes[] | select(.isResolved == false)] | length),
                         awaiting:   ([.reviewThreads.nodes[]
                                       | select(.isResolved == false)
-                                      | select((.comments.nodes[0].author.login // "") != .author.login)] | length)
+                                      | select((.comments.nodes[0].author.login // "") != $pr_author)] | length)
                       } } ] | from_entries' 2>/dev/null)" || THREAD_JSON=""
             # A failed lookup must read as UNKNOWN, never as zero: "0
             # unresolved" is exactly the reassuring answer you would act
             # on, and it would be a guess.
             [[ -z "$THREAD_JSON" ]] && THREAD_JSON="null"
+        else
+            # No repo context ⇒ no thread data. Same rule: unknown.
+            THREAD_JSON="null"
         fi
     fi
+fi
+
+# The THR column can honestly print "?" for an unknown count. The
+# /unresolved FILTER cannot: it must decide keep-or-drop per row, and
+# the only safe default — treat unknown as zero — deletes exactly the
+# rows the caller asked to see, then reports "no PRs with unresolved
+# review threads" as though the question had been answered. That is the
+# unknown-is-not-zero safeguard undone one stage later, so refuse.
+if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREAD_JSON" == "null" ]]; then
+    echo "pr-sessions: could not read review threads, so /unresolved cannot be answered." >&2
+    echo "  (gh api graphql failed, or the repository could not be resolved)" >&2
+    exit 2
 fi
 
 out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPED" \

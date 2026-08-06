@@ -356,9 +356,16 @@ write_graphql "$(jq -n '{data: {repository: {
 }}}')"
 run /all
 assert_rc       "exits 0" 0
-assert_contains "three-segment bot branch is unconventional" "(unconventional)"
-assert_not_contains "no session named after the bot" "dependabot/github_actions"
-assert_not_contains "nor after its package ecosystem" "dependabot/nuget"
+# The branch name itself still shows in the WORK column, so the claim
+# has to be about the SESSION column of each bot row specifically.
+for n in 40 41; do
+    row="$(printf '%s\n' "$RUN_OUT" | grep -- "#$n")"
+    if [[ "$row" == *"(unconventional)"* ]]; then
+        pass "#$n is not attributed to a session"
+    else
+        fail "#$n was attributed to a session" "$row"
+    fi
+done
 assert_contains "a real session branch still resolves" "$ME"
 default_pr_list; default_graphql
 

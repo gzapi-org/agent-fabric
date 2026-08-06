@@ -220,15 +220,33 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
 # not follow the convention (dependabot, a hand-made name) is reported
 # as "(unconventional)" rather than silently mis-attributed — a wrong
 # owner is worse than a visible unknown.
+#
+# "Follows the convention" is checked against the WHOLE shape,
+# <host>/<clone>/<type>/<desc>, not just "has enough slashes". Counting
+# segments alone reported `dependabot/nuget/apps/backend_dotnet/…` as a
+# session called "dependabot/nuget", and the footer then told you that
+# apparent owner was a parallel session to stay out of the way of. The
+# type segment is what separates the two populations, so it is matched
+# against the set this repo actually uses.
+#
+# The cost of the list is that a branch typed something new reads as
+# unconventional until the type is added here. That is the direction to
+# fail in: a visible unknown invites a look, a confident wrong owner
+# does not.
 selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
+  def types: ["feat","fix","docs","chore","ci","test","refactor","perf",
+              "build","style","contracts","i18n","spike"];
+  def conventional:
+    (.headRefName | split("/")) as $p
+    | ($p | length) >= 4 and (types | index($p[2]) != null);
   def session:
     (.headRefName | split("/")) as $p
-    | if ($p | length) >= 3 then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
+    | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
   def work:
     (.headRefName | split("/")) as $p
-    | if ($p | length) >= 3 then ($p[2:] | join("/")) else .headRefName end;
+    | if conventional then ($p[2:] | join("/")) else .headRefName end;
   def mark: if (. == $me) then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def st:

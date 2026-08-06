@@ -35,6 +35,8 @@
 #   tools/gh/pr-sessions.sh --open          # open PRs only
 #   tools/gh/pr-sessions.sh --session gzapp-claude3
 #   tools/gh/pr-sessions.sh /all --by-session   # grouped, all sessions
+#   tools/gh/pr-sessions.sh /unresolved     # only PRs with an open thread
+#   tools/gh/pr-sessions.sh /all /unresolved # ...across every session
 #   tools/gh/pr-sessions.sh --no-threads    # skip the review-thread lookup
 #
 # The THR column counts UNRESOLVED review threads — the ones that
@@ -54,6 +56,7 @@ STATE=all
 FILTER=""
 GROUPED=0
 THREADS=1
+UNRESOLVED_ONLY=0
 SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
 
 while [[ $# -gt 0 ]]; do
@@ -66,10 +69,16 @@ while [[ $# -gt 0 ]]; do
         --session)    FILTER="${2:-}"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
+        /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
         -h|--help)    sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "pr-sessions: unknown option '$1' (try --help)" >&2; exit 2 ;;
     esac
 done
+
+if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREADS" -eq 0 ]]; then
+    echo "pr-sessions: /unresolved needs the thread lookup — drop --no-threads." >&2
+    exit 2
+fi
 
 for bin in gh jq; do
     command -v "$bin" >/dev/null 2>&1 || {
@@ -101,9 +110,20 @@ fi
 # are older than the window". So widen the fetch and trim after
 # filtering.
 FETCH="$LIMIT"
-if [[ -n "$FILTER" ]]; then
+if [[ -n "$FILTER" || "$UNRESOLVED_ONLY" -eq 1 ]]; then
     FETCH=$(( LIMIT * 20 )); (( FETCH < 200 )) && FETCH=200
     (( FETCH > 500 )) && FETCH=500
+fi
+
+# /unresolved filters on data that only exists AFTER the thread lookup,
+# so the candidate set has to be wider than the page — otherwise a PR
+# with an open thread just past row -n would be invisible, which is the
+# same window trap `--mine -n 8` fell into. Capped so the aliased
+# GraphQL query stays one sane request.
+CANDIDATES="$LIMIT"
+if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
+    CANDIDATES=100
+    (( CANDIDATES > FETCH )) && CANDIDATES="$FETCH"
 fi
 
 rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
@@ -117,7 +137,7 @@ rows="$(gh pr list --state "$STATE" --limit "$FETCH" \
 # as "(unconventional)" rather than silently mis-attributed — a wrong
 # owner is worse than a visible unknown.
 selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
-        --argjson limit "$LIMIT" '
+        --argjson limit "$CANDIDATES" '
   def session:
     (.headRefName | split("/")) as $p
     | if ($p | length) >= 3 then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
@@ -191,7 +211,8 @@ if [[ "$THREADS" -eq 1 ]]; then
 fi
 
 out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPED" \
-        --argjson th "$THREAD_JSON" --argjson want "$THREADS" '
+        --argjson th "$THREAD_JSON" --argjson want "$THREADS" \
+        --argjson unres "$UNRESOLVED_ONLY" --argjson limit "$LIMIT" '
   def mark: if (. == $me) then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def lpad($n): (" " * ($n - length)) + .;
@@ -210,7 +231,11 @@ out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPE
         end
     end;
 
-  if $grouped == 1 then
+  ( if $unres == 1
+      then map(select((($th // {})[(.number | tostring)].unresolved // 0) > 0))
+      else . end )
+  | sort_by(-.number) | .[:$limit]
+  | if $grouped == 1 then
     ( group_by(._s) | sort_by(-(map(.number) | max))
       | map(
           "\n\(.[0]._s)\(if .[0]._s == $me then "   <- this clone" else "" end)"
@@ -227,6 +252,15 @@ if [[ "$GROUPED" -eq 0 ]]; then
     printf '  %-5s  %-6s  %3s  %-10s  %-30s  %s\n' \
         PR STATE THR UPDATED SESSION WORK
 fi
+if [[ -z "${out//[$' \t\n']/}" ]]; then
+    scope="this clone ($ME)"
+    [[ "$FILTER" == "" ]] && scope="any session"
+    [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && scope="sessions matching '$FILTER'"
+    echo "pr-sessions: no PRs with unresolved review threads for $scope"
+    echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)"
+    exit 0
+fi
+
 printf '%s\n' "$out"
 
 echo

@@ -51,8 +51,10 @@
 # what they leave behind. That is what separates them from -n: -n trims
 # the printed page, these decide what was ever considered.
 #
-# The THR column counts UNRESOLVED review threads — the ones that
-# actually gate a merge under required_review_thread_resolution. A
+# The THR column counts UNRESOLVED review threads. These no longer gate
+# a merge (required_review_thread_resolution went off 2026-08-06), which
+# is precisely why the column matters: a PR can merge with findings
+# outstanding, so this count is the only place they surface. A
 # trailing "!" means the last word in at least one of them is NOT the
 # PR author's, i.e. somebody is waiting on a reply. "2" without the
 # bang means you answered and simply have not resolved the threads.
@@ -242,8 +244,8 @@ fi
 # GraphQL query rather than one request per PR: ~0.7s for the whole
 # page instead of N round trips.
 #
-# "Unresolved" is the right count because required_review_thread_
-# resolution is what actually gates the merge. The "!" refinement asks
+# "Unresolved" is the right count because it is what is still owed —
+# not what blocks a merge; nothing does since 2026-08-06. The "!" asks
 # a second question the raw count cannot: is the last comment in the
 # thread the PR author's? If it is not, somebody is waiting on YOU.
 THREAD_JSON='{}'

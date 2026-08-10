@@ -82,6 +82,8 @@ The core protocol does not maintain a role enum. Organizations MAY publish conve
 
 A role expresses organizational function, not source-code ownership or repository permission.
 
+A role is a classification, never an identity. The role and the instance holding it are distinct: several instances MAY hold and announce the same role concurrently, and an instance MAY change its role over time without changing its address. The address `host/instance` is the only peer identity; `ROLE` MUST NOT be used as a unique peer identifier, and role routing (§13) is one-to-many by nature. An instance whose role changes SHOULD emit a fresh `HELLO` so peer caches update.
+
 ## 5. Discovery
 
 An instance entering or re-entering a channel MUST emit `HELLO`.

@@ -2,6 +2,10 @@
 
 Telegram is the first GZCoord transport, not part of the core protocol.
 
+The step-by-step bootstrap actually used for this repository (BotFather,
+privacy mode, group creation, plugin wiring, lockdown, validation) is
+documented in [`../../docs/TELEGRAM-SETUP.md`](../../docs/TELEGRAM-SETUP.md).
+
 ## Responsibilities
 
 The adapter is responsible for:

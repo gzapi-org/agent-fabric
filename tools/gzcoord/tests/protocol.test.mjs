@@ -25,6 +25,18 @@ test('address is logical host/instance', () => {
   assert.equal(validate(text).ok, false);
 });
 
+test('transport-native identifiers are forbidden core metadata', () => {
+  for (const field of ['TELEGRAM-CHAT-ID','SLACK-CHANNEL-ID','DISCORD-GUILD-ID','TOKEN-BUDGET','SUBAGENT-DEPTH']) {
+    const text = `[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n${field}: leaked\n`;
+    assert.equal(validate(text).ok, false, `${field} must be rejected`);
+  }
+});
+
+test('TO must be a logical address when present', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: @telegram_username\n`;
+  assert.equal(validate(text).ok, false);
+});
+
 test('metadata block ends at the first section marker', () => {
   const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nREFERENCES:\nPR: #184\n- path: contracts/passenger/eta.yaml\n\nNOTES:\nKEY: value shaped lines stay in the body.\n`;
   const msg = parse(text);

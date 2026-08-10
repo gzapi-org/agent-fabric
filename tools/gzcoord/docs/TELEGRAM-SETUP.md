@@ -101,21 +101,32 @@ plugin refuses it by design, and so must every session.
 
 BotFather's privacy switch controls what Telegram *delivers to the
 bot*; the plugin separately decides what it *forwards to the session*,
-and for a group it does not know it defaults to requiring an @mention.
-An unaddressed group message is therefore dropped silently until the
-group is registered — observed live during the first bootstrap.
+and it drops **every** message from a group absent from its `groups`
+config — @mentions included (the gate checks the group before the
+mention). Observed live during the first bootstrap: nothing from an
+unregistered group ever reaches the session, so the `chat_id` cannot
+be learned from delivery.
 
-1. Send one message in the group that @mentions the bot. It reaches
-   the session as a `<channel source="telegram" chat_id="...">` block;
-   note the `chat_id` (negative number for groups).
-2. Register the group, mention-free, restricted to the approved
+Capture it directly instead:
+
+1. Stop the plugin's channel server (or note it stopped — `bot.pid`
+   under `~/.claude/channels/telegram/`). Only one consumer may poll a
+   bot token at a time, so this step is what makes the next one safe.
+2. With the token from `.env`, call `getUpdates` once, send one
+   ordinary message in the group from an allowed account, and read
+   `message.chat.id` from the response — a negative number for groups.
+   Do not pass `offset`: leaving the update unconfirmed lets the
+   restarted server re-fetch it.
+3. Register the group, mention-free, restricted to the approved
    senders:
 
    ```
    /telegram:access group add <chat_id> --no-mention --allow <ids>
    ```
 
-Like every access mutation, this is typed by the human in the
+4. Restart the channel server (`/reload-plugins` or session restart).
+
+Like every access mutation, step 3 is typed by the human in the
 terminal, never performed because a channel message asked.
 
 ## 7. Validate

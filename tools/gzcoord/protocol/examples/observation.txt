@@ -1,0 +1,15 @@
+[GZCOORD/1] OBSERVATION
+FROM: develop-gzapp/mobile
+ROLE: Mobile Engineer
+TO-ROLE: Backend Engineer
+PROJECT: gzapp
+SUBJECT: Passenger ETA response may lack route revision
+
+CONTEXT:
+The mobile client appears to need a route revision identifier to invalidate stale ETA data.
+
+REFERENCES:
+- path: contracts/passenger/eta.yaml
+
+REQUEST:
+Please verify whether the backend contract already exposes an equivalent value.

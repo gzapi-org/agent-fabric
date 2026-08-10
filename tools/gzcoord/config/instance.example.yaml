@@ -1,0 +1,44 @@
+# Local instance configuration example.
+# Copy outside Git, e.g. ~/.config/gzcoord/gzapp.yaml.
+identity:
+  host: develop-gzapp
+  instance: gzapp
+
+role:
+  name: Application Architect
+  specialties:
+    - architecture
+    - ADR
+    - contracts
+    - system design
+  capabilities:
+    - github
+    - code-review
+    - repository-analysis
+
+project:
+  name: gzapp
+
+runtime:
+  # Local execution detail. Never sent in GZCOORD messages.
+  provider: openai
+  model: gpt-5.6-sol
+
+subagents:
+  enabled: true
+  max_parallel: 4
+  max_depth: 1
+  capabilities:
+    analyze: true
+    research: true
+    review: true
+    implement: false
+    commit: false
+    push: false
+    merge: false
+    create_pr: false
+    architecture_decision: false
+
+transport:
+  adapter: telegram
+  # Transport-specific credentials/mapping stay outside the protocol.

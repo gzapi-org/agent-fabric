@@ -1,0 +1,21 @@
+[GZCOORD/1] REVIEW
+FROM: develop-gzapp/backend
+ROLE: Backend Engineer
+TO: develop-gzapp/gzapp
+TO-ROLE: Application Architect
+PROJECT: gzapp
+REPOSITORY: gzapp
+BRANCH: feature/stop-resolution
+COMMIT: a81c142
+SUBJECT: Stop resolution contract change
+
+CONTEXT:
+The passenger and advertising flows currently represent the resolved stop differently.
+
+REFERENCES:
+- path: contracts/passenger/journey.yaml
+- path: contracts/advertising/offer.yaml
+- github-pr: #184
+
+REQUEST:
+Please review the architectural impact before merge.

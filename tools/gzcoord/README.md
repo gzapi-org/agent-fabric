@@ -1,0 +1,93 @@
+# GZCoord for GZAPP
+
+GZCoord is a small, transport-agnostic, human-readable messaging protocol for autonomous software-development agents collaborating on the same Git/GitHub-governed project.
+
+This directory is intentionally embedded in the GZAPP repository under `tools/gzcoord/`. It is not a second repository and it is not a source of authority for project state.
+
+## Boundary
+
+- **Git/GitHub** are authoritative for source, branches, commits, PRs, reviews, merges, conflicts, ADRs and history.
+- **Repository `CLAUDE.md`** governs how agents operate on the repository.
+- **GZCoord** defines identity, role announcement, discovery, addressing and human-readable message semantics.
+- **Transport adapters** deliver messages. Telegram is the first adapter and may be replaced later.
+- **Local runtime config** contains model/provider and subagent policy; those values are not sent in messages.
+
+## Identity
+
+Every agent instance has the logical address:
+
+```text
+<host>/<instance>
+```
+
+Example:
+
+```text
+develop-gzapp/gzapp
+```
+
+This is not a filesystem path.
+
+## Discovery
+
+An agent self-defines its role by announcing `HELLO`:
+
+```text
+[GZCOORD/1] HELLO
+FROM: develop-gzapp/gzapp
+ROLE: Application Architect
+PROJECT: gzapp
+SPECIALTIES: architecture, ADR, contracts, system design
+CAPABILITIES: github, code-review, repository-analysis
+
+ABOUT:
+I review architectural consistency, cross-component contracts and design decisions.
+```
+
+There is no authoritative role registry. Peers may keep an ephemeral routing cache learned from `HELLO` traffic.
+
+## Normal message
+
+```text
+[GZCOORD/1] REVIEW
+FROM: develop-gzapp/backend
+ROLE: Backend Engineer
+TO: develop-gzapp/gzapp
+TO-ROLE: Application Architect
+PROJECT: gzapp
+BRANCH: feature/stop-resolution
+COMMIT: a81c142
+SUBJECT: Stop resolution contract change
+
+CONTEXT:
+The passenger and advertising flows currently represent the resolved stop differently.
+
+REFERENCES:
+- github-pr: #184
+- path: contracts/common/stop-resolution.yaml
+
+REQUEST:
+Please review the architectural impact before merge.
+```
+
+The message is parseable, but it remains readable without tooling.
+
+## Local configuration
+
+Copy `config/instance.example.yaml` outside Git, e.g. to:
+
+```text
+~/.config/gzcoord/gzapp.yaml
+```
+
+Model/provider, subagent limits and transport credentials are local execution details. They are not part of GZCOORD/1.
+
+## Integration
+
+1. Copy this directory to `gzapp/tools/gzcoord/`.
+2. Add/reference `integration/CLAUDE.snippet.md` in the root repository `CLAUDE.md`.
+3. Configure the concrete instance outside Git.
+4. Configure the selected transport adapter.
+5. Validate messages with `node tools/gzcoord/scripts/gzmsg.mjs validate <file>`.
+
+See `docs/PROJECT-TREE.md` for the intended layout and `protocol/SPEC.md` for the normative protocol.

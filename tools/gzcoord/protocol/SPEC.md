@@ -133,6 +133,8 @@ free-form human-readable text
 
 Section names use the same token syntax as metadata keys.
 
+The metadata block is the run of `KEY: value` lines before the first section marker. Once the first section marker appears, the metadata block is closed: every subsequent line — including a line that happens to look like `KEY: value` — belongs to the current section's body until the next section marker. Only a line consisting of a section name and a colon alone (`SECTION:`) starts a new section.
+
 A parser MUST preserve unknown metadata fields and unknown body sections. This permits backward-compatible extensions.
 
 ## 7. Common metadata

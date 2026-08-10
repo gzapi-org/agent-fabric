@@ -14,16 +14,17 @@ export function parse(text) {
   const metadata = {};
   const sections = {};
   let currentSection = null;
+  let inSections = false;
   for (const line of lines) {
-    if (/^[A-Z][A-Z0-9-]*: /.test(line)) {
-      const idx = line.indexOf(':');
-      metadata[line.slice(0, idx)] = line.slice(idx + 1).trim();
-      currentSection = null;
-      continue;
-    }
     if (/^[A-Z][A-Z0-9-]*:$/.test(line)) {
+      inSections = true;
       currentSection = line.slice(0, -1);
       sections[currentSection] = '';
+      continue;
+    }
+    if (!inSections && /^[A-Z][A-Z0-9-]*: /.test(line)) {
+      const idx = line.indexOf(':');
+      metadata[line.slice(0, idx)] = line.slice(idx + 1).trim();
       continue;
     }
     if (currentSection) sections[currentSection] += `${sections[currentSection] ? '\n' : ''}${line}`;

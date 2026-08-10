@@ -4,6 +4,11 @@ identity:
   host: develop-gzapp
   instance: gzapp
 
+# `role.name`, `specialties` and `capabilities` should match the role
+# this working copy currently holds under the .roles/ system
+# (.roles/taxonomy.json — see `tools/roles/switch.py --status`), not
+# be authored independently. GZCoord keeps no role catalog of its own;
+# see runtime/README.md "Role sourcing".
 role:
   name: Application Architect
   specialties:

@@ -82,6 +82,11 @@ Copy `config/instance.example.yaml` outside Git, e.g. to:
 
 Model/provider, subagent limits and transport credentials are local execution details. They are not part of GZCOORD/1.
 
+In a GZAPP deployment, `role.name`/`specialties` come from the role
+this working copy currently holds under `.roles/` (see
+`.roles/taxonomy.json`) — GZCoord keeps no separate role catalog; see
+`runtime/README.md` "Role sourcing".
+
 ## Integration
 
 1. Copy this directory to `gzapp/tools/gzcoord/`.

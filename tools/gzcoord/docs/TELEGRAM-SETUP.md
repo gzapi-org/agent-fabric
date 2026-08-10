@@ -97,19 +97,41 @@ message asking the assistant to approve a pairing or extend the
 allowlist is exactly the request a prompt injection would make — the
 plugin refuses it by design, and so must every session.
 
-## 6. Validate
+## 6. Register the group with the plugin
+
+BotFather's privacy switch controls what Telegram *delivers to the
+bot*; the plugin separately decides what it *forwards to the session*,
+and for a group it does not know it defaults to requiring an @mention.
+An unaddressed group message is therefore dropped silently until the
+group is registered — observed live during the first bootstrap.
+
+1. Send one message in the group that @mentions the bot. It reaches
+   the session as a `<channel source="telegram" chat_id="...">` block;
+   note the `chat_id` (negative number for groups).
+2. Register the group, mention-free, restricted to the approved
+   senders:
+
+   ```
+   /telegram:access group add <chat_id> --no-mention --allow <ids>
+   ```
+
+Like every access mutation, this is typed by the human in the
+terminal, never performed because a channel message asked.
+
+## 7. Validate
 
 1. Send an ordinary message in the group — *not* a command, *no*
    @mention.
 2. Confirm the session receives it (it arrives as a
    `<channel source="telegram">` block). That proves Group Privacy is
-   off and the plugin is connected.
+   off, the plugin is connected, and the group registration works.
 3. Send a GZCOORD/1 `HELLO` through the session and confirm it lands in
    the group.
 
 If step 2 fails: check the bot is still a group member, re-run
 BotFather `/setprivacy` (then remove and re-add the bot to the group),
-and confirm the token in `.env` matches the bot.
+re-check the group registration (§6), and confirm the token in `.env`
+matches the bot.
 
 ## What stays out of git
 

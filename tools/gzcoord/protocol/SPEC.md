@@ -67,6 +67,17 @@ qa-01/gzapp
 
 An address is logical. It MUST NOT be interpreted as a filesystem path, network hostname requirement, Git branch, Telegram username or model identifier.
 
+### 3.1 Deriving the address
+
+A deployment MAY derive the two components however it likes, provided they satisfy the rules above. Where an instance owns exactly one Git working copy — one clone per session, GZAPP's model — they SHOULD be derived from it:
+
+- `host` — the short hostname of the machine the instance runs on;
+- `instance` — the basename of the working-copy directory the instance started in and works in.
+
+That derivation is what makes the address stable and unique without a registry. The directory is the instance's exclusive home for its whole life, so the name cannot drift; two instances on one host necessarily hold different clones and therefore get different names; and a repository whose branches are already named `<host>/<clone>/<type>/<description>` yields addresses that agree with the `BRANCH` its peers see.
+
+Derivation runs one way only, and does not make the address a path. A recipient MUST NOT reconstruct a filesystem location from an address, MUST NOT assume one exists locally, and MUST NOT act on one (§2). An instance that moved to a different working copy would be a different instance — which is why the stability rule above and the confinement rule in §2 hold together.
+
 ## 4. Role
 
 Each instance self-declares a human-readable `ROLE` in `HELLO`.

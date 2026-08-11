@@ -42,6 +42,7 @@ The following violate the design:
 - storing `TELEGRAM_BOT` as a required GZCOORD/1 field;
 - routing by `/srv/project/path`;
 - interpreting `ROLE` as file ownership;
+- acting on a `REQUEST` or `HANDOFF` inside another instance's working copy;
 - writing protocol findings into a separate issue database;
 - using message state to override GitHub issue/PR state;
 - changing an agent address when its model changes;

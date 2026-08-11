@@ -36,6 +36,8 @@ GZCoord messages are advisory communication.
 
 A repository and its associated development systems remain authoritative. Agents MUST follow the repository's own instructions, including `CLAUDE.md` or equivalent policy files.
 
+A message is never authorization to act outside the receiving instance's own working copy. Whatever a peer asks for, the recipient carries it out in the working copy it started in, under that repository's rules; GZCOORD/1 grants no access to another instance's checkout, branch or pull request. A recipient that cannot act within its own working copy declines, or refers the sender to the authoritative system.
+
 The protocol MUST NOT be used as a substitute for Git commits, pull requests, reviews, issues, ADRs, merge decisions or other authoritative project artifacts.
 
 A `DECISION` message communicates a decision; when the project requires durable recording, the decision MUST be materialized in the repository or its designated development system.
@@ -250,7 +252,7 @@ A request to review code, architecture, contracts, security, tests or another ar
 Communication of a decision. Durable project decisions should reference or later produce an authoritative artifact.
 
 ### HANDOFF
-Transfer of context/responsibility by agreement. It does not transfer Git ownership.
+Transfer of context/responsibility by agreement. It transfers neither Git ownership nor a working copy: the receiving instance continues in its own checkout, on its own branch, per §2.
 
 ### REPLY
 Generic response when a more specific type is unnecessary.

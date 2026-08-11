@@ -30,6 +30,8 @@ None of these messages automatically:
 - changes an issue state;
 - owns a branch;
 - reserves a file;
+- moves an agent out of the working copy it started in;
+- grants access to another agent's checkout, branch or pull request;
 - blocks a merge;
 - approves a pull request;
 - records an ADR;

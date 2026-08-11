@@ -74,6 +74,18 @@ With the official `telegram@claude-plugins-official` plugin installed
    tools (`reply`, `react`, `edit_message`) are live and the plugin owns
    the token's `getUpdates` stream.
 
+3. Start the session with the channel **enabled**. Inbound delivery is
+   gated per session, and installing the plugin does not enable it:
+
+   ```
+   claude --continue --channels "plugin:telegram@claude-plugins-official"
+   ```
+
+   Entries must be tagged; a bare `--channels telegram` is rejected with
+   the accepted forms. Skip this and the session still loads the tools
+   and still sends — it discards every arriving message instead, which
+   is the failure described in §7.
+
 Never poll `getUpdates` by hand once the plugin holds the token: two
 consumers of one bot token steal each other's updates (HTTP 409s and
 silently missing messages).
@@ -139,10 +151,38 @@ terminal, never performed because a channel message asked.
 3. Send a GZCOORD/1 `HELLO` through the session and confirm it lands in
    the group.
 
-If step 2 fails: check the bot is still a group member, re-run
-BotFather `/setprivacy` (then remove and re-add the bot to the group),
-re-check the group registration (§6), and confirm the token in `.env`
-matches the bot.
+If step 2 fails, read the session's MCP log **before** touching any
+configuration — it names the cause outright:
+
+```
+~/.cache/claude-cli-nodejs/<escaped-cwd>/mcp-logs-plugin-telegram-telegram/
+```
+
+- `Channel notifications skipped: server plugin:telegram:telegram not
+  in --channels list for this session` — the session was started
+  without §4 step 3. Nothing else is wrong; restart with the flag.
+- `Channel notifications registered` — inbound is permitted, so look
+  outward: is the bot still a group member, does `getMe` still report
+  `can_read_all_group_messages` (else re-run BotFather `/setprivacy`,
+  then remove and re-add the bot), does the group registration match
+  the live `chat.id` (§6 — a group migrated to a supergroup gets a new
+  `-100…` id), is the sender's numeric id in the group's `allowFrom`,
+  and does the token in `.env` belong to the bot being messaged.
+
+Recognise the first failure by its shape: **every outward sign is
+healthy.** The plugin is installed, the tools are listed, outbound
+`reply` succeeds, the bot process is alive, and Telegram reports no
+webhook and no pending updates — because the messages really did
+arrive and really were fetched. They are discarded at the session
+boundary, and that log is the only place it is visible. Diagnosing it
+from `access.json` leads nowhere: during the first bootstrap the
+access config, group registration and sender id were all correct the
+entire time, and each was suspected and cleared in turn before the log
+was read. Read the log first; it costs seconds.
+
+To inspect what the bot actually received, stop the channel server and
+poll once without `offset` (§6 step 2) — that distinguishes "never
+arrived" from "arrived and was dropped" in one call.
 
 ## What stays out of git
 

@@ -19,6 +19,7 @@ export function parse(text) {
   const type = m[1];
   const metadata = {};
   const sections = {};
+  const malformed = [];
   let currentSection = null;
   let inSections = false;
   for (const line of lines) {
@@ -34,8 +35,9 @@ export function parse(text) {
       continue;
     }
     if (currentSection) sections[currentSection] += `${sections[currentSection] ? '\n' : ''}${line}`;
+    else if (line.trim() !== '') malformed.push(line);
   }
-  return { type, metadata, sections };
+  return { type, metadata, sections, malformed };
 }
 
 export function validate(text) {
@@ -49,6 +51,7 @@ export function validate(text) {
     if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
   }
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
+  for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   return { ok: errors.length === 0, errors, message: msg };
 }
 

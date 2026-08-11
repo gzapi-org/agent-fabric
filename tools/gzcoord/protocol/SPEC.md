@@ -135,7 +135,9 @@ The header is followed by zero or more metadata lines:
 KEY: value
 ```
 
-Metadata keys are uppercase ASCII with digits and `-` permitted.
+Metadata keys are uppercase ASCII with digits and `-` permitted. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line.
+
+Within the metadata block, a non-empty line that is neither a metadata line nor a section marker is invalid, and a validator MUST report it rather than ignore it. Silently discarding it would let a field the sender believed it was sending — including one §14 forbids — pass validation by being misspelled.
 
 After metadata, a blank line MAY separate one or more named body sections:
 

@@ -37,6 +37,22 @@ test('transport-native identifiers are forbidden core metadata', () => {
   }
 });
 
+test('a malformed metadata line is reported, not silently dropped', () => {
+  // `_` is not a metadata key character, so this never became metadata and the
+  // forbidden-field check could not see it — the message validated clean while
+  // carrying runtime config the sender believed it had sent.
+  const text = `[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTOKEN_BUDGET: leaked\n`;
+  const result = validate(text);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(e => e.includes('TOKEN_BUDGET')));
+  assert.equal(result.message.metadata.TOKEN_BUDGET, undefined);
+});
+
+test('body lines after a section marker are never malformed metadata', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\nplain prose, no colon at all\nTOKEN_BUDGET: quoted from another message\n`;
+  assert.deepEqual(validate(text).errors, []);
+});
+
 test('TO must be a logical address when present', () => {
   const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: @telegram_username\n`;
   assert.equal(validate(text).ok, false);

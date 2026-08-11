@@ -30,6 +30,8 @@ None of these messages automatically:
 - changes an issue state;
 - owns a branch;
 - reserves a file;
+- moves an agent out of the working copy it started in;
+- grants access to another agent's checkout, branch or pull request;
 - blocks a merge;
 - approves a pull request;
 - records an ADR;
@@ -42,6 +44,10 @@ If such an effect is required, use the authoritative tool explicitly.
 ## Role is not authentication
 
 `ROLE: Application Architect` is a self-description. The transport adapter authenticates a native sender identity according to local channel policy. Organizational trust in that identity is a deployment concern, not a wire-format claim.
+
+## Role is not identity
+
+A role is a classification shared by however many instances currently hold it; the instance is the peer. Only `host/instance` identifies a peer. `TO-ROLE` addressing is therefore one-to-many, and a reply to "the Backend Engineer" is a reply to whichever instance answered, not to the role.
 
 ## Git context is descriptive
 

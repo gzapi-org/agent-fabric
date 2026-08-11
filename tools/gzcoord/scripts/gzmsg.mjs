@@ -2,7 +2,12 @@
 import fs from 'node:fs';
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
-const FORBIDDEN = new Set(['MODEL','PROVIDER','WORKING-DIRECTORY','WORKING_DIRECTORY','TELEGRAM-BOT','TELEGRAM_BOT','BOT-TOKEN','BOT_TOKEN','SUBAGENT-LIMIT','SUBAGENT_LIMIT']);
+const FORBIDDEN = new Set([
+  'MODEL','PROVIDER','WORKING-DIRECTORY','WORKING_DIRECTORY',
+  'TOKEN-BUDGET','SUBAGENT-DEPTH','SUBAGENT-LIMIT','SUBAGENT_LIMIT',
+  'TELEGRAM-BOT','TELEGRAM_BOT','TELEGRAM-BOT-USERNAME','TELEGRAM-CHAT-ID',
+  'BOT-TOKEN','BOT_TOKEN','SLACK-CHANNEL-ID','DISCORD-GUILD-ID',
+]);
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
 export function parse(text) {
@@ -14,16 +19,17 @@ export function parse(text) {
   const metadata = {};
   const sections = {};
   let currentSection = null;
+  let inSections = false;
   for (const line of lines) {
-    if (/^[A-Z][A-Z0-9-]*: /.test(line)) {
-      const idx = line.indexOf(':');
-      metadata[line.slice(0, idx)] = line.slice(idx + 1).trim();
-      currentSection = null;
-      continue;
-    }
     if (/^[A-Z][A-Z0-9-]*:$/.test(line)) {
+      inSections = true;
       currentSection = line.slice(0, -1);
       sections[currentSection] = '';
+      continue;
+    }
+    if (!inSections && /^[A-Z][A-Z0-9-]*: /.test(line)) {
+      const idx = line.indexOf(':');
+      metadata[line.slice(0, idx)] = line.slice(idx + 1).trim();
       continue;
     }
     if (currentSection) sections[currentSection] += `${sections[currentSection] ? '\n' : ''}${line}`;
@@ -37,6 +43,7 @@ export function validate(text) {
   if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(`unknown type: ${msg.type}`);
   for (const key of ['FROM','ROLE','PROJECT']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
   if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');
+  if (msg.metadata.TO && !addressRe.test(msg.metadata.TO)) errors.push('TO must be <host>/<instance>');
   if (!['HELLO','GOODBYE'].includes(msg.type)) {
     if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
   }

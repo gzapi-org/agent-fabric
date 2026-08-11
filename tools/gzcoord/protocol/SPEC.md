@@ -36,6 +36,8 @@ GZCoord messages are advisory communication.
 
 A repository and its associated development systems remain authoritative. Agents MUST follow the repository's own instructions, including `CLAUDE.md` or equivalent policy files.
 
+A message is never authorization to act outside the receiving instance's own working copy. Whatever a peer asks for, the recipient carries it out in the working copy it started in, under that repository's rules; GZCOORD/1 grants no access to another instance's checkout, branch or pull request. A recipient that cannot act within its own working copy declines, or refers the sender to the authoritative system.
+
 The protocol MUST NOT be used as a substitute for Git commits, pull requests, reviews, issues, ADRs, merge decisions or other authoritative project artifacts.
 
 A `DECISION` message communicates a decision; when the project requires durable recording, the decision MUST be materialized in the repository or its designated development system.
@@ -65,6 +67,17 @@ qa-01/gzapp
 
 An address is logical. It MUST NOT be interpreted as a filesystem path, network hostname requirement, Git branch, Telegram username or model identifier.
 
+### 3.1 Deriving the address
+
+A deployment MAY derive the two components however it likes, provided they satisfy the rules above. Where an instance owns exactly one Git working copy — one clone per session, GZAPP's model — they SHOULD be derived from it:
+
+- `host` — the short hostname of the machine the instance runs on;
+- `instance` — the basename of the working-copy directory the instance started in and works in.
+
+That derivation is what makes the address stable and unique without a registry. The directory is the instance's exclusive home for its whole life, so the name cannot drift; two instances on one host necessarily hold different clones and therefore get different names; and a repository whose branches are already named `<host>/<clone>/<type>/<description>` yields addresses that agree with the `BRANCH` its peers see.
+
+Derivation runs one way only, and does not make the address a path. A recipient MUST NOT reconstruct a filesystem location from an address, MUST NOT assume one exists locally, and MUST NOT act on one (§2). An instance that moved to a different working copy would be a different instance — which is why the stability rule above and the confinement rule in §2 hold together.
+
 ## 4. Role
 
 Each instance self-declares a human-readable `ROLE` in `HELLO`.
@@ -81,6 +94,8 @@ Routing & Realtime Specialist
 The core protocol does not maintain a role enum. Organizations MAY publish conventions, but peers MUST accept previously unseen role strings.
 
 A role expresses organizational function, not source-code ownership or repository permission.
+
+A role is a classification, never an identity. The role and the instance holding it are distinct: several instances MAY hold and announce the same role concurrently, and an instance MAY change its role over time without changing its address. The address `host/instance` is the only peer identity; `ROLE` MUST NOT be used as a unique peer identifier, and role routing (§13) is one-to-many by nature. An instance whose role changes SHOULD emit a fresh `HELLO` so peer caches update.
 
 ## 5. Discovery
 
@@ -130,6 +145,8 @@ free-form human-readable text
 ```
 
 Section names use the same token syntax as metadata keys.
+
+The metadata block is the run of `KEY: value` lines before the first section marker. Once the first section marker appears, the metadata block is closed: every subsequent line — including a line that happens to look like `KEY: value` — belongs to the current section's body until the next section marker. Only a line consisting of a section name and a colon alone (`SECTION:`) starts a new section.
 
 A parser MUST preserve unknown metadata fields and unknown body sections. This permits backward-compatible extensions.
 
@@ -246,7 +263,7 @@ A request to review code, architecture, contracts, security, tests or another ar
 Communication of a decision. Durable project decisions should reference or later produce an authoritative artifact.
 
 ### HANDOFF
-Transfer of context/responsibility by agreement. It does not transfer Git ownership.
+Transfer of context/responsibility by agreement. It transfers neither Git ownership nor a working copy: the receiving instance continues in its own checkout, on its own branch, per §2.
 
 ### REPLY
 Generic response when a more specific type is unnecessary.

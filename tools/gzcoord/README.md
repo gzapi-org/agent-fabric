@@ -26,7 +26,7 @@ Example:
 develop-gzapp/gzapp
 ```
 
-This is not a filesystem path.
+The address is logical, but it is not arbitrary: `host` is the machine's short hostname and `instance` is the basename of the Git working copy the session started in and works in — one clone per session here, so the folder name *is* the session id (`protocol/SPEC.md` §3.1). The derivation runs one way. The address is still not a filesystem path, and no peer may reconstruct one from it or act outside its own working copy.
 
 ## Discovery
 
@@ -81,6 +81,11 @@ Copy `config/instance.example.yaml` outside Git, e.g. to:
 ```
 
 Model/provider, subagent limits and transport credentials are local execution details. They are not part of GZCOORD/1.
+
+In a GZAPP deployment, `role.name`/`specialties` come from the role
+this working copy currently holds under `.roles/` (see
+`.roles/taxonomy.json`) — GZCoord keeps no separate role catalog; see
+`runtime/README.md` "Role sourcing".
 
 ## Integration
 

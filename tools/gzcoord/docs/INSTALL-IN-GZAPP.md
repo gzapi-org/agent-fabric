@@ -12,6 +12,10 @@ Create the concrete instance configuration outside Git, for example:
 ~/.config/gzcoord/gzapp.yaml
 ```
 
-Use `config/instance.example.yaml` only as a template.
+Use `config/instance.example.yaml` only as a template. Fill `role.name`
+and `specialties` from the role this working copy currently holds
+under `.roles/` (`tools/roles/switch.py --status`) — do not author a
+role name independently of `.roles/taxonomy.json`; see
+`../runtime/README.md` "Role sourcing".
 
 Telegram tokens and plugin state must also stay outside the project repository.

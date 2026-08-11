@@ -25,8 +25,13 @@ test('address is logical host/instance', () => {
   assert.equal(validate(text).ok, false);
 });
 
+// One entry per runtime/transport term SPEC.md §14-§15 keeps off the wire,
+// in the spelling the spec itself uses — a near-miss spelling in FORBIDDEN
+// silently admits the exact field the spec names.
 test('transport-native identifiers are forbidden core metadata', () => {
-  for (const field of ['TELEGRAM-CHAT-ID','SLACK-CHANNEL-ID','DISCORD-GUILD-ID','TOKEN-BUDGET','SUBAGENT-DEPTH']) {
+  for (const field of ['TELEGRAM-CHAT-ID','SLACK-CHANNEL-ID','DISCORD-GUILD-ID',
+                       'TOKEN-BUDGET','REASONING-BUDGET',
+                       'MODEL','PROVIDER','WORKING-DIRECTORY','SUBAGENT-DEPTH']) {
     const text = `[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n${field}: leaked\n`;
     assert.equal(validate(text).ok, false, `${field} must be rejected`);
   }

@@ -9,6 +9,15 @@ how-to.
 Every step happens on a Telegram account that will own the bot, plus the
 Claude Code host. Nothing here touches the GZCoord protocol itself.
 
+> **Read this before following the walkthrough.** What it produces is a
+> working **human↔instance** channel, not instance↔instance messaging.
+> Telegram bots never receive messages from other bots, regardless of
+> privacy mode, so with one bot per instance no instance ever sees
+> another's `HELLO`. The limitation and the ways out are in
+> [`../adapters/telegram/README.md`](../adapters/telegram/README.md).
+> §7 below validates the two legs that do work; it cannot validate the
+> one that does not.
+
 ## 1. Create the bot (BotFather)
 
 In Telegram, open the **verified** @BotFather (blue check — there are
@@ -150,6 +159,14 @@ terminal, never performed because a channel message asked.
    off, the plugin is connected, and the group registration works.
 3. Send a GZCOORD/1 `HELLO` through the session and confirm it lands in
    the group.
+
+Steps 1–3 validate human→bot and bot→group. They do **not** validate
+bot→bot, which is the leg GZCoord actually needs and the one Telegram
+forbids — so passing them means the channel works for a human talking
+to one instance, and says nothing about two instances talking to each
+other. The honest test is two instances with two bots in the group,
+checking that one receives the other's `HELLO`; it currently fails by
+design, per the adapter README.
 
 If step 2 fails, read the session's MCP log **before** touching any
 configuration — it names the cause outright:

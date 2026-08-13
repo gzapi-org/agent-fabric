@@ -1,20 +1,28 @@
-# Telegram transport — concrete setup walkthrough
+# Telegram transport — concrete setup walkthrough (retired)
+
+> **RETIRED 2026-08-13. Do not follow this walkthrough.** Telegram is not
+> GZCoord's transport; it cannot carry instance↔instance traffic, which is
+> the reason it was dropped. This file is kept as a record of what was
+> tried and what it cost — see [`README.md`](README.md) for the retirement
+> and [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md) for the limitation in
+> full. Everything below describes the abandoned setup in the present
+> tense because it is preserved as written.
 
 The steps that were actually performed to bootstrap the first GZCoord
 Telegram transport for this repository (2026-08-10), generalised so the
-next instance can repeat them. The adapter contract and responsibilities
-live in `../adapters/telegram/README.md`; this file is the operational
-how-to.
+next instance could repeat them. The adapter contract and responsibilities
+live in [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md); this file is the
+operational how-to.
 
 Every step happens on a Telegram account that will own the bot, plus the
 Claude Code host. Nothing here touches the GZCoord protocol itself.
 
-> **Read this before following the walkthrough.** What it produces is a
-> working **human↔instance** channel, not instance↔instance messaging.
+> **The blocking limitation, as recorded at the time.** What this produces
+> is a working **human↔instance** channel, not instance↔instance messaging.
 > Telegram bots never receive messages from other bots, regardless of
 > privacy mode, so with one bot per instance no instance ever sees
 > another's `HELLO`. The limitation and the ways out are in
-> [`../adapters/telegram/README.md`](../adapters/telegram/README.md).
+> [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md).
 > §7 below validates the two legs that do work; it cannot validate the
 > one that does not.
 
@@ -26,7 +34,7 @@ impersonators with similar names) and run:
 1. `/newbot`
 2. Name: a human-readable display name for the instance — the first one
    used `gzapp gzcoord coordinator`, matching the `.roles/` role the
-   working copy holds (see `../runtime/README.md` "Role sourcing").
+   working copy holds (see `../../runtime/README.md` "Role sourcing").
 3. Username: globally unique, must end in `bot` — the first one is
    `gzapp_gzcoord_bot`.
 
@@ -232,8 +240,8 @@ arrived" from "arrived and was dropped" in one call.
 - The bot token (`$TELEGRAM_STATE_DIR/.env`, mode 600).
 - The plugin's state directory.
 - The instance configuration (`~/.config/gzcoord/<project>.yaml`, from
-  `../config/instance.example.yaml`).
+  `../../config/instance.example.yaml`).
 - Chat IDs, numeric user IDs, allowlists (`access.json`).
 
-Per `../protocol/SPEC.md` §14, none of these may ever become required
+Per `../../protocol/SPEC.md` §14, none of these may ever become required
 GZCOORD/1 fields.

@@ -1,10 +1,17 @@
-# Telegram adapter
+# Telegram adapter — retired
 
-Telegram is the first GZCoord transport, not part of the core protocol.
+> **RETIRED 2026-08-13. This document is history, not instruction.**
+> Telegram is not GZCoord's transport. It was never able to carry the
+> instance↔instance traffic the protocol exists for — see the blocking
+> limitation below, which is the reason it was dropped. Read
+> [`README.md`](README.md) first for what replaced it and what is still
+> true. Do not implement against this file.
+
+Telegram was the first GZCoord transport, never part of the core protocol.
 
 The step-by-step bootstrap actually used for this repository (BotFather,
 privacy mode, group creation, plugin wiring, lockdown, validation) is
-documented in [`../../docs/TELEGRAM-SETUP.md`](../../docs/TELEGRAM-SETUP.md).
+documented in [`TELEGRAM-SETUP.md`](TELEGRAM-SETUP.md).
 
 ## Blocking limitation: bots cannot hear other bots
 

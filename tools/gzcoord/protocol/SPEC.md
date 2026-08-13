@@ -74,7 +74,9 @@ A deployment MAY derive the two components however it likes, provided they satis
 - `host` — the short hostname of the machine the instance runs on;
 - `instance` — the basename of the working-copy directory the instance started in and works in.
 
-That derivation is what makes the address stable and unique without a registry. The directory is the instance's exclusive home for its whole life, so the name cannot drift; two instances on one host necessarily hold different clones and therefore get different names; and a repository whose branches are already named `<host>/<clone>/<type>/<description>` yields addresses that agree with the `BRANCH` its peers see.
+That derivation is what makes the address stable without a registry. The directory is the instance's exclusive home for its whole life, so the name cannot drift, and a repository whose branches are already named `<host>/<clone>/<type>/<description>` yields addresses that agree with the `BRANCH` its peers see.
+
+Uniqueness, however, is a **constraint the deployment must hold**, not a property the derivation supplies. Distinct clones do not imply distinct basenames: `/srv/team-a/gzapp` and `/srv/team-b/gzapp` are two working copies on one host that derive the same `instance`. Two senders then share one address, the peer cache in §5 collapses them into a single identity, and a directed `TO` may reach the wrong instance — a routing failure with no error anywhere, because both addresses are well-formed. A deployment using this derivation MUST therefore keep clone-directory basenames unique per host within the communication domain, or disambiguate the component — a short suffix on collision — before announcing it.
 
 Derivation runs one way only, and does not make the address a path. A recipient MUST NOT reconstruct a filesystem location from an address, MUST NOT assume one exists locally, and MUST NOT act on one (§2). An instance that moved to a different working copy would be a different instance — which is why the stability rule above and the confinement rule in §2 hold together.
 

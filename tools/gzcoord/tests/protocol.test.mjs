@@ -58,6 +58,17 @@ test('TO must be a logical address when present', () => {
   assert.equal(validate(text).ok, false);
 });
 
+test('a repeated section marker resumes the section instead of replacing it', () => {
+  // MESSAGE-FORMAT.md does not require section names to be unique, so a second
+  // marker used to blank the first block and still validate clean — the sender
+  // was told the message was good while half its content was gone.
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\nfirst block\n\nNOTES:\nsecond block\n`;
+  const msg = parse(text);
+  assert.ok(msg.sections.NOTES.includes('first block'));
+  assert.ok(msg.sections.NOTES.includes('second block'));
+  assert.deepEqual(validate(text).errors, []);
+});
+
 test('metadata block ends at the first section marker', () => {
   const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nREFERENCES:\nPR: #184\n- path: contracts/passenger/eta.yaml\n\nNOTES:\nKEY: value shaped lines stay in the body.\n`;
   const msg = parse(text);

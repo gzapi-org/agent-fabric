@@ -26,7 +26,10 @@ export function parse(text) {
     if (/^[A-Z][A-Z0-9-]*:$/.test(line)) {
       inSections = true;
       currentSection = line.slice(0, -1);
-      sections[currentSection] = '';
+      // A repeated marker resumes its section. The grammar does not require
+      // section names to be unique, so resetting here would drop the earlier
+      // block from a message the validator still calls valid.
+      if (!(currentSection in sections)) sections[currentSection] = '';
       continue;
     }
     if (!inSections && /^[A-Z][A-Z0-9-]*: /.test(line)) {

@@ -55,7 +55,7 @@ For non-HELLO messages, `SUBJECT` SHOULD be a one-line metadata field:
 SUBJECT: Stop resolution contract change
 ```
 
-This makes Telegram, Slack and logs easy to scan.
+This makes chat transports and logs easy to scan.
 
 ## Direct versus role addressing
 

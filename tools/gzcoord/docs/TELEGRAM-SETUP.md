@@ -133,11 +133,14 @@ Capture it directly instead:
 1. Stop the plugin's channel server (or note it stopped — `bot.pid`
    under `~/.claude/channels/telegram/`). Only one consumer may poll a
    bot token at a time, so this step is what makes the next one safe.
-2. With the token from `.env`, call `getUpdates` once, send one
-   ordinary message in the group from an allowed account, and read
-   `message.chat.id` from the response — a negative number for groups.
-   Do not pass `offset`: leaving the update unconfirmed lets the
-   restarted server re-fetch it.
+2. Send one ordinary message in the group from an allowed account
+   **first**, then call `getUpdates` once with the token from `.env`
+   and read `message.chat.id` from the response — a negative number
+   for groups. The order matters: without a positive `timeout` this is
+   a short poll, so a `getUpdates` issued before the message exists
+   returns an empty result immediately and leaves nothing to read the
+   `chat_id` from. Do not pass `offset`: leaving the update
+   unconfirmed lets the restarted server re-fetch it.
 3. Register the group, mention-free, restricted to the approved
    senders:
 

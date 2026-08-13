@@ -18,4 +18,8 @@ under `.roles/` (`tools/roles/switch.py --status`) — do not author a
 role name independently of `.roles/taxonomy.json`; see
 `../runtime/README.md` "Role sourcing".
 
-Telegram tokens and plugin state must also stay outside the project repository.
+Transport credentials and adapter state must also stay outside the project
+repository.
+
+No transport is currently selected and the protocol is inactive, so there is
+nothing to configure at step 4 — see [`../CLAUDE.md`](../CLAUDE.md).

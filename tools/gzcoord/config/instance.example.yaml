@@ -45,5 +45,7 @@ subagents:
     architecture_decision: false
 
 transport:
-  adapter: telegram
+  # No transport is selected — GZCoord is inactive (see ../CLAUDE.md).
+  # The first attempt is retired in ../history/telegram-transport/.
+  adapter: none
   # Transport-specific credentials/mapping stay outside the protocol.

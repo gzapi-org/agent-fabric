@@ -4,7 +4,8 @@ import fs from 'node:fs';
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([
   'MODEL','PROVIDER','WORKING-DIRECTORY','WORKING_DIRECTORY',
-  'TOKEN-BUDGET','SUBAGENT-DEPTH','SUBAGENT-LIMIT','SUBAGENT_LIMIT',
+  'TOKEN-BUDGET','TOKEN_BUDGET','REASONING-BUDGET','REASONING_BUDGET',
+  'SUBAGENT-DEPTH','SUBAGENT-LIMIT','SUBAGENT_LIMIT',
   'TELEGRAM-BOT','TELEGRAM_BOT','TELEGRAM-BOT-USERNAME','TELEGRAM-CHAT-ID',
   'BOT-TOKEN','BOT_TOKEN','SLACK-CHANNEL-ID','DISCORD-GUILD-ID',
 ]);
@@ -18,13 +19,17 @@ export function parse(text) {
   const type = m[1];
   const metadata = {};
   const sections = {};
+  const malformed = [];
   let currentSection = null;
   let inSections = false;
   for (const line of lines) {
     if (/^[A-Z][A-Z0-9-]*:$/.test(line)) {
       inSections = true;
       currentSection = line.slice(0, -1);
-      sections[currentSection] = '';
+      // A repeated marker resumes its section. The grammar does not require
+      // section names to be unique, so resetting here would drop the earlier
+      // block from a message the validator still calls valid.
+      if (!(currentSection in sections)) sections[currentSection] = '';
       continue;
     }
     if (!inSections && /^[A-Z][A-Z0-9-]*: /.test(line)) {
@@ -33,8 +38,9 @@ export function parse(text) {
       continue;
     }
     if (currentSection) sections[currentSection] += `${sections[currentSection] ? '\n' : ''}${line}`;
+    else if (line.trim() !== '') malformed.push(line);
   }
-  return { type, metadata, sections };
+  return { type, metadata, sections, malformed };
 }
 
 export function validate(text) {
@@ -48,6 +54,7 @@ export function validate(text) {
     if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
   }
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
+  for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   return { ok: errors.length === 0, errors, message: msg };
 }
 
@@ -70,7 +77,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
     if (arg('capabilities')) lines.push(`CAPABILITIES: ${arg('capabilities')}`);
-    console.log(lines.join('\n'));
+    // A HELLO is how peers learn an address, so emitting one this same tool
+    // would reject publishes an identity nobody can route back to.
+    const text = lines.join('\n');
+    const result = validate(text);
+    if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
+    console.log(text);
   } else {
     console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ...');
     process.exit(2);

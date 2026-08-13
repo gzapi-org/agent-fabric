@@ -2,6 +2,14 @@
 
 Use this prompt on a real host after cloning this repository.
 
+> **GZCoord is inactive and no transport is selected** (see
+> [`../CLAUDE.md`](../CLAUDE.md)). This prompt is therefore the brief for
+> whoever builds the replacement transport, not a task anyone can complete
+> today: step 3 of the goal and the whole live-validation section need an
+> adapter that does not yet exist. The first attempt is retired in
+> [`../history/telegram-transport/`](../history/telegram-transport/README.md);
+> read it for what went wrong before designing the next one.
+
 ---
 
 You are implementing the host/runtime integration for the GZCoord protocol contained in this repository.
@@ -10,9 +18,9 @@ Read first, in this order:
 
 1. `CLAUDE.md`
 2. `protocol/SPEC.md`
-3. `docs/architecture.md`
+3. `protocol/SEMANTICS.md`
 4. `runtime/README.md`
-5. `adapters/telegram/README.md`
+5. `docs/TRANSPORT-ADAPTER-CONTRACT.md`
 6. `config/instance.example.yaml`
 
 The architecture is already decided. Do not redesign it into a coordination database, ownership system, task tracker, lock service, or Git abstraction.
@@ -24,9 +32,9 @@ The architecture is already decided. Do not redesign it into a coordination data
 - Logical agent addresses are `host/instance`.
 - Roles are self-declared through HELLO and are not centrally enumerated.
 - Model/provider and subagent policy are local instance configuration and must not appear in GZCOORD/1 messages.
-- Telegram is an adapter, not part of the core protocol.
+- A transport is an adapter, not part of the core protocol.
 - Do not add SQLite, PostgreSQL, Redis, a durable peer registry, ownership tables, message workflow states, or a task database.
-- Do not fork or patch the official Claude Code Telegram plugin unless a proven blocker is documented and explicit approval is obtained.
+- Do not fork or patch a third-party transport client unless a proven blocker is documented and explicit approval is obtained.
 
 ## Goal
 
@@ -34,7 +42,7 @@ Create the thinnest practical Claude Code host integration that lets multiple in
 
 1. load their local YAML configuration;
 2. use their configured model/runtime outside the protocol;
-3. start with a distinct Telegram bot/state directory;
+3. start with a distinct per-instance transport identity and state directory;
 4. publish a GZCOORD/1 HELLO automatically or through a simple startup action;
 5. receive HELLO messages and maintain an in-memory peer directory;
 6. re-announce HELLO once when a previously unknown peer appears, with jitter/cooldown;
@@ -43,22 +51,24 @@ Create the thinnest practical Claude Code host integration that lets multiple in
 9. use existing Git/GitHub tools for any actual repository work;
 10. respect the target project's CLAUDE.md before acting on incoming messages.
 
-## Telegram first
+## Choosing the transport
 
-Use the official `telegram@claude-plugins-official` plugin.
+No transport is selected. Choosing one is the first task, and it is a
+transport decision, not a protocol one (`protocol/SPEC.md` §14) — the wire
+grammar does not change to accommodate a carrier.
 
-There must be one bot token and one `TELEGRAM_STATE_DIR` per Claude Code instance.
+The candidate must satisfy `docs/TRANSPORT-ADAPTER-CONTRACT.md`, and the
+one property to establish **before** building anything on it is
+**agent-to-agent delivery**: instance B must be able to receive a message
+that instance A sent. The retired Telegram attempt failed exactly here, and
+failed silently — its two bootstrap validations both passed because neither
+exercised that leg. Establish it first, with two real instances.
 
-For the dedicated private coordination supergroup, validate the discovery configuration described in `adapters/telegram/README.md`:
+Per-instance isolation is a requirement of the contract: each instance gets
+its own transport identity and its own state directory, never a shared one.
 
-- Bot-to-Bot Communication Mode;
-- participating bots in the same private supergroup;
-- receiving bots configured as required for ordinary bot messages;
-- Group Privacy Mode disabled where necessary for broadcast HELLO;
-- official plugin group configured `--no-mention`;
-- numeric sender allowlist restricted to participating bots and approved humans.
-
-Do not ask me to paste tokens into chat. Use protected local files/environment configuration.
+Do not ask me to paste credentials into chat. Use protected local
+files/environment configuration.
 
 ## Implementation preference
 
@@ -74,7 +84,7 @@ Before changing anything, inspect:
 
 - installed Claude Code version;
 - installed Bun/Node versions;
-- official Telegram plugin version and its current access configuration contract;
+- the chosen transport client's version and its current access-configuration contract;
 - existing project CLAUDE.md files;
 - existing MCP/hooks/settings so they are merged rather than overwritten.
 
@@ -93,7 +103,14 @@ With two configured instances, prove:
 9. Changing the local model does not change address or wire message structure.
 10. Restarting a process rebuilds the peer directory through HELLO without loading a durable registry.
 
-If broadcast HELLO cannot be made reliable with the official plugin, document the exact Telegram/plugin limitation and propose the smallest transport-adapter fallback. Do not alter the core protocol to solve a Telegram-specific limitation.
+Validation 2 — B receives A's HELLO — is the one that matters most and the
+one the retired transport could never pass. A validation suite that does not
+put **two instances** in the channel and watch one receive the other's HELLO
+proves nothing about the case the protocol exists for.
+
+If broadcast HELLO cannot be made reliable on the chosen transport, document
+the exact limitation and propose the smallest transport-adapter fallback. Do
+not alter the core protocol to solve a transport-specific limitation.
 
 ## Deliverables
 

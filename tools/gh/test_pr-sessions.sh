@@ -162,20 +162,33 @@ assert_not_contains() {
 
 # ── fixtures ────────────────────────────────────────────────────────
 
+# Fixture timestamps are RELATIVE to now, never literal dates.
+#
+# `pr-sessions.sh` derives a /lastDate cutoff from the real wall clock,
+# and nothing here mocks `date`. Pinned fixtures therefore age: the
+# original 2026-08-06 rows sat inside `/lastDate:99d` when they were
+# written and would have fallen outside it on 2026-11-13, failing a
+# required check that also runs on merge_group — i.e. blocking every
+# queued PR in the repo, on a date certain, with nothing in the diff to
+# explain why. Relative fixtures cannot expire.
+ago() { date -u -d "$1 ago" +%Y-%m-%dT%H:%M:%SZ; }
+
 write_pr_list() { printf '%s\n' "$1" > "$SANDBOX/fixtures/pr-list.json"; }
 write_graphql() { printf '%s\n' "$1" > "$SANDBOX/fixtures/graphql.json"; }
 
 # Three PRs: two this clone's, one another session's.
 default_pr_list() {
-    write_pr_list "$(jq -n --arg me "$ME" --arg other "$OTHER" '[
+    write_pr_list "$(jq -n --arg me "$ME" --arg other "$OTHER" \
+      --arg t30 "$(ago '1 hour')" --arg t29 "$(ago '2 hours')" \
+      --arg t28 "$(ago '3 hours')" '[
       {number: 30, state: "OPEN",   headRefName: ($me    + "/feat/alpha"),
-       title: "alpha", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null},
+       title: "alpha", updatedAt: $t30, isDraft: false, mergedAt: null},
       {number: 29, state: "MERGED", headRefName: ($other + "/fix/beta"),
-       title: "beta",  updatedAt: "2026-08-05T10:00:00Z", isDraft: false,
-       mergedAt: "2026-08-05T11:00:00Z"},
+       title: "beta",  updatedAt: $t29, isDraft: false,
+       mergedAt: $t29},
       {number: 28, state: "MERGED", headRefName: ($me    + "/docs/gamma"),
-       title: "gamma", updatedAt: "2026-08-04T10:00:00Z", isDraft: false,
-       mergedAt: "2026-08-04T11:00:00Z"}
+       title: "gamma", updatedAt: $t28, isDraft: false,
+       mergedAt: $t28}
     ]')"
 }
 
@@ -331,6 +344,18 @@ run /all /lastDate:99d
 assert_rc       "/lastDate accepts <N>d" 0
 assert_contains "keeps PRs in the window" "#30"
 
+# A TIGHT window, which is what keeps the fixtures honest.
+#
+# /lastDate:99d passes for ~99 days after any pinned fixture is written,
+# so it cannot tell a relative fixture from one that is quietly ageing
+# out — the original rows sat inside it for three months before they
+# would have started failing a required check on merge_group. A one-day
+# window is outside a pinned fixture's reach almost immediately, so this
+# fails within a day of anyone reintroducing a literal date.
+run /all /lastDate:1d
+assert_rc       "/lastDate:1d exits 0" 0
+assert_contains "fixtures are recent enough for a tight window" "#30"
+
 echo "pr-sessions: malformed pool filters are refused"
 run /lastItem:0
 assert_rc       "/lastItem:0 exits 2" 2
@@ -392,13 +417,15 @@ assert_rc       "non-numeric limit exits 2" 2
 assert_contains "names the expectation" "positive integer"
 
 echo "pr-sessions: bot branches are not attributed to a session"
-write_pr_list "$(jq -n --arg me "$ME" '[
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
+  --arg t3 "$(ago '3 hours')" '[
   {number: 40, state: "OPEN", headRefName: "dependabot/github_actions/actions-minor-patch-5c7bcdc794",
-   title: "bump", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null},
+   title: "bump", updatedAt: $t1, isDraft: false, mergedAt: null},
   {number: 41, state: "OPEN", headRefName: "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2",
-   title: "bump", updatedAt: "2026-08-06T09:00:00Z", isDraft: false, mergedAt: null},
+   title: "bump", updatedAt: $t2, isDraft: false, mergedAt: null},
   {number: 42, state: "OPEN", headRefName: ($me + "/feat/real"),
-   title: "real", updatedAt: "2026-08-06T08:00:00Z", isDraft: false, mergedAt: null}
+   title: "real", updatedAt: $t3, isDraft: false, mergedAt: null}
 ]')"
 write_graphql "$(jq -n '{data: {repository: {
   p40: {number: 40, author: {login: "app/dependabot"}, reviewThreads: {nodes: []}},
@@ -478,9 +505,9 @@ fi
 echo "pr-sessions: a full /lastDate page warns that the window may be short"
 # The warning fires when the fetch came back full, so the fixture has to
 # fill the derived 200-row page.
-write_pr_list "$(jq -n --arg me "$ME" '[range(200) | {
+write_pr_list "$(jq -n --arg me "$ME" --arg t "$(ago '1 hour')" '[range(200) | {
   number: (500 - .), state: "OPEN", headRefName: ($me + "/feat/w\(.)"),
-  title: "w", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null}]')"
+  title: "w", updatedAt: $t, isDraft: false, mergedAt: null}]')"
 # -n 10 puts the derived fetch at its 200 floor, which the fixture fills
 # exactly.
 run /all -n 10 /lastDate:99d --no-threads

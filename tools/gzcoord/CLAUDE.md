@@ -41,9 +41,12 @@ receive messages from other bots regardless of privacy mode, so no instance
 ever saw another's `HELLO`. The archived documents are history, not
 instruction — do not follow them.
 
-The replacement will be a protocol designed for agent-to-agent communication
-from the start rather than a chat network adapted to it. Designing it is the
-open task; [`docs/CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md`](docs/CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md)
+The replacement is a new **transport**, designed for agent-to-agent delivery
+from the start rather than a chat network adapted to it. It is a carrier for
+GZCOORD/1, not a successor to it: the wire contract above is unaffected, and
+building the transport does not mean redesigning the grammar the
+gzcoord-coordinator role owns. Designing it is the open task;
+[`docs/CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md`](docs/CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md)
 is the brief.
 
 ## Reactivating it

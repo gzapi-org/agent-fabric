@@ -1,13 +1,30 @@
-# Telegram transport — concrete setup walkthrough
+# Telegram transport — concrete setup walkthrough (retired)
+
+> **RETIRED 2026-08-13. Do not follow this walkthrough.** Telegram is not
+> GZCoord's transport; it cannot carry instance↔instance traffic, which is
+> the reason it was dropped. This file is kept as a record of what was
+> tried and what it cost — see [`README.md`](README.md) for the retirement
+> and [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md) for the limitation in
+> full. Everything below describes the abandoned setup in the present
+> tense because it is preserved as written.
 
 The steps that were actually performed to bootstrap the first GZCoord
 Telegram transport for this repository (2026-08-10), generalised so the
-next instance can repeat them. The adapter contract and responsibilities
-live in `../adapters/telegram/README.md`; this file is the operational
-how-to.
+next instance could repeat them. The adapter contract and responsibilities
+live in [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md); this file is the
+operational how-to.
 
 Every step happens on a Telegram account that will own the bot, plus the
 Claude Code host. Nothing here touches the GZCoord protocol itself.
+
+> **The blocking limitation, as recorded at the time.** What this produces
+> is a working **human↔instance** channel, not instance↔instance messaging.
+> Telegram bots never receive messages from other bots, regardless of
+> privacy mode, so with one bot per instance no instance ever sees
+> another's `HELLO`. The limitation and the ways out are in
+> [`TELEGRAM-ADAPTER.md`](TELEGRAM-ADAPTER.md).
+> §7 below validates the two legs that do work; it cannot validate the
+> one that does not.
 
 ## 1. Create the bot (BotFather)
 
@@ -17,7 +34,7 @@ impersonators with similar names) and run:
 1. `/newbot`
 2. Name: a human-readable display name for the instance — the first one
    used `gzapp gzcoord coordinator`, matching the `.roles/` role the
-   working copy holds (see `../runtime/README.md` "Role sourcing").
+   working copy holds (see `../../runtime/README.md` "Role sourcing").
 3. Username: globally unique, must end in `bot` — the first one is
    `gzapp_gzcoord_bot`.
 
@@ -60,14 +77,34 @@ layer; the plugin's sender allowlist (below) is the second.
 With the official `telegram@claude-plugins-official` plugin installed
 (`/plugin install telegram@claude-plugins-official`):
 
-1. Save the token where the plugin's channel server reads it at boot:
+1. Save the token where the plugin's channel server reads it at boot.
+   The path is **per instance**, not fixed — see the warning below
+   before using the default:
 
    ```
-   ~/.claude/channels/telegram/.env      # chmod 600
+   $TELEGRAM_STATE_DIR/.env               # chmod 600
    TELEGRAM_BOT_TOKEN=<token from BotFather>
    ```
 
-   (`/telegram:configure <token>` does exactly this.)
+   `TELEGRAM_STATE_DIR` defaults to `~/.claude/channels/telegram/`.
+   That default is safe only for a single instance on the account. Set
+   it explicitly, per instance, before launching the session — name it
+   after the clone directory, the same component the instance's GZCoord
+   address is derived from:
+
+   ```
+   export TELEGRAM_STATE_DIR=~/.claude/channels/telegram-<clone-dir>/
+   ```
+
+   Every concurrently running instance needs its own bot token **and**
+   its own state directory. Sharing the directory means both plugin
+   servers read the same `.env`, so a reload can silently switch a
+   session onto another instance's bot and put two consumers on one
+   token — the 409/dropped-message failure described at the end of this
+   section, arriving without anyone having polled by hand.
+
+   (`/telegram:configure <token>` writes the `.env` for the state
+   directory in effect when it runs.)
 
 2. Restart the session or run `/reload-plugins` — the server reads
    `.env` **once at boot**. After the restart the session's Telegram
@@ -91,7 +128,10 @@ consumers of one bot token steal each other's updates (HTTP 409s and
 silently missing messages).
 
 One bot token and one plugin state directory **per concurrently running
-instance** — instances must not share a bot.
+instance** — instances must not share a bot. That is what
+`TELEGRAM_STATE_DIR` in §4 step 1 is for; leaving it at the default on a
+host running two instances is how the two-consumer failure happens
+without anyone polling by hand.
 
 ## 5. Lock down access
 
@@ -122,13 +162,16 @@ be learned from delivery.
 Capture it directly instead:
 
 1. Stop the plugin's channel server (or note it stopped — `bot.pid`
-   under `~/.claude/channels/telegram/`). Only one consumer may poll a
+   under `$TELEGRAM_STATE_DIR`). Only one consumer may poll a
    bot token at a time, so this step is what makes the next one safe.
-2. With the token from `.env`, call `getUpdates` once, send one
-   ordinary message in the group from an allowed account, and read
-   `message.chat.id` from the response — a negative number for groups.
-   Do not pass `offset`: leaving the update unconfirmed lets the
-   restarted server re-fetch it.
+2. Send one ordinary message in the group from an allowed account
+   **first**, then call `getUpdates` once with the token from `.env`
+   and read `message.chat.id` from the response — a negative number
+   for groups. The order matters: without a positive `timeout` this is
+   a short poll, so a `getUpdates` issued before the message exists
+   returns an empty result immediately and leaves nothing to read the
+   `chat_id` from. Do not pass `offset`: leaving the update
+   unconfirmed lets the restarted server re-fetch it.
 3. Register the group, mention-free, restricted to the approved
    senders:
 
@@ -150,6 +193,14 @@ terminal, never performed because a channel message asked.
    off, the plugin is connected, and the group registration works.
 3. Send a GZCOORD/1 `HELLO` through the session and confirm it lands in
    the group.
+
+Steps 1–3 validate human→bot and bot→group. They do **not** validate
+bot→bot, which is the leg GZCoord actually needs and the one Telegram
+forbids — so passing them means the channel works for a human talking
+to one instance, and says nothing about two instances talking to each
+other. The honest test is two instances with two bots in the group,
+checking that one receives the other's `HELLO`; it currently fails by
+design, per the adapter README.
 
 If step 2 fails, read the session's MCP log **before** touching any
 configuration — it names the cause outright:
@@ -186,11 +237,11 @@ arrived" from "arrived and was dropped" in one call.
 
 ## What stays out of git
 
-- The bot token (`~/.claude/channels/telegram/.env`, mode 600).
+- The bot token (`$TELEGRAM_STATE_DIR/.env`, mode 600).
 - The plugin's state directory.
 - The instance configuration (`~/.config/gzcoord/<project>.yaml`, from
-  `../config/instance.example.yaml`).
+  `../../config/instance.example.yaml`).
 - Chat IDs, numeric user IDs, allowlists (`access.json`).
 
-Per `../protocol/SPEC.md` §14, none of these may ever become required
+Per `../../protocol/SPEC.md` §14, none of these may ever become required
 GZCOORD/1 fields.

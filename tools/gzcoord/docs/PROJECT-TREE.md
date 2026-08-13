@@ -20,9 +20,6 @@ gzapp/
         │       ├── hello.txt
         │       ├── observation.txt
         │       └── review.txt
-        ├── adapters/
-        │   └── telegram/
-        │       └── README.md
         ├── runtime/
         │   └── README.md
         ├── config/
@@ -38,17 +35,24 @@ gzapp/
         │   ├── PROJECT-TREE.md
         │   ├── TRANSPORT-ADAPTER-CONTRACT.md
         │   └── CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md
+        ├── history/
+        │   └── telegram-transport/     # retired, not instruction
+        │       ├── README.md
+        │       ├── TELEGRAM-ADAPTER.md
+        │       └── TELEGRAM-SETUP.md
+        ├── CLAUDE.md
         └── package.json
 ```
+
+There is no `adapters/` directory: no transport is selected. The interface a
+future adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
 
 Local, not committed:
 
 ```text
 ~/.config/gzcoord/
 └── gzapp.yaml
-
-~/.claude/channels/telegram/
-└── <instance>/
-    ├── .env
-    └── ...
 ```
+
+Adapter credentials and state live outside the repository too, in whatever
+location the chosen transport needs — there is none at present.

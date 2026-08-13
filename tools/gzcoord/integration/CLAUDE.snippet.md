@@ -1,10 +1,14 @@
 ## Agent coordination
 
-This repository uses the GZCoord human-readable agent communication protocol.
+**GZCoord is inactive.** The protocol is specified and implemented in
+`tools/gzcoord/`, but no transport is selected and no session communicates
+over it — see `tools/gzcoord/CLAUDE.md`. Sessions coordinate through `origin`:
+git, GitHub, PRs and reviews. Do not announce a `HELLO`; nothing is listening.
 
 Protocol specification: `tools/gzcoord/protocol/SPEC.md`.
 
-When coordinating with another agent:
+The rules below apply if and when a transport is chosen and this section is
+updated to say the protocol is live. When coordinating with another agent:
 
 - use the locally configured `host/instance` identity and self-declared role;
 - announce yourself with `HELLO` when entering the coordination channel;

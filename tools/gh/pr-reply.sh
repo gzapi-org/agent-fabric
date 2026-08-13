@@ -92,7 +92,13 @@ done
 if [[ -t 0 ]]; then
     die "the reply body is read from stdin — pipe it, or use <<'EOF' … EOF"
 fi
-BODY="$(cat)"
+# The sentinel preserves trailing newlines. Command substitution strips
+# ALL of them, so `BODY="$(cat)"` silently dropped the blank line a
+# documented heredoc ends with — and this script's whole promise is that
+# the body reaches GitHub byte-for-byte, which is why it takes stdin
+# instead of an argument in the first place.
+BODY="$(cat; printf x)"
+BODY="${BODY%x}"
 [[ -n "${BODY//[$' \t\n']/}" ]] || die "the reply body is empty."
 
 # ── who owns this thread's PR ───────────────────────────────────────

@@ -77,17 +77,32 @@ case "${1:-}" in
   api)
     [[ -n "${GH_MOCK_GRAPHQL_FAIL:-}" ]] && exit 1
     # Apply the caller's --jq filter to the fixture, exactly as gh does.
-    filter=""
+    filter=""; query=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --jq) filter="$2"; shift 2 ;;
+        -f) [[ "$2" == query=* ]] && query="${2#query=}"; shift 2 ;;
         *) shift ;;
       esac
     done
+    # GRAPHQL RETURNS ONLY WHAT THE QUERY ASKED FOR, and the mock has to
+    # honour that or it hides missing selections. A fixture that
+    # volunteers pageInfo the query never requested lets the script pass
+    # while asking the real API for a field it then reads as absent — the
+    # test goes green on a query that would answer "not truncated" to
+    # everything.
+    src="$GH_MOCK_DIR/graphql.json"
+    if [[ "$query" != *hasNextPage* ]]; then
+      jq '(.data.repository // {}) |= with_entries(
+            .value |= (if has("reviewThreads")
+                       then .reviewThreads |= del(.pageInfo) else . end))' \
+         "$GH_MOCK_DIR/graphql.json" > "$GH_MOCK_DIR/.served.json"
+      src="$GH_MOCK_DIR/.served.json"
+    fi
     if [[ -n "$filter" ]]; then
-      jq -r "$filter" "$GH_MOCK_DIR/graphql.json"
+      jq -r "$filter" "$src"
     else
-      cat "$GH_MOCK_DIR/graphql.json"
+      cat "$src"
     fi
     ;;
   *)
@@ -269,6 +284,42 @@ assert_rc           "exits 0" 0
 assert_contains     "keeps #30"            "#30"
 assert_contains     "keeps #29"            "#29"
 assert_not_contains "drops the resolved-only PR" "#28"
+
+echo "pr-sessions: a truncated thread page reads UNKNOWN, not zero"
+# Only the first 100 threads arrive. A pr whose early threads are all
+# resolved and whose open one sits on page two therefore looks clean —
+# "-" in the column, dropped from /unresolved — which hides precisely the
+# outstanding work this command exists to surface. #28's visible thread
+# is resolved, so without the hasNextPage read it renders "-".
+# #30 and #29 keep their ordinary counts so the "?" below can only have
+# come from the truncated pr — otherwise a pr simply MISSING from the
+# response would satisfy the same assertion.
+write_graphql "$(jq -n '{
+  data: {repository: {
+    p30: {number: 30, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+            {isResolved: false, comments: {nodes: [{author: {login: "some-reviewer"}}]}}
+          ]}},
+    p29: {number: 29, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+            {isResolved: false, comments: {nodes: [{author: {login: "andreabenetton"}}]}}
+          ]}},
+    p28: {number: 28, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: true}, nodes: [
+            {isResolved: true, comments: {nodes: [{author: {login: "some-reviewer"}}]}}
+          ]}}
+  }}
+}')"
+run /all
+assert_rc           "exits 0" 0
+assert_contains     "renders the truncated count as unknown" "?"
+assert_not_contains "does not claim zero open threads" " -  "
+
+run /all /unresolved
+assert_rc       "exits 0" 0
+assert_contains "keeps the pr rather than dropping it" "#28"
+
+default_graphql
 
 echo "pr-sessions: pool filters"
 run /all /lastItem:1

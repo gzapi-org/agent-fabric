@@ -149,6 +149,32 @@ else
     fail "call order wrong" "$(calls)"
 fi
 
+echo "pr-reply: a trailing blank line survives to GitHub"
+# `BODY="$(cat)"` strips ALL trailing newlines, so the blank line a
+# documented heredoc ends with was silently dropped — while this script
+# exists precisely to deliver the body byte-for-byte, which is why it reads
+# stdin instead of taking an argument.
+#
+# Compared with cmp, never `$( )`: reading the capture back through command
+# substitution would strip the exact bytes under test, which is how the
+# suite stayed green over this. The existing helper pipes with
+# `printf '%s'`, so it never had a trailing newline to lose either.
+printf 'line one\n\n' > "$SANDBOX/state/expected.txt"
+thread_fixture "$ME/feat/thing" false
+RUN_OUT="$(cd "$SANDBOX/$CLONE_NAME" && \
+    env PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
+    "${MOCK_ENV[@]}" bash "$UNDER_TEST" "$THREAD_ID" \
+    < "$SANDBOX/state/expected.txt" 2>&1)"
+RUN_RC=$?
+assert_rc "exits 0" 0
+if cmp -s "$SANDBOX/state/body.txt" "$SANDBOX/state/expected.txt"; then
+    pass "the trailing blank line reached GitHub intact"
+else
+    fail "trailing bytes were lost in transit" \
+        "sent:$(od -c "$SANDBOX/state/body.txt" 2>/dev/null | tail -2)
+want:$(od -c "$SANDBOX/state/expected.txt" | tail -2)"
+fi
+
 echo "pr-reply: the body is transmitted verbatim"
 # The defect this script exists to remove. Every one of these is
 # something the shell would have eaten from a double-quoted argument.

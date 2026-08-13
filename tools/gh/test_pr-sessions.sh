@@ -77,17 +77,32 @@ case "${1:-}" in
   api)
     [[ -n "${GH_MOCK_GRAPHQL_FAIL:-}" ]] && exit 1
     # Apply the caller's --jq filter to the fixture, exactly as gh does.
-    filter=""
+    filter=""; query=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --jq) filter="$2"; shift 2 ;;
+        -f) [[ "$2" == query=* ]] && query="${2#query=}"; shift 2 ;;
         *) shift ;;
       esac
     done
+    # GRAPHQL RETURNS ONLY WHAT THE QUERY ASKED FOR, and the mock has to
+    # honour that or it hides missing selections. A fixture that
+    # volunteers pageInfo the query never requested lets the script pass
+    # while asking the real API for a field it then reads as absent — the
+    # test goes green on a query that would answer "not truncated" to
+    # everything.
+    src="$GH_MOCK_DIR/graphql.json"
+    if [[ "$query" != *hasNextPage* ]]; then
+      jq '(.data.repository // {}) |= with_entries(
+            .value |= (if has("reviewThreads")
+                       then .reviewThreads |= del(.pageInfo) else . end))' \
+         "$GH_MOCK_DIR/graphql.json" > "$GH_MOCK_DIR/.served.json"
+      src="$GH_MOCK_DIR/.served.json"
+    fi
     if [[ -n "$filter" ]]; then
-      jq -r "$filter" "$GH_MOCK_DIR/graphql.json"
+      jq -r "$filter" "$src"
     else
-      cat "$GH_MOCK_DIR/graphql.json"
+      cat "$src"
     fi
     ;;
   *)
@@ -147,20 +162,33 @@ assert_not_contains() {
 
 # ── fixtures ────────────────────────────────────────────────────────
 
+# Fixture timestamps are RELATIVE to now, never literal dates.
+#
+# `pr-sessions.sh` derives a /lastDate cutoff from the real wall clock,
+# and nothing here mocks `date`. Pinned fixtures therefore age: the
+# original 2026-08-06 rows sat inside `/lastDate:99d` when they were
+# written and would have fallen outside it on 2026-11-13, failing a
+# required check that also runs on merge_group — i.e. blocking every
+# queued PR in the repo, on a date certain, with nothing in the diff to
+# explain why. Relative fixtures cannot expire.
+ago() { date -u -d "$1 ago" +%Y-%m-%dT%H:%M:%SZ; }
+
 write_pr_list() { printf '%s\n' "$1" > "$SANDBOX/fixtures/pr-list.json"; }
 write_graphql() { printf '%s\n' "$1" > "$SANDBOX/fixtures/graphql.json"; }
 
 # Three PRs: two this clone's, one another session's.
 default_pr_list() {
-    write_pr_list "$(jq -n --arg me "$ME" --arg other "$OTHER" '[
+    write_pr_list "$(jq -n --arg me "$ME" --arg other "$OTHER" \
+      --arg t30 "$(ago '1 hour')" --arg t29 "$(ago '2 hours')" \
+      --arg t28 "$(ago '3 hours')" '[
       {number: 30, state: "OPEN",   headRefName: ($me    + "/feat/alpha"),
-       title: "alpha", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null},
+       title: "alpha", updatedAt: $t30, isDraft: false, mergedAt: null},
       {number: 29, state: "MERGED", headRefName: ($other + "/fix/beta"),
-       title: "beta",  updatedAt: "2026-08-05T10:00:00Z", isDraft: false,
-       mergedAt: "2026-08-05T11:00:00Z"},
+       title: "beta",  updatedAt: $t29, isDraft: false,
+       mergedAt: $t29},
       {number: 28, state: "MERGED", headRefName: ($me    + "/docs/gamma"),
-       title: "gamma", updatedAt: "2026-08-04T10:00:00Z", isDraft: false,
-       mergedAt: "2026-08-04T11:00:00Z"}
+       title: "gamma", updatedAt: $t28, isDraft: false,
+       mergedAt: $t28}
     ]')"
 }
 
@@ -270,6 +298,42 @@ assert_contains     "keeps #30"            "#30"
 assert_contains     "keeps #29"            "#29"
 assert_not_contains "drops the resolved-only PR" "#28"
 
+echo "pr-sessions: a truncated thread page reads UNKNOWN, not zero"
+# Only the first 100 threads arrive. A pr whose early threads are all
+# resolved and whose open one sits on page two therefore looks clean —
+# "-" in the column, dropped from /unresolved — which hides precisely the
+# outstanding work this command exists to surface. #28's visible thread
+# is resolved, so without the hasNextPage read it renders "-".
+# #30 and #29 keep their ordinary counts so the "?" below can only have
+# come from the truncated pr — otherwise a pr simply MISSING from the
+# response would satisfy the same assertion.
+write_graphql "$(jq -n '{
+  data: {repository: {
+    p30: {number: 30, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+            {isResolved: false, comments: {nodes: [{author: {login: "some-reviewer"}}]}}
+          ]}},
+    p29: {number: 29, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+            {isResolved: false, comments: {nodes: [{author: {login: "andreabenetton"}}]}}
+          ]}},
+    p28: {number: 28, author: {login: "andreabenetton"},
+          reviewThreads: {pageInfo: {hasNextPage: true}, nodes: [
+            {isResolved: true, comments: {nodes: [{author: {login: "some-reviewer"}}]}}
+          ]}}
+  }}
+}')"
+run /all
+assert_rc           "exits 0" 0
+assert_contains     "renders the truncated count as unknown" "?"
+assert_not_contains "does not claim zero open threads" " -  "
+
+run /all /unresolved
+assert_rc       "exits 0" 0
+assert_contains "keeps the pr rather than dropping it" "#28"
+
+default_graphql
+
 echo "pr-sessions: pool filters"
 run /all /lastItem:1
 assert_rc           "exits 0" 0
@@ -279,6 +343,18 @@ assert_not_contains "drops everything older"  "#29"
 run /all /lastDate:99d
 assert_rc       "/lastDate accepts <N>d" 0
 assert_contains "keeps PRs in the window" "#30"
+
+# A TIGHT window, which is what keeps the fixtures honest.
+#
+# /lastDate:99d passes for ~99 days after any pinned fixture is written,
+# so it cannot tell a relative fixture from one that is quietly ageing
+# out — the original rows sat inside it for three months before they
+# would have started failing a required check on merge_group. A one-day
+# window is outside a pinned fixture's reach almost immediately, so this
+# fails within a day of anyone reintroducing a literal date.
+run /all /lastDate:1d
+assert_rc       "/lastDate:1d exits 0" 0
+assert_contains "fixtures are recent enough for a tight window" "#30"
 
 echo "pr-sessions: malformed pool filters are refused"
 run /lastItem:0
@@ -341,13 +417,15 @@ assert_rc       "non-numeric limit exits 2" 2
 assert_contains "names the expectation" "positive integer"
 
 echo "pr-sessions: bot branches are not attributed to a session"
-write_pr_list "$(jq -n --arg me "$ME" '[
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
+  --arg t3 "$(ago '3 hours')" '[
   {number: 40, state: "OPEN", headRefName: "dependabot/github_actions/actions-minor-patch-5c7bcdc794",
-   title: "bump", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null},
+   title: "bump", updatedAt: $t1, isDraft: false, mergedAt: null},
   {number: 41, state: "OPEN", headRefName: "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2",
-   title: "bump", updatedAt: "2026-08-06T09:00:00Z", isDraft: false, mergedAt: null},
+   title: "bump", updatedAt: $t2, isDraft: false, mergedAt: null},
   {number: 42, state: "OPEN", headRefName: ($me + "/feat/real"),
-   title: "real", updatedAt: "2026-08-06T08:00:00Z", isDraft: false, mergedAt: null}
+   title: "real", updatedAt: $t3, isDraft: false, mergedAt: null}
 ]')"
 write_graphql "$(jq -n '{data: {repository: {
   p40: {number: 40, author: {login: "app/dependabot"}, reviewThreads: {nodes: []}},
@@ -427,9 +505,9 @@ fi
 echo "pr-sessions: a full /lastDate page warns that the window may be short"
 # The warning fires when the fetch came back full, so the fixture has to
 # fill the derived 200-row page.
-write_pr_list "$(jq -n --arg me "$ME" '[range(200) | {
+write_pr_list "$(jq -n --arg me "$ME" --arg t "$(ago '1 hour')" '[range(200) | {
   number: (500 - .), state: "OPEN", headRefName: ($me + "/feat/w\(.)"),
-  title: "w", updatedAt: "2026-08-06T10:00:00Z", isDraft: false, mergedAt: null}]')"
+  title: "w", updatedAt: $t, isDraft: false, mergedAt: null}]')"
 # -n 10 puts the derived fetch at its 200 floor, which the fixture fills
 # exactly.
 run /all -n 10 /lastDate:99d --no-threads

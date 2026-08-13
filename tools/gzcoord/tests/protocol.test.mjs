@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { parse, validate } from '../scripts/gzmsg.mjs';
+
+const gzmsg = (...args) =>
+  spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
+            { encoding: 'utf8' });
 
 for (const name of ['hello','observation','review']) {
   test(`${name} example is valid`, () => {
@@ -56,6 +61,19 @@ test('body lines after a section marker are never malformed metadata', () => {
 test('TO must be a logical address when present', () => {
   const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: @telegram_username\n`;
   assert.equal(validate(text).ok, false);
+});
+
+test('hello refuses to emit a message its own validate would reject', () => {
+  const bad = gzmsg('hello', '--from', '/srv/project', '--role', 'Tester', '--project', 'gzapp');
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /FROM must be/);
+  assert.equal(bad.stdout, '');
+});
+
+test('hello emits a valid message for a well-formed address', () => {
+  const ok = gzmsg('hello', '--from', 'develop-gzapp/gzapp', '--role', 'Tester', '--project', 'gzapp');
+  assert.equal(ok.status, 0);
+  assert.deepEqual(validate(ok.stdout).errors, []);
 });
 
 test('a repeated section marker resumes the section instead of replacing it', () => {

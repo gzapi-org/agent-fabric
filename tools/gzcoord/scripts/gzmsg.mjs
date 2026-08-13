@@ -77,7 +77,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
     if (arg('capabilities')) lines.push(`CAPABILITIES: ${arg('capabilities')}`);
-    console.log(lines.join('\n'));
+    // A HELLO is how peers learn an address, so emitting one this same tool
+    // would reject publishes an identity nobody can route back to.
+    const text = lines.join('\n');
+    const result = validate(text);
+    if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
+    console.log(text);
   } else {
     console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ...');
     process.exit(2);

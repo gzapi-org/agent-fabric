@@ -10,10 +10,11 @@ Read first, in this order:
 
 1. `CLAUDE.md`
 2. `protocol/SPEC.md`
-3. `docs/architecture.md`
+3. `protocol/SEMANTICS.md`
 4. `runtime/README.md`
-5. `adapters/telegram/README.md`
-6. `config/instance.example.yaml`
+5. `docs/TRANSPORT-ADAPTER-CONTRACT.md`
+6. `adapters/telegram/README.md`
+7. `config/instance.example.yaml`
 
 The architecture is already decided. Do not redesign it into a coordination database, ownership system, task tracker, lock service, or Git abstraction.
 

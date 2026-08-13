@@ -226,6 +226,17 @@ fi
 CANDIDATES="$LIMIT"
 if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
     CANDIDATES=100
+    # AN EXPLICIT /lastItem IS A REQUEST, NOT A SUGGESTION.
+    #
+    # The 100 exists to keep the aliased GraphQL query one sane request
+    # when nobody has said how far to look. But it was applied as the
+    # final slice, AFTER /lastItem had already narrowed the pool — so
+    # `/all /lastItem:150 /unresolved` quietly queried the newest 100 and
+    # never asked about rows 101-150. The caller had named a number and
+    # got a different one, with nothing said.
+    if (( ${LAST_ITEM:-0} > CANDIDATES )); then
+        CANDIDATES="$LAST_ITEM"
+    fi
     (( CANDIDATES > FETCH )) && CANDIDATES="$FETCH"
 fi
 
@@ -443,6 +454,18 @@ if [[ -z "${out//[$' \t\n']/}" ]]; then
 fi
 
 printf '%s\n' "$out"
+
+# SAY WHAT WAS ACTUALLY CHECKED, not only when the answer is empty.
+#
+# This footer used to print on the empty branch alone, so a run that
+# found something in the newest $CANDIDATES looked complete while rows
+# beyond that were never queried. "Nothing outstanding" and "nothing
+# outstanding in the part I looked at" are different answers, and only
+# one of them was ever qualified. stderr, so a piped caller's data is
+# unchanged.
+if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
+    echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)" >&2
+fi
 
 echo
 if [[ "$DEFAULTED_TO_MINE" -eq 1 ]]; then

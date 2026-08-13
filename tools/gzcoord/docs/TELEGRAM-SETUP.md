@@ -69,14 +69,34 @@ layer; the plugin's sender allowlist (below) is the second.
 With the official `telegram@claude-plugins-official` plugin installed
 (`/plugin install telegram@claude-plugins-official`):
 
-1. Save the token where the plugin's channel server reads it at boot:
+1. Save the token where the plugin's channel server reads it at boot.
+   The path is **per instance**, not fixed — see the warning below
+   before using the default:
 
    ```
-   ~/.claude/channels/telegram/.env      # chmod 600
+   $TELEGRAM_STATE_DIR/.env               # chmod 600
    TELEGRAM_BOT_TOKEN=<token from BotFather>
    ```
 
-   (`/telegram:configure <token>` does exactly this.)
+   `TELEGRAM_STATE_DIR` defaults to `~/.claude/channels/telegram/`.
+   That default is safe only for a single instance on the account. Set
+   it explicitly, per instance, before launching the session — name it
+   after the clone directory, the same component the instance's GZCoord
+   address is derived from:
+
+   ```
+   export TELEGRAM_STATE_DIR=~/.claude/channels/telegram-<clone-dir>/
+   ```
+
+   Every concurrently running instance needs its own bot token **and**
+   its own state directory. Sharing the directory means both plugin
+   servers read the same `.env`, so a reload can silently switch a
+   session onto another instance's bot and put two consumers on one
+   token — the 409/dropped-message failure described at the end of this
+   section, arriving without anyone having polled by hand.
+
+   (`/telegram:configure <token>` writes the `.env` for the state
+   directory in effect when it runs.)
 
 2. Restart the session or run `/reload-plugins` — the server reads
    `.env` **once at boot**. After the restart the session's Telegram
@@ -100,7 +120,10 @@ consumers of one bot token steal each other's updates (HTTP 409s and
 silently missing messages).
 
 One bot token and one plugin state directory **per concurrently running
-instance** — instances must not share a bot.
+instance** — instances must not share a bot. That is what
+`TELEGRAM_STATE_DIR` in §4 step 1 is for; leaving it at the default on a
+host running two instances is how the two-consumer failure happens
+without anyone polling by hand.
 
 ## 5. Lock down access
 
@@ -131,7 +154,7 @@ be learned from delivery.
 Capture it directly instead:
 
 1. Stop the plugin's channel server (or note it stopped — `bot.pid`
-   under `~/.claude/channels/telegram/`). Only one consumer may poll a
+   under `$TELEGRAM_STATE_DIR`). Only one consumer may poll a
    bot token at a time, so this step is what makes the next one safe.
 2. Send one ordinary message in the group from an allowed account
    **first**, then call `getUpdates` once with the token from `.env`
@@ -206,7 +229,7 @@ arrived" from "arrived and was dropped" in one call.
 
 ## What stays out of git
 
-- The bot token (`~/.claude/channels/telegram/.env`, mode 600).
+- The bot token (`$TELEGRAM_STATE_DIR/.env`, mode 600).
 - The plugin's state directory.
 - The instance configuration (`~/.config/gzcoord/<project>.yaml`, from
   `../config/instance.example.yaml`).

@@ -472,6 +472,57 @@ done
 assert_contains "a real session branch still resolves" "$ME"
 default_pr_list; default_graphql
 
+echo "pr-sessions: a session branch is attributed by SHAPE, not a type vocabulary"
+# The predicate used to require one of thirteen conventional-commit
+# words in the <type> segment, so `spike-3/`, `hotfix/` and `stage-4/`
+# branches were classified unconventional and then SILENTLY DROPPED by
+# the default clone scope — the command whose job is surfacing
+# outstanding work answering "none". CLAUDE.md puts no vocabulary on
+# <type>; only the shape is specified, so only the shape is checked.
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
+  --arg t3 "$(ago '3 hours')" '[
+  {number: 50, state: "OPEN", headRefName: ($me + "/spike-3/beacon-parse"),
+   title: "spike", updatedAt: $t1, isDraft: false, mergedAt: null},
+  {number: 51, state: "OPEN", headRefName: ($me + "/hotfix/regime-strip"),
+   title: "hotfix", updatedAt: $t2, isDraft: false, mergedAt: null},
+  {number: 52, state: "OPEN", headRefName: ($me + "/feat/known-type"),
+   title: "feat", updatedAt: $t3, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p50: {number: 50, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p51: {number: 51, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p52: {number: 52, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+# DEFAULT scope, not /all: the drop this guards against happens in the
+# scope filter, so a run that scopes to nothing proves nothing.
+run
+assert_rc       "exits 0" 0
+assert_contains "an unlisted <type> is still this clone's work" "#50"
+assert_contains "  and so is another one"                       "#51"
+assert_contains "a conventional type is unaffected"             "#52"
+assert_not_contains "none of them read as unattributed" "(unconventional)"
+
+echo "pr-sessions: a branch with too few segments is still unattributed"
+# Shape-matching is not "anything goes" — <host>/<clone>/<type>/<desc>
+# needs four segments before $p[0]/$p[1] means a session at all.
+write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
+  {number: 53, state: "OPEN", headRefName: "agent/global-event-identity",
+   title: "agent", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p53: {number: 53, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+run /all
+assert_rc       "exits 0" 0
+row="$(printf '%s\n' "$RUN_OUT" | grep -- '#53')"
+if [[ "$row" == *"(unconventional)"* ]]; then
+    pass "#53 is not attributed to a session"
+else
+    fail "#53 was attributed to a session" "$row"
+fi
+default_pr_list; default_graphql
+
 echo "pr-sessions: an invalid --session regex is an invocation error"
 # `test()` with a bad pattern kills jq. Swallowing that printed "no
 # matching PRs" and exited 0 — the same reassuring answer a genuinely

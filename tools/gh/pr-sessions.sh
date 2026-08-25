@@ -268,21 +268,40 @@ fi
 # segments alone reported `dependabot/nuget/apps/backend_dotnet/…` as a
 # session called "dependabot/nuget", and the footer then told you that
 # apparent owner was a parallel session to stay out of the way of. The
-# type segment is what separates the two populations, so it is matched
-# against the set this repo actually uses.
-#
-# The cost of the list is that a branch typed something new reads as
-# unconventional until the type is added here. That is the direction to
-# fail in: a visible unknown invites a look, a confident wrong owner
-# does not.
+# separator is therefore a deny-list of automation vendors, not an
+# allow-list of type words — see `conventional` below for why the
+# asymmetry is deliberate.
 selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
-  def types: ["feat","fix","docs","chore","ci","test","refactor","perf",
-              "build","style","contracts","i18n","spike"];
+  # Automation vendors, whose branch names also have four or more
+  # segments. A DENY-list is right here and an allow-list was wrong: the
+  # asymmetry is the point. The set of bots that open PRs on a
+  # repository is small, known, and changes rarely, while the set of
+  # legitimate <type> words is open-ended — and every omission from an
+  # allow-list silently deletes real work from this listing.
+  def bots: ["dependabot","renovate","github-actions","weblate","imgbot",
+             "allcontributors","pre-commit-ci","snyk-bot"];
+  # STRUCTURAL, not an allow-list of type words.
+  #
+  # CLAUDE.md specifies <host>/<clone>/<type>/<short-desc> and puts no
+  # vocabulary on <type>. This function used to require one of thirteen
+  # conventional-commit words, so any branch typed outside that set —
+  # `spike-3/`, `hotfix/`, `stage-4/` — was classified unconventional,
+  # given the session "(unconventional)", and then SILENTLY DROPPED by
+  # the default clone scope. That is the command whose whole job is
+  # surfacing outstanding work quietly answering "none".
+  #
+  # A branch is conventional if it has the right SHAPE. Anything that
+  # parses as a type token counts, because the session is $p[0]/$p[1]
+  # either way and that is all the scoping needs.
   def conventional:
     (.headRefName | split("/")) as $p
-    | ($p | length) >= 4 and (types | index($p[2]) != null);
+    | ($p | length) >= 4
+      and ($p[0] | length) > 0
+      and ($p[1] | length) > 0
+      and (bots | index($p[0]) == null)
+      and ($p[2] | test("^[a-z][a-z0-9._-]*$"));
   def session:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;

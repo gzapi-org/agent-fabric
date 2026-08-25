@@ -56,6 +56,39 @@ assert_not_contains() {
     else fail "$1 — output unexpectedly had '$2'" "$RUN_OUT"; fi
 }
 
+# A MISTYPED HELPER MUST FAIL THE SUITE, not vanish into stderr.
+#
+# An assertion calling a function nobody defined prints "command not
+# found", never touches the failure counter, and leaves the suite
+# reporting success with that case vacuous — a guard claiming coverage
+# it does not have, in a file whose whole job is stopping exactly that.
+# It has happened twice here: test_pr-review-status.sh's merged-pr case
+# called `ok`/`bad` and ran for weeks doing nothing, and its verdict
+# cases were written with `assert_not_contains` where this file's
+# helpers are named otherwise.
+#
+# Every suite needs this, not just the one that was bitten: the helpers
+# are NOT named alike across these files — two spell it `assert_lacks`,
+# two `assert_not_contains` — so anyone moving between them types the
+# wrong name eventually.
+#
+# THE MARKER FILE IS THE MECHANISM, and a counter is not. Bash runs
+# `command_not_found_handle` in a SUBSHELL, so `failures=$((failures+1))`
+# inside it is discarded when that subshell exits: the handler prints its
+# complaint and the suite still reports "all assertions passed" and exits
+# 0. The first version of this guard did exactly that — a vacuous guard
+# against vacuous guards. A file written in the subshell survives it.
+#
+# The script under test runs as a separate `bash` process, so none of
+# this reaches it or masks a genuine missing-command path there.
+GUARD_MARKER="$(mktemp)"
+command_not_found_handle() {
+    printf '%s\n' "$1" >> "$GUARD_MARKER"
+    echo "  ✗ self-test bug: called '$1', which is not defined here" >&2
+    echo "      the assertion helpers here are assert_rc / assert_contains / assert_not_contains" >&2
+    return 127
+}
+
 setup_sandbox() {
     SANDBOX="$(mktemp -d)"
     mkdir -p "$SANDBOX/$CLONE_NAME" "$SANDBOX/bin" "$SANDBOX/state"
@@ -313,6 +346,16 @@ assert_contains "documents --no-resolve" "--no-resolve"
 assert_contains "documents --dry-run"    "--dry-run"
 
 echo
+# A helper that does not exist fails the suite, whatever the counter
+# says — see command_not_found_handle above for why this cannot be a
+# counter.
+if [[ -s "$GUARD_MARKER" ]]; then
+    echo "SELF-TEST BUG — undefined helper(s) called: $(sort -u "$GUARD_MARKER" | tr '\n' ' ')" >&2
+    echo "  assertions using them never ran. Fix the names before trusting this suite." >&2
+    rm -f "$GUARD_MARKER"
+    exit 1
+fi
+rm -f "$GUARD_MARKER"
 if [[ "$failures" -eq 0 ]]; then
     echo "test_pr-reply: OK — all assertions passed."
     exit 0

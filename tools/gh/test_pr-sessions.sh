@@ -68,6 +68,16 @@ set -uo pipefail
 case "${1:-}" in
   pr)
     [[ -n "${GH_MOCK_PRLIST_FAIL:-}" ]] && exit 1
+    # Record the --limit actually requested, so a case can assert about
+    # the fetch that went out rather than the rendered page. Recorded
+    # UNCONDITIONALLY, which is what lets this one mock serve every
+    # case: a second mock installed mid-file to add one behaviour also
+    # silently drops the others, and every case after it runs blind.
+    args=("$@")
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      [[ "${args[i]}" == "--limit" ]] && \
+        printf '%s\n' "${args[i+1]:-}" > "$GH_MOCK_DIR/last-limit"
+    done
     cat "$GH_MOCK_DIR/pr-list.json"
     ;;
   repo)
@@ -158,6 +168,39 @@ assert_not_contains() {
     local label="$1" needle="$2"
     if [[ "$RUN_OUT" != *"$needle"* ]]; then pass "$label"
     else fail "$label — output unexpectedly contained '$needle'" "$RUN_OUT"; fi
+}
+
+# A MISTYPED HELPER MUST FAIL THE SUITE, not vanish into stderr.
+#
+# An assertion calling a function nobody defined prints "command not
+# found", never touches the failure counter, and leaves the suite
+# reporting success with that case vacuous — a guard claiming coverage
+# it does not have, in a file whose whole job is stopping exactly that.
+# It has happened twice here: test_pr-review-status.sh's merged-pr case
+# called `ok`/`bad` and ran for weeks doing nothing, and its verdict
+# cases were written with `assert_not_contains` where this file's
+# helpers are named otherwise.
+#
+# Every suite needs this, not just the one that was bitten: the helpers
+# are NOT named alike across these files — two spell it `assert_lacks`,
+# two `assert_not_contains` — so anyone moving between them types the
+# wrong name eventually.
+#
+# THE MARKER FILE IS THE MECHANISM, and a counter is not. Bash runs
+# `command_not_found_handle` in a SUBSHELL, so `failures=$((failures+1))`
+# inside it is discarded when that subshell exits: the handler prints its
+# complaint and the suite still reports "all assertions passed" and exits
+# 0. The first version of this guard did exactly that — a vacuous guard
+# against vacuous guards. A file written in the subshell survives it.
+#
+# The script under test runs as a separate `bash` process, so none of
+# this reaches it or masks a genuine missing-command path there.
+GUARD_MARKER="$(mktemp)"
+command_not_found_handle() {
+    printf '%s\n' "$1" >> "$GUARD_MARKER"
+    echo "  ✗ self-test bug: called '$1', which is not defined here" >&2
+    echo "      the assertion helpers here are assert_rc / assert_contains / assert_not_contains" >&2
+    return 127
 }
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -472,6 +515,115 @@ done
 assert_contains "a real session branch still resolves" "$ME"
 default_pr_list; default_graphql
 
+echo "pr-sessions: a session branch is attributed by SHAPE, not a type vocabulary"
+# The predicate used to require one of thirteen conventional-commit
+# words in the <type> segment, so `spike-3/`, `hotfix/` and `stage-4/`
+# branches were classified unconventional and then SILENTLY DROPPED by
+# the default clone scope — the command whose job is surfacing
+# outstanding work answering "none". CLAUDE.md puts no vocabulary on
+# <type>; only the shape is specified, so only the shape is checked.
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
+  --arg t3 "$(ago '3 hours')" '[
+  {number: 50, state: "OPEN", headRefName: ($me + "/spike-3/beacon-parse"),
+   title: "spike", updatedAt: $t1, isDraft: false, mergedAt: null},
+  {number: 51, state: "OPEN", headRefName: ($me + "/hotfix/regime-strip"),
+   title: "hotfix", updatedAt: $t2, isDraft: false, mergedAt: null},
+  {number: 52, state: "OPEN", headRefName: ($me + "/feat/known-type"),
+   title: "feat", updatedAt: $t3, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p50: {number: 50, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p51: {number: 51, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p52: {number: 52, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+# DEFAULT scope, not /all: the drop this guards against happens in the
+# scope filter, so a run that scopes to nothing proves nothing.
+run
+assert_rc       "exits 0" 0
+assert_contains "an unlisted <type> is still this clone's work" "#50"
+assert_contains "  and so is another one"                       "#51"
+assert_contains "a conventional type is unaffected"             "#52"
+assert_not_contains "none of them read as unattributed" "(unconventional)"
+
+echo "pr-sessions: a branch with too few segments is still unattributed"
+# Shape-matching is not "anything goes" — <host>/<clone>/<type>/<desc>
+# needs four segments before $p[0]/$p[1] means a session at all.
+write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
+  {number: 53, state: "OPEN", headRefName: "agent/global-event-identity",
+   title: "agent", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p53: {number: 53, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+run /all
+assert_rc       "exits 0" 0
+row="$(printf '%s\n' "$RUN_OUT" | grep -- '#53')"
+if [[ "$row" == *"(unconventional)"* ]]; then
+    pass "#53 is not attributed to a session"
+else
+    fail "#53 was attributed to a session" "$row"
+fi
+default_pr_list; default_graphql
+
+echo "pr-sessions: PRs no scope filter can attribute are disclosed, not dropped"
+# A row that does not parse as <host>/<clone>/<type>/<desc> is removed by
+# any scope filter. Removing it SILENTLY is how a listing looks complete
+# when it is not, so the count is stated on every path that can exit.
+unscopable_list() {
+    write_pr_list "$(jq -n --arg me "$ME" \
+      --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '[
+      {number: 60, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+       title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null},
+      {number: 61, state: "OPEN", headRefName: ($me + "/feat/real"),
+       title: "real", updatedAt: $t2, isDraft: false, mergedAt: null}
+    ]')"
+    write_graphql "$(jq -n '{data: {repository: {
+      p60: {number: 60, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+      p61: {number: 61, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+    }}}')"
+}
+unscopable_list
+run
+assert_rc       "exits 0" 0
+assert_contains "the footer path discloses the omission" "cannot be scoped to a"
+assert_contains "  and counts them"                      "1 PR(s) have a branch"
+
+echo "pr-sessions: /all reports nothing omitted, because nothing was scoped away"
+run /all
+assert_rc           "exits 0" 0
+assert_not_contains "no disclosure when no filter acted" "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the no-rows early exit"
+# The reassuring "no PRs" answer is exactly the one a reader acts on, so
+# it is the path where a footer-only disclosure would be missing.
+write_pr_list "$(jq -n --arg t1 "$(ago '1 hour')" '[
+  {number: 62, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+   title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {}}}')"
+run
+assert_rc       "exits 0" 0
+assert_contains "says there are no PRs for this clone" "no PRs for this clone"
+assert_contains "  and still discloses the omission"   "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the /unresolved-empty early exit"
+unscopable_list
+run /unresolved
+assert_rc       "exits 0" 0
+assert_contains "says nothing is unresolved"         "no PRs with unresolved"
+assert_contains "  and still discloses the omission" "cannot be scoped to a"
+
+echo "pr-sessions: the count describes the NARROWED pool, not everything fetched"
+# /lastItem fixes the pool before scope. Counting before that narrowing
+# announces a PR the caller never asked about and that nothing omitted:
+# #60 is outside a one-item pool, so there is nothing to disclose.
+unscopable_list
+run /lastItem:1
+assert_rc           "exits 0" 0
+assert_not_contains "does not announce a PR outside the pool" "cannot be scoped to a"
+default_pr_list; default_graphql
+
 echo "pr-sessions: an invalid --session regex is an invocation error"
 # `test()` with a bad pattern kills jq. Swallowing that printed "no
 # matching PRs" and exited 0 — the same reassuring answer a genuinely
@@ -500,24 +652,8 @@ assert_rc       "exits 2" 2
 assert_contains "names the likely cause" "could not list PRs"
 
 echo "pr-sessions: /lastItem beyond the derived cap is honoured, not clamped"
-# The mock records the --limit it was handed, so the claim is about the
-# fetch that actually went out rather than the rendered page.
-cat > "$SANDBOX/bin/gh" <<'MOCK'
-#!/usr/bin/env bash
-set -uo pipefail
-case "${1:-}" in
-  pr)
-    while [[ $# -gt 0 ]]; do
-      [[ "$1" == "--limit" ]] && printf '%s\n' "$2" > "$GH_MOCK_DIR/last-limit"
-      shift
-    done
-    cat "$GH_MOCK_DIR/pr-list.json" ;;
-  repo) printf '%s\n' "gzapi-org/gzapp" ;;
-  api)  printf '%s\n' '{}' ;;
-  *)    exit 1 ;;
-esac
-MOCK
-chmod +x "$SANDBOX/bin/gh"
+# The faithful mock records the --limit it was handed, so the claim is
+# about the fetch that actually went out rather than the rendered page.
 run /all /lastItem:600 --no-threads
 assert_rc "exits 0" 0
 requested="$(cat "$SANDBOX/fixtures/last-limit" 2>/dev/null || echo missing)"
@@ -541,6 +677,16 @@ assert_contains "warns that the window may be truncated" "may be"
 default_pr_list
 
 echo
+# A helper that does not exist fails the suite, whatever the counter
+# says — see command_not_found_handle above for why this cannot be a
+# counter.
+if [[ -s "$GUARD_MARKER" ]]; then
+    echo "SELF-TEST BUG — undefined helper(s) called: $(sort -u "$GUARD_MARKER" | tr '\n' ' ')" >&2
+    echo "  assertions using them never ran. Fix the names before trusting this suite." >&2
+    rm -f "$GUARD_MARKER"
+    exit 1
+fi
+rm -f "$GUARD_MARKER"
 if [[ "$failures" -eq 0 ]]; then
     echo "test_pr-sessions: OK — all assertions passed."
     exit 0

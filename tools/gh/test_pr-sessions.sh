@@ -68,6 +68,16 @@ set -uo pipefail
 case "${1:-}" in
   pr)
     [[ -n "${GH_MOCK_PRLIST_FAIL:-}" ]] && exit 1
+    # Record the --limit actually requested, so a case can assert about
+    # the fetch that went out rather than the rendered page. Recorded
+    # UNCONDITIONALLY, which is what lets this one mock serve every
+    # case: a second mock installed mid-file to add one behaviour also
+    # silently drops the others, and every case after it runs blind.
+    args=("$@")
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      [[ "${args[i]}" == "--limit" ]] && \
+        printf '%s\n' "${args[i+1]:-}" > "$GH_MOCK_DIR/last-limit"
+    done
     cat "$GH_MOCK_DIR/pr-list.json"
     ;;
   repo)
@@ -609,24 +619,8 @@ assert_rc       "exits 2" 2
 assert_contains "names the likely cause" "could not list PRs"
 
 echo "pr-sessions: /lastItem beyond the derived cap is honoured, not clamped"
-# The mock records the --limit it was handed, so the claim is about the
-# fetch that actually went out rather than the rendered page.
-cat > "$SANDBOX/bin/gh" <<'MOCK'
-#!/usr/bin/env bash
-set -uo pipefail
-case "${1:-}" in
-  pr)
-    while [[ $# -gt 0 ]]; do
-      [[ "$1" == "--limit" ]] && printf '%s\n' "$2" > "$GH_MOCK_DIR/last-limit"
-      shift
-    done
-    cat "$GH_MOCK_DIR/pr-list.json" ;;
-  repo) printf '%s\n' "gzapi-org/gzapp" ;;
-  api)  printf '%s\n' '{}' ;;
-  *)    exit 1 ;;
-esac
-MOCK
-chmod +x "$SANDBOX/bin/gh"
+# The faithful mock records the --limit it was handed, so the claim is
+# about the fetch that actually went out rather than the rendered page.
 run /all /lastItem:600 --no-threads
 assert_rc "exits 0" 0
 requested="$(cat "$SANDBOX/fixtures/last-limit" 2>/dev/null || echo missing)"

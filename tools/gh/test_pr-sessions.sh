@@ -523,6 +523,64 @@ else
 fi
 default_pr_list; default_graphql
 
+echo "pr-sessions: PRs no scope filter can attribute are disclosed, not dropped"
+# A row that does not parse as <host>/<clone>/<type>/<desc> is removed by
+# any scope filter. Removing it SILENTLY is how a listing looks complete
+# when it is not, so the count is stated on every path that can exit.
+unscopable_list() {
+    write_pr_list "$(jq -n --arg me "$ME" \
+      --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '[
+      {number: 60, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+       title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null},
+      {number: 61, state: "OPEN", headRefName: ($me + "/feat/real"),
+       title: "real", updatedAt: $t2, isDraft: false, mergedAt: null}
+    ]')"
+    write_graphql "$(jq -n '{data: {repository: {
+      p60: {number: 60, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+      p61: {number: 61, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+    }}}')"
+}
+unscopable_list
+run
+assert_rc       "exits 0" 0
+assert_contains "the footer path discloses the omission" "cannot be scoped to a"
+assert_contains "  and counts them"                      "1 PR(s) have a branch"
+
+echo "pr-sessions: /all reports nothing omitted, because nothing was scoped away"
+run /all
+assert_rc           "exits 0" 0
+assert_not_contains "no disclosure when no filter acted" "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the no-rows early exit"
+# The reassuring "no PRs" answer is exactly the one a reader acts on, so
+# it is the path where a footer-only disclosure would be missing.
+write_pr_list "$(jq -n --arg t1 "$(ago '1 hour')" '[
+  {number: 62, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+   title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {}}}')"
+run
+assert_rc       "exits 0" 0
+assert_contains "says there are no PRs for this clone" "no PRs for this clone"
+assert_contains "  and still discloses the omission"   "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the /unresolved-empty early exit"
+unscopable_list
+run /unresolved
+assert_rc       "exits 0" 0
+assert_contains "says nothing is unresolved"         "no PRs with unresolved"
+assert_contains "  and still discloses the omission" "cannot be scoped to a"
+
+echo "pr-sessions: the count describes the NARROWED pool, not everything fetched"
+# /lastItem fixes the pool before scope. Counting before that narrowing
+# announces a PR the caller never asked about and that nothing omitted:
+# #60 is outside a one-item pool, so there is nothing to disclose.
+unscopable_list
+run /lastItem:1
+assert_rc           "exits 0" 0
+assert_not_contains "does not announce a PR outside the pool" "cannot be scoped to a"
+default_pr_list; default_graphql
+
 echo "pr-sessions: an invalid --session regex is an invocation error"
 # `test()` with a bad pattern kills jq. Swallowing that printed "no
 # matching PRs" and exited 0 — the same reassuring answer a genuinely

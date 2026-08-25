@@ -271,7 +271,20 @@ fi
 # separator is therefore a deny-list of automation vendors, not an
 # allow-list of type words — see `conventional` below for why the
 # asymmetry is deliberate.
-selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
+# Rows whose branch does not parse as <host>/<clone>/<type>/<desc>
+# cannot be attributed to a session, so any scope filter removes them.
+# COUNTED, because removing them silently is how a listing looks
+# complete when it is not — the answer a reader acts on is the one that
+# says "nothing outstanding".
+#
+# Counted in the SAME pass that builds the rows, and from what is left
+# after /lastDate and /lastItem have narrowed the pool. A separate pass
+# over the unnarrowed rows would announce PRs the caller never asked
+# about: `/lastItem:1` would name an unscopable PR that was outside the
+# one-item pool and had therefore not been omitted by anything. Sharing
+# the pipeline is what keeps the two answers about the same set by
+# construction, rather than by two pipelines happening to agree.
+envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
   # Automation vendors, whose branch names also have four or more
@@ -321,10 +334,19 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
   # POOL FIRST: /lastDate then /lastItem, before scope or anything else.
   | ( if $cutoff != "" then map(select(.updatedAt >= $cutoff)) else . end )
   | ( if $lastitem > 0 then .[:$lastitem] else . end )
-  | ( if $filter == "__MINE__" then map(select(._s == $me))
-      elif $filter != "" then map(select(._s | test($filter; "i")))
-      else . end )
-  | sort_by(-.number) | .[:$limit]
+  # The pool is now fixed, so both answers below describe the same set.
+  | . as $pool
+  | { # Nothing is dropped by scope when there is no scope, so /all
+      # reports zero rather than a number no filter ever acted on.
+      unattributed:
+        (if $filter == "" then 0
+         else ([$pool[] | select(._s == "(unconventional)")] | length) end),
+      rows:
+        ($pool
+         | ( if $filter == "__MINE__" then map(select(._s == $me))
+             elif $filter != "" then map(select(._s | test($filter; "i")))
+             else . end )
+         | sort_by(-.number) | .[:$limit]) }
 ')" || {
     # `--session '['` kills jq on the regex, and the unchecked command
     # substitution then left `selected` empty — which the block below
@@ -335,6 +357,23 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
     exit 2
 }
 
+selected="$(printf '%s' "$envelope" | jq '.rows')"
+UNATTRIBUTED="$(printf '%s' "$envelope" | jq '.unattributed')"
+
+# Say it on EVERY exit path, not only the one that prints a table.
+#
+# A disclosure that lives in the footer alone is missing from the two
+# paths that exit early — no rows at all, and /unresolved finding no
+# known open threads. Those print a reassuring "no PRs" and are exactly
+# the answers a reader acts on, so the silence would fall precisely
+# where it costs most.
+unattributed_note() {
+    [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
+    echo "  NOTE: $UNATTRIBUTED PR(s) have a branch that does not parse as" >&2
+    echo "  <host>/<clone>/<type>/<short-desc>, so they cannot be scoped to a" >&2
+    echo "  session and are not listed. Pass /all to see every PR regardless." >&2
+}
+
 if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"
     [[ "$FILTER" == "__MINE__" ]] && what="PRs for this clone ($ME)"
@@ -342,6 +381,7 @@ if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     echo "pr-sessions: no $what in the last $FETCH ${STATE} PR(s)."
     [[ "$DEFAULTED_TO_MINE" -eq 1 ]] && \
         echo "  (scoped to this clone by default — pass /all to see every session)"
+    unattributed_note
     exit 0
 fi
 
@@ -469,6 +509,7 @@ if [[ -z "${out//[$' \t\n']/}" ]]; then
     [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && scope="sessions matching '$FILTER'"
     echo "pr-sessions: no PRs with unresolved review threads for $scope"
     echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)"
+    unattributed_note
     exit 0
 fi
 
@@ -485,6 +526,7 @@ printf '%s\n' "$out"
 if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
     echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)" >&2
 fi
+unattributed_note
 
 echo
 if [[ "$DEFAULTED_TO_MINE" -eq 1 ]]; then

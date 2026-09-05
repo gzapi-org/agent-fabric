@@ -31,7 +31,13 @@ command -v jq >/dev/null 2>&1 || { echo "test: jq required" >&2; exit 1; }
 
 failures=0
 SANDBOX=""
-cleanup() { [[ -n "$SANDBOX" && -d "$SANDBOX" ]] && rm -rf "$SANDBOX"; }
+NOGIT=""
+cleanup() {
+    [[ -n "$SANDBOX" && -d "$SANDBOX" ]] && rm -rf "$SANDBOX"
+    [[ -n "$NOGIT"   && -d "$NOGIT"   ]] && rm -rf "$NOGIT"
+    [[ -n "${GUARD_MARKER:-}" ]] && rm -f "$GUARD_MARKER"
+    return 0
+}
 trap cleanup EXIT
 
 CLONE_NAME="gzapp-testclone"
@@ -325,9 +331,9 @@ thread_fixture "$ME/feat/thing" false
 NOGIT="$(mktemp -d)"
 RUN_OUT="$(cd "$NOGIT" && printf '%s' "would post anywhere" | \
     env PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
-    bash "$UNDER_TEST" "$THREAD_ID" 2>&1)"
+    "${MOCK_ENV[@]}" bash "$UNDER_TEST" "$THREAD_ID" 2>&1)"
 RUN_RC=$?
-rm -rf "$NOGIT"
+rm -rf "$NOGIT"; NOGIT=""
 assert_rc       "exits 2" 2
 assert_contains "says the identity is unknown" "identity is unknown"
 if [[ "$(calls)" != *REPLY* ]]; then
@@ -335,7 +341,6 @@ if [[ "$(calls)" != *REPLY* ]]; then
 else
     fail "posted without knowing whose PR it is" "$(calls)"
 fi
-
 
 echo "pr-reply: a failed thread read stops before posting"
 thread_fixture "$ME/feat/thing" false

@@ -84,7 +84,11 @@ done
 [[ "$THREAD" =~ ^PRRT_[A-Za-z0-9_-]+$ ]] \
     || die "'$THREAD' is not a review-thread id (expected PRRT_…; PRRC_ is a comment, not a thread)"
 
-for bin in gh jq; do
+# git and hostname are as required as gh and jq: the ownership guard below
+# derives this clone's identity from both, and a missing git would surface
+# as "not inside a git worktree" — sending the operator to look for a clone
+# they are already standing in.
+for bin in gh jq git hostname; do
     command -v "$bin" >/dev/null 2>&1 || die "$bin is required but not installed."
 done
 

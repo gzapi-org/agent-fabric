@@ -315,6 +315,28 @@ assert_rc       "two thread ids are refused" 2
 invoke "body" "$THREAD_ID" --nope
 assert_rc       "an unknown option is refused" 2
 
+echo "pr-reply: outside a worktree it refuses rather than trusting itself"
+# The ownership check is the only protection this script offers, and an
+# unresolvable clone identity used to SKIP it: the guard read
+# `[[ -n "$ME" && ... ]]`, so running the script by absolute path from
+# outside any worktree posted AND resolved on whatever thread it was
+# handed. Not knowing whose PR this is has to mean stop, not proceed.
+thread_fixture "$ME/feat/thing" false
+NOGIT="$(mktemp -d)"
+RUN_OUT="$(cd "$NOGIT" && printf '%s' "would post anywhere" | \
+    env PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
+    bash "$UNDER_TEST" "$THREAD_ID" 2>&1)"
+RUN_RC=$?
+rm -rf "$NOGIT"
+assert_rc       "exits 2" 2
+assert_contains "says the identity is unknown" "identity is unknown"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "nothing was posted"
+else
+    fail "posted without knowing whose PR it is" "$(calls)"
+fi
+
+
 echo "pr-reply: a failed thread read stops before posting"
 thread_fixture "$ME/feat/thing" false
 MOCK_ENV=(env GH_MOCK_READ_FAIL=1)

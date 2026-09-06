@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
 # tools/moveto/test_moveto.sh
 #
-# Behavioural tests for moveto's target resolution — the half that can be
-# tested without spawning an interactive shell. `--print` exists for exactly
-# this: it runs the whole resolution path and stops before the exec.
+# Behavioural tests for moveto's target resolution — the half testable without
+# spawning an interactive shell. `--print` exists for exactly this: it runs the
+# whole resolution path and stops before the exec.
 #
-# What is asserted, and why each earned a test:
-#
-#   1. the template layout (~/projects/<account>) resolves, and the title is
-#      the ROLE INSTANCE — the account name, not the clone, not the role
-#   2. an account holding several clones refuses to guess, lists them, exits 1
-#   3. ...and with a clone named explicitly, resolves it and titles by CLONE,
-#      because the account name cannot tell two of its sessions apart
-#   4. an account with an empty projects dir says "not provisioned", rather
-#      than silently dropping the caller into $HOME
-#   5. an unknown account and an unknown clone both fail loudly
-#
-# `getent` and `sudo` are mocked on PATH: the fixture accounts do not exist,
-# and the test must not require root. The sudo mock strips its own flags and
-# runs the rest as the current user, so the code path under test is the real
-# one — the same branch a genuine cross-account call takes.
+# WHAT THE MOCKS DO AND DO NOT PROVE. `getent` and `sudo` are replaced on PATH,
+# because the fixture accounts do not exist and the suite must not need root.
+# The sudo mock RECORDS the argv it was handed and then runs the command as the
+# caller — so an assertion can check WHICH ACCOUNT was asked for, which is the
+# tool's only privilege boundary, but nothing here proves the kernel honoured
+# it. An earlier version of this mock silently discarded `-u`, and deleting
+# both sudo gates from the tool left the suite green.
 #
 # Exit codes:
 #   0  all assertions passed
@@ -39,74 +31,80 @@ trap cleanup EXIT
 
 SANDBOX="$(mktemp -d)"
 BIN="$SANDBOX/bin"; mkdir -p "$BIN"
+SUDO_LOG="$SANDBOX/sudo.log"
 
-# Fixture accounts. `solo` follows the template; `many` holds three clones;
-# `empty` is provisioned but has no clone yet.
+# Fixtures, each earning its place:
+#   solo    the template layout, clone named after the account
+#   odd     ONE clone named differently — the only fixture that can tell
+#           "title = account" from "title = clone basename", because under the
+#           template those two strings are identical
+#   many    several clones: must refuse to guess
+#   empty   projects/ exists but holds nothing
+#   nodir   no projects/ at all — a different state, needing a different answer
+#   spaced  one clone whose name contains a space
+#   esc     one clone whose name contains ESC and BEL
 mkdir -p "$SANDBOX/home/solo/projects/solo"
+mkdir -p "$SANDBOX/home/odd/projects/weird-name"
 mkdir -p "$SANDBOX/home/many/projects/"{alpha,beta,gamma}
 mkdir -p "$SANDBOX/home/empty/projects"
-# `odd` is the fixture that distinguishes "title = account" from "title =
-# clone": one clone, named differently from the account. Without it a mutant
-# that always titles by clone basename passes every other assertion, because
-# the template layout makes the two identical.
-mkdir -p "$SANDBOX/home/odd/projects/weird-name"
+mkdir -p "$SANDBOX/home/nodir"
+mkdir -p "$SANDBOX/home/spaced/projects/spaced backup"
+mkdir -p "$SANDBOX/home/esc/projects/$(printf 'good\033]0;INJECTED\007tail')"
+
+ACCOUNTS="solo odd many empty nodir spaced esc"
 
 cat > "$BIN/getent" <<EOF
 #!/usr/bin/env bash
-# Only the two forms moveto uses: a lookup, and a full dump for --list.
 if [[ "\$1" == "passwd" && \$# -eq 2 ]]; then
-    case "\$2" in
-        solo|many|empty|odd) echo "\$2:x:2000:2000::$SANDBOX/home/\$2:/bin/bash"; exit 0 ;;
-        *) exit 2 ;;
-    esac
+    for u in $ACCOUNTS; do
+        [[ "\$2" == "\$u" ]] && { echo "\$u:x:2000:2000::$SANDBOX/home/\$u:/bin/bash"; exit 0; }
+    done
+    exit 2
 fi
 if [[ "\$1" == "passwd" && \$# -eq 1 ]]; then
-    for u in solo many empty odd; do
-        echo "\$u:x:2000:2000::$SANDBOX/home/\$u:/bin/bash"
-    done
+    for u in $ACCOUNTS; do echo "\$u:x:2000:2000::$SANDBOX/home/\$u:/bin/bash"; done
     exit 0
 fi
 exit 2
 EOF
 
-cat > "$BIN/sudo" <<'EOF'
+# Records the requested account, then runs the command as the caller. SUDO_DENY
+# makes it refuse, which is the only way to reach the "cannot become" branch.
+cat > "$BIN/sudo" <<EOF
 #!/usr/bin/env bash
-# Strip sudo's own flags, then run the rest as the current user. The point is
-# to exercise moveto's cross-account branch without needing root.
-while [[ $# -gt 0 ]]; do
-    case "$1" in
+want=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
         -n|-H) shift ;;
-        -u) shift 2 ;;
+        -u) want="\$2"; shift 2 ;;
         *) break ;;
     esac
 done
-exec "$@"
+echo "as=\$want argv=\$*" >> "$SUDO_LOG"
+[[ -n "\${SUDO_DENY:-}" ]] && exit 1
+exec "\$@"
 EOF
 chmod 755 "$BIN/getent" "$BIN/sudo"
 export PATH="$BIN:$PATH"
 
-check() { # check <label> <expected-substring> <actual>
-    if [[ "$3" == *"$2"* ]]; then
-        printf '  ok   %s\n' "$1"
-    else
-        printf '  FAIL %s\n       want substring: %s\n       got: %s\n' "$1" "$2" "$3"
-        failures=$((failures + 1))
-    fi
+check() { # <label> <expected-substring> <actual>
+    if [[ "$3" == *"$2"* ]]; then printf '  ok   %s\n' "$1"
+    else printf '  FAIL %s\n       want substring: %s\n       got: %s\n' "$1" "$2" "$3"; failures=$((failures+1)); fi
 }
-check_status() { # check_status <label> <expected> <actual>
-    if [[ "$3" == "$2" ]]; then
-        printf '  ok   %s\n' "$1"
-    else
-        printf '  FAIL %s: expected exit %s, got %s\n' "$1" "$2" "$3"
-        failures=$((failures + 1))
-    fi
+check_absent() { # <label> <forbidden-substring> <actual>
+    if [[ "$3" != *"$2"* ]]; then printf '  ok   %s\n' "$1"
+    else printf '  FAIL %s\n       must NOT contain: %s\n       got: %s\n' "$1" "$2" "$3"; failures=$((failures+1)); fi
+}
+check_status() { # <label> <expected> <actual>
+    if [[ "$3" == "$2" ]]; then printf '  ok   %s\n' "$1"
+    else printf '  FAIL %s: expected exit %s, got %s\n' "$1" "$2" "$3"; failures=$((failures+1)); fi
 }
 
 echo "1. template layout resolves, title is the role instance"
 out=$("$UNDER_TEST" solo --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "resolves ~/projects/<account>" "/home/solo/projects/solo" "$out"
-check "title is the account, not the clone path" "title: solo" "$out"
+check "title is the account" "title: solo" "$out"
 
 echo "1b. single clone named differently: still titled by ACCOUNT"
 out=$("$UNDER_TEST" odd --print 2>&1); st=$?
@@ -124,12 +122,16 @@ echo "3. several clones, one named: resolves and titles by clone"
 out=$("$UNDER_TEST" many beta --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "resolves the named clone" "/home/many/projects/beta" "$out"
-check "title is the clone, since the account cannot distinguish" "title: beta" "$out"
+check "title is the clone" "title: beta" "$out"
 
-echo "4. provisioned but no clone yet"
+echo "4. empty projects/ and missing projects/ are DIFFERENT answers"
 out=$("$UNDER_TEST" empty --print 2>&1); st=$?
-check_status "exits 1" 1 "$st"
-check "says not provisioned rather than falling back to \$HOME" "has no clone yet" "$out"
+check_status "empty exits 1" 1 "$st"
+check "empty says no clone yet" "has no clone yet" "$out"
+out=$("$UNDER_TEST" nodir --print 2>&1); st=$?
+check_status "missing exits 1" 1 "$st"
+check "missing says not provisioned" "not provisioned yet" "$out"
+check_absent "missing does NOT claim the directory is empty" "is empty" "$out"
 
 echo "5. unknown account and unknown clone fail loudly"
 out=$("$UNDER_TEST" nosuchuser --print 2>&1); st=$?
@@ -139,17 +141,52 @@ out=$("$UNDER_TEST" solo nosuchclone --print 2>&1); st=$?
 check_status "unknown clone exits 1" 1 "$st"
 check "names the path" "no such directory" "$out"
 
-echo "6. --list shows accounts that have clones"
+echo "6. --list shows accounts WITH clones and omits those without"
 out=$("$UNDER_TEST" --list 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "lists the template account" "solo" "$out"
 check "lists a multi-clone account's clones" "gamma" "$out"
-check "omits an account with no clones" "" "${out/empty/}"
+check_absent "omits an account whose projects/ is empty" "empty" "$out"
+check_absent "omits an account with no projects/ at all" "nodir" "$out"
+
+echo "7. a clone name containing a space is usable, not a wrong path"
+out=$("$UNDER_TEST" spaced --print 2>&1); st=$?
+check_status "exits 0" 0 "$st"
+check "resolves the spaced clone" "/home/spaced/projects/spaced backup" "$out"
+check_absent "does not invent a path named after the account" "projects/spaced
+" "$out"
+
+echo "8. control characters in a clone name never reach the terminal"
+out=$("$UNDER_TEST" --list 2>&1)
+check "the printable part still shows" "good" "$out"
+check_absent "no ESC" "$(printf '\033')" "$out"
+check_absent "no BEL" "$(printf '\007')" "$out"
+out=$("$UNDER_TEST" esc --print 2>&1)
+check_absent "title carries no ESC either" "$(printf '\033')" "$out"
+
+echo "9. the named clone must be a single segment"
+out=$("$UNDER_TEST" solo ../../etc --print 2>&1); st=$?
+check_status "traversal exits 1" 1 "$st"
+check "says why" "single name under" "$out"
+check_absent "no path was resolved" "title:" "$out"
+
+echo "10. the target account is what sudo is asked for"
+: > "$SUDO_LOG"
+"$UNDER_TEST" solo --print >/dev/null 2>&1
+log=$(cat "$SUDO_LOG" 2>/dev/null)
+# Naming the COMMANDS matters: asserting only that "as=solo" appears somewhere
+# is satisfied by the can-I-become gate alone, so dropping -u from the
+# enumeration and the existence check would go unnoticed.
+check "the clone listing ran as the target" "as=solo argv=find" "$log"
+check "the directory check ran as the target" "as=solo argv=test -d" "$log"
+check_absent "never a bare sudo with no -u" "as= " "$log"
+
+echo "11. an account we cannot become is refused, not guessed at"
+out=$(SUDO_DENY=1 "$UNDER_TEST" solo --print 2>&1); st=$?
+check_status "exits 1" 1 "$st"
+check "says it cannot become the account" "cannot become 'solo'" "$out"
 
 echo
-if [[ $failures -eq 0 ]]; then
-    echo "test_moveto: all assertions passed"
-    exit 0
-fi
+if [[ $failures -eq 0 ]]; then echo "test_moveto: all assertions passed"; exit 0; fi
 echo "test_moveto: $failures assertion(s) failed"
 exit 1

@@ -165,12 +165,12 @@ fi
 # Verify as the target user: root can stat what the target may not, and the
 # reverse is the failure that would strand you in a shell with no cwd.
 run_as "$account" test -d "$dir" 2>/dev/null \
-    || die "no such directory for $account: $dir"
+    || die "no such directory for $account: $(display_safe "$dir")"
 
 title=$(title_for "$dir" "$account")
 
 if [[ $print_only -eq 1 ]]; then
-    printf '%s\n' "$dir"
+    printf '%s\n' "$(display_safe "$dir")"
     printf 'title: %s\n' "$title"
     exit 0
 fi

@@ -41,6 +41,20 @@ and the role accounts are not in it — so an account that has sudo can become a
 role account, and a role account can become nothing. `exit` is the way back,
 which is why nothing here tries to be a two-way switch.
 
+## What it gives you, and what it does not
+
+`sudo -u … -H` opens a PAM session, so a `moveto` shell gets its own
+`/run/user/<uid>` — verified by watching the directory appear for an account
+that had none, which is what rootless podman needs. What it does **not** give
+you is persistence: that directory is removed when the account's last session
+ends, so anything expected to outlive the shell needs
+`sudo loginctl enable-linger <account>`, which
+[`.roles/PROVISIONING.md`](../../.roles/PROVISIONING.md) does when standing an
+account up.
+
+That document is the other half of this one: it covers creating a role account
+and moving a session into it; this covers getting into one afterwards.
+
 ## The title
 
 The title is the **role instance** — the account name — because that is what

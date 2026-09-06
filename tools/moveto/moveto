@@ -1,0 +1,140 @@
+#!/bin/bash
+# moveto — open a shell as another role account, in its working clone.
+#
+# Sudo on this host is granted through the `qubes` group, which the role
+# accounts are NOT in. So this works FROM an account with sudo (`user`)
+# TO a role account, and not the other way: `exit` is the way back.
+#
+# A process cannot change its parent's user or directory, so this spawns a
+# new shell rather than moving the one you typed in.
+
+set -euo pipefail
+
+PROJECTS_SUBDIR="projects"
+MOVETO_ENTER="/usr/local/share/moveto/enter"
+print_only=0
+
+die() { printf 'moveto: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+    cat <<'USAGE'
+usage: moveto <account> [clone]     open a shell as <account>, in its clone
+
+The layout is `~/projects/<account>` — architect-cto-01 is the template. Name
+a clone explicitly when an account holds more than one.
+       moveto <account> --print     print the resolved path, spawn nothing
+       moveto --list                accounts that have a projects directory
+       moveto <account> --list      that account's clones
+
+Sudo here comes from the `qubes` group and role accounts are not in it, so
+this runs from an account that has sudo (`user`). From a role account, `exit`
+returns to the shell you came from.
+USAGE
+}
+
+home_of() { getent passwd "$1" | cut -d: -f6; }
+
+# Role homes are 0700, so listing someone else's needs root. -n keeps it
+# non-interactive: a password prompt here means this account cannot do it.
+clones_of() {
+    local home; home=$(home_of "$1")
+    [[ -n "$home" ]] || return 1
+    if [[ "$1" == "$(id -un)" ]]; then
+        ls -1 "$home/$PROJECTS_SUBDIR" 2>/dev/null || true
+    else
+        sudo -n ls -1 "$home/$PROJECTS_SUBDIR" 2>/dev/null || true
+    fi
+}
+
+# The window title is the ROLE INSTANCE — the account — because that is what
+# names a session here. An account holding several clones is the exception:
+# its own name cannot tell two of them apart, so the clone name is used.
+title_for() {
+    local dir="$1" acct="$2" n
+    n=$(clones_of "$acct" | grep -c .)
+    if [[ "$n" -gt 1 ]]; then
+        basename "$dir"
+    else
+        printf '%s' "$acct"
+    fi
+}
+
+[[ $# -ge 1 ]] || { usage; exit 0; }
+
+case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --list)
+        for u in $(getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1}' | sort); do
+            c=$(clones_of "$u" | tr '\n' ' ')
+            [[ -n "${c// /}" ]] && printf '%-24s %s\n' "$u" "$c"
+        done
+        exit 0 ;;
+esac
+
+account="$1"; shift
+target=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --print) print_only=1; shift ;;
+        --list)  clones_of "$account"; exit 0 ;;
+        -*)      die "unknown option '$1' (try --help)" ;;
+        *)       [[ -z "$target" ]] || die "one clone at a time"; target="$1"; shift ;;
+    esac
+done
+
+getent passwd "$account" >/dev/null || die "no such account: $account"
+
+if [[ "$account" != "$(id -un)" ]]; then
+    sudo -n -u "$account" true 2>/dev/null \
+        || die "cannot become '$account' without a password. Role accounts are not in the \`qubes\` group and have no sudo; run this from an account that does."
+fi
+
+home=$(home_of "$account")
+projects="$home/$PROJECTS_SUBDIR"
+mapfile -t clones < <(clones_of "$account")
+
+if [[ -n "$target" ]]; then
+    dir="$projects/$target"
+elif [[ " ${clones[*]} " == *" $account "* ]]; then
+    # The convention where it exists: the clone is named after the account.
+    dir="$projects/$account"
+elif [[ ${#clones[@]} -eq 1 && -n "${clones[0]}" ]]; then
+    dir="$projects/${clones[0]}"
+elif [[ ${#clones[@]} -eq 0 || -z "${clones[0]}" ]]; then
+    die "$account has no clone yet: $projects is empty. The layout is \`~/projects/<account>\`, as on architect-cto-01."
+else
+    printf 'moveto: %s has %d clones; name one:\n' "$account" "${#clones[@]}" >&2
+    printf '  %s\n' "${clones[@]}" >&2
+    exit 1
+fi
+
+# Verify as the target user: root can stat what the target may not, and the
+# reverse is the failure that would strand you in a shell with no cwd.
+if [[ "$account" == "$(id -un)" ]]; then
+    [[ -d "$dir" ]] || die "no such directory: $dir"
+else
+    sudo -n -u "$account" test -d "$dir" 2>/dev/null || die "no such directory for $account: $dir"
+fi
+
+title=$(title_for "$dir" "$account")
+
+if [[ $print_only -eq 1 ]]; then
+    printf '%s\n' "$dir"
+    printf 'title: %s\n' "$title"
+    exit 0
+fi
+
+printf 'moveto: %s in %s  (exit returns here)\n' "$account" "$dir" >&2
+
+# The title travels as an argument, not an export: sudo resets the
+# environment, so an exported value would not cross the boundary.
+#
+# The entering shell is a separate script rather than an inline `bash -lc`,
+# so the process command line stays short. A terminal that titles from the
+# running command showed the whole inline script otherwise.
+if [[ "$account" == "$(id -un)" ]]; then
+    exec "$MOVETO_ENTER" "$dir" "$title"
+fi
+
+exec sudo -n -u "$account" -H "$MOVETO_ENTER" "$dir" "$title"

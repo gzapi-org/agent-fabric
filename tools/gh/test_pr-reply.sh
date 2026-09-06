@@ -284,7 +284,7 @@ invoke "Verified fixed." "$THREAD_ID"
 assert_rc       "exits 0" 0
 assert_contains "says the branch names no session" "names no session"
 assert_contains "warns about the owning surface"   "another SURFACE's"
-assert_contains "  and bounds what may be resolved" "resolve only what you actually verified"
+assert_contains "  and bounds what may be resolved" "left OPEN"
 assert_not_contains "does not invent a rival session" "mid-flight"
 
 echo "pr-reply: a bot branch is unowned, not a session called after the bot"
@@ -326,19 +326,70 @@ for t in spike-3 hotfix stage-4; do
     fi
 done
 
-echo "pr-reply: the <type> SHAPE is what makes a prefix a session"
-# The two cases above cannot see this check: every branch they use has a
-# well-formed <type>, so deleting the shape test leaves them passing. A
-# segment that cannot be a type is what separates "four segments" from
-# "a session", and both scripts must draw that line in the same place —
-# otherwise one lists a PR as unowned while the other calls it someone's.
-for bad in "Feature" "2fix" "-lead"; do
-    thread_fixture "$OTHER/$bad/x" false
-    invoke "answering an unowned branch" "$THREAD_ID"
-    if [[ "$RUN_RC" -eq 0 && "$(calls)" == *REPLY* ]]; then
-        pass "'$bad' is not a type, so the branch names no session"
+echo "pr-reply: an unowned branch is answered but NOT resolved by default"
+# The warning used to say "resolve only what you actually verified" and
+# then resolve in the same run — the operator read the precondition after
+# it had already been violated. Resolving is a claim, and this is the
+# path with the least standing to make it.
+thread_fixture "agent/global-event-identity" false
+invoke "Looks addressed, but I have not verified it." "$THREAD_ID"
+assert_rc       "still replies" 0
+if [[ "$(calls)" == *REPLY* ]]; then pass "the reply was posted"
+else fail "no reply posted" "$(calls)"; fi
+if [[ "$(calls)" != *RESOLVE* ]]; then pass "the thread was left OPEN"
+else fail "resolved an unowned thread by default" "$(calls)"; fi
+assert_contains "says it is leaving it open" "left OPEN"
+assert_contains "names the opt-in flag"      "--resolve"
+
+echo "pr-reply: --resolve is the opt-in on an unowned branch"
+thread_fixture "agent/global-event-identity" false
+invoke "Verified fixed in abc1234." "$THREAD_ID" --resolve
+assert_rc "exits 0" 0
+if [[ "$(calls)" == *RESOLVE* ]]; then pass "resolves when explicitly asked"
+else fail "--resolve was ignored" "$(calls)"; fi
+
+echo "pr-reply: an OWNED branch still resolves by default"
+# The inversion above must be scoped to the unowned path only.
+thread_fixture "$ME/feat/mine" false
+invoke "Fixed." "$THREAD_ID"
+assert_rc "exits 0" 0
+if [[ "$(calls)" == *RESOLVE* ]]; then pass "own PR still resolves by default"
+else fail "the unowned default leaked into an owned PR" "$(calls)"; fi
+
+echo "pr-reply: an UNUSUAL <type> is still another session's branch"
+# This case previously asserted the opposite, and the opposite was a
+# hole. CLAUDE.md imposes no vocabulary on <type>, so a lowercase shape
+# test is a permission decision resting on an open-ended set: every
+# branch below belongs to a real parallel session, and a shape test
+# calls each of them unowned — i.e. POST AND RESOLVE on somebody else's
+# PR, which cannot be undone. The guard must refuse on the SPECIFIED
+# shape (four segments, non-empty host/clone, non-vendor) and nothing
+# more.
+for t in "Fix" "chore(gh)" "WIP" "2fix" "-lead" "FEAT" "spike-3" "hotfix"; do
+    thread_fixture "$OTHER/$t/x" false
+    invoke "I must not be able to post this." "$THREAD_ID"
+    if [[ "$RUN_RC" -eq 2 && "$(calls)" != *REPLY* ]]; then
+        pass "refuses another session's '$t/' branch"
     else
-        fail "'$bad' was read as a session prefix" "rc=$RUN_RC $(calls)"
+        fail "WROTE to another session's '$t/' branch" "rc=$RUN_RC $(calls)"
+    fi
+done
+
+echo "pr-reply: removing the type test did not make the orphans unreachable"
+# The shape test bought nothing it was credited with: every branch this
+# relaxation exists to answer is unowned by segment count or by the
+# vendor deny-list, never by <type>. If that stops being true the four
+# cases below start failing rather than silently narrowing.
+for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
+              "add-claude-github-actions-1785994932117" \
+              "agent/global-event-identity" \
+              "agent/common-api-idempotency"; do
+    thread_fixture "$branch" false
+    invoke "Obsolete." "$THREAD_ID"
+    if [[ "$RUN_RC" -eq 0 && "$(calls)" == *REPLY* ]]; then
+        pass "still answers '$branch'"
+    else
+        fail "orphan became unanswerable: '$branch'" "rc=$RUN_RC $(calls)"
     fi
 done
 

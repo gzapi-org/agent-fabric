@@ -50,6 +50,8 @@
 #
 # Options:
 #   --no-resolve   post the reply, leave the thread open
+#   --resolve      resolve even on a branch that names no session, where
+#                  the default is to leave it open (see below)
 #   --dry-run      show what would be posted, touch nothing
 #   -h, --help     this text
 #
@@ -69,13 +71,18 @@ set -uo pipefail
 
 THREAD=""
 RESOLVE=1
+# Tracks whether the caller SAID so, as against the default. Only the
+# unowned-branch path below needs the distinction: it flips the default
+# to "leave open", and must not silently override an explicit --resolve.
+RESOLVE_EXPLICIT=0
 DRY_RUN=0
 
 die() { echo "pr-reply: $*" >&2; exit 2; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --no-resolve) RESOLVE=0; shift ;;
+        --no-resolve) RESOLVE=0; RESOLVE_EXPLICIT=1; shift ;;
+        --resolve)    RESOLVE=1; RESOLVE_EXPLICIT=1; shift ;;
         --dry-run)    DRY_RUN=1; shift ;;
         -h|--help)
             sed -n '/^# >>> help$/,/^# <<< help$/p' "$0" \
@@ -165,6 +172,7 @@ OWNER="$(printf '%s' "$PR_BRANCH" | cut -d/ -f1,2)"
 # both pin it.
 branch_names_a_session() {
     local b="$1" IFS=/
+    local -a p
     read -r -a p <<< "$b"
     [[ "${#p[@]}" -ge 4 ]]                || return 1
     # Parity with pr-sessions.sh, and NOT separately testable: git's own
@@ -177,7 +185,16 @@ branch_names_a_session() {
         dependabot|renovate|github-actions|weblate|imgbot|\
         allcontributors|pre-commit-ci|snyk-bot) return 1 ;;
     esac
-    [[ "${p[2]}" =~ ^[a-z][a-z0-9._-]*$ ]] || return 1
+    # NO TEST ON <type>, deliberately. CLAUDE.md imposes no vocabulary on
+    # it, so a shape test here is a permission decision resting on an
+    # open-ended set. In a LISTING a wrong "not a session" is fail-safe —
+    # the row is hidden and the NOTE counts it. HERE it inverts: a wrong
+    # "not a session" means POST AND RESOLVE on somebody else's PR, and a
+    # reply cannot be unsent. `Fix/`, `chore(gh)/`, `WIP/`, `2fix/` are
+    # all real parallel-session branches that a lowercase shape test
+    # calls unowned. It also bought nothing: every branch this change
+    # exists to answer is already unowned by segment count or by the
+    # vendor deny-list above.
     return 0
 }
 
@@ -187,8 +204,18 @@ if ! branch_names_a_session "$PR_BRANCH"; then
     # a statement the branch cannot support.
     echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH', which names no session." >&2
     echo "  No session owns it, so there is nobody to defer to — replying." >&2
-    echo "  The finding may still be another SURFACE's (backend, flutter, web):" >&2
-    echo "  resolve only what you actually verified." >&2
+    # THE ADVICE HAS TO BE ENFORCED, NOT PRINTED. This block used to say
+    # "resolve only what you actually verified" and then resolve in the
+    # same run, so the operator read the precondition after it had been
+    # violated. Resolving is a CLAIM (see the header), and this is the
+    # path with the least standing to make it: the script has just said
+    # the finding may belong to a surface whose role has verified
+    # nothing. So the default inverts here and --resolve is the opt-in.
+    if [[ "$RESOLVE" -eq 1 && "$RESOLVE_EXPLICIT" -eq 0 ]]; then
+        RESOLVE=0
+        echo "  The finding may still be another SURFACE's (backend, flutter, web)," >&2
+        echo "  so the thread is left OPEN. Pass --resolve once it is verified." >&2
+    fi
 elif [[ "$OWNER" != "$ME" ]]; then
     echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this clone is '$ME'." >&2
     echo "  Not replying. That session is mid-flight on a fix you cannot see," >&2

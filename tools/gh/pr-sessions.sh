@@ -100,6 +100,7 @@ LAST_ITEM=""; LAST_ITEM_SET=0     # /lastItem:N  — pool = N most recent PRs
 LAST_DATE=""; LAST_DATE_SET=0     # /lastDate:Nd — pool = updated within window
 CUTOFF=""                         # LAST_DATE resolved to an ISO instant
 SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
+SCOPE_SET=""        # which flag chose it, so a conflict can be named
 
 # gh takes ONE --state. Two conflicting flags would otherwise resolve
 # to whichever came last, quietly showing a different set than asked.
@@ -109,6 +110,19 @@ set_state() {
         exit 2
     fi
     STATE="$1"; STATE_SET="$2"
+}
+
+# Two scope flags resolved LAST-WINS in silence, so `/unattributed /all`
+# quietly printed every PR and `/all /unattributed` quietly printed only
+# the unowned ones — the same "a mistyped filter must not render as no
+# filter" hazard the header argues about, reached with two valid flags.
+# Conflicting STATE flags are already refused; scope now matches.
+set_scope() {
+    if [[ "$SCOPE_EXPLICIT" -eq 1 && "$FILTER" != "$1" ]]; then
+        echo "pr-sessions: $SCOPE_SET and $2 are different scopes — pick one." >&2
+        exit 2
+    fi
+    FILTER="$1"; SCOPE_SET="$2"; SCOPE_EXPLICIT=1
 }
 
 # A flag that takes a value must HAVE one. Without this, `-n` as the
@@ -127,11 +141,11 @@ while [[ $# -gt 0 ]]; do
         /OPEN|/open|--open)       set_state open   "$1"; shift ;;
         /MERGED|/merged|--merged) set_state merged "$1"; shift ;;
         /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
-        /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
-        --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
+        /all|--all)   set_scope ""                "$1"; shift ;;
+        --mine)       set_scope "__MINE__"        "$1"; shift ;;
         /unattributed|--unattributed)
-                      FILTER="__UNATTRIBUTED__"; SCOPE_EXPLICIT=1; shift ;;
-        --session)    need_operand "$@"; FILTER="$2"; SCOPE_EXPLICIT=1; shift 2 ;;
+                      set_scope "__UNATTRIBUTED__" "$1"; shift ;;
+        --session)    need_operand "$@"; set_scope "$2" "$1 $2"; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
@@ -162,6 +176,20 @@ if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 # Validated whenever the flag was PASSED, not merely when non-empty.
+# `--session unconventional` ALREADY selected exactly these rows, because
+# the session string is the literal "(unconventional)" and --session is a
+# regex match. It simply did so while printing the omission NOTE above the
+# rows it had just listed, and the "others belong to parallel sessions"
+# footer. Normalising it to the sentinel makes one scope with one set of
+# messages, rather than two routes that disagree about what they showed.
+# Only an exact word is normalised: a broad pattern like `.` matches
+# "(unconventional)" too, and silently redirecting that would be the
+# last-wins hazard set_scope just closed.
+case "$FILTER" in
+    unconventional|UNCONVENTIONAL|"(unconventional)"|Unconventional)
+        FILTER="__UNATTRIBUTED__" ;;
+esac
+
 if [[ "$LAST_ITEM_SET" -eq 1 ]]; then
     [[ "$LAST_ITEM" =~ ^[1-9][0-9]*$ ]] || {
         echo "pr-sessions: /lastItem needs a positive integer, got '$LAST_ITEM'." >&2; exit 2; }
@@ -333,8 +361,13 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
     | ($p | length) >= 4
       and ($p[0] | length) > 0
       and ($p[1] | length) > 0
-      and (bots | index($p[0]) == null)
-      and ($p[2] | test("^[a-z][a-z0-9._-]*$"));
+      and (bots | index($p[0]) == null);
+  # Deliberately NO test on $p[2]. It required thirteen conventional-commit
+  # words once, then a lowercase shape; both guess at an open-ended set
+  # CLAUDE.md never constrains. pr-reply.sh shares this predicate to decide
+  # whether it may WRITE to a PR, and there a wrong "not a session" means
+  # posting to a PR owned by another session — so the two agree on the
+  # SPECIFIED shape and nothing more.
   def session:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;

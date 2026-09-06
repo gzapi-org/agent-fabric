@@ -647,26 +647,51 @@ run
 assert_rc       "exits 0" 0
 assert_contains "names the listing flag" "/unattributed"
 
+echo "pr-sessions: two different scope flags are refused, not last-wins"
+# `/unattributed /all` printed every PR and `/all /unattributed` printed
+# only the unowned ones — silently, in both directions.
+run /unattributed /all
+assert_rc       "exits 2" 2
+assert_contains "names the conflict" "different scopes"
+run /all /unattributed
+assert_rc       "exits 2 the other way round too" 2
+run /unattributed /unattributed
+assert_rc       "the same scope twice is fine" 0
+
+echo "pr-sessions: --session unconventional is the same scope, not a second one"
+# It already selected these rows (the session string is a literal), but
+# printed the omission NOTE above the rows it had just listed.
+unscopable_list
+run --session unconventional
+assert_rc           "exits 0" 0
+assert_contains     "lists the unscopable PR" "#60"
+assert_not_contains "no self-contradicting disclosure" "cannot be scoped to a"
+assert_not_contains "drops the ownership legend"       "* = this clone"
+default_pr_list; default_graphql
+
 echo "pr-sessions: /unattributed narrows BEFORE the thread lookup"
 # Scope is applied before the candidate slice, which is the whole reason
 # this pairing works: an unowned row is by definition an older one, so
 # under /all it loses the slice to recent PRs and its threads are never
 # queried at all. Here it is the only row, so it must carry a real count.
+# THE POOL MUST EXCEED THE CANDIDATE SLICE (100) or the claim is not
+# falsifiable: with two rows, applying the scope AFTER the slice would
+# leave this case green. So 150 owned rows are numbered ABOVE the one
+# unowned row, putting it at position 151 — outside the slice unless the
+# scope really is applied first.
 write_pr_list "$(jq -n --arg me "$ME" \
-  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '[
-  {number: 70, state: "MERGED", headRefName: "agent/global-event-identity",
-   title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1},
-  {number: 71, state: "OPEN", headRefName: ($me + "/feat/real"),
-   title: "real", updatedAt: $t2, isDraft: false, mergedAt: null}
-]')"
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '
+  [{number: 70, state: "MERGED", headRefName: "agent/global-event-identity",
+    title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1}]
+  + [range(150) | {number: (200 + .), state: "OPEN",
+     headRefName: ($me + "/feat/w\(.)"), title: "w",
+     updatedAt: $t2, isDraft: false, mergedAt: null}]')"
 write_graphql "$(jq -n '{data: {repository: {
   p70: {number: 70, author: {login: "andreabenetton"},
         reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
           {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}},
           {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
-        ]}},
-  p71: {number: 71, author: {login: "andreabenetton"},
-        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: []}}
+        ]}}
 }}}')"
 run /unattributed /unresolved
 assert_rc       "exits 0" 0

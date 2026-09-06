@@ -23,7 +23,7 @@ usage: moveto <account> [clone]     open a shell as <account>, in its clone
 The layout is `~/projects/<account>` — architect-cto-01 is the template. Name
 a clone explicitly when an account holds more than one.
        moveto <account> --print     print the resolved path, spawn nothing
-       moveto --list                accounts that have a projects directory
+       moveto --list                accounts that have at least one clone
        moveto <account> --list      that account's clones
 
 Sudo here comes from the `qubes` group and role accounts are not in it, so
@@ -126,7 +126,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-getent passwd "$account" >/dev/null || die "no such account: $account"
+getent passwd "$account" >/dev/null 2>&1 || die "no such account: $account"
 
 if [[ "$account" != "$(id -un)" ]]; then
     sudo -n -u "$account" true 2>/dev/null \

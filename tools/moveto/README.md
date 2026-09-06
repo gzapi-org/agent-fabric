@@ -6,7 +6,7 @@ window title set to the session.
 ```
 moveto architect-cto-01        # shell as that account, in its clone
 moveto user gzapp-claude2      # name the clone when an account holds several
-moveto --list                  # accounts that have a projects directory
+moveto --list                  # accounts that have at least one clone
 moveto <account> --list        # that account's clones
 moveto <account> --print       # resolve only — print path and title, spawn nothing
 ```
@@ -43,9 +43,11 @@ which is why nothing here tries to be a two-way switch.
 
 ## What it gives you, and what it does not
 
-`sudo -u … -H` opens a PAM session, so a `moveto` shell gets its own
-`/run/user/<uid>` — verified by watching the directory appear for an account
-that had none, which is what rootless podman needs. What it does **not** give
+`sudo` runs its PAM session stack — `/etc/pam.d/sudo` includes `system-auth`,
+which carries `pam_systemd` — so a `moveto` shell gets its own
+`/run/user/<uid>`, which is what rootless podman needs. Verified by watching
+the directory appear for an account that had none. (`-H` only sets `HOME`; it
+is not what creates the session.) What it does **not** give
 you is persistence: that directory is removed when the account's last session
 ends, so anything expected to outlive the shell needs
 `sudo loginctl enable-linger <account>`, which
@@ -71,24 +73,34 @@ Each of these was a live defect during development, and each is invisible when
 you get it wrong — which is why they are written down rather than left to the
 code.
 
-**`sudo -i` joins its arguments into a single string** for the login shell, so
-a path passed as `"$1"` arrives empty and the `cd` fails with `null directory`.
-`enter` is invoked as a plain command under `sudo -H` instead, and keeps login
-processing (`PATH` from `/etc/profile` and `~/.bash_profile`) through `-l` in
-its own shebang.
+**`bash -c '…"$1"…' _ "$dir"` under `sudo -i` loses the path.** Two things
+combine: `-c` consumes its first following argument as `$0`, and `sudo -i`
+concatenates the command and its arguments into one string for the login shell
+(`man sudo`), escaping everything except alphanumerics, underscores, hyphens
+and — note — `$`. The original form hit both, and `cd` failed with `null
+directory`. `enter` is a plain command with real arguments now, which is the
+shape that works; the `$`-not-escaped part is the footgun worth remembering if
+anything ever goes back through `-i`. Login processing (`PATH` from
+`/etc/profile` and `~/.bash_profile`) comes from `-l` in `enter`'s own shebang.
 
 **The entering shell is a file, not an inline `bash -lc '...'`.** The inline
 form put the whole script — 156 characters of it — on the process command line,
 and a terminal that titles from the running command showed *that* instead of
 the session name.
 
-**`PROMPT_COMMAND` is appended to, never replaced.** `/etc/bashrc` sets it to
-rewrite the title as `user@host:cwd` at every prompt, so a one-shot title is
-overwritten within a second; and this host also runs VTE shell integration
-through the same variable, so clobbering it takes the terminal's cwd reporting
-with it. Appending puts our write last, which is the one that lands. `enter`
-additionally sets the title *before* the first prompt, or the terminal keeps
-whatever it displayed during startup.
+**`PROMPT_COMMAND` already has a title write in it.** `/etc/bashrc` rewrites
+the title as `user@host:cwd` at every prompt, so a one-shot title is
+overwritten within a second — `enter` sets the title before the first prompt
+*and* `rc` re-sets it at each one.
+
+On Fedora that variable is an **array**: `/etc/bashrc` does `declare -a
+PROMPT_COMMAND` and sets element 0, then vte.sh and the systemd OSC-context
+hook append further elements. A string append therefore reads and writes
+element 0 only — it neither disturbs those hooks (a plain clobber would not
+have either) nor runs after them. Ours lands inside element 0 and runs *before*
+elements 1..n, which is harmless only because vte.sh deliberately leaves the
+title alone in the array case. A `~/.bashrc` appending its own title hook as a
+later element would win.
 
 OSC 1 (tab) and OSC 2 (window) are set explicitly rather than OSC 0, which
 means "both" and is honoured inconsistently.

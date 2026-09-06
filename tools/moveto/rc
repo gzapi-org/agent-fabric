@@ -1,9 +1,17 @@
 # Sourced by the shell `moveto` spawns. Not a general bashrc.
 #
-# /etc/bashrc sets PROMPT_COMMAND to rewrite the window title as
-# user@host:cwd at every prompt, so a one-shot title is overwritten
-# immediately. This sources the normal chain FIRST and then replaces that
-# hook, which is the only ordering that wins.
+# The normal chain is sourced FIRST, then the title write is added, because
+# /etc/bashrc puts an OSC 0 title write of its own into PROMPT_COMMAND at every
+# prompt.
+#
+# On Fedora PROMPT_COMMAND is an ARRAY — /etc/bashrc does `declare -a
+# PROMPT_COMMAND` and sets element 0; vte.sh and the systemd OSC-context hook
+# then APPEND further elements. A string assignment like the one below reads
+# and writes element 0 only, so it neither disturbs those hooks nor runs after
+# them: ours is appended INSIDE element 0 and runs before elements 1..n. That
+# is fine here only because vte.sh deliberately leaves the title alone in the
+# array case. A ~/.bashrc that appends its own title hook as a later element
+# would win over this one.
 
 if [ -f "$HOME/.bashrc" ]; then
     . "$HOME/.bashrc"
@@ -11,10 +19,6 @@ elif [ -f /etc/bashrc ]; then
     . /etc/bashrc
 fi
 
-# APPEND rather than replace. /etc/bashrc's hook is only the title, but this
-# host also has VTE shell integration in the prompt chain, and clobbering the
-# variable would take whatever else lives there with it. Ours runs LAST, so it
-# is the write that lands.
 if [ -n "${MOVETO_TITLE:-}" ]; then
     PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}"'printf "\033]1;%s\007\033]2;%s\007" "$MOVETO_TITLE" "$MOVETO_TITLE"'
 fi

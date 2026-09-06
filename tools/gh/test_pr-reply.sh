@@ -255,6 +255,93 @@ else
     fail "posted to another session's PR" "$(calls)"
 fi
 
+echo "pr-reply: a branch naming no session is answered, not refused as a rival's"
+# The guard took the first two segments of ANY branch and compared, so
+# `dependabot/pub`, `agent/global-event-identity` and a slashless
+# `add-claude-github-actions-178...` each read as another session — and
+# the refusal claimed that session was "mid-flight on a fix you cannot
+# see" about something that does not exist. Nobody owned those PRs and
+# nobody could answer them: four held seven unresolved findings for a
+# month.
+for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
+              "agent/global-event-identity" \
+              "add-claude-github-actions-1785994932117" \
+              "feat/brand-logos"; do
+    thread_fixture "$branch" false
+    invoke "Obsolete — the file was deleted before this landed." "$THREAD_ID"
+    if [[ "$RUN_RC" -eq 0 && "$(calls)" == *REPLY* ]]; then
+        pass "answers '$branch'"
+    else
+        fail "refused an unowned branch: '$branch'" "rc=$RUN_RC $(calls)"
+    fi
+done
+
+echo "pr-reply: an unowned PR still warns before it replies"
+# Allowed is not the same as unremarkable — the finding may belong to a
+# surface whose role has verified nothing.
+thread_fixture "agent/global-event-identity" false
+invoke "Verified fixed." "$THREAD_ID"
+assert_rc       "exits 0" 0
+assert_contains "says the branch names no session" "names no session"
+assert_contains "warns about the owning surface"   "another SURFACE's"
+assert_contains "  and bounds what may be resolved" "resolve only what you actually verified"
+assert_not_contains "does not invent a rival session" "mid-flight"
+
+echo "pr-reply: a bot branch is unowned, not a session called after the bot"
+# `dependabot/pub` has the right SHAPE for a session prefix, so only the
+# vendor deny-list separates it from a real one. Without that this case
+# would refuse, naming "dependabot/pub" as the session to defer to.
+thread_fixture "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2" false
+invoke "Answered." "$THREAD_ID"
+assert_rc           "exits 0" 0
+assert_not_contains "never names the bot as a session" "belongs to 'dependabot"
+
+echo "pr-reply: a real session's PR is STILL refused"
+# The whole point of relaxing the guard is that it must not relax for
+# the case it exists for. A four-segment, non-bot, well-typed branch
+# belonging to someone else stays refused.
+thread_fixture "$OTHER/fix/theirs" false
+invoke "I would like to answer this." "$THREAD_ID"
+assert_rc       "exits 2" 2
+assert_contains "still names the owning session" "$OTHER"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "still posts nothing"
+else
+    fail "relaxation leaked into the owned case" "$(calls)"
+fi
+
+echo "pr-reply: an odd <type> segment is a session, not an unowned branch"
+# pr-sessions.sh imposes no vocabulary on <type> — `spike-3`, `hotfix`
+# and `stage-4` are sessions. If this script disagreed, another
+# session's PR on such a branch would read as unowned and be ANSWERED,
+# which is the failure the guard exists to prevent, reached from the
+# other side.
+for t in spike-3 hotfix stage-4; do
+    thread_fixture "$OTHER/$t/theirs" false
+    invoke "no" "$THREAD_ID"
+    if [[ "$RUN_RC" -eq 2 && "$(calls)" != *REPLY* ]]; then
+        pass "refuses another session's '$t/' branch"
+    else
+        fail "answered another session's '$t/' branch" "rc=$RUN_RC $(calls)"
+    fi
+done
+
+echo "pr-reply: the <type> SHAPE is what makes a prefix a session"
+# The two cases above cannot see this check: every branch they use has a
+# well-formed <type>, so deleting the shape test leaves them passing. A
+# segment that cannot be a type is what separates "four segments" from
+# "a session", and both scripts must draw that line in the same place —
+# otherwise one lists a PR as unowned while the other calls it someone's.
+for bad in "Feature" "2fix" "-lead"; do
+    thread_fixture "$OTHER/$bad/x" false
+    invoke "answering an unowned branch" "$THREAD_ID"
+    if [[ "$RUN_RC" -eq 0 && "$(calls)" == *REPLY* ]]; then
+        pass "'$bad' is not a type, so the branch names no session"
+    else
+        fail "'$bad' was read as a session prefix" "rc=$RUN_RC $(calls)"
+    fi
+done
+
 echo "pr-reply: a failed reply never resolves the thread"
 # The worst available outcome is a resolved thread with no reply: it
 # reads as answered and shows nothing.

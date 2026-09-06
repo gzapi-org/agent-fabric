@@ -20,6 +20,18 @@
 #     The repo-root CLAUDE.md is explicit: never answer reviews on
 #     another session's branch. A wrong reply cannot be unsent, and that
 #     session is mid-flight on a fix you cannot see.
+#
+#     A BRANCH THAT NAMES NO SESSION IS NOT "ANOTHER SESSION'S". The
+#     guard used to take the first two segments of anything and compare
+#     — so dependabot's `dependabot/pub`, a pre-convention `feat/x`, and
+#     `add-claude-github-actions-178…` each read as a rival session, and
+#     the refusal told you it was "mid-flight on a fix you cannot see"
+#     about a session that does not exist. Nobody could answer those
+#     threads through this script, and nobody owned them either: four
+#     such PRs held seven unresolved P1/P2 findings for a month. The
+#     shape is checked now, and an unowned PR is allowed with a warning
+#     — the reply still needs the owning SURFACE's role to have verified
+#     the claim, which is what the warning says.
 #   * RESOLVING IS A CLAIM. --no-resolve exists for the case where the
 #     reply is a question, or the finding is real and not yet fixed.
 #     Resolution stopped gating merges on 2026-08-06, so a resolve now
@@ -143,7 +155,41 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" \
 ME="$(hostname -s)/$(basename "$root")"
 OWNER="$(printf '%s' "$PR_BRANCH" | cut -d/ -f1,2)"
 
-if [[ "$OWNER" != "$ME" ]]; then
+# Does the branch name a SESSION at all? Same structural test
+# pr-sessions.sh applies — <host>/<clone>/<type>/<desc>, a deny-list of
+# automation vendors, and no vocabulary imposed on <type> — because the
+# two scripts must agree about who owns what. Duplicated rather than
+# shared: these scripts are deliberately standalone, and the rule is
+# short enough that a copy is cheaper than a library. If it changes in
+# one, change it in the other; test_pr-reply.sh and test_pr-sessions.sh
+# both pin it.
+branch_names_a_session() {
+    local b="$1" IFS=/
+    read -r -a p <<< "$b"
+    [[ "${#p[@]}" -ge 4 ]]                || return 1
+    # Parity with pr-sessions.sh, and NOT separately testable: git's own
+    # ref-format rules reject an empty path component, so `//feat/x` and
+    # `host//feat/x` cannot be branch names and no fixture can reach this
+    # line. Kept so the two predicates read alike rather than diverging
+    # on a case one of them silently drops.
+    [[ -n "${p[0]}" && -n "${p[1]}" ]]    || return 1
+    case "${p[0]}" in
+        dependabot|renovate|github-actions|weblate|imgbot|\
+        allcontributors|pre-commit-ci|snyk-bot) return 1 ;;
+    esac
+    [[ "${p[2]}" =~ ^[a-z][a-z0-9._-]*$ ]] || return 1
+    return 0
+}
+
+if ! branch_names_a_session "$PR_BRANCH"; then
+    # Unowned, NOT someone else's. Refusing here is what kept these
+    # threads unanswerable; claiming a rival session owns them would be
+    # a statement the branch cannot support.
+    echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH', which names no session." >&2
+    echo "  No session owns it, so there is nobody to defer to — replying." >&2
+    echo "  The finding may still be another SURFACE's (backend, flutter, web):" >&2
+    echo "  resolve only what you actually verified." >&2
+elif [[ "$OWNER" != "$ME" ]]; then
     echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this clone is '$ME'." >&2
     echo "  Not replying. That session is mid-flight on a fix you cannot see," >&2
     echo "  and a review reply cannot be unsent. Raise it in the PR instead." >&2

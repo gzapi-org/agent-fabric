@@ -31,7 +31,15 @@ command -v jq >/dev/null 2>&1 || { echo "test: jq required" >&2; exit 1; }
 
 failures=0
 SANDBOX=""
-cleanup() { [[ -n "$SANDBOX" && -d "$SANDBOX" ]] && rm -rf "$SANDBOX"; }
+NOGIT=""
+STRIP=""
+cleanup() {
+    [[ -n "$SANDBOX" && -d "$SANDBOX" ]] && rm -rf "$SANDBOX"
+    [[ -n "$NOGIT"   && -d "$NOGIT"   ]] && rm -rf "$NOGIT"
+    [[ -n "$STRIP"   && -d "$STRIP"   ]] && rm -rf "$STRIP"
+    [[ -n "${GUARD_MARKER:-}" ]] && rm -f "$GUARD_MARKER"
+    return 0
+}
 trap cleanup EXIT
 
 CLONE_NAME="gzapp-testclone"
@@ -314,6 +322,57 @@ assert_rc       "two thread ids are refused" 2
 
 invoke "body" "$THREAD_ID" --nope
 assert_rc       "an unknown option is refused" 2
+
+echo "pr-reply: outside a worktree it refuses rather than trusting itself"
+# The ownership check is the only protection this script offers, and an
+# unresolvable clone identity used to SKIP it: the guard read
+# `[[ -n "$ME" && ... ]]`, so running the script by absolute path from
+# outside any worktree posted AND resolved on whatever thread it was
+# handed. Not knowing whose PR this is has to mean stop, not proceed.
+thread_fixture "$ME/feat/thing" false
+NOGIT="$(mktemp -d)"
+RUN_OUT="$(cd "$NOGIT" && printf '%s' "would post anywhere" | \
+    env PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
+    "${MOCK_ENV[@]}" bash "$UNDER_TEST" "$THREAD_ID" 2>&1)"
+RUN_RC=$?
+rm -rf "$NOGIT"; NOGIT=""
+assert_rc       "exits 2" 2
+assert_contains "says the identity is unknown" "identity is unknown"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "nothing was posted"
+else
+    fail "posted without knowing whose PR it is" "$(calls)"
+fi
+
+echo "pr-reply: a missing hard dependency is named, not guessed at"
+# git and hostname became hard dependencies when a failed rev-parse was
+# made fatal. Without them in the preflight, a missing git surfaces as
+# "not inside a git worktree ... run it from the clone that owns the PR"
+# — at an operator standing in exactly that clone. Both directions exit
+# 2, so this is diagnostic quality, not a bypass; it still needs a test,
+# because reverting the preflight leaves every other assertion green.
+thread_fixture "$ME/feat/thing" false
+STRIP="$(mktemp -d)"
+for b in bash env cat cut basename sed grep mktemp rm; do
+    src="$(command -v "$b")" && ln -sf "$src" "$STRIP/$b"
+done
+ln -sf "$SANDBOX/bin/gh" "$STRIP/gh"
+ln -sf "$(command -v jq)" "$STRIP/jq"
+# deliberately NOT git and NOT hostname
+RUN_OUT="$(cd "$SANDBOX/$CLONE_NAME" && printf '%s' "body" | \
+    env -i PATH="$STRIP" GH_MOCK_STATE="$SANDBOX/state" \
+    "$STRIP/bash" "$UNDER_TEST" "$THREAD_ID" 2>&1)"
+RUN_RC=$?
+assert_rc       "exits 2" 2
+assert_contains "names git rather than blaming the cwd" "git is required"
+ln -sf "$(command -v git)" "$STRIP/git"
+RUN_OUT="$(cd "$SANDBOX/$CLONE_NAME" && printf '%s' "body" | \
+    env -i PATH="$STRIP" GH_MOCK_STATE="$SANDBOX/state" \
+    "$STRIP/bash" "$UNDER_TEST" "$THREAD_ID" 2>&1)"
+RUN_RC=$?
+assert_rc       "exits 2 for hostname too" 2
+assert_contains "names hostname" "hostname is required"
+rm -rf "$STRIP"; STRIP=""
 
 echo "pr-reply: a failed thread read stops before posting"
 thread_fixture "$ME/feat/thing" false

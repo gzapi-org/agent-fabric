@@ -84,7 +84,11 @@ done
 [[ "$THREAD" =~ ^PRRT_[A-Za-z0-9_-]+$ ]] \
     || die "'$THREAD' is not a review-thread id (expected PRRT_…; PRRC_ is a comment, not a thread)"
 
-for bin in gh jq; do
+# git and hostname are as required as gh and jq: the ownership guard below
+# derives this clone's identity from both, and a missing git would surface
+# as "not inside a git worktree" — sending the operator to look for a clone
+# they are already standing in.
+for bin in gh jq git hostname; do
     command -v "$bin" >/dev/null 2>&1 || die "$bin is required but not installed."
 done
 
@@ -126,13 +130,20 @@ LOCATION="$(printf '%s' "$THREAD_JSON" | jq -r '"\(.path):\(.line // "?")"')"
 # The session that owns a branch is its first two segments — the same
 # rule pr-sessions.sh marks rows with. Derived here, not passed in, so
 # it cannot be talked out of.
-ME=""
-if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    ME="$(hostname -s)/$(basename "$root")"
-fi
+#
+# FAILS CLOSED. pr-sessions.sh treats an unresolvable identity as "no
+# default scope" and shows everything, which is harmless for a listing.
+# Here the same shape would have disabled the only protection this
+# script offers: run by absolute path from outside a worktree, `git
+# rev-parse` fails, ME is empty, and an `[[ -n "$ME" && ... ]]` guard
+# skips straight past — posting to any thread handed to it. Not knowing
+# whose PR this is has to mean stop, not proceed.
+root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "not inside a git worktree, so this clone's identity is unknown — refusing to reply (run it from the clone that owns the PR)."
+ME="$(hostname -s)/$(basename "$root")"
 OWNER="$(printf '%s' "$PR_BRANCH" | cut -d/ -f1,2)"
 
-if [[ -n "$ME" && "$OWNER" != "$ME" ]]; then
+if [[ "$OWNER" != "$ME" ]]; then
     echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this clone is '$ME'." >&2
     echo "  Not replying. That session is mid-flight on a fix you cannot see," >&2
     echo "  and a review reply cannot be unsent. Raise it in the PR instead." >&2

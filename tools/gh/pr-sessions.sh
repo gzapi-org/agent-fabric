@@ -29,9 +29,26 @@
 # far. The empty-ME branch below is belt-and-braces for a future
 # --repo flag, not a path you can reach today.)
 #
+# /unattributed IS THE THIRD SCOPE, and it exists because the other two
+# cannot reach these rows. A branch that does not parse — dependabot's,
+# a pre-convention `feat/x`, whatever /install-github-app names its own
+# — belongs to no session, so every scoped run drops it and /all merely
+# stops filtering rather than selecting it. The count in the NOTE said
+# how many were hidden and no invocation could list them, which is a
+# backlog nothing surfaces: four such PRs sat on seven unresolved P1/P2
+# threads for a month, invisible to every session's sweep because no
+# session owned them. Scope to them directly and they are answerable.
+#
+# The pairing that matters is `/unattributed /unresolved`: scope is
+# applied BEFORE the thread lookup's candidate slice, so narrowing to
+# the unowned rows first is also what gets their threads queried at all
+# — under /all they compete for the same 100 slots as every recent PR
+# and lose, being by definition the older ones.
+#
 # Usage:
 #   tools/gh/pr-sessions.sh                 # THIS clone's PRs (default)
 #   tools/gh/pr-sessions.sh /all            # every session
+#   tools/gh/pr-sessions.sh /unattributed   # only PRs no session owns
 #   tools/gh/pr-sessions.sh -n 50           # last 50 rows
 #   tools/gh/pr-sessions.sh /OPEN           # open PRs only
 #   tools/gh/pr-sessions.sh /MERGED         # merged only  (/CLOSED too)
@@ -42,6 +59,7 @@
 #   tools/gh/pr-sessions.sh /lastDate:6h /unresolved   # ...then filter
 #   tools/gh/pr-sessions.sh /unresolved     # only PRs with an open thread
 #   tools/gh/pr-sessions.sh /all /unresolved # ...across every session
+#   tools/gh/pr-sessions.sh /unattributed /unresolved  # ...owed by nobody
 #
 # State is chosen at FETCH time, so like /lastItem and /lastDate it
 # narrows the pool before scope, /unresolved and -n ever see it.
@@ -111,6 +129,8 @@ while [[ $# -gt 0 ]]; do
         /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
         /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
         --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
+        /unattributed|--unattributed)
+                      FILTER="__UNATTRIBUTED__"; SCOPE_EXPLICIT=1; shift ;;
         --session)    need_operand "$@"; FILTER="$2"; SCOPE_EXPLICIT=1; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
@@ -338,12 +358,20 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
   | . as $pool
   | { # Nothing is dropped by scope when there is no scope, so /all
       # reports zero rather than a number no filter ever acted on.
+      #
+      # /unattributed reports zero for the opposite reason: these rows
+      # are the listing, not what the listing left out. Counting them
+      # here would print "N PR(s) ... are not listed" directly above the
+      # N rows — a disclosure contradicting the page it sits under, and
+      # the one scope where the omission it warns of cannot happen.
       unattributed:
-        (if $filter == "" then 0
+        (if $filter == "" or $filter == "__UNATTRIBUTED__" then 0
          else ([$pool[] | select(._s == "(unconventional)")] | length) end),
       rows:
         ($pool
          | ( if $filter == "__MINE__" then map(select(._s == $me))
+             elif $filter == "__UNATTRIBUTED__" then
+                    map(select(._s == "(unconventional)"))
              elif $filter != "" then map(select(._s | test($filter; "i")))
              else . end )
          | sort_by(-.number) | .[:$limit]) }
@@ -371,13 +399,16 @@ unattributed_note() {
     [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
     echo "  NOTE: $UNATTRIBUTED PR(s) have a branch that does not parse as" >&2
     echo "  <host>/<clone>/<type>/<short-desc>, so they cannot be scoped to a" >&2
-    echo "  session and are not listed. Pass /all to see every PR regardless." >&2
+    echo "  session and are not listed. Pass /unattributed to list exactly" >&2
+    echo "  those, or /all to stop filtering." >&2
 }
 
 if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"
     [[ "$FILTER" == "__MINE__" ]] && what="PRs for this clone ($ME)"
-    [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && what="PRs for a session matching '$FILTER'"
+    [[ "$FILTER" == "__UNATTRIBUTED__" ]] && what="PRs without a parsable session branch"
+    [[ -n "$FILTER" && "$FILTER" != "__MINE__" && "$FILTER" != "__UNATTRIBUTED__" ]] && \
+        what="PRs for a session matching '$FILTER'"
     echo "pr-sessions: no $what in the last $FETCH ${STATE} PR(s)."
     [[ "$DEFAULTED_TO_MINE" -eq 1 ]] && \
         echo "  (scoped to this clone by default — pass /all to see every session)"
@@ -506,7 +537,9 @@ fi
 if [[ -z "${out//[$' \t\n']/}" ]]; then
     scope="this clone ($ME)"
     [[ "$FILTER" == "" ]] && scope="any session"
-    [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && scope="sessions matching '$FILTER'"
+    [[ "$FILTER" == "__UNATTRIBUTED__" ]] && scope="branches no session owns"
+    [[ -n "$FILTER" && "$FILTER" != "__MINE__" && "$FILTER" != "__UNATTRIBUTED__" ]] && \
+        scope="sessions matching '$FILTER'"
     echo "pr-sessions: no PRs with unresolved review threads for $scope"
     echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)"
     unattributed_note
@@ -531,6 +564,15 @@ unattributed_note
 echo
 if [[ "$DEFAULTED_TO_MINE" -eq 1 ]]; then
     echo "  Scoped to this clone ($ME) — pass /all for every session."
+elif [[ "$FILTER" == "__UNATTRIBUTED__" ]]; then
+    # The "*" legend would be a lie here: no row under this scope can be
+    # this clone's, because every one of them failed to parse as any
+    # session at all. Saying who these belong to instead is the useful
+    # sentence, since "leave other sessions' PRs alone" is precisely the
+    # rule that does NOT apply and has kept these unanswered.
+    echo "  These branches parse as no session, so the stay-in-your-lane rule"
+    echo "  has no owner to point at — findings here are unowned, not somebody"
+    echo "  else's. Check with the surface's role before acting on the code."
 elif [[ "$GROUPED" -eq 0 ]]; then
     echo "  * = this clone ($ME).  Others belong to parallel sessions:"
     echo "  do not push to, rebase, delete, or answer reviews on their branches."

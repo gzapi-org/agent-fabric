@@ -614,6 +614,93 @@ assert_rc       "exits 0" 0
 assert_contains "says nothing is unresolved"         "no PRs with unresolved"
 assert_contains "  and still discloses the omission" "cannot be scoped to a"
 
+echo "pr-sessions: /unattributed lists exactly the rows no scope can reach"
+# The count in the NOTE told you how many were hidden, and no invocation
+# could show them: /all stops filtering rather than selecting, so an
+# unowned row still competes with every recent PR for the page. This is
+# the scope that asks for them directly.
+unscopable_list
+run /unattributed
+assert_rc           "exits 0" 0
+assert_contains     "lists the unscopable PR"        "#60"
+assert_not_contains "excludes an owned PR"           "#61"
+
+echo "pr-sessions: /unattributed does not warn about omitting what it just listed"
+# The disclosure counts what SCOPE dropped. Under this scope nothing is
+# dropped, so counting here would print "1 PR(s) ... are not listed"
+# directly above the one row it names — a footer contradicting its page.
+assert_not_contains "no self-contradicting disclosure" "cannot be scoped to a"
+
+echo "pr-sessions: /unattributed does not claim any row is this clone's"
+# Every row here failed to parse as a session, so the "*" legend cannot
+# apply and "leave other sessions alone" is the wrong instruction — it
+# is the reading that left these unanswered.
+assert_not_contains "drops the ownership legend" "* = this clone"
+assert_contains     "says the findings are unowned" "no session"
+
+echo "pr-sessions: the NOTE points at the flag that can actually list them"
+# "Pass /all to see every PR regardless" was the advice, and /all does
+# not select these — it merely stops filtering, so they still fall off
+# the page. Naming a flag that cannot answer is worse than naming none.
+unscopable_list
+run
+assert_rc       "exits 0" 0
+assert_contains "names the listing flag" "/unattributed"
+
+echo "pr-sessions: /unattributed narrows BEFORE the thread lookup"
+# Scope is applied before the candidate slice, which is the whole reason
+# this pairing works: an unowned row is by definition an older one, so
+# under /all it loses the slice to recent PRs and its threads are never
+# queried at all. Here it is the only row, so it must carry a real count.
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '[
+  {number: 70, state: "MERGED", headRefName: "agent/global-event-identity",
+   title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1},
+  {number: 71, state: "OPEN", headRefName: ($me + "/feat/real"),
+   title: "real", updatedAt: $t2, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p70: {number: 70, author: {login: "andreabenetton"},
+        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}},
+          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+        ]}},
+  p71: {number: 71, author: {login: "andreabenetton"},
+        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: []}}
+}}}')"
+run /unattributed /unresolved
+assert_rc       "exits 0" 0
+assert_contains "surfaces the unowned PR"          "#70"
+assert_contains "with a real awaiting-reply count" "2!"
+
+echo "pr-sessions: /unattributed with nothing to show is a clean, named exit"
+default_pr_list; default_graphql
+run /unattributed
+assert_rc           "exits 0" 0
+assert_contains     "names this scope, not another" "without a parsable session branch"
+assert_not_contains "does not claim it scoped to the clone" "PRs for this clone"
+
+echo "pr-sessions: /unattributed and /unresolved with nothing to show names the scope"
+# Reaching the /unresolved-empty exit needs a row that EXISTS under this
+# scope and simply has nothing open — with no unattributed row at all the
+# earlier rows-empty exit fires instead, and this case would assert
+# against a message it never reaches.
+write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
+  {number: 72, state: "MERGED", headRefName: "agent/common-api-idempotency",
+   title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p72: {number: 72, author: {login: "andreabenetton"},
+        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+          {isResolved: true, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+        ]}}
+}}}')"
+run /unattributed /unresolved
+assert_rc           "exits 0" 0
+assert_contains     "names the unowned scope" "branches no session owns"
+assert_not_contains "not the clone scope"     "for this clone"
+default_pr_list; default_graphql
+
 echo "pr-sessions: the count describes the NARROWED pool, not everything fetched"
 # /lastItem fixes the pool before scope. Counting before that narrowing
 # announces a PR the caller never asked about and that nothing omitted:

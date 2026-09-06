@@ -116,7 +116,13 @@ while [[ $# -gt 0 ]]; do
                  for c in "${CLONES[@]}"; do display_safe "$c"; printf '\n'; done
                  exit 0 ;;
         -*)      die "unknown option '$1' (try --help)" ;;
-        *)       [[ -z "$target" ]] || die "one clone at a time"; target="$1"; shift ;;
+        *)       [[ -z "$target" ]] || die "one clone at a time"
+                 # A single path segment. Without this, `moveto acct ../../etc`
+                 # resolves and lands you outside ~/projects entirely.
+                 case "$1" in
+                     */*|.|..) die "clone must be a single name under ~/projects, not a path: $1" ;;
+                 esac
+                 target="$1"; shift ;;
     esac
 done
 

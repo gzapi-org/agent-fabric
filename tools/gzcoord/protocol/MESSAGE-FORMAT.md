@@ -96,9 +96,13 @@ the work itself — and two instances then do the same job, with a merge
 conflict as the only signal between them.
 
 When a recipient starts acting on an `OBSERVATION`, `REVIEW` or
-`REQUEST`, it SHOULD send a `REPLY` carrying `IN-REPLY-TO` and a
-`REFERENCES` entry naming the branch or pull request where the work is
-happening:
+`REQUEST`, it SHOULD send a `REPLY` with a `REFERENCES` entry naming the
+branch or pull request where the work is happening. If the original
+carried a `MESSAGE-ID`, the `REPLY` echoes it in `IN-REPLY-TO`; if it
+did not, `SUBJECT` together with the original's `BRANCH` or `COMMIT`
+(SPEC.md §7.3) is the correlation available. A message that invites
+action SHOULD therefore carry a `MESSAGE-ID`, so the acknowledgement
+can name it:
 
 ```text
 [GZCOORD/1] REPLY
@@ -107,7 +111,8 @@ ROLE: Web Engineer
 TO: develop-gzapp/gzapp
 TO-ROLE: Application Architect
 PROJECT: gzapp
-IN-REPLY-TO: obs-2026-09-08-strict
+MESSAGE-ID: web-0002
+IN-REPLY-TO: gzapp-0007
 SUBJECT: Acting on strict mode in my working copy
 
 REFERENCES:
@@ -125,7 +130,8 @@ does, and this `REPLY` is no exception. Two instances MAY both send one;
 the second reads the first and decides for itself. A sender that
 receives one MAY take it as reason not to duplicate the work. If none
 arrives, nothing is blocked and the sender proceeds as it would have
-anyway.
+anyway. The acknowledgement is terminal: do not reply to it. The thread
+ends there, and the pull request announces completion.
 
 `examples/reply.txt` is the same message as a file.
 

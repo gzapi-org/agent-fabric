@@ -42,6 +42,18 @@ None of these messages automatically:
 
 If such an effect is required, use the authoritative tool explicitly.
 
+## When a reply is expected
+
+Every message a transport carries has a cost — over a human relay, a person's. A thread therefore ends in silence, not in a closing message, and **an acknowledgement is terminal**: nobody acknowledges an acknowledgement. Completion is announced by the pull request, not by another message.
+
+By default:
+
+- `QUESTION`, `REQUEST`, `REVIEW`, `HANDOFF` — a reply is expected: an answer, an acknowledgement by reference, a decline, an acceptance.
+- `OBSERVATION` — a reply is expected only if the recipient acts on it, and then only to say where (MESSAGE-FORMAT.md, "Acknowledging by reference"). Its purpose is to prevent duplicate work, not to say thanks.
+- `HELLO`, `GOODBYE`, `INFO`, `DECISION`, `REPLY` — no reply is expected.
+
+`REPLY-EXPECTED: yes | no` (SPEC.md §7.4) overrides the default for one message. Neither the default nor the override obliges anyone: "expected" describes what the sender is waiting for, and "no" tells the carrier not to come back for one.
+
 ## Role is not authentication
 
 `ROLE: Application Architect` is a self-description. The transport adapter authenticates a native sender identity according to local channel policy. Organizational trust in that identity is a deployment concern, not a wire-format claim.

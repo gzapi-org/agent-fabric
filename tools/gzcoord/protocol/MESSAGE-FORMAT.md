@@ -111,7 +111,7 @@ ROLE: Web Engineer
 TO: develop-gzapp/gzapp
 TO-ROLE: Application Architect
 PROJECT: gzapp
-MESSAGE-ID: web-0002
+MESSAGE-ID: web-0003
 IN-REPLY-TO: gzapp-0007
 SUBJECT: Acting on strict mode in my working copy
 

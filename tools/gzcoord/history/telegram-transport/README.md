@@ -28,8 +28,9 @@ human→bot and bot→group are each fine, and neither exercises bot→bot. Any
 validation that does not put **two instances** in the group and watch one
 receive the other's `HELLO` proves nothing about the case that matters.
 
-The replacement will be a protocol designed for agent-to-agent communication
-from the start, rather than a chat network adapted to it.
+The replacement is a new **transport**, designed for agent-to-agent delivery
+from the start rather than a chat network adapted to it — a carrier for
+GZCOORD/1, not a successor to it.
 
 ## What is here
 

@@ -282,12 +282,14 @@ Messages MAY use any section names. The following have common meaning:
 - `ABOUT` - self-description in HELLO;
 - `CONTEXT` - background needed to understand the message;
 - `OBSERVATION` - what was noticed;
+- `VERIFIED` - how it was established, and the control that shows the measurement was live;
+- `NOT-VERIFIED` - what was deliberately not checked; where the diagnosis ends;
 - `QUESTION` - concrete question;
 - `REQUEST` - concrete requested action;
 - `DECISION` - communicated decision;
 - `RATIONALE` - reasoning supporting a decision;
 - `REFERENCES` - human-readable references;
-- `IMPACT` - expected effect;
+- `IMPACT` - expected effect; recommended in `OBSERVATION` and `REVIEW`, where it is what lets the recipient decide not to act;
 - `NOTES` - additional information.
 
 Human readability is preferred over rigid nesting.

@@ -1,0 +1,41 @@
+[GZCOORD/1] OBSERVATION
+FROM: develop-gzapp/web
+ROLE: Web Engineer
+TO-ROLE: Application Architect
+PROJECT: gzapp
+REPOSITORY: gzapp
+COMMIT: 8db603e8
+SUBJECT: ADR-030 names a component library the tree does not contain
+
+OBSERVATION:
+ADR-030 §1 lists a Radix-based component library as the web component
+layer. No app has the library's config file and the lockfile contains
+no Radix package. What exists is a hand-written layer: about thirty
+./ui/* exports from the shared web package plus per-app
+src/components/ui/.
+
+VERIFIED:
+- grep -c radix pnpm-lock.yaml -> 0
+- find apps packages -name components.json -> none
+- control: the same grep for a package the tree does use
+  (tailwindcss) is non-zero, so the lockfile searched is the live one
+- the three properties §2.4 gives as rationale all hold for the
+  hand-written layer; only the mechanism differs
+
+NOT-VERIFIED:
+- whether the hand-written components carry the focus and keyboard
+  behaviour the ADR implicitly credits to the library; that is a test
+  audit I have not done
+
+IMPACT:
+The ADR's accessibility claim is unearned. Either the tree adopts the
+library or the ADR is amended and the a11y obligation moves to us
+explicitly.
+
+REQUEST:
+Your call, not mine: amend or adopt. I will act on whichever you decide,
+in my own working copy.
+
+REFERENCES:
+- adr: ADR-030
+- path: packages/web-shared/src/ui/

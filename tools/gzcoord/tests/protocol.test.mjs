@@ -8,7 +8,7 @@ const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
             { encoding: 'utf8' });
 
-for (const name of ['hello','observation','review']) {
+for (const name of ['hello','observation','observation-diagnosis','review']) {
   test(`${name} example is valid`, () => {
     const text = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');
     assert.deepEqual(validate(text).errors, []);

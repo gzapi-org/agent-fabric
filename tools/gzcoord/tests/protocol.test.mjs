@@ -135,3 +135,23 @@ test('REPLY-EXPECTED accepts yes and no', () => {
     assert.deepEqual(validate(text).errors, []);
   }
 });
+
+// SPEC §6: a repeated metadata key has no defined meaning, and last-write-wins
+// let an invalid earlier value hide behind a valid later one — observed for
+// REPLY-EXPECTED and for a malformed FROM, which §18 already MUST reject.
+test('a duplicated metadata key is rejected even when the last value is valid', () => {
+  for (const [dup, first, last] of [['REPLY-EXPECTED','maybe','no'], ['FROM','bad','develop-gzapp/gzapp']]) {
+    const base = dup === 'FROM' ? '' : 'FROM: develop-gzapp/gzapp\n';
+    const text = `[GZCOORD/1] INFO\n${base}${dup}: ${first}\n${dup}: ${last}\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n`;
+    const result = validate(text);
+    assert.equal(result.ok, false, `${dup} duplicate must be rejected`);
+    assert.ok(result.errors.some(e => e.includes(dup) && e.includes('more than once')));
+  }
+});
+
+test('a message with no duplicated key reports none', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\nREPLY-EXPECTED: no\n`;
+  const result = validate(text);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.message.duplicateKeys, []);
+});

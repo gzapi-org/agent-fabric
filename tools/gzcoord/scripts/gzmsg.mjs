@@ -18,6 +18,7 @@ export function parse(text) {
   if (!m) throw new Error('invalid GZCOORD/1 first line');
   const type = m[1];
   const metadata = {};
+  const duplicateKeys = new Set();
   const sections = {};
   const malformed = [];
   let currentSection = null;
@@ -34,13 +35,19 @@ export function parse(text) {
     }
     if (!inSections && /^[A-Z][A-Z0-9-]*: /.test(line)) {
       const idx = line.indexOf(':');
-      metadata[line.slice(0, idx)] = line.slice(idx + 1).trim();
+      const key = line.slice(0, idx);
+      // A repeated key has no defined meaning (a repeated section marker
+      // resumes its section; SPEC.md §6 gives a key no such rule). Collapsing
+      // silently let an invalid earlier value — REPLY-EXPECTED: maybe, a
+      // malformed FROM — hide behind a valid later one and validate clean.
+      if (key in metadata) duplicateKeys.add(key);
+      metadata[key] = line.slice(idx + 1).trim();
       continue;
     }
     if (currentSection) sections[currentSection] += `${sections[currentSection] ? '\n' : ''}${line}`;
     else if (line.trim() !== '') malformed.push(line);
   }
-  return { type, metadata, sections, malformed };
+  return { type, metadata, sections, malformed, duplicateKeys: [...duplicateKeys] };
 }
 
 export function validate(text) {
@@ -56,6 +63,7 @@ export function validate(text) {
   }
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
+  for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
   return { ok: errors.length === 0, errors, message: msg };
 }
 

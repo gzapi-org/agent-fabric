@@ -154,6 +154,8 @@ The metadata block is the run of `KEY: value` lines before the first section mar
 
 A parser MUST preserve unknown metadata fields and unknown body sections. This permits backward-compatible extensions.
 
+A metadata key MUST NOT appear more than once in the metadata block. A repeated section marker resumes its section; a repeated key has no defined meaning, and a validator MUST reject it (§18) rather than let one occurrence hide another.
+
 ## 7. Common metadata
 
 ### 7.1 Required fields
@@ -430,6 +432,7 @@ A GZCOORD/1 parser:
 - MUST preserve unknown metadata and sections;
 - MUST reject malformed `FROM` addresses;
 - MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
+- MUST reject a metadata key that appears more than once in the metadata block (§6);
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown.
 

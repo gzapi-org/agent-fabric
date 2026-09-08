@@ -13,6 +13,7 @@ A conforming parser:
 - accepts free-form roles;
 - rejects known transport/runtime fields when presented as core metadata;
 - rejects a `REPLY-EXPECTED` value other than `yes` or `no`;
+- rejects a metadata key that appears more than once;
 - does not infer project authority from messages.
 
 ## Agent runtime

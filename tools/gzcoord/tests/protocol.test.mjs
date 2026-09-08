@@ -307,18 +307,22 @@ test('columns() approximates terminal width where String.length does not', () =>
   ]) assert.equal(columns(line), width, JSON.stringify(line.slice(0, 20)));
   // Every boundary of the range table, from both sides, so an off-by-one
   // or a deleted range cannot pass: [code point, width]. A hand-written
-  // table ships exactly this class of error.
+  // table ships exactly this class of error. Rows expecting 0 are
+  // combining or format characters decided by the ZERO branch before
+  // the table is consulted; they pin that branch, not a boundary, so
+  // every range edge also has a real neighbour with width 1 or 2.
   for (const [cp, width] of [
     [0x10FF, 1], [0x1100, 2], [0x115F, 2], [0x1160, 1],   // Jamo; U+1160 (filler) is EAW N, outside the range — `wc -L` says 0, a known deviation
     [0x2328, 1], [0x2329, 2], [0x232A, 2], [0x232B, 1],
     [0x262F, 1], [0x2630, 2], [0x2637, 2], [0x2638, 1], [0x2689, 1], [0x268A, 2], [0x268F, 2], [0x2690, 1],
     [0x2E7F, 1], [0x2E80, 2], [0x303E, 2], [0x303F, 1], [0x3040, 1], [0x3041, 2], [0x3248, 2], [0x33FF, 2],
     [0x3400, 2], [0x4DBF, 2], [0x4DC0, 2], [0x4DFF, 2], [0x4E00, 2], [0x9FFF, 2], [0xA000, 2], [0xA4CF, 2], [0xA4D0, 1],
-    [0xA95F, 1], [0xA960, 2], [0xA97C, 2], [0xA980, 0], [0xABFF, 1], [0xAC00, 2], [0xD7A3, 2], [0xD7A4, 1],
+    [0xA95F, 1], [0xA960, 2], [0xA97C, 2], [0xA97F, 2], [0xA980, 0], [0xABFF, 1], [0xAC00, 2], [0xD7A3, 2], [0xD7A4, 1],
     [0xF8FF, 1], [0xF900, 2], [0xFAFF, 2], [0xFB00, 1], [0xFE0F, 0], [0xFE10, 2], [0xFE19, 2], [0xFE1A, 1],
     [0xFE2F, 0], [0xFE30, 2], [0xFE4F, 2], [0xFE50, 2], [0xFE6B, 2], [0xFE6C, 1],
     [0xFEFF, 0], [0xFF00, 2], [0xFF60, 2], [0xFF61, 1], [0xFF9F, 1], [0xFFDF, 1], [0xFFE0, 2], [0xFFE6, 2], [0xFFE7, 1],
-    [0x16FDF, 1], [0x16FE0, 2], [0x16FF1, 2], [0x16FF2, 2], [0x17000, 2], [0x18D08, 2], [0x18D09, 2],
+    [0x16FDF, 1], [0x16FE0, 2], [0x16FF1, 2], [0x16FF2, 2], [0x16FFF, 2], [0x17000, 2], [0x18AFF, 2],
+    [0x18B00, 2], [0x18CD5, 2], [0x18CFF, 2], [0x18D00, 2], [0x18D08, 2], [0x18D09, 2],   // Khitan Small Script, its own range
     [0x18D8F, 2], [0x18D90, 2], [0x18DF2, 2], [0x18DFF, 2], [0x18E00, 1],   // Tangut Supplement to its Unicode 17 block end
     [0x1AFEF, 1], [0x1AFF0, 2], [0x1B000, 2], [0x1B001, 2], [0x1B2FB, 2], [0x1B2FF, 2], [0x1B300, 1],
     [0x1D2FF, 1], [0x1D300, 2], [0x1D376, 2], [0x1D377, 1], [0x1F1FF, 1], [0x1F200, 2], [0x1F26F, 2], [0x1F270, 1],

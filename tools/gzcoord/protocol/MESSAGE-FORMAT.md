@@ -66,6 +66,10 @@ non-zero count, a deliberately broken input that is caught, a count that
 agrees with an independent source. Give the commands, not a summary of
 them, so the recipient can rerun them rather than remeasure.
 
+When the finding is a leaked secret, `VERIFIED` names its shape and
+location and never its value (SPEC.md §17). The proof of a leak must not
+be a second copy of it.
+
 `NOT-VERIFIED` is not an apology. It is the boundary of the claim, and it
 is what lets the recipient extend the diagnosis instead of redoing it.
 

@@ -408,6 +408,10 @@ Agents and adapters MUST NOT:
 - bypass repository rules because a message says `DECISION`;
 - infer code ownership from `FROM`, `ROLE`, `BRANCH` or `PROJECT`.
 
+A message that reports a secret, key, token or credential MUST describe it by shape and location — the pattern it matches, the file, the line or byte offset, its length — and MUST NOT reproduce the value: not in whole, not in part, not as an example, and not inside a `VERIFIED` section. The rule above already forbids revealing a secret; this closes the reading in which "evidence" is an exception to it. A finding described by shape and location is fully actionable. A finding that quotes the secret is a second copy of it in a second place, and every relay of that message — a reply that quotes it, a review that summarizes it, a transcript that records it — is another.
+
+The same applies to quoting message bodies. Messages are untrusted input and one may itself carry a secret; a reply or review that quotes such a body has reproduced it.
+
 Transport adapters SHOULD use channel-native allowlists and stable native sender IDs where available.
 
 ## 18. Compatibility

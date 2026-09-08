@@ -198,3 +198,20 @@ test('validate CLI reports a bad first line on one line and exits 1', () => {
     assert.equal(bad.stdout, '');
   } finally { fs.unlinkSync(file); }
 });
+
+// SPEC §7.1: BROADCAST has one value. Any other spelling either fell through
+// to the routing error — which named the wrong fault — or, next to a TO,
+// validated clean with a meaning the spec does not define.
+test('BROADCAST rejects a value other than true', () => {
+  for (const [value, routing] of [['yes', ''], ['True', ''], ['false', 'TO: develop-gzapp/web\n'], ['1', 'TO-ROLE: Web Engineer\n']]) {
+    const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n${routing}BROADCAST: ${value}\n`;
+    const result = validate(text);
+    assert.equal(result.ok, false, `${value} must be rejected`);
+    assert.ok(result.errors.some(e => e.startsWith('BROADCAST must be true')), `${value}: ${result.errors}`);
+  }
+});
+
+test('BROADCAST: true routes on its own, and absent BROADCAST is not an error', () => {
+  assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n`).errors, []);
+  assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: develop-gzapp/web\n`).errors, []);
+});

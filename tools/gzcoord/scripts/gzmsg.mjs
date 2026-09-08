@@ -66,6 +66,10 @@ export function validate(text) {
   if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');
   if (msg.metadata.TO && !addressRe.test(msg.metadata.TO)) errors.push('TO must be <host>/<instance>');
   if (msg.metadata['REPLY-EXPECTED'] !== undefined && !['yes','no'].includes(msg.metadata['REPLY-EXPECTED'])) errors.push('REPLY-EXPECTED must be yes or no');
+  // SPEC §7.1: the field's only value is `true`. `BROADCAST: yes` used to fail
+  // as "missing TO, TO-ROLE or BROADCAST: true", which names the wrong fault,
+  // and `BROADCAST: false` beside a TO validated clean with undefined meaning.
+  if (msg.metadata.BROADCAST !== undefined && msg.metadata.BROADCAST !== 'true') errors.push('BROADCAST must be true, or absent');
   if (!['HELLO','GOODBYE'].includes(msg.type)) {
     if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
   }

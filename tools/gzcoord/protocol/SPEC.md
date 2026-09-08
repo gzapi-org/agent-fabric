@@ -180,6 +180,8 @@ BROADCAST: true
 
 A direct `TO` is preferred when the peer address is known.
 
+`BROADCAST` takes the single value `true`. A message that does not broadcast omits the field; `BROADCAST: false` has no defined meaning, and a validator MUST reject a value other than `true` (§18) rather than read it as either absent or present.
+
 ### 7.2 Optional correlation fields
 
 ```text
@@ -433,6 +435,7 @@ A GZCOORD/1 parser:
 - MUST reject malformed `FROM` addresses;
 - MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
 - MUST reject a metadata key that appears more than once in the metadata block (§6);
+- MUST reject a `BROADCAST` value other than `true` (§7.1);
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown.
 

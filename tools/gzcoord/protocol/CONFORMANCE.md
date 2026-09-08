@@ -14,6 +14,7 @@ A conforming parser:
 - rejects known transport/runtime fields when presented as core metadata;
 - rejects a `REPLY-EXPECTED` value other than `yes` or `no`;
 - rejects a metadata key that appears more than once;
+- rejects a `BROADCAST` value other than `true`;
 - does not infer project authority from messages.
 
 ## Agent runtime

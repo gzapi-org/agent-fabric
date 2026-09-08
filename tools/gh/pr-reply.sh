@@ -130,15 +130,33 @@ THREAD_JSON="$(gh api graphql -f query='
       node(id: $id) {
         ... on PullRequestReviewThread {
           isResolved path line
-          pullRequest { number state headRefName }
+          pullRequest { number state headRefName
+                        repository { nameWithOwner } }
           comments(last: 1) { nodes { author { login } } }
         }
       }
     }' -f id="$THREAD" --jq '.data.node' 2>/dev/null)" \
-    || die "could not read thread $THREAD (gh not authenticated, or wrong repo)."
+    || die "could not read thread $THREAD (gh not authenticated, or no access)."
 
 [[ -n "$THREAD_JSON" && "$THREAD_JSON" != "null" ]] \
-    || die "thread $THREAD not found in this repository."
+    || die "thread $THREAD does not exist, or this token cannot see it."
+
+# SCOPE THE THREAD TO THIS REPOSITORY, EXPLICITLY.
+#
+# `node(id:)` is a GLOBAL lookup: a node id resolves wherever it lives,
+# and nothing in the query above constrains it to this repo. The message
+# below used to read "thread not found in this repository" and fired only
+# when the node was absent -- asserting a guarantee the query never
+# provided. A thread in ANOTHER repository resolved fine, and the only
+# remaining gate was the branch-prefix ownership check further down,
+# which passes for any branch named `<host>/<clone>/...` anywhere. That
+# is enough to reply to, and RESOLVE, a stranger's review thread.
+THREAD_REPO="$(printf '%s' "$THREAD_JSON" | jq -r '.pullRequest.repository.nameWithOwner // ""')"
+HERE_REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+[[ -n "$HERE_REPO" ]] \
+    || die "cannot determine the current repository (run inside a checkout)."
+[[ "$THREAD_REPO" == "$HERE_REPO" ]] \
+    || die "thread $THREAD belongs to $THREAD_REPO, not $HERE_REPO."
 
 PR_NUMBER="$(printf '%s' "$THREAD_JSON" | jq -r '.pullRequest.number')"
 PR_BRANCH="$(printf '%s' "$THREAD_JSON" | jq -r '.pullRequest.headRefName')"

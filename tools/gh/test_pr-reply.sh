@@ -108,6 +108,15 @@ setup_sandbox() {
 # from the fixtures the case set up.
 set -uo pipefail
 
+# `gh repo view` — what the script asks to learn which repo it is in.
+# Answered before the graphql parsing below, because it takes no -f flags.
+if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  echo "REPOVIEW" >> "$GH_MOCK_STATE/calls"
+  [[ -n "${GH_MOCK_REPO_FAIL:-}" ]] && exit 1
+  echo "${GH_MOCK_HERE_REPO:-gzapi-org/gzapp}"
+  exit 0
+fi
+
 query=""; id=""; body=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -150,10 +159,14 @@ MOCK
 }
 
 # Writes the thread fixture. $1 = branch, $2 = isResolved.
+# Writes the thread fixture. $1 = branch, $2 = isResolved, $3 = the repo
+# the thread belongs to (defaults to the one the mock says we are in).
 thread_fixture() {
-    jq -n --arg branch "$1" --argjson resolved "$2" '{
+    jq -n --arg branch "$1" --argjson resolved "$2" \
+          --arg repo "${3:-gzapi-org/gzapp}" '{
       isResolved: $resolved, path: "lib/x.dart", line: 12,
-      pullRequest: {number: 77, state: "MERGED", headRefName: $branch},
+      pullRequest: {number: 77, state: "MERGED", headRefName: $branch,
+                    repository: {nameWithOwner: $repo}},
       comments: {nodes: [{author: {login: "some-reviewer"}}]}
     }' > "$SANDBOX/state/thread.json"
     : > "$SANDBOX/state/calls"
@@ -182,10 +195,13 @@ invoke "Fixed in #123." "$THREAD_ID"
 assert_rc       "exits 0" 0
 assert_contains "reports the reply URL" "discussion_r1"
 assert_contains "reports the resolve"   "resolved: #77"
+# REPOVIEW sits between the read and the reply: the repository check runs
+# on the thread it just read, and must happen BEFORE anything is written.
 if [[ "$(calls)" == "READ $THREAD_ID
+REPOVIEW
 REPLY $THREAD_ID
 RESOLVE $THREAD_ID" ]]; then
-    pass "read, then reply, then resolve — in that order"
+    pass "read, check the repo, then reply, then resolve — in that order"
 else
     fail "call order wrong" "$(calls)"
 fi
@@ -522,6 +538,38 @@ if [[ "$(calls)" != *REPLY* ]]; then
     pass "nothing was posted"
 else
     fail "posted without knowing the owner" "$(calls)"
+fi
+
+echo "pr-reply: a thread in ANOTHER repository is refused"
+# `node(id:)` is a GLOBAL lookup, so a foreign thread resolves fine. The
+# only thing that used to stand between it and a reply was the
+# branch-prefix ownership check -- which passes for any branch named
+# `<host>/<clone>/...` in any repo on GitHub. The branch here is
+# deliberately one this session OWNS, so the case can only pass if the
+# repository check is what stops it.
+thread_fixture "$ME/feat/thing" false "someone-else/other-repo"
+invoke "body" "$THREAD_ID"
+assert_rc "exits 2" 2
+assert_contains "names both repositories" "someone-else/other-repo"
+if [[ "$(calls)" != *REPLY* && "$(calls)" != *RESOLVE* ]]; then
+    pass "neither replied nor resolved"
+else
+    fail "wrote to a thread in another repository" "$(calls)"
+fi
+
+echo "pr-reply: an unknowable current repository is refused, not assumed"
+# Failing open here would restore the whole hole: with no local repo to
+# compare against, every foreign thread would match nothing and pass.
+thread_fixture "$ME/feat/thing" false
+MOCK_ENV=(env GH_MOCK_REPO_FAIL=1)
+invoke "body" "$THREAD_ID"
+MOCK_ENV=(env)
+assert_rc "exits 2" 2
+assert_contains "says it cannot tell" "cannot determine the current repository"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "nothing was posted"
+else
+    fail "posted without knowing which repo it is in" "$(calls)"
 fi
 
 echo "pr-reply: --dry-run touches nothing"

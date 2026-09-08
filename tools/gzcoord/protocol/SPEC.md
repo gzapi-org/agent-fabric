@@ -129,7 +129,7 @@ The first line is:
 [GZCOORD/1] <TYPE>
 ```
 
-`TYPE` MUST be uppercase ASCII.
+`TYPE` uses the token syntax of a metadata key: uppercase ASCII beginning with a letter, digits and `-` permitted after it (`X-` extension names, §10).
 
 The header is followed by zero or more metadata lines:
 
@@ -137,7 +137,7 @@ The header is followed by zero or more metadata lines:
 KEY: value
 ```
 
-Metadata keys are uppercase ASCII with digits and `-` permitted. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line.
+Metadata keys are uppercase ASCII beginning with a letter, with digits and `-` permitted after it. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line; nor is `2FA: x`, which begins with a digit. The key is followed by a colon and a single space; the value is the rest of the line, with leading and trailing whitespace removed. `KEY: value` is the only well-formed metadata line: a sender MUST emit exactly one space, and a tab is not a separator, nor is nothing. A reader MAY accept a run of spaces and trim, as the reference implementation has since the protocol's first commit, so a message padded in transit is read rather than lost. That tolerance is a reader's robustness allowance, not a second way to write a metadata line, and a reader that rejects a run is equally conforming.
 
 Within the metadata block, a non-empty line that is neither a metadata line nor a section marker is invalid, and a validator MUST report it rather than ignore it. Silently discarding it would let a field the sender believed it was sending — including one §14 forbids — pass validation by being misspelled.
 
@@ -153,6 +153,8 @@ Section names use the same token syntax as metadata keys.
 The metadata block is the run of `KEY: value` lines before the first section marker. Once the first section marker appears, the metadata block is closed: every subsequent line — including a line that happens to look like `KEY: value` — belongs to the current section's body until the next section marker. Only a line consisting of a section name and a colon alone (`SECTION:`) starts a new section.
 
 A parser MUST preserve unknown metadata fields and unknown body sections. This permits backward-compatible extensions.
+
+A metadata key MUST NOT appear more than once in the metadata block. A repeated section marker resumes its section; a repeated key has no defined meaning, and a validator MUST reject it (§18) rather than let one occurrence hide another.
 
 ## 7. Common metadata
 
@@ -177,6 +179,8 @@ BROADCAST: true
 ```
 
 A direct `TO` is preferred when the peer address is known.
+
+`BROADCAST` takes the single value `true`. A message that does not broadcast omits the field; `BROADCAST: false` has no defined meaning, and a validator MUST reject a value other than `true` (§18) rather than read it as either absent or present.
 
 ### 7.2 Optional correlation fields
 
@@ -429,7 +433,10 @@ A GZCOORD/1 parser:
 - MUST validate the first line;
 - MUST preserve unknown metadata and sections;
 - MUST reject malformed `FROM` addresses;
+- MUST report a non-empty line in the metadata block that is neither a metadata line nor a section marker (§6);
 - MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
+- MUST reject a metadata key that appears more than once in the metadata block (§6);
+- MUST reject a `BROADCAST` value other than `true` (§7.1);
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown.
 

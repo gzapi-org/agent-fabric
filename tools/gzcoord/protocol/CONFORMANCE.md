@@ -7,12 +7,15 @@ A component may claim one or more conformance profiles.
 A conforming parser:
 
 - recognizes `[GZCOORD/1] TYPE`;
-- parses metadata and named sections;
+- parses metadata and named sections; MAY accept a run of spaces after `KEY:` and trim the value — an allowance, not a requirement; the well-formed separator is one space (§6);
 - validates logical addresses;
 - preserves unknown extension fields/sections;
 - accepts free-form roles;
 - rejects known transport/runtime fields when presented as core metadata;
+- reports a line in the metadata block that is neither metadata nor a section marker;
 - rejects a `REPLY-EXPECTED` value other than `yes` or `no`;
+- rejects a metadata key that appears more than once;
+- rejects a `BROADCAST` value other than `true`;
 - does not infer project authority from messages.
 
 ## Agent runtime

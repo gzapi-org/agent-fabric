@@ -7,10 +7,12 @@ MESSAGE-ID: mobile-0002
 SUBJECT: Passenger ETA response may lack route revision
 
 CONTEXT:
-The mobile client appears to need a route revision identifier to invalidate stale ETA data.
+The mobile client appears to need a route revision identifier to
+invalidate stale ETA data.
 
 REFERENCES:
 - path: contracts/passenger/eta.yaml
 
 REQUEST:
-Please verify whether the backend contract already exposes an equivalent value.
+Please verify whether the backend contract already exposes an equivalent
+value.

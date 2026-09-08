@@ -42,8 +42,10 @@ the talking.
    A message that fails validation is not sent.
 2. Print it in a fenced `text` block so the terminal shows it verbatim.
    Put nothing inside the block that is not part of the message.
-3. Keep lines at 72 characters or fewer. Terminal wrapping can re-break a
-   long line on copy, and a re-broken metadata line is no longer metadata.
+3. Keep lines at 72 terminal columns or fewer — characters, for ASCII;
+   wide scripts take two. Terminal wrapping can re-break a long line on
+   copy, and a re-broken metadata line is no longer metadata. The
+   validator warns, naming the line.
 4. Number every message you send: `MESSAGE-ID: <instance>-NNNN`, one
    sequence per sender across all recipients. The relay is lossy — one
    message in three failed to arrive on its first day — and it reorders:
@@ -51,16 +53,52 @@ the talking.
    made that legible. A gap at one recipient is not by itself evidence of
    loss: a directed message's number skips past ones addressed to other
    peers, and only the sender knows which.
+   **The sequence belongs to the address, not to the session.** The
+   address is derived from the working copy and outlives any one session
+   of it, so a session that starts counting at 0001 repeats numbers a
+   peer has already seen — observed the first day, four of them — and a
+   repeat defeats gap detection exactly as a gap does, while making
+   `IN-REPLY-TO` ambiguous. Take every number from
+   `node tools/gzcoord/scripts/gzmsg.mjs next-id --instance <instance>`,
+   which keeps the counter in the gitignored `.gzcoord/` beside the
+   working copy. A `HELLO` never resets it.
+
+   That a counter exists on disk is a **choice**, recorded here so it is
+   not undone as clutter: **every session owns a counter.** A session
+   owns exactly one working copy, the address is derived from that
+   working copy (SPEC §3.1), and the counter is the file in it — so the
+   session owns the counter through the clone it owns, no registry and
+   nothing shared between sessions of different clones. A later session
+   in the same clone is the same address, and continues the count: that
+   is the case observed. The relay was designed with no adapter state
+   ("Against the adapter contract", above), and this is not adapter
+   state: it is the sender's, the one thing a sender must remember
+   between sessions for its numbers to mean anything. Two alternatives
+   were weighed and rejected. Letting a `HELLO` reset the sequence, with
+   receivers tracking an epoch per peer, moves the bookkeeping to every
+   receiver and still leaves two messages with one id. Putting a session
+   epoch in the id (`<instance>-<session>-NNNN`) keeps ids unique but
+   makes a gap invisible across the boundary, which is the case a
+   restart most needs to expose. A file holding one integer is the
+   smallest thing that preserves both properties. Deleting the clone
+   deletes the address and its counter together, so nothing else has to
+   know.
 5. A printed message is not a delivered one. Expect no reply, block on
    nothing (`../protocol/SEMANTICS.md`), and when you act on something,
    say where by reference (`../protocol/MESSAGE-FORMAT.md`, "Acknowledging
    by reference").
 
 Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
-<host>/<instance> --role ... --project gzapp --message-id <instance>-0001`
-— so the person knows what this session declares. It is the first number
-in your sequence. Do not re-announce; there is no peer cache to refresh
-and no storm to guard against.
+<host>/<instance> --role ... --project gzapp --message-id "$(gzmsg.mjs
+next-id --instance <instance>)"` — so the person knows what this session
+declares. It is the next number in the address's sequence: 0001 only in
+the working copy's first session. Do not re-announce on seeing a peer's
+`HELLO`; there is no peer cache to refresh and no storm to guard against.
+Do re-announce
+when your role changes (SPEC §4) — a `/role` switch mid-session changes
+what `ROLE` this address answers for, and the person routing `TO-ROLE` is
+the cache that needs to hear it. `GOODBYE` is not needed: the person
+knows which sessions are running.
 
 ## Receiving
 
@@ -75,19 +113,43 @@ and no storm to guard against.
   two steps, then validate. First, strip leading whitespace from every
   line of the metadata block — the run up to and including the first
   section marker. That is never ambiguous: the grammar admits no indented
-  content there. Then, for everything after it, strip leading whitespace
-  only if the same whitespace begins every non-blank line; otherwise touch
-  nothing. Indentation inside a body is content — an indented `  YAML:` is
+  content there. That same fact makes the metadata block the place to
+  read the carrier's indentation off: the leading whitespace most of its
+  `KEY: value` lines share is what the paste added. Then, for everything
+  after the first marker, remove exactly that prefix from each line that
+  begins with it, and leave every other line alone. If the metadata block
+  carried no indentation, the paste added none, and no body line is
+  touched — the body's own indentation is never the source, because it
+  cannot tell the sender's indentation from the carrier's, and a clean
+  message whose only section was uniformly indented used to lose it.
+  Indentation inside a body is content — an indented `  YAML:` is
   body text by SPEC §6, and the only way a sender can write a
-  marker-shaped line as content — so never reclassify a body line by its
-  shape. A message that still fails after this (the one-space marker case
-  above does) is asked for again, not guessed at. Do not loosen the
-  parser.
+  marker-shaped line as content — and a uniform paste preserves it: the
+  sender's `  YAML:` arrives as `    YAML:`, loses the carrier's two, and
+  is body again, while a marker-shaped line at exactly the carrier's
+  prefix was written at column 0 and is the marker it looks like. Never
+  reclassify a body line by its shape. `gzmsg.mjs normalize <file>` does exactly these two steps and
+  prints the result; every recipient hand-rolled them on the first day,
+  and the paste is the same on every terminal, so the tool should be
+  too. Then run `gzmsg.mjs validate` on what it printed. A message that
+  fails is asked for
+  again, not guessed at. But the one-space marker case above does not
+  fail: the parser folds an indented marker into the previous section's
+  body and the message validates. The validator therefore warns —
+  `possible swallowed section marker` — naming any body line that is
+  marker-shaped up to whitespace, indented or with trailing whitespace;
+  on that warning, ask the sender whether it began a section rather than
+  trusting the merged body. Do not loosen the parser: the warning names
+  the line, the recipient decides. The same padding before the first
+  marker reads as an empty-valued key (`NOTES: ` is metadata), and the
+  validator warns about that too, beside the errors it causes.
 - Check the sender's `MESSAGE-ID` sequence. A gap means a message with
   that number did not reach you — which may be normal (addressed to
   someone else) rather than lost. Mention it under `NOT-VERIFIED` or
   `NOTES` and let the sender say which; never report a gap as a dropped
-  message.
+  message. A repeated number is a fault at the sender — a session that
+  restarted its count — and is worth an `OBSERVATION`, since every later
+  `IN-REPLY-TO` against that sender is ambiguous until it is fixed.
 - `TO-ROLE` was resolved by the person (SPEC §13): if you received it, you
   hold the role, or you are one of several who do. Reply with your own
   address in `FROM`.
@@ -97,6 +159,14 @@ and no storm to guard against.
 `FROM` is derived as SPEC §3.1 says: `<hostname -s>/<basename of the
 working copy>`. On this host that is the clone directory name, which is
 why clone directories are named for the role they hold.
+
+`ROLE` is the role's **title** in `.roles/taxonomy.json` (`runtime/README.md`,
+"Role sourcing") — `GZCoord protocol coordinator`, not the slug
+`gzcoord-coordinator`. Both are legal (SPEC §4), but the person resolves
+`TO-ROLE` against the string in the last `HELLO` they saw, so an address
+that announces the slug in one session and the title in the next stops
+matching the `TO-ROLE` its peers have been using. Observed the first day,
+on two addresses.
 
 ## Limits, stated plainly
 

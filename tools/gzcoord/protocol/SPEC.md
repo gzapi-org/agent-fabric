@@ -129,7 +129,7 @@ The first line is:
 [GZCOORD/1] <TYPE>
 ```
 
-`TYPE` MUST be uppercase ASCII.
+`TYPE` uses the token syntax of a metadata key: uppercase ASCII beginning with a letter, digits and `-` permitted after it (`X-` extension names, §10).
 
 The header is followed by zero or more metadata lines:
 
@@ -137,7 +137,7 @@ The header is followed by zero or more metadata lines:
 KEY: value
 ```
 
-Metadata keys are uppercase ASCII with digits and `-` permitted. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line.
+Metadata keys are uppercase ASCII beginning with a letter, with digits and `-` permitted after it. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line; nor is `2FA: x`, which begins with a digit. The key is followed by a colon and a single space; the value runs to the end of the line.
 
 Within the metadata block, a non-empty line that is neither a metadata line nor a section marker is invalid, and a validator MUST report it rather than ignore it. Silently discarding it would let a field the sender believed it was sending — including one §14 forbids — pass validation by being misspelled.
 
@@ -433,6 +433,7 @@ A GZCOORD/1 parser:
 - MUST validate the first line;
 - MUST preserve unknown metadata and sections;
 - MUST reject malformed `FROM` addresses;
+- MUST report a non-empty line in the metadata block that is neither a metadata line nor a section marker (§6);
 - MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
 - MUST reject a metadata key that appears more than once in the metadata block (§6);
 - MUST reject a `BROADCAST` value other than `true` (§7.1);

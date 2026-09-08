@@ -12,6 +12,7 @@ A conforming parser:
 - preserves unknown extension fields/sections;
 - accepts free-form roles;
 - rejects known transport/runtime fields when presented as core metadata;
+- reports a line in the metadata block that is neither metadata nor a section marker;
 - rejects a `REPLY-EXPECTED` value other than `yes` or `no`;
 - rejects a metadata key that appears more than once;
 - rejects a `BROADCAST` value other than `true`;

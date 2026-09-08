@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parse, validate, columns, nextId } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, normalize } from '../scripts/gzmsg.mjs';
 
 const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
@@ -323,4 +323,40 @@ test('next-id continues the address sequence across calls and processes', () => 
     fs.writeFileSync(`${dir}/gzapp.seq`, 'garbage\n');
     assert.throws(() => nextId('gzapp', dir), /does not hold a sequence number/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The relay indents on paste — every line by two, the first by one, a
+// single marker by a third — observed twice on the first day. normalize()
+// is the documented two-step rule: metadata block stripped
+// unconditionally, body stripped only of a uniform prefix, never a body
+// line reclassified by shape.
+test('normalize undoes paste indentation without reclassifying body text', () => {
+  const pasted = ' [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: Application Architect\n  PROJECT: gzapp\n  BROADCAST: true\n  \n  NOTES:\n  first\n   NOTES:\n  second\n  \n  REFERENCES:\n  - adr: ADR-001\n';
+  const text = normalize(pasted);
+  assert.match(text, /^\[GZCOORD\/1\] INFO\nFROM: /);
+  const result = validate(text);
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.message.sections.REFERENCES.includes('- adr: ADR-001'));
+  // The odd-one-out marker keeps its one extra space and is warned about, not promoted.
+  assert.ok(result.message.sections.NOTES.includes(' NOTES:'));
+  assert.ok(result.warnings.some(w => w.includes('swallowed section marker')));
+  // Non-uniform body indentation is content: nothing is stripped there.
+  const mixed = normalize('  [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: R\n  PROJECT: gzapp\n  BROADCAST: true\n\n  NOTES:\nflush\n  YAML:\n');
+  assert.ok(mixed.endsWith('NOTES:\nflush\n  YAML:\n'));
+  assert.equal(validate(mixed).message.sections.NOTES, 'flush\n  YAML:\n');
+  // Already-clean input is unchanged, and a message with no body is handled.
+  const clean = fs.readFileSync(new URL('../protocol/examples/review.txt', import.meta.url), 'utf8');
+  assert.equal(normalize(clean), clean);
+  assert.equal(normalize('  [GZCOORD/1] HELLO\n  FROM: a/b\n  ROLE: R\n  PROJECT: p\n'), '[GZCOORD/1] HELLO\nFROM: a/b\nROLE: R\nPROJECT: p\n');
+});
+
+test('normalize CLI prints the normalised message for validate to read', () => {
+  const file = new URL('./pasted.tmp.txt', import.meta.url);
+  fs.writeFileSync(file, '  [GZCOORD/1] HELLO\n  FROM: develop-gzapp/gzapp\n  ROLE: Tester\n  PROJECT: gzapp\n');
+  try {
+    const run = gzmsg('normalize', file.pathname);
+    assert.equal(run.status, 0);
+    assert.equal(run.stdout, '[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Tester\nPROJECT: gzapp\n');
+    assert.deepEqual(validate(run.stdout).errors, []);
+  } finally { fs.unlinkSync(file); }
 });

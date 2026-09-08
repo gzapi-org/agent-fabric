@@ -118,7 +118,11 @@ knows which sessions are running.
   nothing. Indentation inside a body is content — an indented `  YAML:` is
   body text by SPEC §6, and the only way a sender can write a
   marker-shaped line as content — so never reclassify a body line by its
-  shape. Then run `gzmsg.mjs validate`. A message that fails is asked for
+  shape. `gzmsg.mjs normalize <file>` does exactly these two steps and
+  prints the result; every recipient hand-rolled them on the first day,
+  and the paste is the same on every terminal, so the tool should be
+  too. Then run `gzmsg.mjs validate` on what it printed. A message that
+  fails is asked for
   again, not guessed at. But the one-space marker case above does not
   fail: the parser folds an indented marker into the previous section's
   body and the message validates. The validator therefore warns —

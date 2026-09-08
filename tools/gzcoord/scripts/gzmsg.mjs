@@ -133,6 +133,34 @@ export function validate(text) {
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 
+// Undo what a terminal copy does to a message, and nothing more
+// (docs/HUMAN-RELAY-TRANSPORT.md, "Receiving"). The metadata block — every
+// line up to and including the first section marker — is stripped of
+// leading whitespace unconditionally: the grammar admits no indented
+// content there, so the strip is never ambiguous. The body is stripped
+// only of a prefix that begins every non-blank line; otherwise it is left
+// alone, because indentation inside a body is content and the only way a
+// sender can write a marker-shaped line as text. A marker the paste
+// indented differently from its neighbours therefore survives as body,
+// where validate() warns about it — detection by tool, decision by the
+// recipient. This never reclassifies a body line by its shape.
+export function normalize(text) {
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const stripped = lines[i].replace(/^\s+/, '');
+    out.push(stripped);
+    if (/^[A-Z][A-Z0-9-]*:$/.test(stripped)) { i++; break; }
+  }
+  const body = lines.slice(i);
+  const nonBlank = body.filter(l => l.trim() !== '');
+  let prefix = nonBlank.length ? nonBlank[0].match(/^\s*/)[0] : '';
+  for (const l of nonBlank) while (prefix && !l.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  for (const l of body) out.push(l.startsWith(prefix) ? l.slice(prefix.length) : l);
+  return out.join('\n');
+}
+
 // The address is derived from the working copy and outlives any one
 // session of it, so the MESSAGE-ID sequence has to as well: a session that
 // restarted at 0001 repeated four numbers a peer had already seen, and a
@@ -179,12 +207,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
+  } else if (cmd === 'normalize') {
+    const file = process.argv[3];
+    if (!file) throw new Error('usage: gzmsg.mjs normalize <file>');
+    // Prints the normalised message; validate the output, not the paste.
+    process.stdout.write(normalize(fs.readFileSync(file, 'utf8')));
   } else if (cmd === 'next-id') {
     const instance = arg('instance');
     if (!instance) throw new Error('next-id requires --instance');
     console.log(nextId(instance, arg('state-dir') ?? '.gzcoord'));
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ... [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --role ... --project ... [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]');
     process.exit(2);
   }
 }

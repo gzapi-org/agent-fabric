@@ -215,3 +215,30 @@ test('BROADCAST: true routes on its own, and absent BROADCAST is not an error', 
   assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n`).errors, []);
   assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: develop-gzapp/web\n`).errors, []);
 });
+
+// Trailing whitespace is the other way a marker stops being one, and the
+// only way that is invisible in a terminal. Same warning, same rule: named,
+// never promoted.
+test('a marker-shaped body line with trailing whitespace warns instead of silently merging', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\nbody\nREFERENCES: \n- adr: ADR-001\n`;
+  const result = validate(text);
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some(w => w.includes('REFERENCES')));
+  assert.equal(result.message.sections.REFERENCES, undefined);
+  assert.ok(result.message.sections.NOTES.includes('- adr: ADR-001'));
+});
+
+test('an empty-valued metadata key warns, and the CLI prints the warning beside the errors', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\nNOTES: \nbody here\n`;
+  const result = validate(text);
+  assert.equal(result.ok, false);
+  assert.ok(result.warnings.some(w => w.startsWith('NOTES has an empty value')));
+  const file = new URL('./empty-value.tmp.txt', import.meta.url);
+  fs.writeFileSync(file, text);
+  try {
+    const run = gzmsg('validate', file.pathname);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /^warning: NOTES has an empty value/m);
+    assert.match(run.stderr, /unparsable line in the metadata block: body here/);
+  } finally { fs.unlinkSync(file); }
+});

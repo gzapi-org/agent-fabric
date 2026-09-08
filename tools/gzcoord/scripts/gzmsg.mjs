@@ -76,16 +76,24 @@ export function validate(text) {
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
-  // A body line that is indented AND marker-shaped is body text by SPEC §6 —
-  // the grammar admits no other reading — but it is also the exact shape a
-  // paste-indented section marker takes, and the message validates while the
+  // A body line that is marker-shaped up to whitespace — indented, or with
+  // trailing whitespace — is body text by SPEC §6, the grammar admits no
+  // other reading; but it is also the exact shape a paste-indented or
+  // editor-padded section marker takes, and the message validates while the
   // section silently folds into the one before it. Warn, naming the line, so
   // the recipient asks the sender: detection by tool, decision by the agent.
-  // Never reclassify it as a marker.
+  // Never reclassify it as a marker. (An exact marker never reaches a body,
+  // so every match here carries the whitespace that kept it from being one.)
   for (const [name, body] of Object.entries(msg.sections))
     for (const line of body.split('\n'))
-      if (/^\s+[A-Z][A-Z0-9-]*:\s*$/.test(line))
+      if (/^\s*[A-Z][A-Z0-9-]*:\s*$/.test(line))
         warnings.push(`possible swallowed section marker inside ${name}: ${JSON.stringify(line)}`);
+  // The same padding in the metadata block turns a marker into an
+  // empty-valued key: `NOTES: ` is metadata NOTES="", and the body that
+  // follows is then reported as unparsable — true, but not the fault.
+  for (const [key, value] of Object.entries(msg.metadata))
+    if (value === '')
+      warnings.push(`${key} has an empty value — a section marker with trailing whitespace reads as metadata`);
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 
@@ -100,8 +108,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const file = process.argv[3];
     if (!file) throw new Error('usage: gzmsg.mjs validate <file>');
     const result = validate(fs.readFileSync(file, 'utf8'));
-    if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
+    // Warnings print on both paths: on a failure they are often the cause
+    // the errors only describe from downstream.
     for (const w of result.warnings) console.error(`warning: ${w}`);
+    if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
     const from = arg('from'), role = arg('role'), project = arg('project');

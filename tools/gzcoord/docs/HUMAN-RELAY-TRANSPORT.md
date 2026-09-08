@@ -84,10 +84,13 @@ and no storm to guard against.
   again, not guessed at. But the one-space marker case above does not
   fail: the parser folds an indented marker into the previous section's
   body and the message validates. The validator therefore warns —
-  `possible swallowed section marker` — naming any indented marker-shaped
-  body line; on that warning, ask the sender whether it began a section
-  rather than trusting the merged body. Do not loosen the parser: the
-  warning names the line, the recipient decides.
+  `possible swallowed section marker` — naming any body line that is
+  marker-shaped up to whitespace, indented or with trailing whitespace;
+  on that warning, ask the sender whether it began a section rather than
+  trusting the merged body. Do not loosen the parser: the warning names
+  the line, the recipient decides. The same padding before the first
+  marker reads as an empty-valued key (`NOTES: ` is metadata), and the
+  validator warns about that too, beside the errors it causes.
 - Check the sender's `MESSAGE-ID` sequence. A gap means a message with
   that number did not reach you — which may be normal (addressed to
   someone else) rather than lost. Mention it under `NOT-VERIFIED` or

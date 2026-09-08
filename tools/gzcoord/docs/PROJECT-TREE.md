@@ -34,6 +34,7 @@ gzapp/
         │   ├── INSTALL-IN-GZAPP.md
         │   ├── PROJECT-TREE.md
         │   ├── TRANSPORT-ADAPTER-CONTRACT.md
+        │   ├── HUMAN-RELAY-TRANSPORT.md
         │   └── CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md
         ├── history/
         │   └── telegram-transport/     # retired, not instruction
@@ -44,8 +45,9 @@ gzapp/
         └── package.json
 ```
 
-There is no `adapters/` directory: no transport is selected. The interface a
-future adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
+There is no `adapters/` directory: the current transport is a human relay
+(`docs/HUMAN-RELAY-TRANSPORT.md`) and needs no adapter code. The interface an
+automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
 
 Local, not committed:
 
@@ -55,4 +57,4 @@ Local, not committed:
 ```
 
 Adapter credentials and state live outside the repository too, in whatever
-location the chosen transport needs — there is none at present.
+location the chosen transport needs — the human relay needs none.

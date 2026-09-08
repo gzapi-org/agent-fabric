@@ -9,7 +9,7 @@ This directory is intentionally embedded in the GZAPP repository under `tools/gz
 - **Git/GitHub** are authoritative for source, branches, commits, PRs, reviews, merges, conflicts, ADRs and history.
 - **Repository `CLAUDE.md`** governs how agents operate on the repository.
 - **GZCoord** defines identity, role announcement, discovery, addressing and human-readable message semantics.
-- **Transport adapters** deliver messages. **No transport is currently selected** — the first attempt is retired (`history/telegram-transport/`) and the protocol is inactive until a replacement is chosen. The interface an adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
+- **Transport adapters** deliver messages. **The current transport is a human relay** — a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). It carries real traffic until a purpose-built agent-to-agent transport replaces it; the first automated attempt is retired (`history/telegram-transport/`). The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
 - **Local runtime config** contains model/provider and subagent policy; those values are not sent in messages.
 
 ## Identity

@@ -45,7 +45,9 @@ subagents:
     architecture_decision: false
 
 transport:
-  # No transport is selected — GZCoord is inactive (see ../CLAUDE.md).
-  # The first attempt is retired in ../history/telegram-transport/.
-  adapter: none
+  # The human relay: a person copies messages between session terminals
+  # (../docs/HUMAN-RELAY-TRANSPORT.md). It has no credentials and no
+  # state. The first automated attempt is retired in
+  # ../history/telegram-transport/.
+  adapter: human-relay
   # Transport-specific credentials/mapping stay outside the protocol.

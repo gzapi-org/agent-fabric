@@ -21,5 +21,6 @@ role name independently of `.roles/taxonomy.json`; see
 Transport credentials and adapter state must also stay outside the project
 repository.
 
-No transport is currently selected and the protocol is inactive, so there is
-nothing to configure at step 4 — see [`../CLAUDE.md`](../CLAUDE.md).
+The current transport is the human relay ([`HUMAN-RELAY-TRANSPORT.md`](HUMAN-RELAY-TRANSPORT.md)):
+no credentials, no state directory, and nothing to configure at step 4
+beyond `adapter: human-relay` — see [`../CLAUDE.md`](../CLAUDE.md).

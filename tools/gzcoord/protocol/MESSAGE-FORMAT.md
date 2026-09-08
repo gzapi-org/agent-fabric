@@ -84,6 +84,47 @@ repository's rules, not by this protocol.
 
 `examples/observation-diagnosis.txt` is a complete example.
 
+## Acknowledging by reference
+
+A complete diagnosis does not stop its sender from acting on it. Unless
+the sender hears that someone else has, the natural next step is to do
+the work itself — and two instances then do the same job, with a merge
+conflict as the only signal between them.
+
+When a recipient starts acting on an `OBSERVATION`, `REVIEW` or
+`REQUEST`, it SHOULD send a `REPLY` carrying `IN-REPLY-TO` and a
+`REFERENCES` entry naming the branch or pull request where the work is
+happening:
+
+```text
+[GZCOORD/1] REPLY
+FROM: develop-gzapp/web
+ROLE: Web Engineer
+TO: develop-gzapp/gzapp
+TO-ROLE: Application Architect
+PROJECT: gzapp
+IN-REPLY-TO: obs-2026-09-08-strict
+SUBJECT: Acting on strict mode in my working copy
+
+REFERENCES:
+- branch: develop-gzapp/web/fix/ts-strict-all-apps
+
+NOTES:
+Enabling strict in all four apps. Six real errors in admin_web; fixing
+them.
+```
+
+This is descriptive context (SPEC.md §7.3) and means exactly what it
+says: this is where the work is. It does not reserve the finding, own
+the branch or block anyone — SEMANTICS.md lists what a message never
+does, and this `REPLY` is no exception. Two instances MAY both send one;
+the second reads the first and decides for itself. A sender that
+receives one MAY take it as reason not to duplicate the work. If none
+arrives, nothing is blocked and the sender proceeds as it would have
+anyway.
+
+`examples/reply.txt` is the same message as a file.
+
 ## Avoid protocol clutter
 
 Do not expose runtime trivia:

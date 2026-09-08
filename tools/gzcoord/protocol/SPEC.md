@@ -302,6 +302,7 @@ The `REFERENCES` section SHOULD use one item per line:
 REFERENCES:
 - path: contracts/passenger/journey.yaml
 - commit: 1a2b3c4
+- branch: feature/stop-resolution
 - github-pr: #184
 - github-issue: #219
 - adr: ADR-057

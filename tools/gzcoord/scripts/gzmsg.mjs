@@ -53,6 +53,7 @@ export function parse(text) {
 export function validate(text) {
   const msg = parse(text);
   const errors = [];
+  const warnings = [];
   if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(`unknown type: ${msg.type}`);
   for (const key of ['FROM','ROLE','PROJECT']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
   if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');
@@ -64,7 +65,17 @@ export function validate(text) {
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
-  return { ok: errors.length === 0, errors, message: msg };
+  // A body line that is indented AND marker-shaped is body text by SPEC §6 —
+  // the grammar admits no other reading — but it is also the exact shape a
+  // paste-indented section marker takes, and the message validates while the
+  // section silently folds into the one before it. Warn, naming the line, so
+  // the recipient asks the sender: detection by tool, decision by the agent.
+  // Never reclassify it as a marker.
+  for (const [name, body] of Object.entries(msg.sections))
+    for (const line of body.split('\n'))
+      if (/^\s+[A-Z][A-Z0-9-]*:\s*$/.test(line))
+        warnings.push(`possible swallowed section marker inside ${name}: ${JSON.stringify(line)}`);
+  return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 
 function arg(name) {
@@ -79,6 +90,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!file) throw new Error('usage: gzmsg.mjs validate <file>');
     const result = validate(fs.readFileSync(file, 'utf8'));
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
+    for (const w of result.warnings) console.error(`warning: ${w}`);
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
     const from = arg('from'), role = arg('role'), project = arg('project');

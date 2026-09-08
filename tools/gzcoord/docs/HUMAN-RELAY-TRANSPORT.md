@@ -80,9 +80,14 @@ and no storm to guard against.
   nothing. Indentation inside a body is content — an indented `  YAML:` is
   body text by SPEC §6, and the only way a sender can write a
   marker-shaped line as content — so never reclassify a body line by its
-  shape. A message that still fails after this (the one-space marker case
-  above does) is asked for again, not guessed at. Do not loosen the
-  parser.
+  shape. Then run `gzmsg.mjs validate`. A message that fails is asked for
+  again, not guessed at. But the one-space marker case above does not
+  fail: the parser folds an indented marker into the previous section's
+  body and the message validates. The validator therefore warns —
+  `possible swallowed section marker` — naming any indented marker-shaped
+  body line; on that warning, ask the sender whether it began a section
+  rather than trusting the merged body. Do not loosen the parser: the
+  warning names the line, the recipient decides.
 - Check the sender's `MESSAGE-ID` sequence. A gap means a message with
   that number did not reach you — which may be normal (addressed to
   someone else) rather than lost. Mention it under `NOT-VERIFIED` or

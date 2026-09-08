@@ -11,7 +11,9 @@ const gzmsg = (...args) =>
 for (const name of ['hello','observation','observation-diagnosis','reply','review']) {
   test(`${name} example is valid`, () => {
     const text = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');
-    assert.deepEqual(validate(text).errors, []);
+    const result = validate(text);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.warnings, []);
   });
 }
 
@@ -154,4 +156,17 @@ test('a message with no duplicated key reports none', () => {
   const result = validate(text);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.message.duplicateKeys, []);
+});
+
+// A relay-indented marker is body text by §6 and the message validates, so
+// the "ask for a re-send on failure" rule never fires. The validator warns
+// instead of failing — content may legitimately look like this — and never
+// promotes the line to a marker.
+test('an indented marker-shaped body line warns instead of silently merging', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\n  first body line\n REFERENCES:\n  - path: contracts/passenger/eta.yaml\n`;
+  const result = validate(text);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.warnings.some(w => w.includes('REFERENCES')));
+  assert.equal(result.message.sections.REFERENCES, undefined);
 });

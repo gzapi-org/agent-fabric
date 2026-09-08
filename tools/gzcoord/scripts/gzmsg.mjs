@@ -11,26 +11,40 @@ const FORBIDDEN = new Set([
 ]);
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
-// Terminal columns a line occupies, approximated without a wcwidth table:
-// CJK scripts and emoji-presentation characters are 2, combining and
-// format characters 0, a tab advances to the next multiple of 8,
-// everything else 1. Emoji_Presentation, not Extended_Pictographic: the
-// latter includes text-default symbols (©, ™, ↔, ❤) that render in one
-// column. A regional indicator is 1 so that a flag pair (two of them) is
-// 2. Reproduces `wc -L` on the probes in the test; known to count narrow
-// the wide punctuation and fullwidth forms that are Script=Common
-// (U+3001, U+FF21, U+3000), and to count East Asian Ambiguous characters
-// (§, —) and VS16-forced emoji (❤️) as 1, which only the reader's
-// terminal can decide — `wc -L` says 1 for both.
-const WIDE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Emoji_Presentation}/u;
+// Terminal columns a line occupies. ECMAScript regexes cannot express
+// East_Asian_Width, so wide is the wcwidth range table (Wide and
+// Fullwidth, halfwidth forms excluded — Script=Katakana would have
+// counted the halfwidth block U+FF66–FF9D as 2, a false warning) plus
+// emoji-presentation characters; combining and format characters are 0;
+// a tab advances to the next multiple of 8; everything else is 1.
+// Emoji_Presentation, not Extended_Pictographic: the latter includes
+// text-default symbols (©, ™, ↔, ❤) that render in one column. A regional
+// indicator is 1 so that a flag pair (two of them) is 2. Reproduces
+// `wc -L` on the probes in the test. East Asian Ambiguous characters
+// (§, —, U+3248–324F) and VS16-forced emoji (❤️) count 1, which only the
+// reader's terminal can decide — `wc -L` says 1 for both.
+const WIDE_RANGES = [
+  [0x1100, 0x115F], [0x2329, 0x232A], [0x2E80, 0x303E], [0x3041, 0x33FF],
+  [0x3400, 0x4DBF], [0x4DC0, 0x4DFF], [0x4E00, 0x9FFF], [0xA000, 0xA4CF],
+  [0xA960, 0xA97C], [0xAC00, 0xD7A3], [0xF900, 0xFAFF], [0xFE10, 0xFE19],
+  [0xFE30, 0xFE4F], [0xFE50, 0xFE6B], [0xFF00, 0xFF60], [0xFFE0, 0xFFE6],
+  [0x16FE0, 0x16FE4], [0x16FF0, 0x16FF1], [0x17000, 0x18D08], [0x1AFF0, 0x1AFFE],
+  [0x1B000, 0x1B2FB], [0x1D300, 0x1D376], [0x1F200, 0x1F26F],
+  [0x20000, 0x2FFFD], [0x30000, 0x3FFFD],
+];
+const EMOJI = /\p{Emoji_Presentation}/u;
 const REGIONAL_INDICATOR = /\p{RI}/u;
 const ZERO = /\p{Mn}|\p{Me}|\p{Cf}/u;
+function isWide(ch) {
+  const cp = ch.codePointAt(0);
+  return WIDE_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi) || (EMOJI.test(ch) && !REGIONAL_INDICATOR.test(ch));
+}
 export function columns(line) {
   let w = 0;
   for (const ch of line) {
     if (ch === '\t') { w += 8 - (w % 8); continue; }
     if (ZERO.test(ch)) continue;
-    w += WIDE.test(ch) && !REGIONAL_INDICATOR.test(ch) ? 2 : 1;
+    w += isWide(ch) ? 2 : 1;
   }
   return w;
 }

@@ -29,9 +29,26 @@
 # far. The empty-ME branch below is belt-and-braces for a future
 # --repo flag, not a path you can reach today.)
 #
+# /unattributed IS THE THIRD SCOPE, and it exists because the other two
+# cannot reach these rows. A branch that does not parse — dependabot's,
+# a pre-convention `feat/x`, whatever /install-github-app names its own
+# — belongs to no session, so every scoped run drops it and /all merely
+# stops filtering rather than selecting it. The count in the NOTE said
+# how many were hidden and no invocation could list them, which is a
+# backlog nothing surfaces: four such PRs sat on seven unresolved P1/P2
+# threads for a month, invisible to every session's sweep because no
+# session owned them. Scope to them directly and they are answerable.
+#
+# The pairing that matters is `/unattributed /unresolved`: scope is
+# applied BEFORE the thread lookup's candidate slice, so narrowing to
+# the unowned rows first is also what gets their threads queried at all
+# — under /all they compete for the same 100 slots as every recent PR
+# and lose, being by definition the older ones.
+#
 # Usage:
 #   tools/gh/pr-sessions.sh                 # THIS clone's PRs (default)
 #   tools/gh/pr-sessions.sh /all            # every session
+#   tools/gh/pr-sessions.sh /unattributed   # only PRs no session owns
 #   tools/gh/pr-sessions.sh -n 50           # last 50 rows
 #   tools/gh/pr-sessions.sh /OPEN           # open PRs only
 #   tools/gh/pr-sessions.sh /MERGED         # merged only  (/CLOSED too)
@@ -42,6 +59,7 @@
 #   tools/gh/pr-sessions.sh /lastDate:6h /unresolved   # ...then filter
 #   tools/gh/pr-sessions.sh /unresolved     # only PRs with an open thread
 #   tools/gh/pr-sessions.sh /all /unresolved # ...across every session
+#   tools/gh/pr-sessions.sh /unattributed /unresolved  # ...owed by nobody
 #
 # State is chosen at FETCH time, so like /lastItem and /lastDate it
 # narrows the pool before scope, /unresolved and -n ever see it.
@@ -82,6 +100,7 @@ LAST_ITEM=""; LAST_ITEM_SET=0     # /lastItem:N  — pool = N most recent PRs
 LAST_DATE=""; LAST_DATE_SET=0     # /lastDate:Nd — pool = updated within window
 CUTOFF=""                         # LAST_DATE resolved to an ISO instant
 SCOPE_EXPLICIT=0    # did the caller choose a scope, overriding the default?
+SCOPE_SET=""        # which flag chose it, so a conflict can be named
 
 # gh takes ONE --state. Two conflicting flags would otherwise resolve
 # to whichever came last, quietly showing a different set than asked.
@@ -91,6 +110,19 @@ set_state() {
         exit 2
     fi
     STATE="$1"; STATE_SET="$2"
+}
+
+# Two scope flags resolved LAST-WINS in silence, so `/unattributed /all`
+# quietly printed every PR and `/all /unattributed` quietly printed only
+# the unowned ones — the same "a mistyped filter must not render as no
+# filter" hazard the header argues about, reached with two valid flags.
+# Conflicting STATE flags are already refused; scope now matches.
+set_scope() {
+    if [[ "$SCOPE_EXPLICIT" -eq 1 && "$FILTER" != "$1" ]]; then
+        echo "pr-sessions: $SCOPE_SET and $2 are different scopes — pick one." >&2
+        exit 2
+    fi
+    FILTER="$1"; SCOPE_SET="$2"; SCOPE_EXPLICIT=1
 }
 
 # A flag that takes a value must HAVE one. Without this, `-n` as the
@@ -109,9 +141,11 @@ while [[ $# -gt 0 ]]; do
         /OPEN|/open|--open)       set_state open   "$1"; shift ;;
         /MERGED|/merged|--merged) set_state merged "$1"; shift ;;
         /CLOSED|/closed|--closed) set_state closed "$1"; shift ;;
-        /all|--all)   FILTER=""; SCOPE_EXPLICIT=1; shift ;;
-        --mine)       FILTER="__MINE__"; SCOPE_EXPLICIT=1; shift ;;
-        --session)    need_operand "$@"; FILTER="$2"; SCOPE_EXPLICIT=1; shift 2 ;;
+        /all|--all)   set_scope ""                "$1"; shift ;;
+        --mine)       set_scope "__MINE__"        "$1"; shift ;;
+        /unattributed|--unattributed)
+                      set_scope "__UNATTRIBUTED__" "$1"; shift ;;
+        --session)    need_operand "$@"; set_scope "$2" "$1 $2"; shift 2 ;;
         --by-session) GROUPED=1; shift ;;
         --no-threads) THREADS=0; shift ;;
         /unresolved|--unresolved) UNRESOLVED_ONLY=1; shift ;;
@@ -142,6 +176,20 @@ if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 # Validated whenever the flag was PASSED, not merely when non-empty.
+# `--session unconventional` ALREADY selected exactly these rows, because
+# the session string is the literal "(unconventional)" and --session is a
+# regex match. It simply did so while printing the omission NOTE above the
+# rows it had just listed, and the "others belong to parallel sessions"
+# footer. Normalising it to the sentinel makes one scope with one set of
+# messages, rather than two routes that disagree about what they showed.
+# Only an exact word is normalised: a broad pattern like `.` matches
+# "(unconventional)" too, and silently redirecting that would be the
+# last-wins hazard set_scope just closed.
+case "$FILTER" in
+    unconventional|UNCONVENTIONAL|"(unconventional)"|Unconventional)
+        FILTER="__UNATTRIBUTED__" ;;
+esac
+
 if [[ "$LAST_ITEM_SET" -eq 1 ]]; then
     [[ "$LAST_ITEM" =~ ^[1-9][0-9]*$ ]] || {
         echo "pr-sessions: /lastItem needs a positive integer, got '$LAST_ITEM'." >&2; exit 2; }
@@ -226,6 +274,17 @@ fi
 CANDIDATES="$LIMIT"
 if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
     CANDIDATES=100
+    # AN EXPLICIT /lastItem IS A REQUEST, NOT A SUGGESTION.
+    #
+    # The 100 exists to keep the aliased GraphQL query one sane request
+    # when nobody has said how far to look. But it was applied as the
+    # final slice, AFTER /lastItem had already narrowed the pool — so
+    # `/all /lastItem:150 /unresolved` quietly queried the newest 100 and
+    # never asked about rows 101-150. The caller had named a number and
+    # got a different one, with nothing said.
+    if (( ${LAST_ITEM:-0} > CANDIDATES )); then
+        CANDIDATES="$LAST_ITEM"
+    fi
     (( CANDIDATES > FETCH )) && CANDIDATES="$FETCH"
 fi
 
@@ -257,21 +316,58 @@ fi
 # segments alone reported `dependabot/nuget/apps/backend_dotnet/…` as a
 # session called "dependabot/nuget", and the footer then told you that
 # apparent owner was a parallel session to stay out of the way of. The
-# type segment is what separates the two populations, so it is matched
-# against the set this repo actually uses.
+# separator is therefore a deny-list of automation vendors, not an
+# allow-list of type words — see `conventional` below for why the
+# asymmetry is deliberate.
+# Rows whose branch does not parse as <host>/<clone>/<type>/<desc>
+# cannot be attributed to a session, so any scope filter removes them.
+# COUNTED, because removing them silently is how a listing looks
+# complete when it is not — the answer a reader acts on is the one that
+# says "nothing outstanding".
 #
-# The cost of the list is that a branch typed something new reads as
-# unconventional until the type is added here. That is the direction to
-# fail in: a visible unknown invites a look, a confident wrong owner
-# does not.
-selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
+# Counted in the SAME pass that builds the rows, and from what is left
+# after /lastDate and /lastItem have narrowed the pool. A separate pass
+# over the unnarrowed rows would announce PRs the caller never asked
+# about: `/lastItem:1` would name an unscopable PR that was outside the
+# one-item pool and had therefore not been omitted by anything. Sharing
+# the pipeline is what keeps the two answers about the same set by
+# construction, rather than by two pipelines happening to agree.
+envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
-  def types: ["feat","fix","docs","chore","ci","test","refactor","perf",
-              "build","style","contracts","i18n","spike"];
+  # Automation vendors, whose branch names also have four or more
+  # segments. A DENY-list is right here and an allow-list was wrong: the
+  # asymmetry is the point. The set of bots that open PRs on a
+  # repository is small, known, and changes rarely, while the set of
+  # legitimate <type> words is open-ended — and every omission from an
+  # allow-list silently deletes real work from this listing.
+  def bots: ["dependabot","renovate","github-actions","weblate","imgbot",
+             "allcontributors","pre-commit-ci","snyk-bot"];
+  # STRUCTURAL, not an allow-list of type words.
+  #
+  # CLAUDE.md specifies <host>/<clone>/<type>/<short-desc> and puts no
+  # vocabulary on <type>. This function used to require one of thirteen
+  # conventional-commit words, so any branch typed outside that set —
+  # `spike-3/`, `hotfix/`, `stage-4/` — was classified unconventional,
+  # given the session "(unconventional)", and then SILENTLY DROPPED by
+  # the default clone scope. That is the command whose whole job is
+  # surfacing outstanding work quietly answering "none".
+  #
+  # A branch is conventional if it has the right SHAPE. Anything that
+  # parses as a type token counts, because the session is $p[0]/$p[1]
+  # either way and that is all the scoping needs.
   def conventional:
     (.headRefName | split("/")) as $p
-    | ($p | length) >= 4 and (types | index($p[2]) != null);
+    | ($p | length) >= 4
+      and ($p[0] | length) > 0
+      and ($p[1] | length) > 0
+      and (bots | index($p[0]) == null);
+  # Deliberately NO test on $p[2]. It required thirteen conventional-commit
+  # words once, then a lowercase shape; both guess at an open-ended set
+  # CLAUDE.md never constrains. pr-reply.sh shares this predicate to decide
+  # whether it may WRITE to a PR, and there a wrong "not a session" means
+  # posting to a PR owned by another session — so the two agree on the
+  # SPECIFIED shape and nothing more.
   def session:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
@@ -291,10 +387,27 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
   # POOL FIRST: /lastDate then /lastItem, before scope or anything else.
   | ( if $cutoff != "" then map(select(.updatedAt >= $cutoff)) else . end )
   | ( if $lastitem > 0 then .[:$lastitem] else . end )
-  | ( if $filter == "__MINE__" then map(select(._s == $me))
-      elif $filter != "" then map(select(._s | test($filter; "i")))
-      else . end )
-  | sort_by(-.number) | .[:$limit]
+  # The pool is now fixed, so both answers below describe the same set.
+  | . as $pool
+  | { # Nothing is dropped by scope when there is no scope, so /all
+      # reports zero rather than a number no filter ever acted on.
+      #
+      # /unattributed reports zero for the opposite reason: these rows
+      # are the listing, not what the listing left out. Counting them
+      # here would print "N PR(s) ... are not listed" directly above the
+      # N rows — a disclosure contradicting the page it sits under, and
+      # the one scope where the omission it warns of cannot happen.
+      unattributed:
+        (if $filter == "" or $filter == "__UNATTRIBUTED__" then 0
+         else ([$pool[] | select(._s == "(unconventional)")] | length) end),
+      rows:
+        ($pool
+         | ( if $filter == "__MINE__" then map(select(._s == $me))
+             elif $filter == "__UNATTRIBUTED__" then
+                    map(select(._s == "(unconventional)"))
+             elif $filter != "" then map(select(._s | test($filter; "i")))
+             else . end )
+         | sort_by(-.number) | .[:$limit]) }
 ')" || {
     # `--session '['` kills jq on the regex, and the unchecked command
     # substitution then left `selected` empty — which the block below
@@ -305,13 +418,34 @@ selected="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
     exit 2
 }
 
+selected="$(printf '%s' "$envelope" | jq '.rows')"
+UNATTRIBUTED="$(printf '%s' "$envelope" | jq '.unattributed')"
+
+# Say it on EVERY exit path, not only the one that prints a table.
+#
+# A disclosure that lives in the footer alone is missing from the two
+# paths that exit early — no rows at all, and /unresolved finding no
+# known open threads. Those print a reassuring "no PRs" and are exactly
+# the answers a reader acts on, so the silence would fall precisely
+# where it costs most.
+unattributed_note() {
+    [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
+    echo "  NOTE: $UNATTRIBUTED PR(s) have a branch that does not parse as" >&2
+    echo "  <host>/<clone>/<type>/<short-desc>, so they cannot be scoped to a" >&2
+    echo "  session and are not listed. Pass /unattributed to list exactly" >&2
+    echo "  those, or /all to stop filtering." >&2
+}
+
 if [[ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]]; then
     what="PRs"
     [[ "$FILTER" == "__MINE__" ]] && what="PRs for this clone ($ME)"
-    [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && what="PRs for a session matching '$FILTER'"
+    [[ "$FILTER" == "__UNATTRIBUTED__" ]] && what="PRs without a parsable session branch"
+    [[ -n "$FILTER" && "$FILTER" != "__MINE__" && "$FILTER" != "__UNATTRIBUTED__" ]] && \
+        what="PRs for a session matching '$FILTER'"
     echo "pr-sessions: no $what in the last $FETCH ${STATE} PR(s)."
     [[ "$DEFAULTED_TO_MINE" -eq 1 ]] && \
         echo "  (scoped to this clone by default — pass /all to see every session)"
+    unattributed_note
     exit 0
 fi
 
@@ -436,17 +570,42 @@ fi
 if [[ -z "${out//[$' \t\n']/}" ]]; then
     scope="this clone ($ME)"
     [[ "$FILTER" == "" ]] && scope="any session"
-    [[ -n "$FILTER" && "$FILTER" != "__MINE__" ]] && scope="sessions matching '$FILTER'"
+    [[ "$FILTER" == "__UNATTRIBUTED__" ]] && scope="branches no session owns"
+    [[ -n "$FILTER" && "$FILTER" != "__MINE__" && "$FILTER" != "__UNATTRIBUTED__" ]] && \
+        scope="sessions matching '$FILTER'"
     echo "pr-sessions: no PRs with unresolved review threads for $scope"
     echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)"
+    unattributed_note
     exit 0
 fi
 
 printf '%s\n' "$out"
 
+# SAY WHAT WAS ACTUALLY CHECKED, not only when the answer is empty.
+#
+# This footer used to print on the empty branch alone, so a run that
+# found something in the newest $CANDIDATES looked complete while rows
+# beyond that were never queried. "Nothing outstanding" and "nothing
+# outstanding in the part I looked at" are different answers, and only
+# one of them was ever qualified. stderr, so a piped caller's data is
+# unchanged.
+if [[ "$UNRESOLVED_ONLY" -eq 1 ]]; then
+    echo "  (checked the newest $CANDIDATES of the last $FETCH ${STATE} PRs)" >&2
+fi
+unattributed_note
+
 echo
 if [[ "$DEFAULTED_TO_MINE" -eq 1 ]]; then
     echo "  Scoped to this clone ($ME) — pass /all for every session."
+elif [[ "$FILTER" == "__UNATTRIBUTED__" ]]; then
+    # The "*" legend would be a lie here: no row under this scope can be
+    # this clone's, because every one of them failed to parse as any
+    # session at all. Saying who these belong to instead is the useful
+    # sentence, since "leave other sessions' PRs alone" is precisely the
+    # rule that does NOT apply and has kept these unanswered.
+    echo "  These branches parse as no session, so the stay-in-your-lane rule"
+    echo "  has no owner to point at — findings here are unowned, not somebody"
+    echo "  else's. Check with the surface's role before acting on the code."
 elif [[ "$GROUPED" -eq 0 ]]; then
     echo "  * = this clone ($ME).  Others belong to parallel sessions:"
     echo "  do not push to, rebase, delete, or answer reviews on their branches."

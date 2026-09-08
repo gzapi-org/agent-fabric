@@ -1,0 +1,190 @@
+#!/bin/bash
+# moveto — open a shell as another role account, in its working clone.
+#
+# Sudo on this host is granted through the `qubes` group, which the role
+# accounts are NOT in. So this works FROM an account with sudo (`user`)
+# TO a role account, and not the other way: `exit` is the way back.
+#
+# A process cannot change its parent's user or directory, so this spawns a
+# new shell rather than moving the one you typed in.
+
+set -euo pipefail
+
+PROJECTS_SUBDIR="projects"
+MOVETO_ENTER="/usr/local/share/moveto/enter"
+print_only=0
+
+die() { printf 'moveto: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+    cat <<'USAGE'
+usage: moveto <account> [clone]     open a shell as <account>, in its clone
+
+The layout is `~/projects/<account>` — architect-cto-01 is the template. Name
+a clone explicitly when an account holds more than one.
+       moveto <account> --print     print the resolved path, spawn nothing
+       moveto --list                accounts that have at least one clone
+       moveto <account> --list      that account's clones
+
+Sudo here comes from the `qubes` group and role accounts are not in it, so
+this runs from an account that has sudo (`user`). From a role account, `exit`
+returns to the shell you came from.
+USAGE
+}
+
+home_of() { getent passwd "$1" 2>/dev/null | cut -d: -f6; }
+
+# Run a command as an account. The target's own privileges are what is needed
+# to read the target's home — not root's — so this binds the tool to
+# run-as-target sudo rather than to full root, and a symlink planted in a
+# target-writable ~/projects is followed as that account, not as root.
+run_as() {
+    local u="$1"; shift
+    if [[ "$u" == "$(id -un)" ]]; then
+        "$@"
+    else
+        sudo -n -u "$u" "$@"
+    fi
+}
+
+# Names reach the caller's terminal — via --list, the ambiguity listing, and
+# the title — from an account the caller is not yet running as. A filename may
+# contain any byte but / and NUL, so ESC is legal, and an OSC string closed
+# early by an embedded BEL leaves the rest to be parsed as terminal input.
+# Strip control characters at every point a name is DISPLAYED. Path use keeps
+# the raw name. /etc/profile.d/vte.sh does the same to $PWD, for this reason.
+display_safe() { printf '%s' "${1//[[:cntrl:]]/}"; }
+
+# Enumerate an account's clones into CLONES. A glob rather than `ls`: names may
+# contain spaces and newlines, and a newline through a pipe cannot be told from
+# a separator. Sets CLONES_STATE to why the list is empty, because "never
+# provisioned", "cannot read" and "no clone yet" need different answers.
+CLONES=()
+CLONES_STATE=""
+list_clones() {
+    local acct="$1" home projects entry
+    home=$(home_of "$acct")
+    CLONES=(); CLONES_STATE=""
+    if [[ -z "$home" ]]; then CLONES_STATE="no-account"; return 1; fi
+    projects="$home/$PROJECTS_SUBDIR"
+
+    if ! run_as "$acct" test -e "$projects" 2>/dev/null; then
+        CLONES_STATE="no-projects-dir"; return 0
+    fi
+    while IFS= read -r -d '' entry; do
+        CLONES+=("${entry##*/}")
+    done < <(run_as "$acct" find "$projects" -mindepth 1 -maxdepth 1 ! -name '.*' -print0 2>/dev/null \
+             | sort -z)
+    [[ ${#CLONES[@]} -eq 0 ]] && CLONES_STATE="empty"
+    return 0
+}
+
+# The window title is the ROLE INSTANCE — the account — because that is what
+# names a session here. An account holding several clones is the exception:
+# its own name cannot tell two of them apart, so the clone name is used.
+title_for() {
+    local dir="$1" acct="$2"
+    if [[ ${#CLONES[@]} -gt 1 ]]; then
+        display_safe "${dir##*/}"
+    else
+        display_safe "$acct"
+    fi
+}
+
+[[ $# -ge 1 ]] || { usage; exit 0; }
+
+case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --list)
+        for u in $(getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1}' | sort); do
+            list_clones "$u" || continue
+            [[ ${#CLONES[@]} -gt 0 ]] || continue
+            line=""
+            for c in "${CLONES[@]}"; do line+="$(display_safe "$c") "; done
+            printf '%-24s %s\n' "$u" "${line% }"
+        done
+        exit 0 ;;
+esac
+
+account="$1"; shift
+target=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --print) print_only=1; shift ;;
+        --list)  list_clones "$account" || die "no such account: $account"
+                 for c in "${CLONES[@]}"; do display_safe "$c"; printf '\n'; done
+                 exit 0 ;;
+        -*)      die "unknown option '$1' (try --help)" ;;
+        *)       [[ -z "$target" ]] || die "one clone at a time"
+                 # A single path segment. Without this, `moveto acct ../../etc`
+                 # resolves and lands you outside ~/projects entirely.
+                 case "$1" in
+                     */*|.|..) die "clone must be a single name under ~/projects, not a path: $1" ;;
+                 esac
+                 target="$1"; shift ;;
+    esac
+done
+
+getent passwd "$account" >/dev/null 2>&1 || die "no such account: $account"
+
+if [[ "$account" != "$(id -un)" ]]; then
+    sudo -n -u "$account" true 2>/dev/null \
+        || die "cannot become '$account' without a password. Role accounts are not in the \`qubes\` group and have no sudo; run this from an account that does."
+fi
+
+home=$(home_of "$account")
+projects="$home/$PROJECTS_SUBDIR"
+list_clones "$account"
+
+# Exact comparison over elements. A substring test against "${CLONES[*]}" —
+# which joins with spaces — matches a single entry like "acct backup" as though
+# a clone named "acct" existed, then dies pointing at a path nobody created.
+template_clone=""
+for c in "${CLONES[@]}"; do
+    [[ "$c" == "$account" ]] && { template_clone="$c"; break; }
+done
+
+if [[ -n "$target" ]]; then
+    dir="$projects/$target"
+elif [[ -n "$template_clone" ]]; then
+    dir="$projects/$template_clone"
+elif [[ ${#CLONES[@]} -eq 1 ]]; then
+    dir="$projects/${CLONES[0]}"
+elif [[ ${#CLONES[@]} -eq 0 ]]; then
+    case "$CLONES_STATE" in
+        no-projects-dir) die "$account has no $PROJECTS_SUBDIR directory — not provisioned yet. See .roles/PROVISIONING.md." ;;
+        *)               die "$account has no clone yet: $projects is empty. The layout is \`~/projects/<account>\`, as on architect-cto-01." ;;
+    esac
+else
+    printf 'moveto: %s has %d clones; name one:\n' "$account" "${#CLONES[@]}" >&2
+    for c in "${CLONES[@]}"; do printf '  %s\n' "$(display_safe "$c")" >&2; done
+    exit 1
+fi
+
+# Verify as the target user: root can stat what the target may not, and the
+# reverse is the failure that would strand you in a shell with no cwd.
+run_as "$account" test -d "$dir" 2>/dev/null \
+    || die "no such directory for $account: $(display_safe "$dir")"
+
+title=$(title_for "$dir" "$account")
+
+if [[ $print_only -eq 1 ]]; then
+    printf '%s\n' "$(display_safe "$dir")"
+    printf 'title: %s\n' "$title"
+    exit 0
+fi
+
+printf 'moveto: %s in %s  (exit returns here)\n' "$account" "$dir" >&2
+
+# The title travels as an argument, not an export: sudo resets the
+# environment, so an exported value would not cross the boundary.
+#
+# The entering shell is a separate script rather than an inline `bash -lc`,
+# so the process command line stays short. A terminal that titles from the
+# running command showed the whole inline script otherwise.
+if [[ "$account" == "$(id -un)" ]]; then
+    exec "$MOVETO_ENTER" "$dir" "$title"
+fi
+
+exec sudo -n -u "$account" -H "$MOVETO_ENTER" "$dir" "$title"

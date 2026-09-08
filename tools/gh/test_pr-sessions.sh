@@ -68,6 +68,16 @@ set -uo pipefail
 case "${1:-}" in
   pr)
     [[ -n "${GH_MOCK_PRLIST_FAIL:-}" ]] && exit 1
+    # Record the --limit actually requested, so a case can assert about
+    # the fetch that went out rather than the rendered page. Recorded
+    # UNCONDITIONALLY, which is what lets this one mock serve every
+    # case: a second mock installed mid-file to add one behaviour also
+    # silently drops the others, and every case after it runs blind.
+    args=("$@")
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      [[ "${args[i]}" == "--limit" ]] && \
+        printf '%s\n' "${args[i+1]:-}" > "$GH_MOCK_DIR/last-limit"
+    done
     cat "$GH_MOCK_DIR/pr-list.json"
     ;;
   repo)
@@ -158,6 +168,39 @@ assert_not_contains() {
     local label="$1" needle="$2"
     if [[ "$RUN_OUT" != *"$needle"* ]]; then pass "$label"
     else fail "$label — output unexpectedly contained '$needle'" "$RUN_OUT"; fi
+}
+
+# A MISTYPED HELPER MUST FAIL THE SUITE, not vanish into stderr.
+#
+# An assertion calling a function nobody defined prints "command not
+# found", never touches the failure counter, and leaves the suite
+# reporting success with that case vacuous — a guard claiming coverage
+# it does not have, in a file whose whole job is stopping exactly that.
+# It has happened twice here: test_pr-review-status.sh's merged-pr case
+# called `ok`/`bad` and ran for weeks doing nothing, and its verdict
+# cases were written with `assert_not_contains` where this file's
+# helpers are named otherwise.
+#
+# Every suite needs this, not just the one that was bitten: the helpers
+# are NOT named alike across these files — two spell it `assert_lacks`,
+# two `assert_not_contains` — so anyone moving between them types the
+# wrong name eventually.
+#
+# THE MARKER FILE IS THE MECHANISM, and a counter is not. Bash runs
+# `command_not_found_handle` in a SUBSHELL, so `failures=$((failures+1))`
+# inside it is discarded when that subshell exits: the handler prints its
+# complaint and the suite still reports "all assertions passed" and exits
+# 0. The first version of this guard did exactly that — a vacuous guard
+# against vacuous guards. A file written in the subshell survives it.
+#
+# The script under test runs as a separate `bash` process, so none of
+# this reaches it or masks a genuine missing-command path there.
+GUARD_MARKER="$(mktemp)"
+command_not_found_handle() {
+    printf '%s\n' "$1" >> "$GUARD_MARKER"
+    echo "  ✗ self-test bug: called '$1', which is not defined here" >&2
+    echo "      the assertion helpers here are assert_rc / assert_contains / assert_not_contains" >&2
+    return 127
 }
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -356,6 +399,31 @@ run /all /lastDate:1d
 assert_rc       "/lastDate:1d exits 0" 0
 assert_contains "fixtures are recent enough for a tight window" "#30"
 
+echo "pr-sessions: /unresolved honours an explicit /lastItem"
+# The candidate cap of 100 was applied as the FINAL slice, after
+# /lastItem had already narrowed the pool — so `/lastItem:150 /unresolved`
+# queried the newest 100 and never asked about rows 101-150. The caller
+# named a number and silently got a different one.
+#
+# 150 rows; every one has a RESOLVED thread except the oldest, #151. If
+# the cap still won, #151 is never queried and never reported.
+write_pr_list "$(jq -n --arg me "$ME" --arg t "$(ago '1 hour')" '[range(150) | {
+  number: (300 - .), state: "MERGED", headRefName: ($me + "/feat/p" + (. | tostring)),
+  title: "p", updatedAt: $t, isDraft: false, mergedAt: $t}]')"
+write_graphql "$(jq -n '{data: {repository: (
+  [range(150) | {key: ("p" + ((300 - .) | tostring)),
+                 value: {number: (300 - .), author: {login: "andreabenetton"},
+                         reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+                           {isResolved: ((300 - .) != 151),
+                            comments: {nodes: [{author: {login: "some-reviewer"}}]}}
+                         ]}}}] | from_entries)}}')"
+run /all -n 200 /lastItem:150 /unresolved
+assert_rc           "exits 0" 0
+assert_contains     "queries past the 100-row cap" "#151"
+assert_not_contains "and still drops the resolved ones" "#300"
+
+default_pr_list; default_graphql
+
 echo "pr-sessions: malformed pool filters are refused"
 run /lastItem:0
 assert_rc       "/lastItem:0 exits 2" 2
@@ -447,6 +515,227 @@ done
 assert_contains "a real session branch still resolves" "$ME"
 default_pr_list; default_graphql
 
+echo "pr-sessions: a session branch is attributed by SHAPE, not a type vocabulary"
+# The predicate used to require one of thirteen conventional-commit
+# words in the <type> segment, so `spike-3/`, `hotfix/` and `stage-4/`
+# branches were classified unconventional and then SILENTLY DROPPED by
+# the default clone scope — the command whose job is surfacing
+# outstanding work answering "none". CLAUDE.md puts no vocabulary on
+# <type>; only the shape is specified, so only the shape is checked.
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
+  --arg t3 "$(ago '3 hours')" '[
+  {number: 50, state: "OPEN", headRefName: ($me + "/spike-3/beacon-parse"),
+   title: "spike", updatedAt: $t1, isDraft: false, mergedAt: null},
+  {number: 51, state: "OPEN", headRefName: ($me + "/hotfix/regime-strip"),
+   title: "hotfix", updatedAt: $t2, isDraft: false, mergedAt: null},
+  {number: 52, state: "OPEN", headRefName: ($me + "/feat/known-type"),
+   title: "feat", updatedAt: $t3, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p50: {number: 50, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p51: {number: 51, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p52: {number: 52, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+# DEFAULT scope, not /all: the drop this guards against happens in the
+# scope filter, so a run that scopes to nothing proves nothing.
+run
+assert_rc       "exits 0" 0
+assert_contains "an unlisted <type> is still this clone's work" "#50"
+assert_contains "  and so is another one"                       "#51"
+assert_contains "a conventional type is unaffected"             "#52"
+assert_not_contains "none of them read as unattributed" "(unconventional)"
+
+echo "pr-sessions: a branch with too few segments is still unattributed"
+# Shape-matching is not "anything goes" — <host>/<clone>/<type>/<desc>
+# needs four segments before $p[0]/$p[1] means a session at all.
+write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
+  {number: 53, state: "OPEN", headRefName: "agent/global-event-identity",
+   title: "agent", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p53: {number: 53, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+}}}')"
+run /all
+assert_rc       "exits 0" 0
+row="$(printf '%s\n' "$RUN_OUT" | grep -- '#53')"
+if [[ "$row" == *"(unconventional)"* ]]; then
+    pass "#53 is not attributed to a session"
+else
+    fail "#53 was attributed to a session" "$row"
+fi
+default_pr_list; default_graphql
+
+echo "pr-sessions: PRs no scope filter can attribute are disclosed, not dropped"
+# A row that does not parse as <host>/<clone>/<type>/<desc> is removed by
+# any scope filter. Removing it SILENTLY is how a listing looks complete
+# when it is not, so the count is stated on every path that can exit.
+unscopable_list() {
+    write_pr_list "$(jq -n --arg me "$ME" \
+      --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '[
+      {number: 60, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+       title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null},
+      {number: 61, state: "OPEN", headRefName: ($me + "/feat/real"),
+       title: "real", updatedAt: $t2, isDraft: false, mergedAt: null}
+    ]')"
+    write_graphql "$(jq -n '{data: {repository: {
+      p60: {number: 60, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+      p61: {number: 61, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+    }}}')"
+}
+unscopable_list
+run
+assert_rc       "exits 0" 0
+assert_contains "the footer path discloses the omission" "cannot be scoped to a"
+assert_contains "  and counts them"                      "1 PR(s) have a branch"
+
+echo "pr-sessions: /all reports nothing omitted, because nothing was scoped away"
+run /all
+assert_rc           "exits 0" 0
+assert_not_contains "no disclosure when no filter acted" "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the no-rows early exit"
+# The reassuring "no PRs" answer is exactly the one a reader acts on, so
+# it is the path where a footer-only disclosure would be missing.
+write_pr_list "$(jq -n --arg t1 "$(ago '1 hour')" '[
+  {number: 62, state: "OPEN", headRefName: "add-claude-github-actions-1785994932117",
+   title: "hand-made", updatedAt: $t1, isDraft: false, mergedAt: null}
+]')"
+write_graphql "$(jq -n '{data: {repository: {}}}')"
+run
+assert_rc       "exits 0" 0
+assert_contains "says there are no PRs for this clone" "no PRs for this clone"
+assert_contains "  and still discloses the omission"   "cannot be scoped to a"
+
+echo "pr-sessions: the disclosure survives the /unresolved-empty early exit"
+unscopable_list
+run /unresolved
+assert_rc       "exits 0" 0
+assert_contains "says nothing is unresolved"         "no PRs with unresolved"
+assert_contains "  and still discloses the omission" "cannot be scoped to a"
+
+echo "pr-sessions: /unattributed lists exactly the rows no scope can reach"
+# The count in the NOTE told you how many were hidden, and no invocation
+# could show them: /all stops filtering rather than selecting, so an
+# unowned row still competes with every recent PR for the page. This is
+# the scope that asks for them directly.
+unscopable_list
+run /unattributed
+assert_rc           "exits 0" 0
+assert_contains     "lists the unscopable PR"        "#60"
+assert_not_contains "excludes an owned PR"           "#61"
+
+echo "pr-sessions: /unattributed does not warn about omitting what it just listed"
+# The disclosure counts what SCOPE dropped. Under this scope nothing is
+# dropped, so counting here would print "1 PR(s) ... are not listed"
+# directly above the one row it names — a footer contradicting its page.
+assert_not_contains "no self-contradicting disclosure" "cannot be scoped to a"
+
+echo "pr-sessions: /unattributed does not claim any row is this clone's"
+# Every row here failed to parse as a session, so the "*" legend cannot
+# apply and "leave other sessions alone" is the wrong instruction — it
+# is the reading that left these unanswered.
+assert_not_contains "drops the ownership legend" "* = this clone"
+assert_contains     "says the findings are unowned" "no session"
+
+echo "pr-sessions: the NOTE points at the flag that can actually list them"
+# "Pass /all to see every PR regardless" was the advice, and /all does
+# not select these — it merely stops filtering, so they still fall off
+# the page. Naming a flag that cannot answer is worse than naming none.
+unscopable_list
+run
+assert_rc       "exits 0" 0
+assert_contains "names the listing flag" "/unattributed"
+
+echo "pr-sessions: two different scope flags are refused, not last-wins"
+# `/unattributed /all` printed every PR and `/all /unattributed` printed
+# only the unowned ones — silently, in both directions.
+run /unattributed /all
+assert_rc       "exits 2" 2
+assert_contains "names the conflict" "different scopes"
+run /all /unattributed
+assert_rc       "exits 2 the other way round too" 2
+run /unattributed /unattributed
+assert_rc       "the same scope twice is fine" 0
+
+echo "pr-sessions: --session unconventional is the same scope, not a second one"
+# It already selected these rows (the session string is a literal), but
+# printed the omission NOTE above the rows it had just listed.
+unscopable_list
+run --session unconventional
+assert_rc           "exits 0" 0
+assert_contains     "lists the unscopable PR" "#60"
+assert_not_contains "no self-contradicting disclosure" "cannot be scoped to a"
+assert_not_contains "drops the ownership legend"       "* = this clone"
+default_pr_list; default_graphql
+
+echo "pr-sessions: /unattributed narrows BEFORE the thread lookup"
+# Scope is applied before the candidate slice, which is the whole reason
+# this pairing works: an unowned row is by definition an older one, so
+# under /all it loses the slice to recent PRs and its threads are never
+# queried at all. Here it is the only row, so it must carry a real count.
+# THE POOL MUST EXCEED THE CANDIDATE SLICE (100) or the claim is not
+# falsifiable: with two rows, applying the scope AFTER the slice would
+# leave this case green. So 150 owned rows are numbered ABOVE the one
+# unowned row, putting it at position 151 — outside the slice unless the
+# scope really is applied first.
+write_pr_list "$(jq -n --arg me "$ME" \
+  --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" '
+  [{number: 70, state: "MERGED", headRefName: "agent/global-event-identity",
+    title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1}]
+  + [range(150) | {number: (200 + .), state: "OPEN",
+     headRefName: ($me + "/feat/w\(.)"), title: "w",
+     updatedAt: $t2, isDraft: false, mergedAt: null}]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p70: {number: 70, author: {login: "andreabenetton"},
+        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}},
+          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+        ]}}
+}}}')"
+run /unattributed /unresolved
+assert_rc       "exits 0" 0
+assert_contains "surfaces the unowned PR"          "#70"
+assert_contains "with a real awaiting-reply count" "2!"
+
+echo "pr-sessions: /unattributed with nothing to show is a clean, named exit"
+default_pr_list; default_graphql
+run /unattributed
+assert_rc           "exits 0" 0
+assert_contains     "names this scope, not another" "without a parsable session branch"
+assert_not_contains "does not claim it scoped to the clone" "PRs for this clone"
+
+echo "pr-sessions: /unattributed and /unresolved with nothing to show names the scope"
+# Reaching the /unresolved-empty exit needs a row that EXISTS under this
+# scope and simply has nothing open — with no unattributed row at all the
+# earlier rows-empty exit fires instead, and this case would assert
+# against a message it never reaches.
+write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
+  {number: 72, state: "MERGED", headRefName: "agent/common-api-idempotency",
+   title: "unowned", updatedAt: $t1, isDraft: false, mergedAt: $t1}
+]')"
+write_graphql "$(jq -n '{data: {repository: {
+  p72: {number: 72, author: {login: "andreabenetton"},
+        reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
+          {isResolved: true, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+        ]}}
+}}}')"
+run /unattributed /unresolved
+assert_rc           "exits 0" 0
+assert_contains     "names the unowned scope" "branches no session owns"
+assert_not_contains "not the clone scope"     "for this clone"
+default_pr_list; default_graphql
+
+echo "pr-sessions: the count describes the NARROWED pool, not everything fetched"
+# /lastItem fixes the pool before scope. Counting before that narrowing
+# announces a PR the caller never asked about and that nothing omitted:
+# #60 is outside a one-item pool, so there is nothing to disclose.
+unscopable_list
+run /lastItem:1
+assert_rc           "exits 0" 0
+assert_not_contains "does not announce a PR outside the pool" "cannot be scoped to a"
+default_pr_list; default_graphql
+
 echo "pr-sessions: an invalid --session regex is an invocation error"
 # `test()` with a bad pattern kills jq. Swallowing that printed "no
 # matching PRs" and exited 0 — the same reassuring answer a genuinely
@@ -475,24 +764,8 @@ assert_rc       "exits 2" 2
 assert_contains "names the likely cause" "could not list PRs"
 
 echo "pr-sessions: /lastItem beyond the derived cap is honoured, not clamped"
-# The mock records the --limit it was handed, so the claim is about the
-# fetch that actually went out rather than the rendered page.
-cat > "$SANDBOX/bin/gh" <<'MOCK'
-#!/usr/bin/env bash
-set -uo pipefail
-case "${1:-}" in
-  pr)
-    while [[ $# -gt 0 ]]; do
-      [[ "$1" == "--limit" ]] && printf '%s\n' "$2" > "$GH_MOCK_DIR/last-limit"
-      shift
-    done
-    cat "$GH_MOCK_DIR/pr-list.json" ;;
-  repo) printf '%s\n' "gzapi-org/gzapp" ;;
-  api)  printf '%s\n' '{}' ;;
-  *)    exit 1 ;;
-esac
-MOCK
-chmod +x "$SANDBOX/bin/gh"
+# The faithful mock records the --limit it was handed, so the claim is
+# about the fetch that actually went out rather than the rendered page.
 run /all /lastItem:600 --no-threads
 assert_rc "exits 0" 0
 requested="$(cat "$SANDBOX/fixtures/last-limit" 2>/dev/null || echo missing)"
@@ -516,6 +789,16 @@ assert_contains "warns that the window may be truncated" "may be"
 default_pr_list
 
 echo
+# A helper that does not exist fails the suite, whatever the counter
+# says — see command_not_found_handle above for why this cannot be a
+# counter.
+if [[ -s "$GUARD_MARKER" ]]; then
+    echo "SELF-TEST BUG — undefined helper(s) called: $(sort -u "$GUARD_MARKER" | tr '\n' ' ')" >&2
+    echo "  assertions using them never ran. Fix the names before trusting this suite." >&2
+    rm -f "$GUARD_MARKER"
+    exit 1
+fi
+rm -f "$GUARD_MARKER"
 if [[ "$failures" -eq 0 ]]; then
     echo "test_pr-sessions: OK — all assertions passed."
     exit 0

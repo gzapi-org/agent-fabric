@@ -30,6 +30,7 @@ None of these messages automatically:
 - changes an issue state;
 - owns a branch;
 - reserves a file;
+- reserves a finding, task or fix for the sender;
 - moves an agent out of the working copy it started in;
 - grants access to another agent's checkout, branch or pull request;
 - blocks a merge;
@@ -52,3 +53,8 @@ A role is a classification shared by however many instances currently hold it; t
 ## Git context is descriptive
 
 `BRANCH` and `COMMIT` help peers reproduce the sender's context. They never imply exclusive ownership.
+
+A `REPLY` whose `REFERENCES` name a branch or pull request says where its
+sender is working. That is a report, not a reservation: it does not stop
+another instance from working on the same thing, and it does not commit
+the sender to finishing. A peer that reads it decides for itself.

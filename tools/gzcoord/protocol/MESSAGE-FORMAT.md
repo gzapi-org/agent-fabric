@@ -32,6 +32,103 @@ A good message answers:
 - Is any action requested?
 - Where is the authoritative artifact?
 
+## Reporting a finding
+
+An `OBSERVATION` or `REVIEW` is complete when it diagnoses and stops. The
+recommended shape:
+
+```text
+OBSERVATION:
+what was noticed, stated as fact
+
+VERIFIED:
+how it was established, and the control that shows the measurement
+was live
+
+NOT-VERIFIED:
+what was deliberately not checked, so the reader knows where the
+diagnosis ends
+
+IMPACT:
+what follows if it is true, so the reader can decide not to act
+
+REQUEST:
+what the addressed role is asked to decide
+```
+
+`VERIFIED` is what separates a fact from a rumour with confidence
+attached. A measurement can succeed while measuring nothing: a
+type-checker that resolved to the wrong package and reported zero errors,
+a pattern that never matched, a probe against the working tree when the
+guard reads committed diffs. The control is whatever shows the instrument
+was really pointed at the target — a second flag that yields a known
+non-zero count, a deliberately broken input that is caught, a count that
+agrees with an independent source. Give the commands, not a summary of
+them, so the recipient can rerun them rather than remeasure.
+
+When the finding is a leaked secret, `VERIFIED` names its shape and
+location and never its value (SPEC.md §17). The proof of a leak must not
+be a second copy of it.
+
+`NOT-VERIFIED` is not an apology. It is the boundary of the claim, and it
+is what lets the recipient extend the diagnosis instead of redoing it.
+
+`IMPACT` is recommended for these two types specifically. A finding
+without a stated impact gets the recipient's default treatment, and
+"do nothing" is a legitimate outcome the message should make easy to
+choose.
+
+`REQUEST`, when present, asks the addressed role to exercise its own
+judgement — "decide whether strict mode is enabled per app or through a
+shared base config" — rather than to execute a fix the sender has
+prescribed from outside that role's lane. The sender reports; the
+recipient decides, and acts in its own working copy (SPEC.md §2). What a
+session then does in its own working copy is governed by the
+repository's rules, not by this protocol.
+
+`examples/observation-diagnosis.txt` is a complete example.
+
+## Acknowledging by reference
+
+A complete diagnosis does not stop its sender from acting on it. Unless
+the sender hears that someone else has, the natural next step is to do
+the work itself — and two instances then do the same job, with a merge
+conflict as the only signal between them.
+
+When a recipient starts acting on an `OBSERVATION`, `REVIEW` or
+`REQUEST`, it SHOULD send a `REPLY` carrying `IN-REPLY-TO` and a
+`REFERENCES` entry naming the branch or pull request where the work is
+happening:
+
+```text
+[GZCOORD/1] REPLY
+FROM: develop-gzapp/web
+ROLE: Web Engineer
+TO: develop-gzapp/gzapp
+TO-ROLE: Application Architect
+PROJECT: gzapp
+IN-REPLY-TO: obs-2026-09-08-strict
+SUBJECT: Acting on strict mode in my working copy
+
+REFERENCES:
+- branch: develop-gzapp/web/fix/ts-strict-all-apps
+
+NOTES:
+Enabling strict in all four apps. Six real errors in admin_web; fixing
+them.
+```
+
+This is descriptive context (SPEC.md §7.3) and means exactly what it
+says: this is where the work is. It does not reserve the finding, own
+the branch or block anyone — SEMANTICS.md lists what a message never
+does, and this `REPLY` is no exception. Two instances MAY both send one;
+the second reads the first and decides for itself. A sender that
+receives one MAY take it as reason not to duplicate the work. If none
+arrives, nothing is blocked and the sender proceeds as it would have
+anyway.
+
+`examples/reply.txt` is the same message as a file.
+
 ## Avoid protocol clutter
 
 Do not expose runtime trivia:

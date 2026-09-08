@@ -7,7 +7,7 @@ A component may claim one or more conformance profiles.
 A conforming parser:
 
 - recognizes `[GZCOORD/1] TYPE`;
-- parses metadata and named sections;
+- parses metadata and named sections, reading `KEY:` plus one or more spaces as the separator and trimming the value;
 - validates logical addresses;
 - preserves unknown extension fields/sections;
 - accepts free-form roles;

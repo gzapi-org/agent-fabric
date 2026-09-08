@@ -137,7 +137,7 @@ The header is followed by zero or more metadata lines:
 KEY: value
 ```
 
-Metadata keys are uppercase ASCII beginning with a letter, with digits and `-` permitted after it. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line; nor is `2FA: x`, which begins with a digit. The key is followed by a colon and a single space; the value runs to the end of the line.
+Metadata keys are uppercase ASCII beginning with a letter, with digits and `-` permitted after it. `_` is not a metadata key character: `TOKEN_BUDGET: x` is not a metadata line; nor is `2FA: x`, which begins with a digit. The key is followed by a colon and one or more spaces — a tab is not a separator, and neither is nothing — and the value is the rest of the line with leading and trailing whitespace removed. A sender MUST emit exactly one space; `KEY: value` is the canonical form, and the tolerance is the reader's, not a second way to write it.
 
 Within the metadata block, a non-empty line that is neither a metadata line nor a section marker is invalid, and a validator MUST report it rather than ignore it. Silently discarding it would let a field the sender believed it was sending — including one §14 forbids — pass validation by being misspelled.
 

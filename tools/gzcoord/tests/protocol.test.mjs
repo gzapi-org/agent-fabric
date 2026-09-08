@@ -266,3 +266,17 @@ test('hello prints the line-length warning on stderr and still emits the message
   assert.match(ok.stderr, /^warning: line 5 is 93 characters/m);
   assert.match(ok.stdout, /^\[GZCOORD\/1\] HELLO\n/);
 });
+
+// SPEC §6: the separator is a colon and one or more spaces, the value is
+// trimmed, and a sender emits exactly one space. Nothing pinned it: a regex
+// that dropped the space requirement altogether left every test green.
+test('the metadata separator is a colon plus one or more spaces, value trimmed', () => {
+  const base = 'ROLE: Application Architect\nPROJECT: gzapp\n';
+  for (const [line, ok] of [['FROM: develop-gzapp/gzapp', true], ['FROM:   develop-gzapp/gzapp   ', true],
+                            ['FROM:develop-gzapp/gzapp', false], ['FROM:\tdevelop-gzapp/gzapp', false]]) {
+    const result = validate(`[GZCOORD/1] HELLO\n${line}\n${base}`);
+    assert.equal(result.ok, ok, JSON.stringify(line));
+    if (ok) assert.equal(result.message.metadata.FROM, 'develop-gzapp/gzapp');
+    else assert.ok(result.errors.some(e => e.startsWith('unparsable line in the metadata block: FROM')), JSON.stringify(line));
+  }
+});

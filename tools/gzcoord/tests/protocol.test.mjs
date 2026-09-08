@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parse, validate } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns } from '../scripts/gzmsg.mjs';
 
 const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
@@ -253,8 +253,8 @@ test('a line over 72 characters warns, naming the line, and stays valid', () => 
   assert.equal(result.ok, true);
   const lines = result.warnings.filter(w => w.includes('may re-break'));
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /^line 5 is 86 characters/);
-  assert.match(lines[1], /^line 8 is 73 characters/);
+  assert.match(lines[0], /^line 5 is 86 columns wide/);
+  assert.match(lines[1], /^line 8 is 73 columns wide/);
   // Exactly 72 is inside the limit.
   assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\n${'y'.repeat(72)}\n`).warnings, []);
 });
@@ -263,7 +263,7 @@ test('hello prints the line-length warning on stderr and still emits the message
   const ok = gzmsg('hello','--from','develop-gzapp/gzapp','--role','Tester','--project','gzapp',
                    '--specialties', 'z'.repeat(80));
   assert.equal(ok.status, 0);
-  assert.match(ok.stderr, /^warning: line 5 is 93 characters/m);
+  assert.match(ok.stderr, /^warning: line 5 is 93 columns wide/m);
   assert.match(ok.stdout, /^\[GZCOORD\/1\] HELLO\n/);
 });
 
@@ -281,4 +281,25 @@ test('reference parser: separator is one space, tolerates a run, rejects tab and
     if (ok) assert.equal(result.message.metadata.FROM, 'develop-gzapp/gzapp');
     else assert.ok(result.errors.some(e => e.startsWith('unparsable line in the metadata block: FROM')), JSON.stringify(line));
   }
+});
+
+// The relay re-breaks on columns, and String.length is UTF-16 code units:
+// 40 CJK characters counted 49 and rendered at 89, no warning; 40 combining
+// sequences counted 89 and rendered at 49, a false warning. Each row is
+// what `wc -L` reports for the same line.
+test('columns() approximates terminal width where String.length does not', () => {
+  for (const [line, width] of [
+    ['SUBJECT: ' + '\u7DDA'.repeat(40), 89],          // CJK: 2 each
+    ['SUBJECT: ' + '\u{1F68C}'.repeat(40), 89],       // wide emoji: 2 each
+    ['SUBJECT: ' + '\u{1D400}'.repeat(40), 49],       // narrow astral: 1 each
+    ['SUBJECT: ' + 'e\u0301'.repeat(40), 49],         // combining: 0
+    ['SUBJECT: \u10DB\u10D0\u10E0\u10E8 \u043C\u0430\u0440\u0448', 18], // Georgian, Cyrillic: 1 each
+    ['SUBJECT: a\tb', 17],                           // tab to next multiple of 8
+    ['x'.repeat(72), 72],
+  ]) assert.equal(columns(line), width, JSON.stringify(line.slice(0, 20)));
+  const head = 'FROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n';
+  const cjk = validate(`[GZCOORD/1] INFO\n${head}SUBJECT: ${'\u7DDA'.repeat(40)}\n`);
+  assert.ok(cjk.warnings.some(w => w.startsWith('line 6 is 89 columns wide')), cjk.warnings);
+  const combining = validate(`[GZCOORD/1] INFO\n${head}SUBJECT: ${'e\u0301'.repeat(40)}\n`);
+  assert.deepEqual(combining.warnings, []);
 });

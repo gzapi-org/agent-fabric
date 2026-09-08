@@ -11,6 +11,25 @@ const FORBIDDEN = new Set([
 ]);
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
+// Terminal columns a line occupies, approximated without a wcwidth table:
+// CJK scripts and pictographs are 2, combining and format characters 0, a
+// tab advances to the next multiple of 8, everything else 1. Reproduces
+// `wc -L` on the probes in the test; known to count narrow the wide
+// punctuation and fullwidth forms that are Script=Common (U+3001, U+FF21,
+// U+3000), and to count East Asian Ambiguous characters (§, —) as 1, which
+// only the reader's locale can decide.
+const WIDE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Extended_Pictographic}/u;
+const ZERO = /\p{Mn}|\p{Me}|\p{Cf}/u;
+export function columns(line) {
+  let w = 0;
+  for (const ch of line) {
+    if (ch === '\t') { w += 8 - (w % 8); continue; }
+    if (ZERO.test(ch)) continue;
+    w += WIDE.test(ch) ? 2 : 1;
+  }
+  return w;
+}
+
 export function parse(text) {
   // A byte-order mark is an encoding artefact, not the first character of
   // the header; some editors prepend one on save.
@@ -98,10 +117,13 @@ export function validate(text) {
   // the current carrier is a terminal copy, and a line it re-breaks stops
   // being metadata (docs/HUMAN-RELAY-TRANSPORT.md, "Sending"). Advisory,
   // and the width is the relay's, so a future transport drops or moves it.
-  const RELAY_MAX_LINE = 72;
+  // Measured in columns, not code units: String.length undercounts CJK
+  // and overcounts combining marks and astral characters.
+  const RELAY_MAX_COLUMNS = 72;
   text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line, i) => {
-    if (line.length > RELAY_MAX_LINE)
-      warnings.push(`line ${i + 1} is ${line.length} characters; over ${RELAY_MAX_LINE} the relay may re-break it`);
+    const w = columns(line);
+    if (w > RELAY_MAX_COLUMNS)
+      warnings.push(`line ${i + 1} is ${w} columns wide; over ${RELAY_MAX_COLUMNS} the relay may re-break it`);
   });
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }

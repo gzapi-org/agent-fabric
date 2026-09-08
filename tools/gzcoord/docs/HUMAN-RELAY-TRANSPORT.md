@@ -42,8 +42,10 @@ the talking.
    A message that fails validation is not sent.
 2. Print it in a fenced `text` block so the terminal shows it verbatim.
    Put nothing inside the block that is not part of the message.
-3. Keep lines at 72 characters or fewer. Terminal wrapping can re-break a
-   long line on copy, and a re-broken metadata line is no longer metadata.
+3. Keep lines at 72 terminal columns or fewer — characters, for ASCII;
+   wide scripts take two. Terminal wrapping can re-break a long line on
+   copy, and a re-broken metadata line is no longer metadata. The
+   validator warns, naming the line.
 4. Number every message you send: `MESSAGE-ID: <instance>-NNNN`, one
    sequence per sender across all recipients. The relay is lossy — one
    message in three failed to arrive on its first day — and it reorders:

@@ -53,16 +53,48 @@ the talking.
    made that legible. A gap at one recipient is not by itself evidence of
    loss: a directed message's number skips past ones addressed to other
    peers, and only the sender knows which.
+   **The sequence belongs to the address, not to the session.** The
+   address is derived from the working copy and outlives any one session
+   of it, so a session that starts counting at 0001 repeats numbers a
+   peer has already seen — observed the first day, four of them — and a
+   repeat defeats gap detection exactly as a gap does, while making
+   `IN-REPLY-TO` ambiguous. Take every number from
+   `node tools/gzcoord/scripts/gzmsg.mjs next-id --instance <instance>`,
+   which keeps the counter in the gitignored `.gzcoord/` beside the
+   working copy. A `HELLO` never resets it.
+
+   That a counter exists on disk is a **choice**, recorded here so it is
+   not undone as clutter: **every session owns a counter.** A session
+   owns exactly one working copy, the address is derived from that
+   working copy (SPEC §3.1), and the counter is the file in it — so the
+   session owns the counter through the clone it owns, no registry and
+   nothing shared between sessions of different clones. A later session
+   in the same clone is the same address, and continues the count: that
+   is the case observed. The relay was designed with no adapter state
+   ("Against the adapter contract", above), and this is not adapter
+   state: it is the sender's, the one thing a sender must remember
+   between sessions for its numbers to mean anything. Two alternatives
+   were weighed and rejected. Letting a `HELLO` reset the sequence, with
+   receivers tracking an epoch per peer, moves the bookkeeping to every
+   receiver and still leaves two messages with one id. Putting a session
+   epoch in the id (`<instance>-<session>-NNNN`) keeps ids unique but
+   makes a gap invisible across the boundary, which is the case a
+   restart most needs to expose. A file holding one integer is the
+   smallest thing that preserves both properties. Deleting the clone
+   deletes the address and its counter together, so nothing else has to
+   know.
 5. A printed message is not a delivered one. Expect no reply, block on
    nothing (`../protocol/SEMANTICS.md`), and when you act on something,
    say where by reference (`../protocol/MESSAGE-FORMAT.md`, "Acknowledging
    by reference").
 
 Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
-<host>/<instance> --role ... --project gzapp --message-id <instance>-0001`
-— so the person knows what this session declares. It is the first number
-in your sequence. Do not re-announce on seeing a peer's `HELLO`; there is
-no peer cache to refresh and no storm to guard against. Do re-announce
+<host>/<instance> --role ... --project gzapp --message-id "$(gzmsg.mjs
+next-id --instance <instance>)"` — so the person knows what this session
+declares. It is the next number in the address's sequence: 0001 only in
+the working copy's first session. Do not re-announce on seeing a peer's
+`HELLO`; there is no peer cache to refresh and no storm to guard against.
+Do re-announce
 when your role changes (SPEC §4) — a `/role` switch mid-session changes
 what `ROLE` this address answers for, and the person routing `TO-ROLE` is
 the cache that needs to hear it. `GOODBYE` is not needed: the person
@@ -101,7 +133,9 @@ knows which sessions are running.
   that number did not reach you — which may be normal (addressed to
   someone else) rather than lost. Mention it under `NOT-VERIFIED` or
   `NOTES` and let the sender say which; never report a gap as a dropped
-  message.
+  message. A repeated number is a fault at the sender — a session that
+  restarted its count — and is worth an `OBSERVATION`, since every later
+  `IN-REPLY-TO` against that sender is ambiguous until it is fixed.
 - `TO-ROLE` was resolved by the person (SPEC §13): if you received it, you
   hold the role, or you are one of several who do. Reply with your own
   address in `FROM`.
@@ -111,6 +145,14 @@ knows which sessions are running.
 `FROM` is derived as SPEC §3.1 says: `<hostname -s>/<basename of the
 working copy>`. On this host that is the clone directory name, which is
 why clone directories are named for the role they hold.
+
+`ROLE` is the role's **title** in `.roles/taxonomy.json` (`runtime/README.md`,
+"Role sourcing") — `GZCoord protocol coordinator`, not the slug
+`gzcoord-coordinator`. Both are legal (SPEC §4), but the person resolves
+`TO-ROLE` against the string in the last `HELLO` they saw, so an address
+that announces the slug in one session and the title in the next stops
+matching the `TO-ROLE` its peers have been using. Observed the first day,
+on two addresses.
 
 ## Limits, stated plainly
 

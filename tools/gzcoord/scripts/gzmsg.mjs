@@ -128,6 +128,22 @@ export function validate(text) {
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 
+// The address is derived from the working copy and outlives any one
+// session of it, so the MESSAGE-ID sequence has to as well: a session that
+// restarted at 0001 repeated four numbers a peer had already seen, and a
+// repeat defeats gap detection the same way a gap does. The counter lives
+// beside the working copy in a gitignored file, one per instance.
+export function nextId(instance, stateDir = '.gzcoord') {
+  if (!/^[a-z0-9._-]+$/.test(instance)) throw new Error('instance must be the <instance> half of an address');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const file = `${stateDir}/${instance}.seq`;
+  const last = fs.existsSync(file) ? Number.parseInt(fs.readFileSync(file, 'utf8'), 10) : 0;
+  if (!Number.isInteger(last) || last < 0) throw new Error(`${file} does not hold a sequence number`);
+  const next = last + 1;
+  fs.writeFileSync(file, `${next}\n`);
+  return `${instance}-${String(next).padStart(4, '0')}`;
+}
+
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -158,8 +174,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
+  } else if (cmd === 'next-id') {
+    const instance = arg('instance');
+    if (!instance) throw new Error('next-id requires --instance');
+    console.log(nextId(instance, arg('state-dir') ?? '.gzcoord'));
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ... [--message-id ...]');
+    console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ... [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]');
     process.exit(2);
   }
 }

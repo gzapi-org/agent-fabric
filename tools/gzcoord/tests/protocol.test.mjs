@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parse, validate, columns } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId } from '../scripts/gzmsg.mjs';
 
 const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
@@ -302,4 +302,22 @@ test('columns() approximates terminal width where String.length does not', () =>
   assert.ok(cjk.warnings.some(w => w.startsWith('line 6 is 89 columns wide')), cjk.warnings);
   const combining = validate(`[GZCOORD/1] INFO\n${head}SUBJECT: ${'e\u0301'.repeat(40)}\n`);
   assert.deepEqual(combining.warnings, []);
+});
+
+// The address outlives a session; the counter has to. A session that
+// restarted at 0001 repeated four numbers a peer had already seen.
+test('next-id continues the address sequence across calls and processes', () => {
+  const dir = new URL('./seq.tmp/', import.meta.url).pathname;
+  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    assert.equal(nextId('gzapp', dir), 'gzapp-0001');
+    assert.equal(nextId('gzapp', dir), 'gzapp-0002');
+    const cli = gzmsg('next-id', '--instance', 'gzapp', '--state-dir', dir);
+    assert.equal(cli.status, 0);
+    assert.equal(cli.stdout.trim(), 'gzapp-0003');
+    assert.equal(nextId('web', dir), 'web-0001');       // one counter per instance
+    assert.throws(() => nextId('bad/instance', dir));   // the instance half only
+    fs.writeFileSync(`${dir}/gzapp.seq`, 'garbage\n');
+    assert.throws(() => nextId('gzapp', dir), /does not hold a sequence number/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

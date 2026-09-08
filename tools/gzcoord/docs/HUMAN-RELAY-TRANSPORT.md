@@ -90,6 +90,10 @@ why clone directories are named for the role they hold.
   person queues it or drops it.
 - The person can misroute. `TO` names the intended recipient so a
   misdelivered message is recognisable as one.
+- Every reply is another relay. Send one only when the type expects it
+  (`../protocol/SEMANTICS.md`, "When a reply is expected"), never to
+  acknowledge an acknowledgement, and mark a message `REPLY-EXPECTED: no`
+  when the person need not come back for one.
 
 ## What replaces it
 

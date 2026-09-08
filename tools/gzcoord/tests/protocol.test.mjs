@@ -96,3 +96,12 @@ test('metadata block ends at the first section marker', () => {
   assert.ok(msg.sections.NOTES.includes('KEY: value shaped lines'));
   assert.equal(validate(text).ok, true);
 });
+
+// SPEC §7.4: REPLY-EXPECTED is an optional common field, so it must pass as
+// ordinary metadata and survive the forbidden-field check untouched.
+test('REPLY-EXPECTED is ordinary optional metadata', () => {
+  const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\nREPLY-EXPECTED: no\n`;
+  const result = validate(text);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.message.metadata['REPLY-EXPECTED'], 'no');
+});

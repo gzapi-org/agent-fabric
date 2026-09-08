@@ -199,6 +199,14 @@ COMMIT: <commit-ish>
 
 These fields are context only. An adapter MUST NOT infer ownership or authority from them.
 
+### 7.4 Reply expectation
+
+```text
+REPLY-EXPECTED: yes | no
+```
+
+Optional. Each message type carries a default expectation (SEMANTICS.md, "When a reply is expected"); this field overrides it for one message — an `OBSERVATION` that is purely for information, an `INFO` that asks to be corrected. `no` means the sender will not wait for a reply and does not want one; the recipient may still act, and says so through the authoritative artifact. Like the correlation fields, it MUST NOT create workflow state: it is a courtesy to whoever carries the message, not a constraint on the recipient.
+
 ## 8. HELLO
 
 Required:

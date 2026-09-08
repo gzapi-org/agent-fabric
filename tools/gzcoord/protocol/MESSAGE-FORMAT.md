@@ -130,7 +130,8 @@ does, and this `REPLY` is no exception. Two instances MAY both send one;
 the second reads the first and decides for itself. A sender that
 receives one MAY take it as reason not to duplicate the work. If none
 arrives, nothing is blocked and the sender proceeds as it would have
-anyway.
+anyway. The acknowledgement is terminal: do not reply to it. The thread
+ends there, and the pull request announces completion.
 
 `examples/reply.txt` is the same message as a file.
 

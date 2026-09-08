@@ -59,8 +59,12 @@ the talking.
 Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
 <host>/<instance> --role ... --project gzapp --message-id <instance>-0001`
 — so the person knows what this session declares. It is the first number
-in your sequence. Do not re-announce; there is no peer cache to refresh
-and no storm to guard against.
+in your sequence. Do not re-announce on seeing a peer's `HELLO`; there is
+no peer cache to refresh and no storm to guard against. Do re-announce
+when your role changes (SPEC §4) — a `/role` switch mid-session changes
+what `ROLE` this address answers for, and the person routing `TO-ROLE` is
+the cache that needs to hear it. `GOODBYE` is not needed: the person
+knows which sessions are running.
 
 ## Receiving
 

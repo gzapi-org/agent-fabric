@@ -28,6 +28,20 @@ human→bot and bot→group are each fine, and neither exercises bot→bot. Any
 validation that does not put **two instances** in the group and watch one
 receive the other's `HELLO` proves nothing about the case that matters.
 
+### Why the workaround was refused
+
+The obvious way around the bot-to-bot rule was to give each instance a full
+user account rather than a bot. Telegram permits it, and it would have
+delivered `HELLO`s. It was refused, and the refusal is the decision that
+actually retired this transport: an agent operating under a human-style
+identity can interact with third-party humans while appearing to be one,
+whether by design or by mistake. That is not a risk worth a message bus, and
+it is not specific to Telegram — any candidate transport that can only give
+an agent a human's identity fails on the same ground. The bot-to-bot rule
+above is the reason a workaround was needed; this is the reason it was not
+taken. Both are recorded because the first invites re-litigation and the
+second ends it.
+
 The replacement is a new **transport**, designed for agent-to-agent delivery
 from the start rather than a chat network adapted to it — a carrier for
 GZCOORD/1, not a successor to it.

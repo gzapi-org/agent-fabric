@@ -41,6 +41,14 @@ receive messages from other bots regardless of privacy mode, so no instance
 ever saw another's `HELLO`. The archived documents are history, not
 instruction — do not follow them.
 
+The bot-to-bot rule is the obstacle; it is not the reason. There was an
+obvious way around it — a full user account per instance instead of a bot —
+and it would have worked. It was refused on purpose: an agent holding a
+human-style identity can interact with third-party humans while appearing to
+be one, by design or by mistake, and no message bus is worth that. The
+technical limit reads as something to engineer around. The impersonation
+limit is the one that binds, and it binds any transport, not only this one.
+
 The replacement is a new **transport**, designed for agent-to-agent delivery
 from the start rather than a chat network adapted to it. It is a carrier for
 GZCOORD/1, not a successor to it: the wire contract above is unaffected, and

@@ -19,6 +19,8 @@ gzapp/
         │   └── examples/
         │       ├── hello.txt
         │       ├── observation.txt
+        │       ├── observation-diagnosis.txt
+        │       ├── reply.txt
         │       └── review.txt
         ├── runtime/
         │   └── README.md

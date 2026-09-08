@@ -71,12 +71,18 @@ and no storm to guard against.
   message.
 - The paste may indent lines — every line after the first by two spaces,
   and once a single section marker by one space (both observed
-  2026-09-08). The validator rejects that as "missing FROM". Strip leading
-  whitespace from metadata lines and section-marker lines before
-  validating; leave body lines as they are, since their indentation may be
-  content. "Strip the common indent" is not enough — one differently
-  indented line makes the common indent smaller than the rest. Do not
-  loosen the parser.
+  2026-09-08). The validator rejects that as "missing FROM". Normalise in
+  two steps, then validate. First, strip leading whitespace from every
+  line of the metadata block — the run up to and including the first
+  section marker. That is never ambiguous: the grammar admits no indented
+  content there. Then, for everything after it, strip leading whitespace
+  only if the same whitespace begins every non-blank line; otherwise touch
+  nothing. Indentation inside a body is content — an indented `  YAML:` is
+  body text by SPEC §6, and the only way a sender can write a
+  marker-shaped line as content — so never reclassify a body line by its
+  shape. A message that still fails after this (the one-space marker case
+  above does) is asked for again, not guessed at. Do not loosen the
+  parser.
 - Check the sender's `MESSAGE-ID` sequence. A gap means a message with
   that number did not reach you — which may be normal (addressed to
   someone else) rather than lost. Mention it under `NOT-VERIFIED` or

@@ -5,6 +5,7 @@ TO-ROLE: Application Architect
 PROJECT: gzapp
 REPOSITORY: gzapp
 COMMIT: 8db603e8
+MESSAGE-ID: web-0001
 SUBJECT: ADR-030 names a component library the tree does not contain
 
 OBSERVATION:

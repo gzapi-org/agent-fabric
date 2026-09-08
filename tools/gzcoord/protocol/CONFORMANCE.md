@@ -46,4 +46,5 @@ The following violate the design:
 - writing protocol findings into a separate issue database;
 - using message state to override GitHub issue/PR state;
 - changing an agent address when its model changes;
+- quoting a credential, key or token value in a finding — in whole, in part, or as an example — instead of describing its shape and location;
 - requiring a central catalog of legal role names.

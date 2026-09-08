@@ -67,6 +67,13 @@ exercised that leg. Establish it first, with two real instances.
 Per-instance isolation is a requirement of the contract: each instance gets
 its own transport identity and its own state directory, never a shared one.
 
+The identity the transport gives an instance must be an agent's, not a
+human's. Telegram offered a working route around its bot-to-bot rule — user
+accounts — and it was refused because an agent under a human-style identity
+can pass as a human to third parties (see the retirement record). A
+candidate whose only agent-to-agent path runs through human identities fails
+on that ground before delivery is even measured.
+
 Do not ask me to paste credentials into chat. Use protected local
 files/environment configuration.
 

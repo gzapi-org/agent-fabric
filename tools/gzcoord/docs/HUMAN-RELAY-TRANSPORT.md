@@ -44,9 +44,13 @@ the talking.
    Put nothing inside the block that is not part of the message.
 3. Keep lines at 72 characters or fewer. Terminal wrapping can re-break a
    long line on copy, and a re-broken metadata line is no longer metadata.
-4. Number your messages: `MESSAGE-ID: <instance>-NNNN`, sequential per
-   sender. The relay is lossy — one message in three failed to arrive on
-   its first day — and a gap in the sequence is how a recipient notices.
+4. Number every message you send: `MESSAGE-ID: <instance>-NNNN`, one
+   sequence per sender across all recipients. The relay is lossy — one
+   message in three failed to arrive on its first day — and it reorders:
+   two messages crossed in flight the same day, and the numbers are what
+   made that legible. A gap at one recipient is not by itself evidence of
+   loss: a directed message's number skips past ones addressed to other
+   peers, and only the sender knows which.
 5. A printed message is not a delivered one. Expect no reply, block on
    nothing (`../protocol/SEMANTICS.md`), and when you act on something,
    say where by reference (`../protocol/MESSAGE-FORMAT.md`, "Acknowledging
@@ -72,8 +76,11 @@ refresh and no storm to guard against.
   content. "Strip the common indent" is not enough — one differently
   indented line makes the common indent smaller than the rest. Do not
   loosen the parser.
-- Check the sender's `MESSAGE-ID` sequence. If there is a gap, say so in
-  your reply, under `NOT-VERIFIED` or `NOTES`.
+- Check the sender's `MESSAGE-ID` sequence. A gap means a message with
+  that number did not reach you — which may be normal (addressed to
+  someone else) rather than lost. Mention it under `NOT-VERIFIED` or
+  `NOTES` and let the sender say which; never report a gap as a dropped
+  message.
 - `TO-ROLE` was resolved by the person (SPEC §13): if you received it, you
   hold the role, or you are one of several who do. Reply with your own
   address in `FROM`.

@@ -291,6 +291,9 @@ test('columns() approximates terminal width where String.length does not', () =>
   for (const [line, width] of [
     ['SUBJECT: ' + '\u7DDA'.repeat(40), 89],          // CJK: 2 each
     ['SUBJECT: ' + '\u{1F68C}'.repeat(40), 89],       // wide emoji: 2 each
+    ['SUBJECT: ' + '\u00A9'.repeat(32), 41],          // text-default pictograph ©: 1 each
+    ['SUBJECT: instance\u2194instance', 26],           // ↔ as the repo writes it: 1
+    ['SUBJECT: \u{1F1EC}\u{1F1EA}', 11],              // flag pair: 2 total, not 4
     ['SUBJECT: ' + '\u{1D400}'.repeat(40), 49],       // narrow astral: 1 each
     ['SUBJECT: ' + 'e\u0301'.repeat(40), 49],         // combining: 0
     ['SUBJECT: \u10DB\u10D0\u10E0\u10E8 \u043C\u0430\u0440\u0448', 18], // Georgian, Cyrillic: 1 each

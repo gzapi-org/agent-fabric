@@ -12,20 +12,25 @@ const FORBIDDEN = new Set([
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
 // Terminal columns a line occupies, approximated without a wcwidth table:
-// CJK scripts and pictographs are 2, combining and format characters 0, a
-// tab advances to the next multiple of 8, everything else 1. Reproduces
-// `wc -L` on the probes in the test; known to count narrow the wide
-// punctuation and fullwidth forms that are Script=Common (U+3001, U+FF21,
-// U+3000), and to count East Asian Ambiguous characters (§, —) as 1, which
-// only the reader's locale can decide.
-const WIDE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Extended_Pictographic}/u;
+// CJK scripts and emoji-presentation characters are 2, combining and
+// format characters 0, a tab advances to the next multiple of 8,
+// everything else 1. Emoji_Presentation, not Extended_Pictographic: the
+// latter includes text-default symbols (©, ™, ↔, ❤) that render in one
+// column. A regional indicator is 1 so that a flag pair (two of them) is
+// 2. Reproduces `wc -L` on the probes in the test; known to count narrow
+// the wide punctuation and fullwidth forms that are Script=Common
+// (U+3001, U+FF21, U+3000), and to count East Asian Ambiguous characters
+// (§, —) and VS16-forced emoji (❤️) as 1, which only the reader's
+// terminal can decide — `wc -L` says 1 for both.
+const WIDE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Emoji_Presentation}/u;
+const REGIONAL_INDICATOR = /\p{RI}/u;
 const ZERO = /\p{Mn}|\p{Me}|\p{Cf}/u;
 export function columns(line) {
   let w = 0;
   for (const ch of line) {
     if (ch === '\t') { w += 8 - (w % 8); continue; }
     if (ZERO.test(ch)) continue;
-    w += WIDE.test(ch) ? 2 : 1;
+    w += WIDE.test(ch) && !REGIONAL_INDICATOR.test(ch) ? 2 : 1;
   }
   return w;
 }

@@ -60,7 +60,8 @@ COMMIT: a81c142
 SUBJECT: Stop resolution contract change
 
 CONTEXT:
-The passenger and advertising flows currently represent the resolved stop differently.
+The passenger and advertising flows currently represent the resolved
+stop differently.
 
 REFERENCES:
 - github-pr: #184

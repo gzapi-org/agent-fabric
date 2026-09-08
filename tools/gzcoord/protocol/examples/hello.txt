@@ -7,4 +7,5 @@ SPECIALTIES: architecture, ADR, contracts, system design
 CAPABILITIES: github, code-review, repository-analysis
 
 ABOUT:
-I review architectural consistency, cross-component contracts and design decisions for GZAPP.
+I review architectural consistency, cross-component contracts and design
+decisions for GZAPP.

@@ -242,3 +242,27 @@ test('an empty-valued metadata key warns, and the CLI prints the warning beside 
     assert.match(run.stderr, /unparsable line in the metadata block: body here/);
   } finally { fs.unlinkSync(file); }
 });
+
+// HUMAN-RELAY-TRANSPORT.md "Sending" caps lines at 72 because a terminal
+// copy re-breaks longer ones and a re-broken metadata line is no longer
+// metadata. Nothing enforced it; three of the five examples broke it.
+test('a line over 72 characters warns, naming the line, and stays valid', () => {
+  const long = 'x'.repeat(73);
+  const text = `[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nSPECIALTIES: ${long}\n\nABOUT:\n${long}\n`;
+  const result = validate(text);
+  assert.equal(result.ok, true);
+  const lines = result.warnings.filter(w => w.includes('may re-break'));
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^line 5 is 86 characters/);
+  assert.match(lines[1], /^line 8 is 73 characters/);
+  // Exactly 72 is inside the limit.
+  assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\n${'y'.repeat(72)}\n`).warnings, []);
+});
+
+test('hello prints the line-length warning on stderr and still emits the message', () => {
+  const ok = gzmsg('hello','--from','develop-gzapp/gzapp','--role','Tester','--project','gzapp',
+                   '--specialties', 'z'.repeat(80));
+  assert.equal(ok.status, 0);
+  assert.match(ok.stderr, /^warning: line 5 is 93 characters/m);
+  assert.match(ok.stdout, /^\[GZCOORD\/1\] HELLO\n/);
+});

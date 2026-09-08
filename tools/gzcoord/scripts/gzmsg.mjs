@@ -94,6 +94,15 @@ export function validate(text) {
   for (const [key, value] of Object.entries(msg.metadata))
     if (value === '')
       warnings.push(`${key} has an empty value — a section marker with trailing whitespace reads as metadata`);
+  // Not a grammar rule — SPEC §14 keeps carrier limits off the wire — but
+  // the current carrier is a terminal copy, and a line it re-breaks stops
+  // being metadata (docs/HUMAN-RELAY-TRANSPORT.md, "Sending"). Advisory,
+  // and the width is the relay's, so a future transport drops or moves it.
+  const RELAY_MAX_LINE = 72;
+  text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line, i) => {
+    if (line.length > RELAY_MAX_LINE)
+      warnings.push(`line ${i + 1} is ${line.length} characters; over ${RELAY_MAX_LINE} the relay may re-break it`);
+  });
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 
@@ -124,6 +133,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // would reject publishes an identity nobody can route back to.
     const text = lines.join('\n');
     const result = validate(text);
+    for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
   } else {

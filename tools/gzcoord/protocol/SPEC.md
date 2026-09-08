@@ -429,6 +429,7 @@ A GZCOORD/1 parser:
 - MUST validate the first line;
 - MUST preserve unknown metadata and sections;
 - MUST reject malformed `FROM` addresses;
+- MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown.
 

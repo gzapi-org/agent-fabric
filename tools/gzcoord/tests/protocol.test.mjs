@@ -115,3 +115,23 @@ test('hello carries --message-id when given', () => {
   assert.match(ok.stdout, /^MESSAGE-ID: gzapp-0001$/m);
   assert.deepEqual(validate(ok.stdout).errors, []);
 });
+
+// SPEC §7.4 gives REPLY-EXPECTED a closed grammar, and the relay procedure
+// makes senders rely on this validator — so a value outside it must fail
+// here, not reach the carrier with undefined reply semantics. Lowercase
+// only, matching the exact-match convention for BROADCAST: true.
+test('REPLY-EXPECTED rejects a value outside yes | no', () => {
+  for (const value of ['maybe', 'Yes', 'NO', 'true']) {
+    const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\nREPLY-EXPECTED: ${value}\n`;
+    const result = validate(text);
+    assert.equal(result.ok, false, `${value} must be rejected`);
+    assert.ok(result.errors.some(e => e.includes('REPLY-EXPECTED')));
+  }
+});
+
+test('REPLY-EXPECTED accepts yes and no', () => {
+  for (const value of ['yes', 'no']) {
+    const text = `[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nBROADCAST: true\nREPLY-EXPECTED: ${value}\n`;
+    assert.deepEqual(validate(text).errors, []);
+  }
+});

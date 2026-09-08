@@ -35,18 +35,48 @@
 #   0  no protected file changed, or the branch is architect-cto's, or the
 #      head branch is not knowable in this context
 #   1  a protected file changed on another role's branch
-#   2  invocation problem
+#   0  also when no base ref is resolvable -- an environment that cannot
+#      show a diff is not a violation, and failing there would block every
+#      PR rather than the one changing a charter
+#   2  invocation problem (cannot reach the repo root)
 
 set -uo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || { echo "cannot cd to repo root" >&2; exit 2; }
 
-BASE="${GZAPP_CHARTER_BASE:-origin/main}"
-git rev-parse --verify -q "$BASE" >/dev/null || BASE="main"
-git rev-parse --verify -q "$BASE" >/dev/null || {
-    echo "check_charter_authority: cannot resolve a base ref to diff against" >&2
-    exit 2
+# RESOLVING THE BASE IS THE HARD PART IN CI, not locally. `actions/checkout`
+# defaults to depth 1 and, on a pull_request, checks out the MERGE ref -- so
+# there is no `origin/main` and no `HEAD^1` to diff against. The first
+# version assumed `origin/main` existed and exited 2 when it did not, which
+# failed the build for an environment limitation rather than a violation.
+resolve_base() {
+    local candidate
+    for candidate in "${GZAPP_CHARTER_BASE:-}" \
+                     "origin/${GITHUB_BASE_REF:-}" "${GITHUB_BASE_REF:-}" \
+                     origin/main main; do
+        [[ -n "$candidate" && "$candidate" != "origin/" ]] || continue
+        if git rev-parse --verify -q "$candidate" >/dev/null 2>&1; then
+            printf '%s' "$candidate"; return 0
+        fi
+    done
+    # Nothing local matched: fetch just the base tip. One shallow fetch, and
+    # only on a pull_request where GITHUB_BASE_REF names the branch.
+    if [[ -n "${GITHUB_BASE_REF:-}" ]] \
+       && git fetch -q --depth=1 origin "$GITHUB_BASE_REF" 2>/dev/null; then
+        printf 'FETCH_HEAD'; return 0
+    fi
+    return 1
+}
+
+BASE="$(resolve_base)" || {
+    # NOT a build failure. This guard is a tripwire; an environment that
+    # cannot show it a diff is not a violation, and failing here would
+    # block every PR rather than the one changing a charter.
+    echo "check_charter_authority: NOT ENFORCED — no base ref to diff"
+    echo "against (shallow checkout with no GITHUB_BASE_REF). A charter"
+    echo "change would pass unexamined here."
+    exit 0
 }
 
 # GITHUB_HEAD_REF is set on pull_request and empty elsewhere; fall back to

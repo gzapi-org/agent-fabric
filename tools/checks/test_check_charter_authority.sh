@@ -46,6 +46,9 @@ new_repo() {
   git -C "$SANDBOX" config user.email t@e; git -C "$SANDBOX" config user.name t
   git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm base
   git -C "$SANDBOX" branch -q base-ref
+  # Renamed so there is no `main` for the guard to fall back to:
+  # the unresolvable-base case below depends on its absence.
+  git -C "$SANDBOX" branch -q -M sandbox-head
 }
 
 commit_change() {  # $1 = path, relative
@@ -101,6 +104,23 @@ rc="$(rc_of gh-readonly-queue/main/pr-999-abc)"
 out="$(check gh-readonly-queue/main/pr-999-abc)"
 [[ "$out" == *"the pull_request run"* ]] \
     && pass "says where it IS enforced" || fail "says where it IS enforced" "$out"
+
+echo "no base ref is resolvable"
+# The guard must NOT fail the build here. An environment that cannot show
+# it a diff is not a violation, and exiting non-zero would block every PR
+# rather than the one changing a charter -- which is exactly what the
+# first version did in CI, where actions/checkout leaves no origin/main.
+new_repo; commit_change ".roles/flutter-dev/charter.md"
+rc="$( ( cd "$SANDBOX" && GZAPP_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
+    GZAPP_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
+    bash tools/checks/check_charter_authority.sh >/dev/null 2>&1 ); echo $? )"
+[[ "$rc" == 0 ]] && pass "passes rather than blocking every PR" \
+    || fail "passes rather than blocking every PR" "exit $rc"
+out="$( cd "$SANDBOX" && GZAPP_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
+    GZAPP_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
+    bash tools/checks/check_charter_authority.sh 2>&1 )"
+[[ "$out" == *"NOT ENFORCED"* ]] && pass "says it did not enforce" \
+    || fail "says it did not enforce" "$out"
 
 echo "a detached HEAD"
 rc="$(rc_of HEAD)"

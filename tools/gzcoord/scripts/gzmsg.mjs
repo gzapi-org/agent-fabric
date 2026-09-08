@@ -24,19 +24,23 @@ const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 // (§, —) and VS16-forced emoji (❤️) count 1, which only the reader's
 // terminal can decide — `wc -L` says 1 for both; the one exception is
 // U+3248–324F, Ambiguous by property but 2 here and in `wc -L`, because
-// they sit inside the CJK block the table takes whole. Ranges run to the
-// end of their block, not to the last code point assigned at some
-// vintage: a range pinned to an assignment silently drops every later
-// one (U+16FF2–16FF6, U+18D09–18DF2, U+2630–2637 all arrived after the
-// classic table), and over-counting an unassigned code point costs
-// nothing, since none can legitimately appear in a message.
+// they sit inside the CJK block the table takes whole. Where a block is
+// wholly Wide or Fullwidth, its range runs to the block end, not to the
+// last code point assigned at some vintage: a range pinned to an
+// assignment silently drops every later one (U+16FF2–16FF6,
+// U+18D09–18DF2, U+2630–2637 all arrived after the classic table), and an
+// unassigned code point inside a wide block will be wide when it is
+// assigned, so over-counting it now is the right answer early. Where a
+// block mixes widths — Halfwidth and Fullwidth Forms, Hangul Jamo, CJK
+// Symbols and Punctuation — the range stops at the last wide code point,
+// and must not be "finished" to the block end.
 const WIDE_RANGES = [
   [0x1100, 0x115F], [0x2329, 0x232A], [0x2630, 0x2637], [0x268A, 0x268F],
   [0x2E80, 0x303E], [0x3041, 0x33FF], [0x3400, 0x4DBF], [0x4DC0, 0x4DFF],
   [0x4E00, 0x9FFF], [0xA000, 0xA4CF], [0xA960, 0xA97F], [0xAC00, 0xD7A3],
   [0xF900, 0xFAFF], [0xFE10, 0xFE19], [0xFE30, 0xFE4F], [0xFE50, 0xFE6B],
   [0xFF00, 0xFF60], [0xFFE0, 0xFFE6],
-  [0x16FE0, 0x16FFF], [0x17000, 0x18AFF], [0x18B00, 0x18CFF], [0x18D00, 0x18D8F],
+  [0x16FE0, 0x16FFF], [0x17000, 0x18AFF], [0x18B00, 0x18CFF], [0x18D00, 0x18DFF],
   [0x1AFF0, 0x1AFFF], [0x1B000, 0x1B2FF], [0x1D300, 0x1D376], [0x1F200, 0x1F26F],
   [0x20000, 0x2FFFD], [0x30000, 0x3FFFD],
 ];

@@ -75,6 +75,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const from = arg('from'), role = arg('role'), project = arg('project');
     if (!from || !role || !project) throw new Error('hello requires --from --role --project');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
+    if (arg('message-id')) lines.push(`MESSAGE-ID: ${arg('message-id')}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
     if (arg('capabilities')) lines.push(`CAPABILITIES: ${arg('capabilities')}`);
     // A HELLO is how peers learn an address, so emitting one this same tool
@@ -84,7 +85,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ...');
+    console.error('usage: gzmsg.mjs validate <file> | hello --from ... --role ... --project ... [--message-id ...]');
     process.exit(2);
   }
 }

@@ -4,6 +4,7 @@ ROLE: Backend Engineer
 TO: develop-gzapp/gzapp
 TO-ROLE: Application Architect
 PROJECT: gzapp
+MESSAGE-ID: backend-0001
 REPOSITORY: gzapp
 BRANCH: feature/stop-resolution
 COMMIT: a81c142

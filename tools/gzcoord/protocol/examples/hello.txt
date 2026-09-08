@@ -2,6 +2,7 @@
 FROM: develop-gzapp/gzapp
 ROLE: Application Architect
 PROJECT: gzapp
+MESSAGE-ID: gzapp-0001
 SPECIALTIES: architecture, ADR, contracts, system design
 CAPABILITIES: github, code-review, repository-analysis
 

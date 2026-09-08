@@ -105,3 +105,13 @@ test('REPLY-EXPECTED is ordinary optional metadata', () => {
   assert.deepEqual(result.errors, []);
   assert.equal(result.message.metadata['REPLY-EXPECTED'], 'no');
 });
+
+// The relay transport numbers every message, HELLO included, and points at
+// this command to emit it — so the command must be able to carry the id.
+test('hello carries --message-id when given', () => {
+  const ok = gzmsg('hello','--from','develop-gzapp/gzapp','--role','Application Architect',
+                   '--project','gzapp','--message-id','gzapp-0001');
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /^MESSAGE-ID: gzapp-0001$/m);
+  assert.deepEqual(validate(ok.stdout).errors, []);
+});

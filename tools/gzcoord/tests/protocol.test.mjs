@@ -294,6 +294,10 @@ test('columns() approximates terminal width where String.length does not', () =>
     ['SUBJECT: ' + '\u00A9'.repeat(32), 41],          // text-default pictograph ©: 1 each
     ['SUBJECT: instance\u2194instance', 26],           // ↔ as the repo writes it: 1
     ['SUBJECT: \u{1F1EC}\u{1F1EA}', 11],              // flag pair: 2 total, not 4
+    ['SUBJECT: ' + '\uFF21'.repeat(32), 73],          // fullwidth Latin: 2 each (was 1)
+    ['SUBJECT: \u3000\u3001\u3002', 15],              // ideographic space and punctuation: 2 each
+    ['SUBJECT: ' + '\uFF76'.repeat(40), 49],          // halfwidth katakana: 1 each (was 2, a false warning)
+    ['SUBJECT: ' + '\u{1B001}'.repeat(40), 89],       // kana supplement: 2, outside the classic table
     ['SUBJECT: ' + '\u{1D400}'.repeat(40), 49],       // narrow astral: 1 each
     ['SUBJECT: ' + 'e\u0301'.repeat(40), 49],         // combining: 0
     ['SUBJECT: \u10DB\u10D0\u10E0\u10E8 \u043C\u0430\u0440\u0448', 18], // Georgian, Cyrillic: 1 each

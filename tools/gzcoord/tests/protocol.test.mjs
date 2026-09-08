@@ -267,10 +267,12 @@ test('hello prints the line-length warning on stderr and still emits the message
   assert.match(ok.stdout, /^\[GZCOORD\/1\] HELLO\n/);
 });
 
-// SPEC §6: the separator is a colon and one or more spaces, the value is
-// trimmed, and a sender emits exactly one space. Nothing pinned it: a regex
-// that dropped the space requirement altogether left every test green.
-test('the metadata separator is a colon plus one or more spaces, value trimmed', () => {
+// SPEC §6: the well-formed separator is one space; a tab or nothing is not
+// a separator (normative), and a reader MAY accept a run of spaces and trim
+// (an allowance — this pins what the reference does, not what a conforming
+// parser must). Nothing pinned any of it: a regex that dropped the space
+// requirement altogether left every test green.
+test('reference parser: separator is one space, tolerates a run, rejects tab and nothing', () => {
   const base = 'ROLE: Application Architect\nPROJECT: gzapp\n';
   for (const [line, ok] of [['FROM: develop-gzapp/gzapp', true], ['FROM:   develop-gzapp/gzapp   ', true],
                             ['FROM:develop-gzapp/gzapp', false], ['FROM:\tdevelop-gzapp/gzapp', false]]) {

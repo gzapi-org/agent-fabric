@@ -27,13 +27,19 @@ const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 // they sit inside the CJK block the table takes whole. Where a block is
 // wholly Wide or Fullwidth, its range runs to the block end, not to the
 // last code point assigned at some vintage: a range pinned to an
-// assignment silently drops every later one (U+16FF2–16FF6,
-// U+18D09–18DF2, U+2630–2637 all arrived after the classic table), and an
-// unassigned code point inside a wide block will be wide when it is
-// assigned, so over-counting it now is the right answer early. Where a
-// block mixes widths — Halfwidth and Fullwidth Forms, Hangul Jamo, CJK
-// Symbols and Punctuation — the range stops at the last wide code point,
-// and must not be "finished" to the block end.
+// assignment silently drops every later one (U+16FF2–16FF6, the Tangut
+// additions at U+18D00–18D1E and U+18D80–18DF2, U+2630–2637 all arrived
+// after the classic table), and an unassigned code point inside a wide
+// block will be wide when it is assigned, so over-counting it now is the
+// right answer early. Three wholly-wide ranges stop short on purpose —
+// FE10–FE19, FE50–FE6B, 1F200–1F26F — because the code point past the
+// block end is zero-width (U+FE20) or wide by another rule (U+1F300),
+// so extended to the block end they would have no narrow neighbour to
+// pin the edge in the test. Where a block mixes widths — Halfwidth and
+// Fullwidth Forms, Hangul Jamo, CJK Symbols and Punctuation,
+// Miscellaneous Technical, Miscellaneous Symbols, Counting Rod Numerals
+// — the range stops at the last wide code point, and must not be
+// "finished" to the block end: 40 card suits would report 81 columns.
 const WIDE_RANGES = [
   [0x1100, 0x115F], [0x2329, 0x232A], [0x2630, 0x2637], [0x268A, 0x268F],
   [0x2E80, 0x303E], [0x3041, 0x33FF], [0x3400, 0x4DBF], [0x4DC0, 0x4DFF],

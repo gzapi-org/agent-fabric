@@ -340,13 +340,27 @@ test('normalize undoes paste indentation without reclassifying body text', () =>
   // The odd-one-out marker keeps its one extra space and is warned about, not promoted.
   assert.ok(result.message.sections.NOTES.includes(' NOTES:'));
   assert.ok(result.warnings.some(w => w.includes('swallowed section marker')));
-  // Non-uniform body indentation is content: nothing is stripped there.
-  const mixed = normalize('  [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: R\n  PROJECT: gzapp\n  BROADCAST: true\n\n  NOTES:\nflush\n  YAML:\n');
-  assert.ok(mixed.endsWith('NOTES:\nflush\n  YAML:\n'));
-  assert.equal(validate(mixed).message.sections.NOTES, 'flush\n  YAML:\n');
+  // The carrier prefix comes from the metadata block, never from the body:
+  // a clean message whose only section is uniformly indented keeps it,
+  // and a content line shaped like a marker stays content.
+  const cleanIndented = '[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: R\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\n  the config we discussed:\n  YAML:\n  key: value\n';
+  assert.equal(normalize(cleanIndented), cleanIndented);
+  assert.deepEqual(Object.keys(validate(cleanIndented).message.sections), ['NOTES']);
+  // Under a uniform paste the sender's indented marker-shaped line comes
+  // back indented and stays body; a marker-shaped line at exactly the
+  // carrier prefix was written at column 0 and is a marker.
+  const uniform = normalize('  [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: R\n  PROJECT: gzapp\n  BROADCAST: true\n\n  NOTES:\n  flush\n    YAML:\n  key: value\n  REFERENCES:\n  - adr: ADR-001\n');
+  assert.equal(uniform, '[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: R\nPROJECT: gzapp\nBROADCAST: true\n\nNOTES:\nflush\n  YAML:\nkey: value\nREFERENCES:\n- adr: ADR-001\n');
+  assert.deepEqual(Object.keys(validate(uniform).message.sections), ['NOTES', 'REFERENCES']);
+  // The first marker is not the source: a paste that indented it oddly
+  // still strips the body by the metadata block's prefix.
+  const oddFirstMarker = normalize(' [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: R\n  PROJECT: gzapp\n  BROADCAST: true\n  \n   NOTES:\n  first\n  \n  REFERENCES:\n  - adr: ADR-001\n');
+  assert.ok(validate(oddFirstMarker).message.sections.REFERENCES.includes('- adr: ADR-001'));
   // Already-clean input is unchanged, and a message with no body is handled.
-  const clean = fs.readFileSync(new URL('../protocol/examples/review.txt', import.meta.url), 'utf8');
-  assert.equal(normalize(clean), clean);
+  for (const name of ['hello','observation','observation-diagnosis','reply','review']) {
+    const clean = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');
+    assert.equal(normalize(clean), clean, name);
+  }
   assert.equal(normalize('  [GZCOORD/1] HELLO\n  FROM: a/b\n  ROLE: R\n  PROJECT: p\n'), '[GZCOORD/1] HELLO\nFROM: a/b\nROLE: R\nPROJECT: p\n');
 });
 

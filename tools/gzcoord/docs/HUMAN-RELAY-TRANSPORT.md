@@ -113,12 +113,22 @@ knows which sessions are running.
   two steps, then validate. First, strip leading whitespace from every
   line of the metadata block — the run up to and including the first
   section marker. That is never ambiguous: the grammar admits no indented
-  content there. Then, for everything after it, strip leading whitespace
-  only if the same whitespace begins every non-blank line; otherwise touch
-  nothing. Indentation inside a body is content — an indented `  YAML:` is
+  content there. That same fact makes the metadata block the place to
+  read the carrier's indentation off: the leading whitespace most of its
+  `KEY: value` lines share is what the paste added. Then, for everything
+  after the first marker, remove exactly that prefix from each line that
+  begins with it, and leave every other line alone. If the metadata block
+  carried no indentation, the paste added none, and no body line is
+  touched — the body's own indentation is never the source, because it
+  cannot tell the sender's indentation from the carrier's, and a clean
+  message whose only section was uniformly indented used to lose it.
+  Indentation inside a body is content — an indented `  YAML:` is
   body text by SPEC §6, and the only way a sender can write a
-  marker-shaped line as content — so never reclassify a body line by its
-  shape. `gzmsg.mjs normalize <file>` does exactly these two steps and
+  marker-shaped line as content — and a uniform paste preserves it: the
+  sender's `  YAML:` arrives as `    YAML:`, loses the carrier's two, and
+  is body again, while a marker-shaped line at exactly the carrier's
+  prefix was written at column 0 and is the marker it looks like. Never
+  reclassify a body line by its shape. `gzmsg.mjs normalize <file>` does exactly these two steps and
   prints the result; every recipient hand-rolled them on the first day,
   and the paste is the same on every terminal, so the tool should be
   too. Then run `gzmsg.mjs validate` on what it printed. A message that

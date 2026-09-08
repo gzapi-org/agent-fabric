@@ -137,27 +137,41 @@ export function validate(text) {
 // (docs/HUMAN-RELAY-TRANSPORT.md, "Receiving"). The metadata block — every
 // line up to and including the first section marker — is stripped of
 // leading whitespace unconditionally: the grammar admits no indented
-// content there, so the strip is never ambiguous. The body is stripped
-// only of a prefix that begins every non-blank line; otherwise it is left
-// alone, because indentation inside a body is content and the only way a
-// sender can write a marker-shaped line as text. A marker the paste
-// indented differently from its neighbours therefore survives as body,
-// where validate() warns about it — detection by tool, decision by the
-// recipient. This never reclassifies a body line by its shape.
+// content there, so the strip is never ambiguous. That same fact makes
+// the metadata block the one place the carrier's indentation can be read
+// off: the most common leading whitespace across its KEY: value lines
+// (ties to the shorter) is what the paste added, and exactly that prefix
+// is removed from each later line that begins with it. Every other body
+// line is left alone: indentation inside a body is content, and the
+// body's own common prefix cannot tell the sender's indentation from the
+// carrier's — an unindented paste with a uniformly indented body used to
+// lose it. A paste that indented nothing therefore returns the body
+// byte for byte, and a uniform paste leaves nothing ambiguous: a sender's
+// indented `  YAML:` comes back indented and stays body, and a
+// marker-shaped line at exactly the carrier's prefix was written at
+// column 0, so it is the marker it looks like. A marker the paste
+// indented differently from its neighbours is the case that remains,
+// and validate() warns about it. The first marker is not the source: the
+// observed relay indented one marker differently from every line around
+// it, and the mandatory FROM / ROLE / PROJECT lines outvote it.
 export function normalize(text) {
   const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   const out = [];
+  const votes = new Map();
   let i = 0;
   for (; i < lines.length; i++) {
     const stripped = lines[i].replace(/^\s+/, '');
     out.push(stripped);
     if (/^[A-Z][A-Z0-9-]*:$/.test(stripped)) { i++; break; }
+    if (i > 0 && /^[A-Z][A-Z0-9-]*: /.test(stripped)) {
+      const ws = lines[i].slice(0, lines[i].length - stripped.length);
+      votes.set(ws, (votes.get(ws) ?? 0) + 1);
+    }
   }
-  const body = lines.slice(i);
-  const nonBlank = body.filter(l => l.trim() !== '');
-  let prefix = nonBlank.length ? nonBlank[0].match(/^\s*/)[0] : '';
-  for (const l of nonBlank) while (prefix && !l.startsWith(prefix)) prefix = prefix.slice(0, -1);
-  for (const l of body) out.push(l.startsWith(prefix) ? l.slice(prefix.length) : l);
+  let prefix = '';
+  let best = 0;
+  for (const [ws, n] of votes) if (n > best || (n === best && ws.length < prefix.length)) { prefix = ws; best = n; }
+  for (const l of lines.slice(i)) out.push(prefix && l.startsWith(prefix) ? l.slice(prefix.length) : l);
   return out.join('\n');
 }
 

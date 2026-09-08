@@ -2,11 +2,13 @@
 
 Use this prompt on a real host after cloning this repository.
 
-> **GZCoord is inactive and no transport is selected** (see
-> [`../CLAUDE.md`](../CLAUDE.md)). This prompt is therefore the brief for
-> whoever builds the replacement transport, not a task anyone can complete
-> today: step 3 of the goal and the whole live-validation section need an
-> adapter that does not yet exist. The first attempt is retired in
+> **GZCoord is active over a human relay; no automated transport exists**
+> (see [`../CLAUDE.md`](../CLAUDE.md) and
+> [`HUMAN-RELAY-TRANSPORT.md`](HUMAN-RELAY-TRANSPORT.md)). This prompt is
+> therefore the brief for whoever builds the automated transport, not a task
+> anyone can complete today: step 3 of the goal and the whole live-validation
+> section need an adapter that does not yet exist. The first automated
+> attempt is retired in
 > [`../history/telegram-transport/`](../history/telegram-transport/README.md);
 > read it for what went wrong before designing the next one.
 
@@ -53,8 +55,9 @@ Create the thinnest practical Claude Code host integration that lets multiple in
 
 ## Choosing the transport
 
-No transport is selected. Choosing one is the first task, and it is a
-transport decision, not a protocol one (`protocol/SPEC.md` §14) — the wire
+No automated transport is selected; a human relay carries traffic meanwhile.
+Choosing the automated one is the first task, and it is a transport
+decision, not a protocol one (`protocol/SPEC.md` §14) — the wire
 grammar does not change to accommodate a carrier.
 
 The candidate must satisfy `docs/TRANSPORT-ADAPTER-CONTRACT.md`, and the

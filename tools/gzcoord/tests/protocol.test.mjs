@@ -170,3 +170,31 @@ test('an indented marker-shaped body line warns instead of silently merging', ()
   assert.ok(result.warnings.some(w => w.includes('REFERENCES')));
   assert.equal(result.message.sections.REFERENCES, undefined);
 });
+
+// A header the parser cannot read used to escape validate() as an uncaught
+// exception — a stack trace on the CLI, and a caller that could not tell a
+// bad header from a crashed validator.
+test('a bad first line is a validation error, not an exception', () => {
+  for (const first of ['GZCOORD/1 HELLO', '[GZCOORD/2] HELLO', '[GZCOORD/1] HELLO ', '[GZCOORD/1] hello']) {
+    const result = validate(`${first}\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n`);
+    assert.equal(result.ok, false, `${JSON.stringify(first)} must be rejected`);
+    assert.ok(result.errors.some(e => e.includes('first line')));
+    assert.equal(result.message, null);
+  }
+});
+
+test('a leading byte-order mark does not invalidate the header', () => {
+  const text = `\uFEFF[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n`;
+  assert.deepEqual(validate(text).errors, []);
+});
+
+test('validate CLI reports a bad first line on one line and exits 1', () => {
+  const file = new URL('./bad-first-line.tmp.txt', import.meta.url);
+  fs.writeFileSync(file, 'GZCOORD/1 HELLO\nFROM: develop-gzapp/gzapp\nROLE: Tester\nPROJECT: gzapp\n');
+  try {
+    const bad = gzmsg('validate', file.pathname);
+    assert.equal(bad.status, 1);
+    assert.equal(bad.stderr.trim(), 'invalid GZCOORD/1 first line');
+    assert.equal(bad.stdout, '');
+  } finally { fs.unlinkSync(file); }
+});

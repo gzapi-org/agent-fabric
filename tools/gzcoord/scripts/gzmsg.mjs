@@ -12,7 +12,9 @@ const FORBIDDEN = new Set([
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
 export function parse(text) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  // A byte-order mark is an encoding artefact, not the first character of
+  // the header; some editors prepend one on save.
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   const first = lines.shift() ?? '';
   const m = first.match(/^\[GZCOORD\/1\] ([A-Z][A-Z0-9-]*)$/);
   if (!m) throw new Error('invalid GZCOORD/1 first line');
@@ -51,9 +53,14 @@ export function parse(text) {
 }
 
 export function validate(text) {
-  const msg = parse(text);
   const errors = [];
   const warnings = [];
+  let msg;
+  // parse() throws on a bad header because nothing after it can be read;
+  // validate() reports that like any other error, so the CLI prints one
+  // line instead of a stack trace and callers see a uniform result shape.
+  try { msg = parse(text); }
+  catch (e) { return { ok: false, errors: [e.message], warnings, message: null }; }
   if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(`unknown type: ${msg.type}`);
   for (const key of ['FROM','ROLE','PROJECT']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
   if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');

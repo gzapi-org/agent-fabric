@@ -129,6 +129,11 @@ export function validate(text) {
   if (!['HELLO','GOODBYE'].includes(msg.type)) {
     if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
   }
+  // SPEC §7.1: TO and TO-ROLE are two answers to one question, and the role
+  // string beside an address is the one nobody checks — it rode along
+  // unmatched in live traffic. BROADCAST is a reach, not an addressee, and
+  // may stand beside either one: everyone reads, the named party acts.
+  if (msg.metadata.TO && msg.metadata['TO-ROLE']) errors.push('TO and TO-ROLE are exclusive: name the instance or the role, not both');
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);

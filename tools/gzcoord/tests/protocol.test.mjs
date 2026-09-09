@@ -402,3 +402,18 @@ test('normalize CLI prints the normalised message for validate to read', () => {
     assert.deepEqual(validate(run.stdout).errors, []);
   } finally { fs.unlinkSync(file); }
 });
+
+// SPEC §7.1: one addressee. Live traffic carried TO beside a TO-ROLE that
+// matched no recorded role, and nothing noticed, because the address had
+// already routed the message. BROADCAST is a reach and may stand beside
+// either: everyone reads, the named party acts.
+test('TO and TO-ROLE are exclusive; BROADCAST may accompany either', () => {
+  const head = '[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n';
+  const both = validate(`${head}TO: develop-gzapp/web\nTO-ROLE: Web Engineer\n`);
+  assert.equal(both.ok, false);
+  assert.ok(both.errors.some(e => e.startsWith('TO and TO-ROLE are exclusive')));
+  assert.deepEqual(validate(`${head}TO: develop-gzapp/web\nBROADCAST: true\n`).errors, []);
+  assert.deepEqual(validate(`${head}BROADCAST: true\nTO-ROLE: Web Engineer\n`).errors, []);
+  assert.deepEqual(validate(`${head}TO: develop-gzapp/web\n`).errors, []);
+  assert.deepEqual(validate(`${head}TO-ROLE: Web Engineer\n`).errors, []);
+});

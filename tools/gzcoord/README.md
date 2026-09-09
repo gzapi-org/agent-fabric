@@ -53,7 +53,6 @@ There is no authoritative role registry. Peers may keep an ephemeral routing cac
 FROM: develop-gzapp/backend
 ROLE: Backend Engineer
 TO: develop-gzapp/gzapp
-TO-ROLE: Application Architect
 PROJECT: gzapp
 BRANCH: feature/stop-resolution
 COMMIT: a81c142

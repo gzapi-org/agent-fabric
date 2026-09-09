@@ -109,7 +109,6 @@ can name it:
 FROM: develop-gzapp/web
 ROLE: Web Engineer
 TO: develop-gzapp/gzapp
-TO-ROLE: Application Architect
 PROJECT: gzapp
 MESSAGE-ID: web-0003
 IN-REPLY-TO: gzapp-0007
@@ -162,23 +161,38 @@ This makes chat transports and logs easy to scan.
 
 ## Direct versus role addressing
 
-Known peer:
+Known peer — the address alone; the role it holds is in the peer
+directory, not repeated in the message:
 
 ```text
 TO: develop-gzapp/gzapp
-TO-ROLE: Application Architect
 ```
 
-Unknown concrete peer:
+Unknown concrete peer — the role alone:
 
 ```text
 TO-ROLE: Security Engineer
 ```
 
-Broadcast:
+Never both: `TO` and `TO-ROLE` are two answers to one question, and a
+role string beside an address is the one nobody checks (SPEC.md §7.1).
+
+Broadcast, and broadcast with one party asked to act — a role, or an
+instance:
 
 ```text
 BROADCAST: true
 ```
 
+```text
+BROADCAST: true
+TO-ROLE: Security Engineer
+```
+
+```text
+BROADCAST: true
+TO: develop-gzapp/gzapp
+```
+
+A direct message — no `BROADCAST` — carries `TO` and nothing else.
 `HELLO` and `GOODBYE` imply broadcast and need not include the field.

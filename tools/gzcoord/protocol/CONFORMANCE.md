@@ -16,6 +16,7 @@ A conforming parser:
 - rejects a `REPLY-EXPECTED` value other than `yes` or `no`;
 - rejects a metadata key that appears more than once;
 - rejects a `BROADCAST` value other than `true`;
+- rejects `TO` beside `TO-ROLE`;
 - does not infer project authority from messages.
 
 ## Agent runtime

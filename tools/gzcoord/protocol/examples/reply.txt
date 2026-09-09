@@ -2,7 +2,6 @@
 FROM: develop-gzapp/web
 ROLE: Web Engineer
 TO: develop-gzapp/gzapp
-TO-ROLE: Application Architect
 PROJECT: gzapp
 MESSAGE-ID: web-0003
 IN-REPLY-TO: gzapp-0007

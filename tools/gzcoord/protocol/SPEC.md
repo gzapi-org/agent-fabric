@@ -170,13 +170,20 @@ PROJECT: <project identifier>
 
 `HELLO` and `GOODBYE` are broadcast by default and do not require `TO`.
 
-All other messages MUST contain at least one of:
+All other messages MUST carry exactly one of the two addressing fields:
 
 ```text
 TO: <address>
 TO-ROLE: <role>
+```
+
+`TO` names one instance; `TO-ROLE` names whoever holds a role. A message MUST NOT carry both — they are two answers to one question, and when they disagree the disagreement is invisible, because the role string rides along unchecked beside the address that actually routed. A validator MUST reject a message carrying both (§18).
+
+```text
 BROADCAST: true
 ```
+
+`BROADCAST: true` is a reach, not an addressee: everyone receives the message. It stands alone, or beside one addressing field — everyone reads, and the named instance or role is the one asked to act. A direct message, one without `BROADCAST`, carries `TO` and nothing else.
 
 A direct `TO` is preferred when the peer address is known.
 
@@ -340,7 +347,7 @@ If more than one matching peer exists, the runtime SHOULD either:
 
 It MUST NOT invent a permanent ownership rule.
 
-If `TO` and `TO-ROLE` are both present, `TO` identifies the intended concrete recipient and `TO-ROLE` documents why that recipient was selected.
+`TO` and `TO-ROLE` are exclusive (§7.1). A sender that knows the concrete recipient uses `TO`; the role that recipient holds is in the peer directory, not in the message.
 
 ## 14. Transport boundary
 
@@ -437,6 +444,7 @@ A GZCOORD/1 parser:
 - MUST reject a `REPLY-EXPECTED` value other than `yes` or `no` (§7.4);
 - MUST reject a metadata key that appears more than once in the metadata block (§6);
 - MUST reject a `BROADCAST` value other than `true` (§7.1);
+- MUST reject a message carrying both `TO` and `TO-ROLE` (§7.1);
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown.
 

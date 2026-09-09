@@ -427,25 +427,27 @@ test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
   }
 });
 
-// SPEC §4 deployment catalogue: ROLE and TO-ROLE are taxonomy titles,
-// verbatim; an instance names a slug; ROLE is the title of the slug FROM
-// names. One role was live in three spellings on the relay's first day.
-test('with a taxonomy, roles are titles and instances name slugs', () => {
+// SPEC §4 deployment catalogue: ROLE and TO-ROLE are taxonomy slugs,
+// matched by equality. One role was live in three spellings on the
+// relay's first day. The address is NOT bound to the role: a role can
+// change without the address changing (§4), and gzapp-claude2 is a live
+// clone holding backend-dev with no slug in its name — an earlier cut of
+// this rule silenced it.
+test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to the role', () => {
   const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
   assert.deepEqual(ok.errors, []);
-  const cases = [
-    ['ROLE: Application Architect', 'ROLE must be architect-cto, the slug FROM names'],
-    ['ROLE: Architect / CTO', 'ROLE must be architect-cto, the slug FROM names'],
-    ['ROLE: backend-dev', 'ROLE must be architect-cto, the slug FROM names'],
-  ];
-  for (const [role, expected] of cases) {
-    const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\n${role}\nPROJECT: gzapp\nBROADCAST: true\n`, { taxonomy });
-    assert.ok(r.errors.some(e => e.startsWith(expected)), `${role}: ${r.errors}`);
+  assert.deepEqual(ok.warnings, []);
+  for (const role of ['Application Architect', 'Architect / CTO']) {
+    const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: ${role}\nPROJECT: gzapp\nBROADCAST: true\n`, { taxonomy });
+    assert.ok(r.errors.some(e => e.startsWith(`ROLE "${role}" is not a role slug`)), `${role}: ${r.errors}`);
   }
-  const noSlug = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/gzapp-claude2\nROLE: architect-cto\nPROJECT: gzapp\nBROADCAST: true\n', { taxonomy });
-  assert.ok(noSlug.errors.some(e => e.startsWith('FROM instance "gzapp-claude2" names no role slug')));
-  const badTo = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nTO: develop-qzapp/somebody\n', { taxonomy });
-  assert.ok(badTo.errors.some(e => e.startsWith('TO instance "somebody" names no role slug')));
+  // A role change without a rename: valid, with a warning naming the disagreement.
+  const switched = validate('[GZCOORD/1] HELLO\nFROM: develop-qzapp/architect-cto-01\nROLE: backend-dev\nPROJECT: gzapp\n', { taxonomy });
+  assert.deepEqual(switched.errors, []);
+  assert.ok(switched.warnings.some(w => w.startsWith('FROM names architect-cto but ROLE is backend-dev')), switched.warnings);
+  // A clone named for no role is a session like any other, as sender and as addressee.
+  assert.deepEqual(validate('[GZCOORD/1] HELLO\nFROM: develop-qzapp/gzapp-claude2\nROLE: backend-dev\nPROJECT: gzapp\n', { taxonomy }).errors, []);
+  assert.deepEqual(validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nTO: develop-qzapp/gzapp-claude2\n', { taxonomy }).errors, []);
   for (const bad of ['Architect / CTO', 'Application Architect']) {
     const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nTO-ROLE: ${bad}\n`, { taxonomy });
     assert.ok(r.errors.some(e => e.startsWith(`TO-ROLE "${bad}" is not a role slug`)), r.errors);
@@ -470,7 +472,7 @@ test('hello derives the slug from the address and refuses a title as ROLE', () =
   assert.match(derived.stdout, /^ROLE: architect-cto$/m);
   const title = gzmsg('hello', '--from', 'develop-qzapp/architect-cto-01', '--role', 'Architect / CTO', '--project', 'gzapp');
   assert.equal(title.status, 1);
-  assert.match(title.stderr, /ROLE must be architect-cto, the slug FROM names/);
+  assert.match(title.stderr, /ROLE "Architect \/ CTO" is not a role slug/);
   // Outside a deployment the old contract holds.
   const generic = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/anything', '--role', 'Tester', '--project', 'gzapp');
   assert.equal(generic.status, 0, generic.stderr);

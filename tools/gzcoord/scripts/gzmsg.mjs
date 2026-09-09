@@ -111,13 +111,17 @@ export function parse(text) {
 // A deployment's role catalogue (SPEC §4: the core protocol keeps no
 // enum; a deployment MAY publish one, and gzapp does — .roles/taxonomy.json).
 // Given one, the validator holds ROLE and TO-ROLE to its slugs — the `id`,
-// `backend-dev`, one token with no spaces or slashes — and the instance
-// half of FROM and TO to carrying one. A slug rather than the title: it
-// is what the instance name already carries, so ROLE is derivable from
-// FROM and TO-ROLE matches by equality, and it survives a metadata line
-// and a filter without quoting. Live traffic announced one role three
-// ways in a day, and a TO-ROLE matches nothing unless both ends spell it
-// the same.
+// `backend-dev`, one token with no spaces or slashes, matched by equality
+// and safe in a metadata line and a filter. Live traffic announced one
+// role three ways in a day. The catalogue is the only source a RECEIVING
+// validator can consult: it is committed and identical in every clone,
+// where a sender's active-role record is gitignored on the sender's disk.
+// Nothing ties ROLE to the address: SPEC §4 says an instance MAY change
+// its role without changing its address, a live clone (gzapp-claude2,
+// holding backend-dev) carries no slug in its name at all, and a recipient
+// tests TO against its own address by equality, so a slug in an instance
+// name buys the protocol nothing. Where the name does carry one that
+// disagrees with ROLE, a warning says so — a rename would be tidy.
 export function loadTaxonomy(path) {
   const t = JSON.parse(fs.readFileSync(path, 'utf8'));
   const titles = new Map();
@@ -137,7 +141,9 @@ export function findTaxonomy(from = process.cwd()) {
 }
 // The slug an instance name carries, as a whole run of hyphen-separated
 // tokens: `gzapp-gzcoord-coordinator` and `architect-cto-01` both name
-// their role; `gzapp-claude2` names none. The longest match wins.
+// their role; `gzapp-claude2` names none. The longest match wins. Used to
+// derive a default ROLE for `hello` and to warn on disagreement — never
+// to reject.
 export function slugOf(instance, taxonomy) {
   const tokens = instance.split('-');
   let best;
@@ -180,20 +186,13 @@ export function validate(text, { taxonomy } = {}) {
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';
-    const instanceOf = a => addressRe.test(a) ? a.split('/')[1] : undefined;
-    const fromSlug = msg.metadata.FROM && instanceOf(msg.metadata.FROM) && slugOf(instanceOf(msg.metadata.FROM), taxonomy);
-    if (msg.metadata.FROM && instanceOf(msg.metadata.FROM) && !fromSlug)
-      errors.push(`FROM instance "${instanceOf(msg.metadata.FROM)}" names no role slug from ${catalogue}`);
-    if (msg.metadata.ROLE) {
-      if (fromSlug && msg.metadata.ROLE !== fromSlug)
-        errors.push(`ROLE must be ${fromSlug}, the slug FROM names; got "${msg.metadata.ROLE}"`);
-      else if (!taxonomy.titles.has(msg.metadata.ROLE))
-        errors.push(`ROLE "${msg.metadata.ROLE}" is not a role slug in ${catalogue}`);
-    }
-    if (msg.metadata.TO && instanceOf(msg.metadata.TO) && !slugOf(instanceOf(msg.metadata.TO), taxonomy))
-      errors.push(`TO instance "${instanceOf(msg.metadata.TO)}" names no role slug from ${catalogue}`);
+    if (msg.metadata.ROLE && !taxonomy.titles.has(msg.metadata.ROLE))
+      errors.push(`ROLE "${msg.metadata.ROLE}" is not a role slug in ${catalogue}`);
     if (msg.metadata['TO-ROLE'] && !taxonomy.titles.has(msg.metadata['TO-ROLE']))
       errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role slug in ${catalogue}`);
+    const fromSlug = msg.metadata.FROM && addressRe.test(msg.metadata.FROM) && slugOf(msg.metadata.FROM.split('/')[1], taxonomy);
+    if (fromSlug && msg.metadata.ROLE && taxonomy.titles.has(msg.metadata.ROLE) && msg.metadata.ROLE !== fromSlug)
+      warnings.push(`FROM names ${fromSlug} but ROLE is ${msg.metadata.ROLE}; the role may have changed since the clone was named`);
   }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
@@ -311,9 +310,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
     const from = arg('from'), project = arg('project');
-    // With a catalogue, the role is the slug the address names — the one
-    // spelling a peer's TO-ROLE can match.
-    const derived = taxonomy && from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy);
+    // With a catalogue the role can be derived: first from this working
+    // copy's active-role record (.roles/.instance/state.json, gitignored,
+    // written by /role), then from the slug the address carries. The
+    // record is authoritative where it exists; the address is a last
+    // resort, since a clone is named once and a role can change.
+    const recorded = (() => {
+      if (!taxonomy?.path) return undefined;
+      try { return JSON.parse(fs.readFileSync(taxonomy.path.replace(/taxonomy\.json$/, '.instance/state.json'), 'utf8')).role; }
+      catch { return undefined; }
+    })();
+    const derived = taxonomy && ((recorded && taxonomy.titles.has(recorded) && recorded) || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
     const role = arg('role') ?? derived;
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the address names a catalogue role');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];

@@ -173,13 +173,18 @@ such as `Architect / CTO` or a free description such as `Application
 Architect` (`runtime/README.md`, "Role sourcing"). The person resolves
 `TO-ROLE` by equality against the last `HELLO` they saw, so any other
 spelling matches nothing; a slug is one token, safe in a metadata line
-and in a filter. The instance half of the address MUST carry the same
-slug (`architect-cto-01`, `gzapp-gzcoord-coordinator`): that is what
-lets a recipient tell a misdelivered `TO` from its own, and it is why
-`ROLE` follows from `FROM`. Observed the first day: one role spelled
-three ways across a HELLO, a TO-ROLE and an address. The validator
-enforces all of this from anywhere inside the working copy, and `hello`
-derives the slug from the address when `--role` is omitted — use that.
+and in a filter. The address is not bound to the role: clones are
+usually named for the role they were launched as (`architect-cto-01`,
+`gzapp-gzcoord-coordinator`), which is a convenience, not a claim — a
+role can change without the address changing (SPEC §4), and a clone
+named otherwise is still a session. A recipient tells a misdelivered
+`TO` from its own by comparing it to its own address, nothing more.
+Observed the first day: one role spelled three ways across a HELLO, a
+TO-ROLE and an address. The validator enforces the slug rules from
+anywhere inside the working copy, warns when an address names a role
+other than the one announced, and `hello` derives the slug when `--role`
+is omitted — from `.roles/.instance/state.json`, else from the address —
+so use that.
 
 ## Limits, stated plainly
 

@@ -15,10 +15,11 @@ session's prompt. That is the whole transport, and it is the current one:
   `scripts/gzmsg.mjs`, print it in a fenced text block, and number it —
   every number from `gzmsg.mjs next-id`, because the sequence belongs to
   the address and outlives the session. Announce the role's **slug** from
-  `.roles/taxonomy.json` — `backend-dev`, never `.NET backend developer`
+  [`.roles/taxonomy.json`](../../.roles/taxonomy.json) — `backend-dev`, never `.NET backend developer`
   — or omit `--role` and let `hello` derive it, from this working copy's
-  `.roles/.instance/state.json` (what `/role` wrote) and only failing
-  that from the address — a record naming a role the catalogue does not
+  `.roles/.instance/state.json` at the repository root (what `/role`
+  wrote; gitignored, so it may be absent) and only failing that from the
+  address — a record naming a role the catalogue does not
   have is refused, not guessed past: the person resolves `TO-ROLE` by
   equality against the last `HELLO` they saw, and one addressing field
   per message is the whole routing rule.

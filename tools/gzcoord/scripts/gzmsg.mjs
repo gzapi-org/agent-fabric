@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
@@ -123,27 +124,35 @@ export function parse(text) {
 // tests TO against its own address by equality, so a slug in an instance
 // name buys the protocol nothing. Where the name does carry one that
 // disagrees with ROLE, a warning says so — a rename would be tidy.
-export function loadTaxonomy(path) {
-  const t = JSON.parse(fs.readFileSync(path, 'utf8'));
+// The parameter is `file`, not `path`: `path` is the node:path module
+// here, and shadowing it turns a later path.join() in this function into
+// a runtime error rather than a compile one.
+export function loadTaxonomy(file) {
+  const t = JSON.parse(fs.readFileSync(file, 'utf8'));
   const roles = new Map();   // slug (the catalogue id, what goes on the wire) → title (for reading)
   for (const r of t.roles ?? []) if (r.id && r.title) roles.set(r.id, r.title);
-  if (roles.size === 0) throw new Error(`${path} holds no roles with id and title`);
-  return { path, roles };
+  if (roles.size === 0) throw new Error(`${file} holds no roles with id and title`);
+  return { path: file, roles };
 }
 // The working copy's active-role record, written by /role beside the
-// catalogue (.roles/.instance/state.json, gitignored). Three outcomes,
-// kept distinct because the second used to be silent: no record, a record
-// naming a catalogue role, or a record naming a role the catalogue does
-// not have — which is not "no record" and must not fall through to a
-// guess from the directory name.
+// catalogue (.roles/.instance/state.json, gitignored). Four outcomes, kept
+// distinct because a record that fails to name a usable role must never
+// pass as "no record" and fall through to a guess from the directory name:
+// no record at all; a record naming a catalogue role; a record present but
+// saying nothing usable — unreadable, or with no `role`, which the
+// instance-state schema makes required — which warns and leaves the caller
+// to decide; and a record naming a role the catalogue does not have, which
+// is an error, since the clone asserts a role the deployment does not
+// know. The warning states the cause only: what happens next is the
+// caller's, and it may not be the address.
 export function recordedRole(taxonomy) {
   if (!taxonomy?.path) return { role: undefined };
   const file = path.join(path.dirname(taxonomy.path), '.instance', 'state.json');
   if (!fs.existsSync(file)) return { role: undefined };
   let role;
   try { role = JSON.parse(fs.readFileSync(file, 'utf8')).role; }
-  catch (e) { return { role: undefined, warning: `${file} could not be read (${e.message}); deriving the role from the address instead` }; }
-  if (role === undefined) return { role: undefined };
+  catch (e) { return { role: undefined, warning: `${file} could not be read (${e.message})` }; }
+  if (role === undefined) return { role: undefined, warning: `${file} records no role` };
   if (!taxonomy.roles.has(role)) return { role: undefined, error: `${file} records role "${role}", which is not in ${taxonomy.path}; pass --role explicitly` };
   return { role, file };
 }
@@ -335,10 +344,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // resort, since a clone is named once and a role can change. A record
     // the catalogue does not know is an error, never a silent fallback.
     const recorded = recordedRole(taxonomy);
-    if (recorded.warning) console.error(`warning: ${recorded.warning}`);
     if (recorded.error && !arg('role')) { console.error(recorded.error); process.exit(1); }
     const derived = taxonomy && (recorded.role || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
     const role = arg('role') ?? derived;
+    // The consequence is named by whoever took it, not by recordedRole:
+    // an explicit --role may have won, or nothing may have been derived
+    // at all, and the warning used to claim the address either way.
+    if (recorded.warning)
+      console.error(`warning: ${recorded.warning}; ` + (arg('role') ? `using --role ${arg('role')}` : derived ? `deriving ${derived} from the address instead` : 'and the address names no role either'));
     if (arg('role') && recorded.role && arg('role') !== recorded.role)
       console.error(`warning: --role ${arg('role')} disagrees with ${recorded.file}, which records ${recorded.role}`);
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the working copy records a role or the address names one');

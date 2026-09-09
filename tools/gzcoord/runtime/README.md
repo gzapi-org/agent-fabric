@@ -34,4 +34,8 @@ walking up from the working directory and enforces both slug rules;
 `hello` derives `--role` when it is omitted — from the active-role
 record, else from a slug the address carries — so the one spelling a
 peer can match is the default, and it warns when an address names a
-role other than the one announced.
+role other than the one announced. A record that says nothing usable
+(unreadable, or without a `role`) warns and falls back; a record naming
+a role the catalogue does not have is refused outright, naming the file
+and asking for an explicit `--role`, because a clone asserting a role
+the deployment does not know is a state to fix, not to guess past.

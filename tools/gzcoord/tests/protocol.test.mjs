@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
@@ -471,14 +473,26 @@ test('slugOf finds the longest whole-token slug an instance carries', () => {
 // --taxonomy keeps the CLI off the developer's real record — the suite
 // used to read whatever /role had written in this clone, and passed only
 // where that file was absent.
+// System temp, not the tests directory: a run interrupted between the
+// mkdtemp and the finally would otherwise leave an untracked copy of the
+// catalogue in a tree whose workflow blesses `git add -A`.
 function fixtureRoot(state) {
-  const root = fs.mkdtempSync(new URL('./fixture-', import.meta.url).pathname);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-fixture-'));
   fs.mkdirSync(`${root}/.roles/.instance`, { recursive: true });
   fs.copyFileSync(taxonomy.path, `${root}/.roles/taxonomy.json`);
   if (state !== undefined) fs.writeFileSync(`${root}/.roles/.instance/state.json`, state);
   return root;
 }
-const withFixture = (state, fn) => { const root = fixtureRoot(state); try { return fn(root, `${root}/.roles/taxonomy.json`); } finally { fs.rmSync(root, { recursive: true, force: true }); } };
+// Synchronous callbacks only: the finally fires when fn RETURNS, so an
+// async fn would have its fixture removed while still running.
+const withFixture = (state, fn) => {
+  const root = fixtureRoot(state);
+  try {
+    const r = fn(root, `${root}/.roles/taxonomy.json`);
+    if (r instanceof Promise) throw new TypeError('withFixture takes a synchronous callback');
+    return r;
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+};
 
 test('hello derives the slug from the address when no role is recorded, and refuses a title as ROLE', () => withFixture(undefined, (root, tax) => {
   const derived = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
@@ -516,12 +530,28 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     const rec = recordedRole(loadTaxonomy(tax));
     assert.equal(rec.role, undefined); assert.match(rec.error, /security-engineer/);
   });
-  withFixture('not json', (root, tax) => {
-    const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^ROLE: architect-cto$/m);
-    assert.match(r.stderr, /^warning: .*state\.json could not be read/m);
-  });
+  // A record present but saying nothing usable warns, and the warning
+  // names the consequence the caller actually took — never the address
+  // when the address was not what was used.
+  for (const state of ['not json', JSON.stringify({ clone_id: 'x' })]) {
+    withFixture(state, (root, tax) => {
+      const cause = state === 'not json' ? /could not be read/ : /records no role/;
+      const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /^ROLE: architect-cto$/m);
+      assert.match(r.stderr, cause);
+      assert.match(r.stderr, /deriving architect-cto from the address instead$/m);
+      assert.equal(recordedRole(loadTaxonomy(tax)).role, undefined);
+      assert.match(recordedRole(loadTaxonomy(tax)).warning, cause);
+      const flag = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--role', 'db-admin', '--project', 'gzapp');
+      assert.equal(flag.status, 0, flag.stderr);
+      assert.match(flag.stderr, /using --role db-admin$/m);
+      const neither = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/gzapp-claude2', '--project', 'gzapp');
+      assert.notEqual(neither.status, 0);
+      assert.match(neither.stderr, /and the address names no role either$/m);
+    });
+  }
+  assert.throws(() => withFixture(undefined, async () => {}), /synchronous callback/);
   // A --taxonomy whose basename is not taxonomy.json still finds the record beside it.
   withFixture(JSON.stringify({ role: 'web-dev' }), (root, tax) => {
     fs.copyFileSync(tax, `${root}/.roles/catalogue.json`);

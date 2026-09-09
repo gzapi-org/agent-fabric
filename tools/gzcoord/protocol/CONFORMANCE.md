@@ -52,4 +52,4 @@ The following violate the design:
 - using message state to override GitHub issue/PR state;
 - changing an agent address when its model changes;
 - quoting a credential, key or token value in a finding — in whole, in part, or as an example — instead of describing its shape and location;
-- requiring a central catalog of legal role names.
+- requiring a central catalog of legal role names in the core protocol — a deployment's own catalogue, applied within that deployment, is the convention §4 permits.

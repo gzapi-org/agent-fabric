@@ -108,7 +108,44 @@ export function parse(text) {
   return { type, metadata, sections, malformed, duplicateKeys: [...duplicateKeys] };
 }
 
-export function validate(text) {
+// A deployment's role catalogue (SPEC §4: the core protocol keeps no
+// enum; a deployment MAY publish one, and gzapp does — .roles/taxonomy.json).
+// Given one, the validator holds ROLE and TO-ROLE to its titles, verbatim,
+// and holds the instance half of FROM and TO to naming one of its slugs:
+// live traffic announced one role three ways in a day, and a TO-ROLE
+// matches nothing unless both ends spell it the same.
+export function loadTaxonomy(path) {
+  const t = JSON.parse(fs.readFileSync(path, 'utf8'));
+  const titles = new Map();
+  for (const r of t.roles ?? []) if (r.id && r.title) titles.set(r.id, r.title);
+  if (titles.size === 0) throw new Error(`${path} holds no roles with id and title`);
+  return { path, titles };
+}
+export function findTaxonomy(from = process.cwd()) {
+  let dir = from;
+  for (;;) {
+    const candidate = `${dir}/.roles/taxonomy.json`;
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = dir.replace(/\/[^/]*$/, '');
+    if (!parent || parent === dir) return undefined;
+    dir = parent;
+  }
+}
+// The slug an instance name carries, as a whole run of hyphen-separated
+// tokens: `gzapp-gzcoord-coordinator` and `architect-cto-01` both name
+// their role; `gzapp-claude2` names none. The longest match wins.
+export function slugOf(instance, taxonomy) {
+  const tokens = instance.split('-');
+  let best;
+  for (const slug of taxonomy.titles.keys()) {
+    const st = slug.split('-');
+    for (let i = 0; i + st.length <= tokens.length; i++)
+      if (st.every((s, j) => tokens[i + j] === s) && (!best || slug.length > best.length)) best = slug;
+  }
+  return best;
+}
+
+export function validate(text, { taxonomy } = {}) {
   const errors = [];
   const warnings = [];
   let msg;
@@ -135,6 +172,24 @@ export function validate(text) {
   // may stand beside either one: everyone reads, the named party acts.
   if (msg.metadata.TO && msg.metadata['TO-ROLE']) errors.push('TO and TO-ROLE are exclusive: name the instance or the role, not both');
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
+  if (taxonomy) {
+    const catalogue = taxonomy.path ?? 'the role catalogue';
+    const titleSet = new Set(taxonomy.titles.values());
+    const instanceOf = a => addressRe.test(a) ? a.split('/')[1] : undefined;
+    const fromSlug = msg.metadata.FROM && instanceOf(msg.metadata.FROM) && slugOf(instanceOf(msg.metadata.FROM), taxonomy);
+    if (msg.metadata.FROM && instanceOf(msg.metadata.FROM) && !fromSlug)
+      errors.push(`FROM instance "${instanceOf(msg.metadata.FROM)}" names no role slug from ${catalogue}`);
+    if (msg.metadata.ROLE) {
+      if (fromSlug && msg.metadata.ROLE !== taxonomy.titles.get(fromSlug))
+        errors.push(`ROLE must be "${taxonomy.titles.get(fromSlug)}", the title of ${fromSlug} named by FROM; got "${msg.metadata.ROLE}"`);
+      else if (!titleSet.has(msg.metadata.ROLE))
+        errors.push(`ROLE "${msg.metadata.ROLE}" is not a role title in ${catalogue}`);
+    }
+    if (msg.metadata.TO && instanceOf(msg.metadata.TO) && !slugOf(instanceOf(msg.metadata.TO), taxonomy))
+      errors.push(`TO instance "${instanceOf(msg.metadata.TO)}" names no role slug from ${catalogue}`);
+    if (msg.metadata['TO-ROLE'] && !titleSet.has(msg.metadata['TO-ROLE']))
+      errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role title in ${catalogue}`);
+  }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
   // A body line that is marker-shaped up to whitespace — indented, or with
@@ -235,18 +290,27 @@ function arg(name) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cmd = process.argv[2];
+  // The deployment's catalogue is found by walking up from the working
+  // directory; --taxonomy names one explicitly, --no-taxonomy validates
+  // the wire grammar alone.
+  const taxonomyPath = process.argv.includes('--no-taxonomy') ? undefined : (arg('taxonomy') ?? findTaxonomy());
+  const taxonomy = taxonomyPath ? loadTaxonomy(taxonomyPath) : undefined;
   if (cmd === 'validate') {
     const file = process.argv[3];
     if (!file) throw new Error('usage: gzmsg.mjs validate <file>');
-    const result = validate(fs.readFileSync(file, 'utf8'));
+    const result = validate(fs.readFileSync(file, 'utf8'), { taxonomy });
     // Warnings print on both paths: on a failure they are often the cause
     // the errors only describe from downstream.
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
-    const from = arg('from'), role = arg('role'), project = arg('project');
-    if (!from || !role || !project) throw new Error('hello requires --from --role --project');
+    const from = arg('from'), project = arg('project');
+    // With a catalogue, the role is the title of the slug the address
+    // names — the one spelling a peer's TO-ROLE can match.
+    const derived = taxonomy && from && addressRe.test(from) && taxonomy.titles.get(slugOf(from.split('/')[1], taxonomy) ?? '');
+    const role = arg('role') ?? derived;
+    if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the address names a catalogue role');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
     if (arg('message-id')) lines.push(`MESSAGE-ID: ${arg('message-id')}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
@@ -254,7 +318,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // A HELLO is how peers learn an address, so emitting one this same tool
     // would reject publishes an identity nobody can route back to.
     const text = lines.join('\n');
-    const result = validate(text);
+    const result = validate(text, { taxonomy });
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
@@ -268,7 +332,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!instance) throw new Error('next-id requires --instance');
     console.log(nextId(instance, arg('state-dir') ?? '.gzcoord'));
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --role ... --project ... [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]   (--taxonomy <path> | --no-taxonomy)');
     process.exit(2);
   }
 }

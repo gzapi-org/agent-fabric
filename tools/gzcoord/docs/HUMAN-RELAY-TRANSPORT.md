@@ -160,13 +160,18 @@ knows which sessions are running.
 working copy>`. On this host that is the clone directory name, which is
 why clone directories are named for the role they hold.
 
-`ROLE` is the role's **title** in `.roles/taxonomy.json` (`runtime/README.md`,
-"Role sourcing") — `GZCoord protocol coordinator`, not the slug
-`gzcoord-coordinator`. Both are legal (SPEC §4), but the person resolves
-`TO-ROLE` against the string in the last `HELLO` they saw, so an address
-that announces the slug in one session and the title in the next stops
-matching the `TO-ROLE` its peers have been using. Observed the first day,
-on two addresses.
+`ROLE` MUST be the role's **title** in `.roles/taxonomy.json`
+(`runtime/README.md`, "Role sourcing") — `GZCoord protocol coordinator`,
+not the slug `gzcoord-coordinator`, and `Architect / CTO`, not
+`Application Architect`. The person resolves `TO-ROLE` against the
+string in the last `HELLO` they saw, so any other spelling matches
+nothing. The instance half of the address MUST carry the role's slug
+(`architect-cto-01`, `gzapp-gzcoord-coordinator`): that is what lets a
+recipient tell a misdelivered `TO` from its own. Observed the first day:
+one role spelled three ways across a HELLO, a TO-ROLE and a slug. The
+validator enforces all of this from anywhere inside the working copy,
+and `hello` derives the title from the address when `--role` is omitted
+— use that.
 
 ## Limits, stated plainly
 

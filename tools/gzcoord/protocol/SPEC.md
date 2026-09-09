@@ -95,6 +95,8 @@ Routing & Realtime Specialist
 
 The core protocol does not maintain a role enum. Organizations MAY publish conventions, but peers MUST accept previously unseen role strings.
 
+A deployment MAY publish a role catalogue and require every `ROLE` and `TO-ROLE` within it to be a catalogue title, verbatim, and every instance name to carry a catalogue slug. That is a deployment convention, not a core rule: it binds senders inside the deployment, and the reference validator enforces it only when handed the catalogue. gzapp's is `.roles/taxonomy.json` (`runtime/README.md`, "Role sourcing"). The evidence for having one is plain — three spellings of one role were live on the same day, and role routing matches strings, so a `TO-ROLE` reaches nobody unless both ends spell it the same.
+
 A role expresses organizational function, not source-code ownership or repository permission.
 
 A role is a classification, never an identity. The role and the instance holding it are distinct: several instances MAY hold and announce the same role concurrently, and an instance MAY change its role over time without changing its address. The address `host/instance` is the only peer identity; `ROLE` MUST NOT be used as a unique peer identifier, and role routing (§13) is one-to-many by nature. An instance whose role changes SHOULD emit a fresh `HELLO` so peer caches update.

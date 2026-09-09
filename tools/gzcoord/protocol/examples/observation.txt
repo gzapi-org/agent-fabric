@@ -1,9 +1,9 @@
 [GZCOORD/1] OBSERVATION
-FROM: develop-gzapp/mobile
-ROLE: Mobile Engineer
-TO-ROLE: Backend Engineer
+FROM: develop-gzapp/flutter-dev
+ROLE: Flutter developer
+TO-ROLE: .NET backend developer
 PROJECT: gzapp
-MESSAGE-ID: mobile-0002
+MESSAGE-ID: flutter-dev-0002
 SUBJECT: Passenger ETA response may lack route revision
 
 CONTEXT:

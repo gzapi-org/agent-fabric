@@ -1,11 +1,11 @@
 [GZCOORD/1] OBSERVATION
-FROM: develop-gzapp/web
-ROLE: Web Engineer
-TO-ROLE: Application Architect
+FROM: develop-gzapp/web-dev
+ROLE: Web sub-app developer
+TO-ROLE: Architect / CTO
 PROJECT: gzapp
 REPOSITORY: gzapp
 COMMIT: 8db603e8
-MESSAGE-ID: web-0002
+MESSAGE-ID: web-dev-0002
 SUBJECT: ADR-030 names a component library the tree does not contain
 
 OBSERVATION:

@@ -23,7 +23,7 @@ Every agent instance has the logical address:
 Example:
 
 ```text
-develop-gzapp/gzapp
+develop-gzapp/architect-cto
 ```
 
 The address is logical, but it is not arbitrary: `host` is the machine's short hostname and `instance` is the basename of the Git working copy the session started in and works in — one clone per session here, so the folder name *is* the session id (`protocol/SPEC.md` §3.1). The derivation runs one way. The address is still not a filesystem path, and no peer may reconstruct one from it or act outside its own working copy.
@@ -34,8 +34,8 @@ An agent self-defines its role by announcing `HELLO`:
 
 ```text
 [GZCOORD/1] HELLO
-FROM: develop-gzapp/gzapp
-ROLE: Application Architect
+FROM: develop-gzapp/architect-cto
+ROLE: Architect / CTO
 PROJECT: gzapp
 SPECIALTIES: architecture, ADR, contracts, system design
 CAPABILITIES: github, code-review, repository-analysis
@@ -50,9 +50,9 @@ There is no authoritative role registry. Peers may keep an ephemeral routing cac
 
 ```text
 [GZCOORD/1] REVIEW
-FROM: develop-gzapp/backend
-ROLE: Backend Engineer
-TO: develop-gzapp/gzapp
+FROM: develop-gzapp/backend-dev
+ROLE: .NET backend developer
+TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 BRANCH: feature/stop-resolution
 COMMIT: a81c142

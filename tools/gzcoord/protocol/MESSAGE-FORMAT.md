@@ -106,16 +106,16 @@ can name it:
 
 ```text
 [GZCOORD/1] REPLY
-FROM: develop-gzapp/web
-ROLE: Web Engineer
-TO: develop-gzapp/gzapp
+FROM: develop-gzapp/web-dev
+ROLE: Web sub-app developer
+TO: develop-gzapp/architect-cto
 PROJECT: gzapp
-MESSAGE-ID: web-0003
-IN-REPLY-TO: gzapp-0007
+MESSAGE-ID: web-dev-0003
+IN-REPLY-TO: architect-cto-0007
 SUBJECT: Acting on strict mode in my working copy
 
 REFERENCES:
-- branch: develop-gzapp/web/fix/ts-strict-all-apps
+- branch: develop-gzapp/web-dev/fix/ts-strict-all-apps
 
 NOTES:
 Enabling strict in all four apps. Six real errors in admin_web; fixing
@@ -165,13 +165,13 @@ Known peer — the address alone; the role it holds is in the peer
 directory, not repeated in the message:
 
 ```text
-TO: develop-gzapp/gzapp
+TO: develop-gzapp/architect-cto
 ```
 
 Unknown concrete peer — the role alone:
 
 ```text
-TO-ROLE: Security Engineer
+TO-ROLE: Architect / CTO
 ```
 
 Never both: `TO` and `TO-ROLE` are two answers to one question, and a
@@ -186,7 +186,7 @@ BROADCAST: true
 
 ```text
 BROADCAST: true
-TO-ROLE: Security Engineer
+TO-ROLE: Architect / CTO
 ```
 
 ```text

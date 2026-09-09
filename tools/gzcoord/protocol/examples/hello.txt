@@ -1,8 +1,8 @@
 [GZCOORD/1] HELLO
-FROM: develop-gzapp/gzapp
-ROLE: Application Architect
+FROM: develop-gzapp/architect-cto
+ROLE: Architect / CTO
 PROJECT: gzapp
-MESSAGE-ID: gzapp-0001
+MESSAGE-ID: architect-cto-0001
 SPECIALTIES: architecture, ADR, contracts, system design
 CAPABILITIES: github, code-review, repository-analysis
 

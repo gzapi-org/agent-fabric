@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parse, validate, columns, nextId, normalize } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf } from '../scripts/gzmsg.mjs';
+
+const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
 const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
@@ -11,7 +13,8 @@ const gzmsg = (...args) =>
 for (const name of ['hello','observation','observation-diagnosis','reply','review']) {
   test(`${name} example is valid`, () => {
     const text = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');
-    const result = validate(text);
+    // Under the deployment's catalogue: the examples are what sessions copy.
+    const result = validate(text, { taxonomy });
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.warnings, []);
   });
@@ -66,15 +69,15 @@ test('TO must be a logical address when present', () => {
 });
 
 test('hello refuses to emit a message its own validate would reject', () => {
-  const bad = gzmsg('hello', '--from', '/srv/project', '--role', 'Tester', '--project', 'gzapp');
+  const bad = gzmsg('hello', '--no-taxonomy', '--from', '/srv/project', '--role', 'Tester', '--project', 'gzapp');
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /FROM must be/);
   assert.equal(bad.stdout, '');
 });
 
 test('hello emits a valid message for a well-formed address', () => {
-  const ok = gzmsg('hello', '--from', 'develop-gzapp/gzapp', '--role', 'Tester', '--project', 'gzapp');
-  assert.equal(ok.status, 0);
+  const ok = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/gzapp', '--role', 'Tester', '--project', 'gzapp');
+  assert.equal(ok.status, 0, ok.stderr);
   assert.deepEqual(validate(ok.stdout).errors, []);
 });
 
@@ -111,7 +114,7 @@ test('REPLY-EXPECTED is ordinary optional metadata', () => {
 // The relay transport numbers every message, HELLO included, and points at
 // this command to emit it — so the command must be able to carry the id.
 test('hello carries --message-id when given', () => {
-  const ok = gzmsg('hello','--from','develop-gzapp/gzapp','--role','Application Architect',
+  const ok = gzmsg('hello','--no-taxonomy','--from','develop-gzapp/gzapp','--role','Application Architect',
                    '--project','gzapp','--message-id','gzapp-0001');
   assert.equal(ok.status, 0);
   assert.match(ok.stdout, /^MESSAGE-ID: gzapp-0001$/m);
@@ -260,7 +263,7 @@ test('a line over 72 characters warns, naming the line, and stays valid', () => 
 });
 
 test('hello prints the line-length warning on stderr and still emits the message', () => {
-  const ok = gzmsg('hello','--from','develop-gzapp/gzapp','--role','Tester','--project','gzapp',
+  const ok = gzmsg('hello','--no-taxonomy','--from','develop-gzapp/gzapp','--role','Tester','--project','gzapp',
                    '--specialties', 'z'.repeat(80));
   assert.equal(ok.status, 0);
   assert.match(ok.stderr, /^warning: line 5 is 93 columns wide/m);
@@ -416,4 +419,49 @@ test('TO and TO-ROLE are exclusive; BROADCAST may accompany either', () => {
   assert.deepEqual(validate(`${head}BROADCAST: true\nTO-ROLE: Web Engineer\n`).errors, []);
   assert.deepEqual(validate(`${head}TO: develop-gzapp/web\n`).errors, []);
   assert.deepEqual(validate(`${head}TO-ROLE: Web Engineer\n`).errors, []);
+});
+
+// SPEC §4 deployment catalogue: ROLE and TO-ROLE are taxonomy titles,
+// verbatim; an instance names a slug; ROLE is the title of the slug FROM
+// names. One role was live in three spellings on the relay's first day.
+test('with a taxonomy, roles are titles and instances name slugs', () => {
+  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: Architect / CTO\nPROJECT: gzapp\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
+  assert.deepEqual(ok.errors, []);
+  const cases = [
+    ['ROLE: Application Architect', 'ROLE must be "Architect / CTO", the title of architect-cto named by FROM'],
+    ['ROLE: architect-cto', 'ROLE must be "Architect / CTO"'],
+  ];
+  for (const [role, expected] of cases) {
+    const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\n${role}\nPROJECT: gzapp\nBROADCAST: true\n`, { taxonomy });
+    assert.ok(r.errors.some(e => e.startsWith(expected)), `${role}: ${r.errors}`);
+  }
+  const noSlug = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/gzapp-claude2\nROLE: Architect / CTO\nPROJECT: gzapp\nBROADCAST: true\n', { taxonomy });
+  assert.ok(noSlug.errors.some(e => e.startsWith('FROM instance "gzapp-claude2" names no role slug')));
+  const badTo = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: Database administrator\nPROJECT: gzapp\nTO: develop-qzapp/somebody\n', { taxonomy });
+  assert.ok(badTo.errors.some(e => e.startsWith('TO instance "somebody" names no role slug')));
+  const badToRole = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: Database administrator\nPROJECT: gzapp\nTO-ROLE: Application Architect\n', { taxonomy });
+  assert.ok(badToRole.errors.some(e => e.startsWith('TO-ROLE "Application Architect" is not a role title')));
+  // Without a taxonomy none of this applies: the wire grammar is generic.
+  assert.deepEqual(validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/gzapp-claude2\nROLE: Anything\nPROJECT: gzapp\nTO-ROLE: Whoever\n').errors, []);
+});
+
+test('slugOf finds the longest whole-token slug an instance carries', () => {
+  assert.equal(slugOf('gzapp-gzcoord-coordinator', taxonomy), 'gzcoord-coordinator');
+  assert.equal(slugOf('architect-cto-01', taxonomy), 'architect-cto');
+  assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
+  assert.equal(slugOf('gzapp-claude2', taxonomy), undefined);
+  assert.equal(slugOf('web-developer', taxonomy), undefined);   // token match, not substring
+  assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/.roles/taxonomy.json'));
+});
+
+test('hello derives the title from the address and refuses a slug as ROLE', () => {
+  const derived = gzmsg('hello', '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+  assert.equal(derived.status, 0, derived.stderr);
+  assert.match(derived.stdout, /^ROLE: Architect \/ CTO$/m);
+  const slug = gzmsg('hello', '--from', 'develop-qzapp/architect-cto-01', '--role', 'architect-cto', '--project', 'gzapp');
+  assert.equal(slug.status, 1);
+  assert.match(slug.stderr, /ROLE must be "Architect \/ CTO"/);
+  // Outside a deployment the old contract holds.
+  const generic = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/anything', '--role', 'Tester', '--project', 'gzapp');
+  assert.equal(generic.status, 0, generic.stderr);
 });

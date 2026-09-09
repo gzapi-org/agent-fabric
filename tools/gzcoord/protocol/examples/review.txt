@@ -1,9 +1,9 @@
 [GZCOORD/1] REVIEW
-FROM: develop-gzapp/backend
-ROLE: Backend Engineer
-TO: develop-gzapp/gzapp
+FROM: develop-gzapp/backend-dev
+ROLE: .NET backend developer
+TO: develop-gzapp/architect-cto
 PROJECT: gzapp
-MESSAGE-ID: backend-0002
+MESSAGE-ID: backend-dev-0002
 REPOSITORY: gzapp
 BRANCH: feature/stop-resolution
 COMMIT: a81c142

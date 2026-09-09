@@ -124,10 +124,10 @@ export function parse(text) {
 // disagrees with ROLE, a warning says so — a rename would be tidy.
 export function loadTaxonomy(path) {
   const t = JSON.parse(fs.readFileSync(path, 'utf8'));
-  const titles = new Map();
-  for (const r of t.roles ?? []) if (r.id && r.title) titles.set(r.id, r.title);
-  if (titles.size === 0) throw new Error(`${path} holds no roles with id and title`);
-  return { path, titles };
+  const roles = new Map();   // slug (the catalogue id, what goes on the wire) → title (for reading)
+  for (const r of t.roles ?? []) if (r.id && r.title) roles.set(r.id, r.title);
+  if (roles.size === 0) throw new Error(`${path} holds no roles with id and title`);
+  return { path, roles };
 }
 export function findTaxonomy(from = process.cwd()) {
   let dir = from;
@@ -147,7 +147,7 @@ export function findTaxonomy(from = process.cwd()) {
 export function slugOf(instance, taxonomy) {
   const tokens = instance.split('-');
   let best;
-  for (const slug of taxonomy.titles.keys()) {
+  for (const slug of taxonomy.roles.keys()) {
     const st = slug.split('-');
     for (let i = 0; i + st.length <= tokens.length; i++)
       if (st.every((s, j) => tokens[i + j] === s) && (!best || slug.length > best.length)) best = slug;
@@ -186,12 +186,12 @@ export function validate(text, { taxonomy } = {}) {
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';
-    if (msg.metadata.ROLE && !taxonomy.titles.has(msg.metadata.ROLE))
+    if (msg.metadata.ROLE && !taxonomy.roles.has(msg.metadata.ROLE))
       errors.push(`ROLE "${msg.metadata.ROLE}" is not a role slug in ${catalogue}`);
-    if (msg.metadata['TO-ROLE'] && !taxonomy.titles.has(msg.metadata['TO-ROLE']))
+    if (msg.metadata['TO-ROLE'] && !taxonomy.roles.has(msg.metadata['TO-ROLE']))
       errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role slug in ${catalogue}`);
     const fromSlug = msg.metadata.FROM && addressRe.test(msg.metadata.FROM) && slugOf(msg.metadata.FROM.split('/')[1], taxonomy);
-    if (fromSlug && msg.metadata.ROLE && taxonomy.titles.has(msg.metadata.ROLE) && msg.metadata.ROLE !== fromSlug)
+    if (fromSlug && msg.metadata.ROLE && taxonomy.roles.has(msg.metadata.ROLE) && msg.metadata.ROLE !== fromSlug)
       warnings.push(`FROM names ${fromSlug} but ROLE is ${msg.metadata.ROLE}; the role may have changed since the clone was named`);
   }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
@@ -320,7 +320,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       try { return JSON.parse(fs.readFileSync(taxonomy.path.replace(/taxonomy\.json$/, '.instance/state.json'), 'utf8')).role; }
       catch { return undefined; }
     })();
-    const derived = taxonomy && ((recorded && taxonomy.titles.has(recorded) && recorded) || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
+    const derived = taxonomy && ((recorded && taxonomy.roles.has(recorded) && recorded) || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
     const role = arg('role') ?? derived;
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the address names a catalogue role');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];

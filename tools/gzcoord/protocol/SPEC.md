@@ -332,7 +332,7 @@ The labels are informative. The referenced system remains authoritative.
 A sender MAY address a role instead of a concrete peer:
 
 ```text
-TO-ROLE: Security Engineer
+TO-ROLE: backend-dev
 ```
 
 The runtime/adapter MAY resolve that role from the ephemeral peer directory.
@@ -445,6 +445,8 @@ A GZCOORD/1 parser:
 - MUST reject a `BROADCAST` value other than `true` (§7.1);
 - MUST reject a message carrying more than one of `TO`, `TO-ROLE` and `BROADCAST`, and a `HELLO` or `GOODBYE` carrying any (§7.1);
 - SHOULD warn about missing recommended fields;
-- MUST NOT reject a message merely because its role, specialty or capability is unknown.
+- MUST NOT reject a message merely because its role, specialty or capability is unknown — absent a deployment role catalogue (§4), which binds `ROLE` and `TO-ROLE` inside that deployment.
 
-Breaking grammar changes require a new major protocol marker, e.g. `GZCOORD/2`.
+Every message valid under this text was valid under every earlier GZCOORD/1 text: the accepted set only ever narrows. A tightened MUST on an existing field retires a shape rather than redefining one, and a sender that emits a retired shape is told which field is at fault rather than silently misrouted. "Grammar" here means §6 — the header line, the `KEY: value` form, the section markers — and a tightening leaves it byte for byte.
+
+A new major marker, `GZCOORD/2`, is required when, and only when, a change would make an old reader and a new reader disagree about the meaning of a message they **both accept**: a reinterpreted field value, a changed metadata form, a section-marker rule that moves a line between metadata and body. The marker exists so that a reader which cannot correctly read a message declines it at the first line; a reader which would still read this version's messages correctly must not be made to reject them. Bumping the marker for a narrowing does exactly that — every GZCOORD/1 reader rejects every GZCOORD/2 message, including the messages the narrowing never touched.

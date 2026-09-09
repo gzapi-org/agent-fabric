@@ -163,14 +163,16 @@ export function validate(text, { taxonomy } = {}) {
   // as "missing TO, TO-ROLE or BROADCAST: true", which names the wrong fault,
   // and `BROADCAST: false` beside a TO validated clean with undefined meaning.
   if (msg.metadata.BROADCAST !== undefined && msg.metadata.BROADCAST !== 'true') errors.push('BROADCAST must be true, or absent');
-  if (!['HELLO','GOODBYE'].includes(msg.type)) {
-    if (!msg.metadata.TO && !msg.metadata['TO-ROLE'] && msg.metadata.BROADCAST !== 'true') errors.push('missing TO, TO-ROLE or BROADCAST: true');
-  }
-  // SPEC §7.1: TO and TO-ROLE are two answers to one question, and the role
-  // string beside an address is the one nobody checks — it rode along
-  // unmatched in live traffic. BROADCAST is a reach, not an addressee, and
-  // may stand beside either one: everyone reads, the named party acts.
-  if (msg.metadata.TO && msg.metadata['TO-ROLE']) errors.push('TO and TO-ROLE are exclusive: name the instance or the role, not both');
+  // SPEC §7.1: the addressing field is the delivery scope, and there is
+  // exactly one — a second answers "who receives" twice, and a transport
+  // filtering by addressee cannot obey both. Live traffic carried TO beside
+  // an unmatched TO-ROLE and nothing noticed. HELLO and GOODBYE are
+  // broadcasts by definition and carry none.
+  const addressing = ['TO', 'TO-ROLE', 'BROADCAST'].filter(k => msg.metadata[k] !== undefined);
+  if (['HELLO','GOODBYE'].includes(msg.type)) {
+    if (addressing.length) errors.push(`${msg.type} is a broadcast by definition and carries no ${addressing.join(', ')}`);
+  } else if (addressing.length === 0) errors.push('missing TO, TO-ROLE or BROADCAST: true');
+  else if (addressing.length > 1) errors.push(`${addressing.join(' and ')} are exclusive: one addressing field, the delivery scope`);
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';

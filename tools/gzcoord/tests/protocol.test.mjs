@@ -406,19 +406,25 @@ test('normalize CLI prints the normalised message for validate to read', () => {
   } finally { fs.unlinkSync(file); }
 });
 
-// SPEC §7.1: one addressee. Live traffic carried TO beside a TO-ROLE that
-// matched no recorded role, and nothing noticed, because the address had
-// already routed the message. BROADCAST is a reach and may stand beside
-// either: everyone reads, the named party acts.
-test('TO and TO-ROLE are exclusive; BROADCAST may accompany either', () => {
+// SPEC §7.1: one addressing field, the delivery scope. Live traffic
+// carried TO beside a TO-ROLE that matched no recorded role, and nothing
+// noticed, because the address had already routed the message; a
+// transport filtering by addressee could not obey two. HELLO and GOODBYE
+// are broadcasts by definition.
+test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
   const head = '[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n';
-  const both = validate(`${head}TO: develop-gzapp/web\nTO-ROLE: Web Engineer\n`);
-  assert.equal(both.ok, false);
-  assert.ok(both.errors.some(e => e.startsWith('TO and TO-ROLE are exclusive')));
-  assert.deepEqual(validate(`${head}TO: develop-gzapp/web\nBROADCAST: true\n`).errors, []);
-  assert.deepEqual(validate(`${head}BROADCAST: true\nTO-ROLE: Web Engineer\n`).errors, []);
-  assert.deepEqual(validate(`${head}TO: develop-gzapp/web\n`).errors, []);
-  assert.deepEqual(validate(`${head}TO-ROLE: Web Engineer\n`).errors, []);
+  for (const pair of ['TO: develop-gzapp/web\nTO-ROLE: Web Engineer\n', 'TO: develop-gzapp/web\nBROADCAST: true\n', 'BROADCAST: true\nTO-ROLE: Web Engineer\n']) {
+    const r = validate(`${head}${pair}`);
+    assert.equal(r.ok, false, pair);
+    assert.ok(r.errors.some(e => e.includes('are exclusive')), r.errors);
+  }
+  for (const one of ['TO: develop-gzapp/web\n', 'TO-ROLE: Web Engineer\n', 'BROADCAST: true\n'])
+    assert.deepEqual(validate(`${head}${one}`).errors, [], one);
+  for (const type of ['HELLO', 'GOODBYE']) {
+    const r = validate(`[GZCOORD/1] ${type}\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nTO: develop-gzapp/web\n`);
+    assert.ok(r.errors.some(e => e.startsWith(`${type} is a broadcast by definition`)), r.errors);
+    assert.deepEqual(validate(`[GZCOORD/1] ${type}\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\n`).errors, []);
+  }
 });
 
 // SPEC §4 deployment catalogue: ROLE and TO-ROLE are taxonomy titles,

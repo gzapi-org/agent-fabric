@@ -174,25 +174,15 @@ Unknown concrete peer — the role alone:
 TO-ROLE: Architect / CTO
 ```
 
-Never both: `TO` and `TO-ROLE` are two answers to one question, and a
-role string beside an address is the one nobody checks (SPEC.md §7.1).
-
-Broadcast, and broadcast with one party asked to act — a role, or an
-instance:
+Everyone:
 
 ```text
 BROADCAST: true
 ```
 
-```text
-BROADCAST: true
-TO-ROLE: Architect / CTO
-```
-
-```text
-BROADCAST: true
-TO: develop-gzapp/gzapp
-```
-
-A direct message — no `BROADCAST` — carries `TO` and nothing else.
-`HELLO` and `GOODBYE` imply broadcast and need not include the field.
+Exactly one of the three, never two (SPEC.md §7.1): the field is who
+receives, and a transport that filters by it cannot obey two. To ask one
+party to act while others watch, send the ask to that party; its
+acknowledgement by reference and the pull request are how the others
+learn of it. `HELLO` and `GOODBYE` are broadcasts by definition and carry
+none of the three.

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -466,14 +466,67 @@ test('slugOf finds the longest whole-token slug an instance carries', () => {
   assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/.roles/taxonomy.json'));
 });
 
-test('hello derives the slug from the address and refuses a title as ROLE', () => {
-  const derived = gzmsg('hello', '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+// A fixture root for the derivation tests: the catalogue copied into a
+// temp dir, with or without an .instance/state.json beside it. Passing
+// --taxonomy keeps the CLI off the developer's real record — the suite
+// used to read whatever /role had written in this clone, and passed only
+// where that file was absent.
+function fixtureRoot(state) {
+  const root = fs.mkdtempSync(new URL('./fixture-', import.meta.url).pathname);
+  fs.mkdirSync(`${root}/.roles/.instance`, { recursive: true });
+  fs.copyFileSync(taxonomy.path, `${root}/.roles/taxonomy.json`);
+  if (state !== undefined) fs.writeFileSync(`${root}/.roles/.instance/state.json`, state);
+  return root;
+}
+const withFixture = (state, fn) => { const root = fixtureRoot(state); try { return fn(root, `${root}/.roles/taxonomy.json`); } finally { fs.rmSync(root, { recursive: true, force: true }); } };
+
+test('hello derives the slug from the address when no role is recorded, and refuses a title as ROLE', () => withFixture(undefined, (root, tax) => {
+  const derived = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
   assert.equal(derived.status, 0, derived.stderr);
   assert.match(derived.stdout, /^ROLE: architect-cto$/m);
-  const title = gzmsg('hello', '--from', 'develop-qzapp/architect-cto-01', '--role', 'Architect / CTO', '--project', 'gzapp');
+  const title = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--role', 'Architect / CTO', '--project', 'gzapp');
   assert.equal(title.status, 1);
   assert.match(title.stderr, /ROLE "Architect \/ CTO" is not a role slug/);
   // Outside a deployment the old contract holds.
   const generic = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/anything', '--role', 'Tester', '--project', 'gzapp');
   assert.equal(generic.status, 0, generic.stderr);
+}));
+
+// The record wins over the address; a record the catalogue does not know
+// is an error naming the file and the value, never a silent guess from
+// the directory name; a malformed record warns and falls back; an
+// explicit --role wins and is warned about when it disagrees.
+test('hello prefers the recorded role, and refuses a recorded role outside the catalogue', () => {
+  withFixture(JSON.stringify({ role: 'backend-dev' }), (root, tax) => {
+    const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^ROLE: backend-dev$/m);
+    assert.match(r.stderr, /^warning: FROM names architect-cto but ROLE is backend-dev/m);
+    const explicit = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/backend-dev-02', '--role', 'db-admin', '--project', 'gzapp');
+    assert.equal(explicit.status, 0, explicit.stderr);
+    assert.match(explicit.stdout, /^ROLE: db-admin$/m);
+    assert.match(explicit.stderr, /^warning: --role db-admin disagrees with .*state\.json, which records backend-dev/m);
+    assert.equal(recordedRole(loadTaxonomy(tax)).role, 'backend-dev');
+  });
+  withFixture(JSON.stringify({ role: 'security-engineer' }), (root, tax) => {
+    const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /state\.json records role "security-engineer", which is not in .*taxonomy\.json; pass --role explicitly/);
+    assert.equal(r.stdout, '');
+    const rec = recordedRole(loadTaxonomy(tax));
+    assert.equal(rec.role, undefined); assert.match(rec.error, /security-engineer/);
+  });
+  withFixture('not json', (root, tax) => {
+    const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^ROLE: architect-cto$/m);
+    assert.match(r.stderr, /^warning: .*state\.json could not be read/m);
+  });
+  // A --taxonomy whose basename is not taxonomy.json still finds the record beside it.
+  withFixture(JSON.stringify({ role: 'web-dev' }), (root, tax) => {
+    fs.copyFileSync(tax, `${root}/.roles/catalogue.json`);
+    const r = gzmsg('hello', '--taxonomy', `${root}/.roles/catalogue.json`, '--from', 'develop-qzapp/gzapp-claude2', '--project', 'gzapp');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^ROLE: web-dev$/m);
+  });
 });

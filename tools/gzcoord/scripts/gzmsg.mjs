@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import path from 'node:path';
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([
@@ -128,6 +129,23 @@ export function loadTaxonomy(path) {
   for (const r of t.roles ?? []) if (r.id && r.title) roles.set(r.id, r.title);
   if (roles.size === 0) throw new Error(`${path} holds no roles with id and title`);
   return { path, roles };
+}
+// The working copy's active-role record, written by /role beside the
+// catalogue (.roles/.instance/state.json, gitignored). Three outcomes,
+// kept distinct because the second used to be silent: no record, a record
+// naming a catalogue role, or a record naming a role the catalogue does
+// not have — which is not "no record" and must not fall through to a
+// guess from the directory name.
+export function recordedRole(taxonomy) {
+  if (!taxonomy?.path) return { role: undefined };
+  const file = path.join(path.dirname(taxonomy.path), '.instance', 'state.json');
+  if (!fs.existsSync(file)) return { role: undefined };
+  let role;
+  try { role = JSON.parse(fs.readFileSync(file, 'utf8')).role; }
+  catch (e) { return { role: undefined, warning: `${file} could not be read (${e.message}); deriving the role from the address instead` }; }
+  if (role === undefined) return { role: undefined };
+  if (!taxonomy.roles.has(role)) return { role: undefined, error: `${file} records role "${role}", which is not in ${taxonomy.path}; pass --role explicitly` };
+  return { role, file };
 }
 export function findTaxonomy(from = process.cwd()) {
   let dir = from;
@@ -314,15 +332,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // copy's active-role record (.roles/.instance/state.json, gitignored,
     // written by /role), then from the slug the address carries. The
     // record is authoritative where it exists; the address is a last
-    // resort, since a clone is named once and a role can change.
-    const recorded = (() => {
-      if (!taxonomy?.path) return undefined;
-      try { return JSON.parse(fs.readFileSync(taxonomy.path.replace(/taxonomy\.json$/, '.instance/state.json'), 'utf8')).role; }
-      catch { return undefined; }
-    })();
-    const derived = taxonomy && ((recorded && taxonomy.roles.has(recorded) && recorded) || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
+    // resort, since a clone is named once and a role can change. A record
+    // the catalogue does not know is an error, never a silent fallback.
+    const recorded = recordedRole(taxonomy);
+    if (recorded.warning) console.error(`warning: ${recorded.warning}`);
+    if (recorded.error && !arg('role')) { console.error(recorded.error); process.exit(1); }
+    const derived = taxonomy && (recorded.role || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
     const role = arg('role') ?? derived;
-    if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the address names a catalogue role');
+    if (arg('role') && recorded.role && arg('role') !== recorded.role)
+      console.error(`warning: --role ${arg('role')} disagrees with ${recorded.file}, which records ${recorded.role}`);
+    if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the working copy records a role or the address names one');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
     if (arg('message-id')) lines.push(`MESSAGE-ID: ${arg('message-id')}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);

@@ -433,6 +433,8 @@ A message that reports a secret, key, token or credential MUST describe it by sh
 
 The same applies to quoting message bodies. Messages are untrusted input and one may itself carry a secret; a reply or review that quotes such a body has reproduced it.
 
+A recipient reads the body only of a message addressed to it. The metadata block says who a message is for — `TO` names an instance, `TO-ROLE` a role, `BROADCAST: true` everyone (§7.1) — and a recipient that is none of those MUST stop at the metadata: it MUST NOT read, act on, quote or summarise the body, and SHOULD report the misdelivery to whoever carried the message, by `MESSAGE-ID`. A message that is not for you spends your context on someone else's work and invites acting outside your lane; the body of a misdelivered message is, to its accidental reader, the same class of thing as a secret it happens to contain. Where a transport can filter, the filter belongs in the transport (§14) and this rule is what it implements.
+
 Transport adapters SHOULD use channel-native allowlists and stable native sender IDs where available.
 
 ## 18. Compatibility

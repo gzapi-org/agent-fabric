@@ -150,8 +150,15 @@ knows which sessions are running.
   message. A repeated number is a fault at the sender — a session that
   restarted its count — and is worth an `OBSERVATION`, since every later
   `IN-REPLY-TO` against that sender is ambiguous until it is fixed.
-- `TO-ROLE` was resolved by the person (SPEC §13): if you received it, you
-  hold the role, or you are one of several who do. Reply with your own
+- **Check the addressee before the body.** Normalise, validate, and read
+  `TO`, `TO-ROLE` and `BROADCAST` — nothing else — then decide: it is for
+  you if `TO` is your address, `TO-ROLE` is your role's title, or it is a
+  broadcast. If it is none of those, stop there (SPEC §17): do not read
+  the body, do not act on it, do not quote it; tell the person it was
+  misdelivered, by `MESSAGE-ID`, and let them re-route it. A message that
+  is not for you costs your context and invites acting outside your lane.
+  `TO-ROLE` was resolved by the person (SPEC §13): if it names your role,
+  you hold it, or you are one of several who do. Reply with your own
   address in `FROM`.
 
 ## Addressing
@@ -193,5 +200,10 @@ and `hello` derives the title from the address when `--role` is omitted
 An automated transport, when it demonstrably delivers a message from one
 instance to another — the bar in
 [`CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md`](CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md).
+The first thing it should do that the person does by hand is the
+addressee check above: a transport that drops a misaddressed message
+before delivery is the same rule enforced where it costs nobody's
+context, and the addressee fields are disciplined enough now (catalogue
+titles, slug-bearing instances) for a filter to decide by string match.
 Until then this document describes how GZCoord runs, and the three activity
 claims `../CLAUDE.md` names change together when that changes.

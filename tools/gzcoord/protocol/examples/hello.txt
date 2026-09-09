@@ -1,6 +1,6 @@
 [GZCOORD/1] HELLO
 FROM: develop-gzapp/architect-cto
-ROLE: Architect / CTO
+ROLE: architect-cto
 PROJECT: gzapp
 MESSAGE-ID: architect-cto-0001
 SPECIALTIES: architecture, ADR, contracts, system design

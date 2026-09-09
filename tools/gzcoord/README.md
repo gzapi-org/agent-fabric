@@ -35,7 +35,7 @@ An agent self-defines its role by announcing `HELLO`:
 ```text
 [GZCOORD/1] HELLO
 FROM: develop-gzapp/architect-cto
-ROLE: Architect / CTO
+ROLE: architect-cto
 PROJECT: gzapp
 SPECIALTIES: architecture, ADR, contracts, system design
 CAPABILITIES: github, code-review, repository-analysis
@@ -51,7 +51,7 @@ There is no authoritative role registry. Peers may keep an ephemeral routing cac
 ```text
 [GZCOORD/1] REVIEW
 FROM: develop-gzapp/backend-dev
-ROLE: .NET backend developer
+ROLE: backend-dev
 TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 BRANCH: feature/stop-resolution

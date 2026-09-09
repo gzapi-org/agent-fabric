@@ -1,6 +1,6 @@
 [GZCOORD/1] REPLY
 FROM: develop-gzapp/web-dev
-ROLE: Web sub-app developer
+ROLE: web-dev
 TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 MESSAGE-ID: web-dev-0003

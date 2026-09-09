@@ -107,7 +107,7 @@ can name it:
 ```text
 [GZCOORD/1] REPLY
 FROM: develop-gzapp/web-dev
-ROLE: Web sub-app developer
+ROLE: web-dev
 TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 MESSAGE-ID: web-dev-0003
@@ -171,7 +171,7 @@ TO: develop-gzapp/architect-cto
 Unknown concrete peer — the role alone:
 
 ```text
-TO-ROLE: Architect / CTO
+TO-ROLE: architect-cto
 ```
 
 Everyone:

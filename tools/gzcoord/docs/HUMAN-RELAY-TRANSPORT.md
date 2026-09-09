@@ -152,7 +152,7 @@ knows which sessions are running.
   `IN-REPLY-TO` against that sender is ambiguous until it is fixed.
 - **Check the addressee before the body.** Normalise, validate, and read
   `TO`, `TO-ROLE` and `BROADCAST` — nothing else — then decide: it is for
-  you if `TO` is your address, `TO-ROLE` is your role's title, or it is a
+  you if `TO` is your address, `TO-ROLE` is your role's slug, or it is a
   broadcast. If it is none of those, stop there (SPEC §17): do not read
   the body, do not act on it, do not quote it; tell the person it was
   misdelivered, by `MESSAGE-ID`, and let them re-route it. A message that
@@ -167,18 +167,19 @@ knows which sessions are running.
 working copy>`. On this host that is the clone directory name, which is
 why clone directories are named for the role they hold.
 
-`ROLE` MUST be the role's **title** in `.roles/taxonomy.json`
-(`runtime/README.md`, "Role sourcing") — `GZCoord protocol coordinator`,
-not the slug `gzcoord-coordinator`, and `Architect / CTO`, not
-`Application Architect`. The person resolves `TO-ROLE` against the
-string in the last `HELLO` they saw, so any other spelling matches
-nothing. The instance half of the address MUST carry the role's slug
-(`architect-cto-01`, `gzapp-gzcoord-coordinator`): that is what lets a
-recipient tell a misdelivered `TO` from its own. Observed the first day:
-one role spelled three ways across a HELLO, a TO-ROLE and a slug. The
-validator enforces all of this from anywhere inside the working copy,
-and `hello` derives the title from the address when `--role` is omitted
-— use that.
+`ROLE` MUST be the role's **slug** in `.roles/taxonomy.json` — its `id`:
+`gzcoord-coordinator`, `architect-cto`, `backend-dev` — never a title
+such as `Architect / CTO` or a free description such as `Application
+Architect` (`runtime/README.md`, "Role sourcing"). The person resolves
+`TO-ROLE` by equality against the last `HELLO` they saw, so any other
+spelling matches nothing; a slug is one token, safe in a metadata line
+and in a filter. The instance half of the address MUST carry the same
+slug (`architect-cto-01`, `gzapp-gzcoord-coordinator`): that is what
+lets a recipient tell a misdelivered `TO` from its own, and it is why
+`ROLE` follows from `FROM`. Observed the first day: one role spelled
+three ways across a HELLO, a TO-ROLE and an address. The validator
+enforces all of this from anywhere inside the working copy, and `hello`
+derives the slug from the address when `--role` is omitted — use that.
 
 ## Limits, stated plainly
 
@@ -204,6 +205,6 @@ The first thing it should do that the person does by hand is the
 addressee check above: a transport that drops a misaddressed message
 before delivery is the same rule enforced where it costs nobody's
 context, and the addressee fields are disciplined enough now (catalogue
-titles, slug-bearing instances) for a filter to decide by string match.
+slugs, slug-bearing instances) for a filter to decide by string match.
 Until then this document describes how GZCoord runs, and the three activity
 claims `../CLAUDE.md` names change together when that changes.

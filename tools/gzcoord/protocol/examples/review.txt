@@ -1,6 +1,6 @@
 [GZCOORD/1] REVIEW
 FROM: develop-gzapp/backend-dev
-ROLE: .NET backend developer
+ROLE: backend-dev
 TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 MESSAGE-ID: backend-dev-0002

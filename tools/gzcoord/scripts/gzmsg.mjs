@@ -110,10 +110,14 @@ export function parse(text) {
 
 // A deployment's role catalogue (SPEC §4: the core protocol keeps no
 // enum; a deployment MAY publish one, and gzapp does — .roles/taxonomy.json).
-// Given one, the validator holds ROLE and TO-ROLE to its titles, verbatim,
-// and holds the instance half of FROM and TO to naming one of its slugs:
-// live traffic announced one role three ways in a day, and a TO-ROLE
-// matches nothing unless both ends spell it the same.
+// Given one, the validator holds ROLE and TO-ROLE to its slugs — the `id`,
+// `backend-dev`, one token with no spaces or slashes — and the instance
+// half of FROM and TO to carrying one. A slug rather than the title: it
+// is what the instance name already carries, so ROLE is derivable from
+// FROM and TO-ROLE matches by equality, and it survives a metadata line
+// and a filter without quoting. Live traffic announced one role three
+// ways in a day, and a TO-ROLE matches nothing unless both ends spell it
+// the same.
 export function loadTaxonomy(path) {
   const t = JSON.parse(fs.readFileSync(path, 'utf8'));
   const titles = new Map();
@@ -176,21 +180,20 @@ export function validate(text, { taxonomy } = {}) {
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';
-    const titleSet = new Set(taxonomy.titles.values());
     const instanceOf = a => addressRe.test(a) ? a.split('/')[1] : undefined;
     const fromSlug = msg.metadata.FROM && instanceOf(msg.metadata.FROM) && slugOf(instanceOf(msg.metadata.FROM), taxonomy);
     if (msg.metadata.FROM && instanceOf(msg.metadata.FROM) && !fromSlug)
       errors.push(`FROM instance "${instanceOf(msg.metadata.FROM)}" names no role slug from ${catalogue}`);
     if (msg.metadata.ROLE) {
-      if (fromSlug && msg.metadata.ROLE !== taxonomy.titles.get(fromSlug))
-        errors.push(`ROLE must be "${taxonomy.titles.get(fromSlug)}", the title of ${fromSlug} named by FROM; got "${msg.metadata.ROLE}"`);
-      else if (!titleSet.has(msg.metadata.ROLE))
-        errors.push(`ROLE "${msg.metadata.ROLE}" is not a role title in ${catalogue}`);
+      if (fromSlug && msg.metadata.ROLE !== fromSlug)
+        errors.push(`ROLE must be ${fromSlug}, the slug FROM names; got "${msg.metadata.ROLE}"`);
+      else if (!taxonomy.titles.has(msg.metadata.ROLE))
+        errors.push(`ROLE "${msg.metadata.ROLE}" is not a role slug in ${catalogue}`);
     }
     if (msg.metadata.TO && instanceOf(msg.metadata.TO) && !slugOf(instanceOf(msg.metadata.TO), taxonomy))
       errors.push(`TO instance "${instanceOf(msg.metadata.TO)}" names no role slug from ${catalogue}`);
-    if (msg.metadata['TO-ROLE'] && !titleSet.has(msg.metadata['TO-ROLE']))
-      errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role title in ${catalogue}`);
+    if (msg.metadata['TO-ROLE'] && !taxonomy.titles.has(msg.metadata['TO-ROLE']))
+      errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role slug in ${catalogue}`);
   }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
@@ -308,9 +311,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
     const from = arg('from'), project = arg('project');
-    // With a catalogue, the role is the title of the slug the address
-    // names — the one spelling a peer's TO-ROLE can match.
-    const derived = taxonomy && from && addressRe.test(from) && taxonomy.titles.get(slugOf(from.split('/')[1], taxonomy) ?? '');
+    // With a catalogue, the role is the slug the address names — the one
+    // spelling a peer's TO-ROLE can match.
+    const derived = taxonomy && from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy);
     const role = arg('role') ?? derived;
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the address names a catalogue role');
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];

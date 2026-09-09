@@ -335,6 +335,8 @@ A sender MAY address a role instead of a concrete peer:
 TO-ROLE: backend-dev
 ```
 
+(`backend-dev` is a catalogue slug from a deployment that publishes one — §4; the core protocol accepts any role string.)
+
 The runtime/adapter MAY resolve that role from the ephemeral peer directory.
 
 If more than one matching peer exists, the runtime SHOULD either:

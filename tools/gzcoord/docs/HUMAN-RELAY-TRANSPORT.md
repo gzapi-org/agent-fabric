@@ -164,8 +164,10 @@ knows which sessions are running.
 ## Addressing
 
 `FROM` is derived as SPEC §3.1 says: `<hostname -s>/<basename of the
-working copy>`. On this host that is the clone directory name, which is
-why clone directories are named for the role they hold.
+working copy>`. On this host that is the clone directory name. Clone
+directories are usually named for the role they were launched as, which
+is a convenience for the person routing; the address does not claim the
+role (SPEC §4), and a clone named otherwise is a session like any other.
 
 `ROLE` MUST be the role's **slug** in `.roles/taxonomy.json` — its `id`:
 `gzcoord-coordinator`, `architect-cto`, `backend-dev` — never a title
@@ -209,7 +211,9 @@ instance to another — the bar in
 The first thing it should do that the person does by hand is the
 addressee check above: a transport that drops a misaddressed message
 before delivery is the same rule enforced where it costs nobody's
-context, and the addressee fields are disciplined enough now (catalogue
-slugs, slug-bearing instances) for a filter to decide by string match.
+context. The filter needs nothing beyond string equality: `TO` against
+the recipient's own address, `TO-ROLE` against its catalogue slug,
+`BROADCAST` for everyone — the address carries no claim about the role
+and the filter must not read one into it.
 Until then this document describes how GZCoord runs, and the three activity
 claims `../CLAUDE.md` names change together when that changes.

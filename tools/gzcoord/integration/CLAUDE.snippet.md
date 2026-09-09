@@ -11,7 +11,7 @@ good message: `tools/gzcoord/protocol/MESSAGE-FORMAT.md`.
 
 When coordinating with another agent:
 
-- use the `host/instance` identity derived from this working copy (SPEC §3.1) and, as `ROLE`, the title of the role it holds in `.roles/taxonomy.json` — the title, not the slug;
+- use the `host/instance` identity derived from this working copy (SPEC §3.1) and, as `ROLE`, the slug of the role it holds in `.roles/taxonomy.json` — `backend-dev`, never a title — or omit `--role` and let `gzmsg.mjs hello` derive it;
 - emit one `HELLO` at session start; re-announce only when your role changes (SPEC §4);
 - validate every message with `tools/gzcoord/scripts/gzmsg.mjs validate` and print it in a fenced text block for the relay, lines of 72 columns or fewer;
 - number every message with `tools/gzcoord/scripts/gzmsg.mjs next-id` — the sequence belongs to the address and survives sessions, so a fresh session never restarts at 0001; a gap is a question for the sender, not a verdict;

@@ -379,13 +379,18 @@ default_graphql
 
 echo "pr-sessions: a retired clone is scoped to its successor, or to nobody"
 # A retired clone's prefix parses, so its PRs matched no scope: not the
-# successor's (different name), not /unattributed (it parses). Twelve
-# threads sat that way. With the record: an inherited row appears in the
-# successor's DEFAULT sweep, marked as its own but still showing the
-# retired name; an orphan row appears under /unattributed and in the NOTE.
+# successor's (different name), not /unattributed (it parses). The registry
+# decides -- a clone whose every window is closed is retired, and the clone
+# holding an open window for the same role inherits it.
 HOST="$(hostname -s)"
-RETIRED_FIXTURE="$SANDBOX/fixtures/retired.txt"
-printf '%s\n' "$HOST/gzapp-old     $ME" "$HOST/gzapp-orphan" > "$RETIRED_FIXTURE"
+BINDINGS="$SANDBOX/fixtures/bindings.jsonl"
+: > "$BINDINGS"
+jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"gzapp-old", host:$h,
+    role:"architect-cto", valid_to:"2026-09-05T00:00:00Z"}' >> "$BINDINGS"
+jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c2", dir_basename:$d,
+    host:$h, role:"architect-cto", valid_to:null}' >> "$BINDINGS"
+jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"gzapp-orphan", host:$h,
+    role:"domain-transit", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
 write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
     --arg orphan "$HOST/gzapp-orphan" --arg t "$(ago '1 hour')" '[
   {number: 40, state: "MERGED", headRefName: ($old    + "/fix/inherited"),
@@ -395,22 +400,34 @@ write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
   {number: 42, state: "OPEN",   headRefName: ($me     + "/feat/mine"),
    title: "mine",      updatedAt: $t, isDraft: false, mergedAt: null}
 ]')"
-run_env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE" -- --no-threads
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
 assert_rc           "default scope exits 0" 0
 assert_contains     "inherited PR is in the successor's default sweep" "#40"
 assert_contains     "inherited row still shows the retired name" "gzapp-old"
 assert_contains     "own PR still listed" "#42"
 assert_not_contains "orphan PR is NOT in the default sweep" "#41"
 assert_contains     "the NOTE counts the orphan" "1 PR(s) name no live session"
+# The `*` is the only per-row ownership cue; an inherited row must carry it.
+if grep -qE '^\* +#40' <<<"$RUN_OUT"; then
+    pass "inherited row is marked as this clone's"
+else
+    fail "inherited row is not marked" "$RUN_OUT"
+fi
 
-run_env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE" -- /unattributed --no-threads
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
 assert_rc           "/unattributed exits 0" 0
 assert_contains     "orphan PR is listed under /unattributed" "#41"
 assert_not_contains "inherited PR is not an orphan" "#40"
 
-# CONTROL: no record -> the old behaviour, so the record is what changed it.
-run_env "GZAPP_RETIRED_CLONES=$SANDBOX/fixtures/does-not-exist.txt" -- --no-threads
-assert_not_contains "control: without the record the inherited PR is invisible" "#40"
+# --session by MY OWN name must reach the rows I inherited, or the filter
+# is narrower than the default scope it is meant to reproduce.
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --session "$CLONE_NAME" --no-threads
+assert_contains "--session finds the inherited row too" "#40"
+assert_contains "--session still finds my own row"      "#42"
+
+# CONTROL: no registry -> the old behaviour, so the registry is what changed it.
+run_env "GZAPP_CLONE_BINDINGS=$SANDBOX/fixtures/no-such.jsonl" -- --no-threads
+assert_not_contains "control: without the registry the inherited PR is invisible" "#40"
 default_pr_list
 
 echo "pr-sessions: pool filters"

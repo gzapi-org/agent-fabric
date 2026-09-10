@@ -292,24 +292,41 @@ for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
     fi
 done
 
-echo "pr-reply: a retired clone's PR goes to its recorded successor, or to nobody"
+echo "pr-reply: a retired clone's PR goes to its successor, or to nobody"
 # A retired clone's prefix still PARSES as a session, so it read as a live
-# rival and was refused -- and it appeared in no sweep either. Twelve
-# threads on five PRs sat that way. The record decides: a successor
-# inherits, no successor means unowned, and a successor that is somebody
-# else means it is THEIR live PR now.
+# rival and was refused -- and it appeared in no sweep either. The registry
+# decides: a clone whose every window is closed is retired, and the clone
+# holding an OPEN window for the same role inherits it.
 HOST="$(hostname -s)"
-RETIRED_FIXTURE="$SANDBOX/state/retired.txt"
-printf '%s\n' "# test record" \
-    "$HOST/gzapp-old      $ME" \
-    "$HOST/gzapp-orphan" \
-    "$HOST/gzapp-theirs   $OTHER" > "$RETIRED_FIXTURE"
-MOCK_ENV=(env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE")
+OTHER_CLONE="${OTHER#*/}"
+BINDINGS="$SANDBOX/state/bindings.jsonl"
+mk_bindings() {
+    : > "$BINDINGS"
+    # retired, same role as this clone -> inherited by ME
+    jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"gzapp-old", host:$h,
+        role:"architect-cto", valid_to:"2026-09-05T00:00:00Z"}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c2", dir_basename:$d,
+        host:$h, role:"architect-cto", valid_to:null}' >> "$BINDINGS"
+    # retired, no live holder of its role -> nobody's
+    jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"gzapp-orphan", host:$h,
+        role:"domain-transit", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
+    # retired, role held by ANOTHER live clone -> theirs
+    jq -nc --arg h "$HOST" '{clone_id:"c4", dir_basename:"gzapp-theirs", host:$h,
+        role:"web-dev", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" --arg d "$OTHER_CLONE" '{clone_id:"c5", dir_basename:$d,
+        host:$h, role:"web-dev", valid_to:null}' >> "$BINDINGS"
+    # a clone with an OPEN window is NOT retired, whatever else is true
+    jq -nc --arg h "$HOST" '{clone_id:"c6", dir_basename:"gzapp-stillhere", host:$h,
+        role:"backend-dev", valid_to:null}' >> "$BINDINGS"
+}
+mk_bindings
+MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$BINDINGS")
 
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc       "inherited: exits 0" 0
-assert_contains "inherited: says so" "inherited"
+assert_contains "inherited: says whose role it now is" "role this clone now holds"
+assert_contains "inherited: the override is announced" "clone registry overridden"
 if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
     pass "inherited: replied AND resolved, as its own"
 else
@@ -319,7 +336,7 @@ fi
 thread_fixture "$HOST/gzapp-orphan/fix/nobody" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc       "orphan: exits 0" 0
-assert_contains "orphan: names the gap" "no recorded successor"
+assert_contains "orphan: names the gap" "no live clone holds its role"
 if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
     pass "orphan: replied but left OPEN by default"
 else
@@ -336,13 +353,24 @@ else
     fail "inherited by another: posted to a live session's PR" "$(calls)"
 fi
 
-# CONTROL: the record is what changes the verdict. Same branch, no record
-# -> refused as a rival, exactly as before. Without this, the three cases
-# above could pass on a script that ignores the file entirely.
-MOCK_ENV=(env "GZAPP_RETIRED_CLONES=$SANDBOX/state/does-not-exist.txt")
+# An OPEN window means live, so the old refusal stands.
+thread_fixture "$HOST/gzapp-stillhere/fix/theirs" false
+invoke "I would like to answer this." "$THREAD_ID"
+assert_rc "a clone with an open window is still refused" 2
+
+# CONTROLS. The registry is what changes the verdict, and everything the
+# registry does not positively call retired must FAIL CLOSED.
+MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$SANDBOX/state/no-such-registry.jsonl")
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc "control: with no record, the retired prefix is still refused" 2
+assert_rc "control: with no registry, the retired prefix is refused" 2
+
+printf 'not json at all\n' > "$SANDBOX/state/broken.jsonl"
+MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$SANDBOX/state/broken.jsonl")
+thread_fixture "$HOST/gzapp-old/fix/inherited" false
+invoke "Verified against main; obsolete." "$THREAD_ID"
+assert_rc "control: an unparseable registry fails CLOSED, not open" 2
+
 MOCK_ENV=(env)
 
 echo "pr-reply: an unowned PR still warns before it replies"

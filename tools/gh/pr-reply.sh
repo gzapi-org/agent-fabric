@@ -217,22 +217,55 @@ branch_names_a_session() {
 }
 
 # RETIRED CLONES. A branch prefix that parses as a session may name one
-# that no longer exists: clones are retired and replaced under new names
-# (.roles/PROVISIONING.md §11), and their pull requests keep the old
-# prefix forever. Read as a rival, such a PR is refused; read as unowned it
-# is answerable; read as INHERITED by the recorded successor it is simply
-# that session's. The record is tools/gh/retired-clones.txt, overridable
-# for tests. Prints the successor (possibly empty) and returns 0 when the
-# prefix is retired; returns 1 when it is not in the record at all.
-RETIRED_CLONES="${GZAPP_RETIRED_CLONES:-$(dirname "${BASH_SOURCE[0]}")/retired-clones.txt}"
-retired_successor() {
-    local want="$1" name succ
-    [[ -r "$RETIRED_CLONES" ]] || return 1
-    while read -r name succ _; do
-        [[ -z "$name" || "$name" == \#* ]] && continue
-        if [[ "$name" == "$want" ]]; then printf '%s' "${succ:-}"; return 0; fi
-    done < "$RETIRED_CLONES"
-    return 1
+# that no longer exists: clones are retired and replaced under new names,
+# and their pull requests keep the old prefix forever. Read as a rival,
+# such a PR is refused for a session that is not there; read as INHERITED
+# by the successor it is simply that session's; read as unowned it is at
+# least answerable.
+#
+# THE RECORD IS .roles/registry/bindings.jsonl, not a table kept here. That
+# file is tracked, lint-governed (one open window per clone, closures only
+# move forward) and written by tools/roles/materialize_bindings.py, so it
+# is maintained by something other than memory. A first version of this
+# used a hand-written list and shipped three clones as retired that the
+# registry marks LIVE -- which would have turned a refusal into permission
+# for any clone to answer their PRs. A second record that can disagree
+# with the first is worse than no second record.
+#
+# A clone is RETIRED when every binding window for it is closed. Its
+# successor is the clone with an OPEN window for the SAME role on the same
+# host. Anything the registry does not positively say is retired is
+# treated as LIVE and refused: unknown prefixes, an unreadable file, a jq
+# failure. Fail-closed is the only safe default for a script that posts.
+CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
+if [[ -n "${GZAPP_CLONE_BINDINGS:-}" ]]; then
+    # An ownership input that can be pointed anywhere deserves to be
+    # visible in the transcript: this is the one variable that can turn a
+    # refusal into a reply, and a laundered run must not look ordinary.
+    echo "pr-reply: clone registry overridden: $CLONE_BINDINGS" >&2
+fi
+
+# Prints exactly one of: LIVE | ORPHAN | HEIR <host>/<clone>
+clone_status() {
+    local want="$1" out
+    [[ -r "$CLONE_BINDINGS" ]] || { printf 'LIVE'; return 0; }
+    out="$(jq -s -r --arg want "$want" '
+        ( $want | split("/") ) as $w
+        | [ .[] | select(.host == $w[0] and .dir_basename == $w[1]) ] as $mine
+        | if ($mine | length) == 0 then "LIVE"
+          elif ($mine | map(select(.valid_to == null)) | length) > 0 then "LIVE"
+          else
+            ( $mine | sort_by(.valid_to) | last | .role ) as $role
+            | [ .[] | select(.valid_to == null and .host == $w[0]
+                             and $role != null and .role == $role
+                             and .dir_basename != $w[1]) ]
+            | if length > 0 then "HEIR " + (.[0] | .host + "/" + .dir_basename)
+              else "ORPHAN" end
+          end' "$CLONE_BINDINGS" 2>/dev/null)" || out=""
+    case "$out" in
+        ORPHAN|HEIR\ */*) printf '%s' "$out" ;;
+        *)                printf 'LIVE' ;;
+    esac
 }
 
 # The unowned path's one enforced rule: resolving is a claim, and a PR no
@@ -261,23 +294,24 @@ if ! branch_names_a_session "$PR_BRANCH"; then
     # the finding may belong to a surface whose role has verified
     # nothing. So the default inverts here and --resolve is the opt-in.
     leave_open_unless_explicit
-elif [[ "$OWNER" != "$ME" ]] && SUCCESSOR="$(retired_successor "$OWNER")"; then
-    # The prefix names a RETIRED clone. Three outcomes, by what the record
-    # says about its heir.
-    if [[ "$SUCCESSOR" == "$ME" ]]; then
-        # Inherited: this clone is the recorded successor, so the PR is
-        # its own -- no warning, resolve stays the default.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which this clone inherited." >&2
-    elif [[ -n "$SUCCESSOR" ]]; then
-        # Somebody else inherited it. That is a live session's PR now.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', inherited by '$SUCCESSOR'." >&2
+elif [[ "$OWNER" != "$ME" ]] && [[ "$(clone_status "$OWNER")" != "LIVE" ]]; then
+    # The registry says this prefix names a retired clone. Two outcomes,
+    # by whether it records an heir.
+    STATUS="$(clone_status "$OWNER")"
+    if [[ "$STATUS" == "HEIR $ME" ]]; then
+        # Inherited: this clone holds the open window for that role, so the
+        # PR is its own -- no warning, resolve stays the default.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', whose role this clone now holds." >&2
+    elif [[ "$STATUS" == HEIR\ * ]]; then
+        # Somebody else holds it. That is a live session's PR now.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', inherited by '${STATUS#HEIR }'." >&2
         echo "  Not replying: that session owns it now, and a review reply cannot" >&2
         echo "  be unsent. Raise it in the PR, or from that clone." >&2
         exit 2
     else
-        # Retired with no recorded heir: nobody's, like a branch that names
-        # no session, and treated the same way.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which has no recorded successor." >&2
+        # Retired with no open window for its role: nobody's, like a branch
+        # that names no session, and treated the same way.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and no live clone holds its role." >&2
         echo "  No session owns it, so there is nobody to defer to — replying." >&2
         leave_open_unless_explicit
     fi

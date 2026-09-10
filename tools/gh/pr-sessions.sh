@@ -333,21 +333,43 @@ fi
 # the pipeline is what keeps the two answers about the same set by
 # construction, rather than by two pipelines happening to agree.
 # RETIRED CLONES. A prefix that parses as a session may name one that was
-# retired and replaced (.roles/PROVISIONING.md §11). Its PRs keep the old
-# prefix forever, so without this they appear in nobody's sweep: not the
-# successor's (different name), not /unattributed (the branch parses). The
-# record is tools/gh/retired-clones.txt, overridable for tests. A retired
-# clone WITH a successor is OWNED by the successor -- scoped into its
-# default sweep, marked as its own -- while still DISPLAYING the retired
-# name, because that is where the work lives. One WITHOUT a successor is
-# nobody's and joins the /unattributed rows.
-RETIRED_CLONES="${GZAPP_RETIRED_CLONES:-$(dirname "${BASH_SOURCE[0]}")/retired-clones.txt}"
+# retired and replaced. Its PRs keep the old prefix forever, so without
+# this they appear in nobody's sweep: not the successor's (different
+# name), not /unattributed (the branch parses).
+#
+# THE RECORD IS .roles/registry/bindings.jsonl -- tracked, lint-governed,
+# and written by the roles pipeline, so it is maintained by something
+# other than memory. A clone is retired when every window for it is
+# closed; its successor is the clone holding an OPEN window for the same
+# role on the same host. A retired clone WITH a successor is OWNED by the
+# successor -- scoped into its default sweep, marked as its own -- while
+# still DISPLAYING the retired name, because that is where the work lives.
+# One with no live holder of its role is nobody's and joins the
+# /unattributed rows. Anything the registry does not positively record as
+# retired stays LIVE, which is the pre-existing behaviour.
+CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
 INHERIT_JSON='{}'; ORPHANS_JSON='[]'
-if [[ -r "$RETIRED_CLONES" ]]; then
-    INHERIT_JSON="$(awk '!/^[[:space:]]*(#|$)/ && NF>=2 {printf "%s\t%s\n",$1,$2}' "$RETIRED_CLONES" \
-        | jq -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries')"
-    ORPHANS_JSON="$(awk '!/^[[:space:]]*(#|$)/ && NF==1 {print $1}' "$RETIRED_CLONES" \
-        | jq -Rn '[inputs]')"
+if [[ -r "$CLONE_BINDINGS" ]]; then
+    registry="$(jq -s '
+        . as $all
+        | ( [ $all[] | {h: .host, d: .dir_basename} ] | unique ) as $clones
+        | reduce $clones[] as $c ({inherit: {}, orphans: []};
+            ( [ $all[] | select(.host == $c.h and .dir_basename == $c.d) ] ) as $mine
+            | if ($mine | map(select(.valid_to == null)) | length) > 0 then .
+              else
+                ( $mine | sort_by(.valid_to) | last | .role ) as $role
+                | ( [ $all[] | select(.valid_to == null and .host == $c.h
+                                      and $role != null and .role == $role
+                                      and .dir_basename != $c.d) ] ) as $heirs
+                | ($c.h + "/" + $c.d) as $key
+                | if ($heirs | length) > 0
+                  then .inherit[$key] = ($heirs[0] | .host + "/" + .dir_basename)
+                  else .orphans += [$key] end
+              end)' "$CLONE_BINDINGS" 2>/dev/null)" || registry=""
+    if [[ -n "$registry" ]]; then
+        INHERIT_JSON="$(printf '%s' "$registry" | jq -c '.inherit')"
+        ORPHANS_JSON="$(printf '%s' "$registry" | jq -c '.orphans')"
+    fi
 fi
 
 envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
@@ -433,7 +455,13 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
          | ( if $filter == "__MINE__" then map(select(._o == $me))
              elif $filter == "__UNATTRIBUTED__" then
                     map(select(._s == "(unconventional)" or ._orphan))
-             elif $filter != "" then map(select(._s | test($filter; "i")))
+             elif $filter != "" then
+                    # BOTH names: the successor filtering by its own clone
+                    # must see the rows it inherited, which still DISPLAY
+                    # the retired name. Matching only the display name made
+                    # --session narrower than the default scope.
+                    map(select((._s | test($filter; "i"))
+                               or (._o | test($filter; "i"))))
              else . end )
          | sort_by(-.number) | .[:$limit]) }
 ')" || {
@@ -582,7 +610,11 @@ out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPE
   | if $grouped == 1 then
     ( group_by(._s) | sort_by(-(map(.number) | max))
       | map(
-          "\n\(.[0]._s)\(if .[0]._s == $me then "   <- this clone" else "" end)"
+          # OWNER decides the marker, the retired name is still the
+          # heading: a group of rows this clone inherited must be labelled
+          # as its own, or the one ownership cue in grouped mode is absent
+          # exactly where it is least obvious.
+          "\n\(.[0]._s)\(if .[0]._o == $me then "   <- this clone" else "" end)"
           , ( sort_by(-.number)[]
               | "  #\(.number)  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._w)" )
         ) | flatten | .[] )

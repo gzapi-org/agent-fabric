@@ -292,6 +292,59 @@ for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
     fi
 done
 
+echo "pr-reply: a retired clone's PR goes to its recorded successor, or to nobody"
+# A retired clone's prefix still PARSES as a session, so it read as a live
+# rival and was refused -- and it appeared in no sweep either. Twelve
+# threads on five PRs sat that way. The record decides: a successor
+# inherits, no successor means unowned, and a successor that is somebody
+# else means it is THEIR live PR now.
+HOST="$(hostname -s)"
+RETIRED_FIXTURE="$SANDBOX/state/retired.txt"
+printf '%s\n' "# test record" \
+    "$HOST/gzapp-old      $ME" \
+    "$HOST/gzapp-orphan" \
+    "$HOST/gzapp-theirs   $OTHER" > "$RETIRED_FIXTURE"
+MOCK_ENV=(env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE")
+
+thread_fixture "$HOST/gzapp-old/fix/inherited" false
+invoke "Verified against main; obsolete." "$THREAD_ID"
+assert_rc       "inherited: exits 0" 0
+assert_contains "inherited: says so" "inherited"
+if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
+    pass "inherited: replied AND resolved, as its own"
+else
+    fail "inherited: expected reply and resolve" "$(calls)"
+fi
+
+thread_fixture "$HOST/gzapp-orphan/fix/nobody" false
+invoke "Verified against main; obsolete." "$THREAD_ID"
+assert_rc       "orphan: exits 0" 0
+assert_contains "orphan: names the gap" "no recorded successor"
+if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
+    pass "orphan: replied but left OPEN by default"
+else
+    fail "orphan: expected reply without resolve" "$(calls)"
+fi
+
+thread_fixture "$HOST/gzapp-theirs/fix/inherited-by-other" false
+invoke "I would like to answer this." "$THREAD_ID"
+assert_rc       "inherited by another: exits 2" 2
+assert_contains "inherited by another: names the heir" "$OTHER"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "inherited by another: nothing was posted"
+else
+    fail "inherited by another: posted to a live session's PR" "$(calls)"
+fi
+
+# CONTROL: the record is what changes the verdict. Same branch, no record
+# -> refused as a rival, exactly as before. Without this, the three cases
+# above could pass on a script that ignores the file entirely.
+MOCK_ENV=(env "GZAPP_RETIRED_CLONES=$SANDBOX/state/does-not-exist.txt")
+thread_fixture "$HOST/gzapp-old/fix/inherited" false
+invoke "Verified against main; obsolete." "$THREAD_ID"
+assert_rc "control: with no record, the retired prefix is still refused" 2
+MOCK_ENV=(env)
+
 echo "pr-reply: an unowned PR still warns before it replies"
 # Allowed is not the same as unremarkable — the finding may belong to a
 # surface whose role has verified nothing.

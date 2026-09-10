@@ -377,6 +377,42 @@ assert_contains "keeps the pr rather than dropping it" "#28"
 
 default_graphql
 
+echo "pr-sessions: a retired clone is scoped to its successor, or to nobody"
+# A retired clone's prefix parses, so its PRs matched no scope: not the
+# successor's (different name), not /unattributed (it parses). Twelve
+# threads sat that way. With the record: an inherited row appears in the
+# successor's DEFAULT sweep, marked as its own but still showing the
+# retired name; an orphan row appears under /unattributed and in the NOTE.
+HOST="$(hostname -s)"
+RETIRED_FIXTURE="$SANDBOX/fixtures/retired.txt"
+printf '%s\n' "$HOST/gzapp-old     $ME" "$HOST/gzapp-orphan" > "$RETIRED_FIXTURE"
+write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
+    --arg orphan "$HOST/gzapp-orphan" --arg t "$(ago '1 hour')" '[
+  {number: 40, state: "MERGED", headRefName: ($old    + "/fix/inherited"),
+   title: "inherited", updatedAt: $t, isDraft: false, mergedAt: $t},
+  {number: 41, state: "MERGED", headRefName: ($orphan + "/fix/nobody"),
+   title: "nobody",    updatedAt: $t, isDraft: false, mergedAt: $t},
+  {number: 42, state: "OPEN",   headRefName: ($me     + "/feat/mine"),
+   title: "mine",      updatedAt: $t, isDraft: false, mergedAt: null}
+]')"
+run_env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE" -- --no-threads
+assert_rc           "default scope exits 0" 0
+assert_contains     "inherited PR is in the successor's default sweep" "#40"
+assert_contains     "inherited row still shows the retired name" "gzapp-old"
+assert_contains     "own PR still listed" "#42"
+assert_not_contains "orphan PR is NOT in the default sweep" "#41"
+assert_contains     "the NOTE counts the orphan" "1 PR(s) name no live session"
+
+run_env "GZAPP_RETIRED_CLONES=$RETIRED_FIXTURE" -- /unattributed --no-threads
+assert_rc           "/unattributed exits 0" 0
+assert_contains     "orphan PR is listed under /unattributed" "#41"
+assert_not_contains "inherited PR is not an orphan" "#40"
+
+# CONTROL: no record -> the old behaviour, so the record is what changed it.
+run_env "GZAPP_RETIRED_CLONES=$SANDBOX/fixtures/does-not-exist.txt" -- --no-threads
+assert_not_contains "control: without the record the inherited PR is invisible" "#40"
+default_pr_list
+
 echo "pr-sessions: pool filters"
 run /all /lastItem:1
 assert_rc           "exits 0" 0
@@ -587,7 +623,7 @@ unscopable_list
 run
 assert_rc       "exits 0" 0
 assert_contains "the footer path discloses the omission" "cannot be scoped to a"
-assert_contains "  and counts them"                      "1 PR(s) have a branch"
+assert_contains "  and counts them"                      "1 PR(s) name no live session"
 
 echo "pr-sessions: /all reports nothing omitted, because nothing was scoped away"
 run /all

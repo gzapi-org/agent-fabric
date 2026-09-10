@@ -332,9 +332,28 @@ fi
 # one-item pool and had therefore not been omitted by anything. Sharing
 # the pipeline is what keeps the two answers about the same set by
 # construction, rather than by two pipelines happening to agree.
+# RETIRED CLONES. A prefix that parses as a session may name one that was
+# retired and replaced (.roles/PROVISIONING.md §11). Its PRs keep the old
+# prefix forever, so without this they appear in nobody's sweep: not the
+# successor's (different name), not /unattributed (the branch parses). The
+# record is tools/gh/retired-clones.txt, overridable for tests. A retired
+# clone WITH a successor is OWNED by the successor -- scoped into its
+# default sweep, marked as its own -- while still DISPLAYING the retired
+# name, because that is where the work lives. One WITHOUT a successor is
+# nobody's and joins the /unattributed rows.
+RETIRED_CLONES="${GZAPP_RETIRED_CLONES:-$(dirname "${BASH_SOURCE[0]}")/retired-clones.txt}"
+INHERIT_JSON='{}'; ORPHANS_JSON='[]'
+if [[ -r "$RETIRED_CLONES" ]]; then
+    INHERIT_JSON="$(awk '!/^[[:space:]]*(#|$)/ && NF>=2 {printf "%s\t%s\n",$1,$2}' "$RETIRED_CLONES" \
+        | jq -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries')"
+    ORPHANS_JSON="$(awk '!/^[[:space:]]*(#|$)/ && NF==1 {print $1}' "$RETIRED_CLONES" \
+        | jq -Rn '[inputs]')"
+fi
+
 envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
-        --argjson lastitem "${LAST_ITEM:-0}" '
+        --argjson lastitem "${LAST_ITEM:-0}" \
+        --argjson inherit "$INHERIT_JSON" --argjson orphans "$ORPHANS_JSON" '
   # Automation vendors, whose branch names also have four or more
   # segments. A DENY-list is right here and an allow-list was wrong: the
   # asymmetry is the point. The set of bots that open PRs on a
@@ -371,6 +390,15 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
   def session:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
+  # OWNER answers for the row TODAY: a retired clone with a recorded
+  # successor is owned by that successor. NO APOSTROPHES in this block --
+  # it is a single-quoted jq program. Scope and the `*` mark use owner; the
+  # SESSION column keeps the retired name, so the row is honest about
+  # where the branch actually is.
+  def owner:
+    session as $s | if (($inherit[$s] // "") != "") then $inherit[$s] else $s end;
+  def orphan:
+    session as $s | (($orphans | index($s)) != null);
   def work:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[2:] | join("/")) else .headRefName end;
@@ -382,7 +410,7 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
     elif .state == "MERGED" then "MERGED"
     else "CLOSED" end;
 
-  [ .[] | . + {_s: session, _w: work} ]
+  [ .[] | . + {_s: session, _o: owner, _orphan: orphan, _w: work} ]
   | sort_by(-.number)
   # POOL FIRST: /lastDate then /lastItem, before scope or anything else.
   | ( if $cutoff != "" then map(select(.updatedAt >= $cutoff)) else . end )
@@ -399,12 +427,12 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
       # the one scope where the omission it warns of cannot happen.
       unattributed:
         (if $filter == "" or $filter == "__UNATTRIBUTED__" then 0
-         else ([$pool[] | select(._s == "(unconventional)")] | length) end),
+         else ([$pool[] | select(._s == "(unconventional)" or ._orphan)] | length) end),
       rows:
         ($pool
-         | ( if $filter == "__MINE__" then map(select(._s == $me))
+         | ( if $filter == "__MINE__" then map(select(._o == $me))
              elif $filter == "__UNATTRIBUTED__" then
-                    map(select(._s == "(unconventional)"))
+                    map(select(._s == "(unconventional)" or ._orphan))
              elif $filter != "" then map(select(._s | test($filter; "i")))
              else . end )
          | sort_by(-.number) | .[:$limit]) }
@@ -430,8 +458,9 @@ UNATTRIBUTED="$(printf '%s' "$envelope" | jq '.unattributed')"
 # where it costs most.
 unattributed_note() {
     [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
-    echo "  NOTE: $UNATTRIBUTED PR(s) have a branch that does not parse as" >&2
-    echo "  <host>/<clone>/<type>/<short-desc>, so they cannot be scoped to a" >&2
+    echo "  NOTE: $UNATTRIBUTED PR(s) name no live session — the branch does not" >&2
+    echo "  parse as <host>/<clone>/<type>/<short-desc>, or names a retired clone" >&2
+    echo "  with no recorded successor — so they cannot be scoped to a" >&2
     echo "  session and are not listed. Pass /unattributed to list exactly" >&2
     echo "  those, or /all to stop filtering." >&2
 }
@@ -559,7 +588,7 @@ out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPE
         ) | flatten | .[] )
   else
     ( sort_by(-.number)[]
-      | "\(._s | mark) #\(.number | tostring | pad(4))  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._s | pad(30))  \(._w)" )
+      | "\(._o | mark) #\(.number | tostring | pad(4))  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._s | pad(30))  \(._w)" )
   end
 ')"
 

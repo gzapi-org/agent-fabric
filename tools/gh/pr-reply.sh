@@ -216,6 +216,37 @@ branch_names_a_session() {
     return 0
 }
 
+# RETIRED CLONES. A branch prefix that parses as a session may name one
+# that no longer exists: clones are retired and replaced under new names
+# (.roles/PROVISIONING.md §11), and their pull requests keep the old
+# prefix forever. Read as a rival, such a PR is refused; read as unowned it
+# is answerable; read as INHERITED by the recorded successor it is simply
+# that session's. The record is tools/gh/retired-clones.txt, overridable
+# for tests. Prints the successor (possibly empty) and returns 0 when the
+# prefix is retired; returns 1 when it is not in the record at all.
+RETIRED_CLONES="${GZAPP_RETIRED_CLONES:-$(dirname "${BASH_SOURCE[0]}")/retired-clones.txt}"
+retired_successor() {
+    local want="$1" name succ
+    [[ -r "$RETIRED_CLONES" ]] || return 1
+    while read -r name succ _; do
+        [[ -z "$name" || "$name" == \#* ]] && continue
+        if [[ "$name" == "$want" ]]; then printf '%s' "${succ:-}"; return 0; fi
+    done < "$RETIRED_CLONES"
+    return 1
+}
+
+# The unowned path's one enforced rule: resolving is a claim, and a PR no
+# session owns is the path with the least standing to make it, so the
+# default flips to leave-open and --resolve is the opt-in. Shared by the
+# no-session and retired-without-successor cases below.
+leave_open_unless_explicit() {
+    if [[ "$RESOLVE" -eq 1 && "$RESOLVE_EXPLICIT" -eq 0 ]]; then
+        RESOLVE=0
+        echo "  The finding may still be another SURFACE's (backend, flutter, web)," >&2
+        echo "  so the thread is left OPEN. Pass --resolve once it is verified." >&2
+    fi
+}
+
 if ! branch_names_a_session "$PR_BRANCH"; then
     # Unowned, NOT someone else's. Refusing here is what kept these
     # threads unanswerable; claiming a rival session owns them would be
@@ -229,10 +260,26 @@ if ! branch_names_a_session "$PR_BRANCH"; then
     # path with the least standing to make it: the script has just said
     # the finding may belong to a surface whose role has verified
     # nothing. So the default inverts here and --resolve is the opt-in.
-    if [[ "$RESOLVE" -eq 1 && "$RESOLVE_EXPLICIT" -eq 0 ]]; then
-        RESOLVE=0
-        echo "  The finding may still be another SURFACE's (backend, flutter, web)," >&2
-        echo "  so the thread is left OPEN. Pass --resolve once it is verified." >&2
+    leave_open_unless_explicit
+elif [[ "$OWNER" != "$ME" ]] && SUCCESSOR="$(retired_successor "$OWNER")"; then
+    # The prefix names a RETIRED clone. Three outcomes, by what the record
+    # says about its heir.
+    if [[ "$SUCCESSOR" == "$ME" ]]; then
+        # Inherited: this clone is the recorded successor, so the PR is
+        # its own -- no warning, resolve stays the default.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which this clone inherited." >&2
+    elif [[ -n "$SUCCESSOR" ]]; then
+        # Somebody else inherited it. That is a live session's PR now.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', inherited by '$SUCCESSOR'." >&2
+        echo "  Not replying: that session owns it now, and a review reply cannot" >&2
+        echo "  be unsent. Raise it in the PR, or from that clone." >&2
+        exit 2
+    else
+        # Retired with no recorded heir: nobody's, like a branch that names
+        # no session, and treated the same way.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which has no recorded successor." >&2
+        echo "  No session owns it, so there is nobody to defer to — replying." >&2
+        leave_open_unless_explicit
     fi
 elif [[ "$OWNER" != "$ME" ]]; then
     echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this clone is '$ME'." >&2

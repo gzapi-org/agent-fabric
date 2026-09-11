@@ -616,3 +616,39 @@ test('next-id CLI: --peek prints without taking, --seed reports the move', () =>
     assert.notEqual(bad.status, 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
+// delivery: the body of a message not addressed to this session is never
+// printed. forMe() is that decision, kept pure so it can be pinned.
+import { forMe, identity } from '../scripts/inbox.mjs';
+test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/db-admin\n'), me), true, 'TO is my address');
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/web-dev-01\n'), me), false, 'TO is someone else');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), me), true, 'TO-ROLE is my slug');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: backend-dev\n'), me), false, 'TO-ROLE is another slug');
+  assert.equal(forMe(mk('INFO', 'BROADCAST: true\n'), me), true, 'broadcast reaches everyone');
+  assert.equal(forMe(mk('HELLO', ''), me), true, 'HELLO is a broadcast by definition');
+  assert.equal(forMe(mk('GOODBYE', ''), me), true, 'GOODBYE too');
+  assert.equal(forMe(mk('INFO', ''), me), false, 'no addressing field at all: not for anyone');
+  // A session with no resolvable role never matches a TO-ROLE.
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), { ...me, slug: undefined }), false);
+});
+
+test('inbox identity: address from the working copy, slug from record then basename', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-inbox-'));
+  try {
+    const root = path.join(dir, 'architect-cto-01'); fs.mkdirSync(path.join(root, '.roles', '.instance'), { recursive: true });
+    fs.copyFileSync(taxonomy.path, path.join(root, '.roles', 'taxonomy.json'));
+    const tax = loadTaxonomy(path.join(root, '.roles', 'taxonomy.json'));
+    const host = os.hostname().split('.')[0];
+    // no record: the basename's slug
+    assert.deepEqual(identity(root, tax), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: 'architect-cto' });
+    // a record wins over the basename
+    fs.writeFileSync(path.join(root, '.roles', '.instance', 'state.json'), JSON.stringify({ role: 'backend-dev' }));
+    assert.equal(identity(root, tax).slug, 'backend-dev');
+    // no catalogue at all: address still derives, slug does not
+    assert.deepEqual(identity(root, undefined), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: undefined });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

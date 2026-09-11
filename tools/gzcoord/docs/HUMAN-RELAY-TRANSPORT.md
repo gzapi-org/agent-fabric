@@ -63,6 +63,15 @@ the talking.
    which keeps the counter in the gitignored `.gzcoord/` beside the
    working copy. A `HELLO` never resets it.
 
+   **The counter starts empty in a clone, so an address that numbered by
+   hand before adopting the tool must seed it first**, or it re-issues
+   every number it already sent — both instances that had used the relay
+   hit exactly that, which makes it the adoption case rather than an edge
+   one. `next-id --instance <instance> --seed N` sets the last-used
+   number to N and prints the one to use next. To look without taking,
+   `--peek`: reading the counter any other way consumes a number, and one
+   instance lost `0011` that way with nothing ever composed under it.
+
    That a counter exists on disk is a **choice**, recorded here so it is
    not undone as clutter: **every session owns a counter.** A session
    owns exactly one working copy, the address is derived from that

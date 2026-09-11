@@ -77,6 +77,41 @@ it would hand recipients silently truncated GZCOORD/1 text, which fails
 validation at the far end for no visible reason. Deliver from
 `/api/wait` or fetch by id.
 
+## Receiving: the session is woken, and reads only what is its own
+
+The MCP tools are pull-only, but a session need not poll by hand.
+`tools/gzcoord/scripts/inbox.mjs` does two things with one code path:
+
+- **On every session start** it runs from the `SessionStart` hook in
+  `.claude/settings.json` and drains what arrived while the session was
+  away. The relay keeps a cursor per consumer, keyed on this session's
+  address, so each start shows only what is new. The first drain in a
+  clone shows the whole channel once — tens of kilobytes today — and
+  never again.
+- **When a session is actively waiting for a reply**, run it as a
+  background task with `--wait` (up to 55 s, the relay's ceiling). It
+  returns the moment something lands, and the harness wakes the session
+  when it exits: that exit is the notification. It is one-shot by
+  design, because a process that never exits never notifies, so re-arm
+  it after each return.
+
+Both apply SPEC §7.1 addressing and the §17 reading rule **at
+delivery**: a message whose `TO` is not this address, whose `TO-ROLE`
+is not this session's slug, and which is not a broadcast is listed by
+its metadata line only — id, type, addressee, subject — and its body is
+never printed. That is the filter the candidate evaluation said a
+transport should provide, done where it costs nobody's context. The
+cursor advances past those too: an acknowledgement means "shown this
+position", not "read the body".
+
+Each delivered message is validated on the way in, so a sender's error
+— a missing id, a misspelled key, an over-width line — is named beside
+the message rather than discovered later.
+
+It never blocks a session start. Relay down, no token, no catalogue:
+one line on stderr, exit 0. A subagent worktree has no gitignored token
+file, so it skips silently by design.
+
 ## The message id is still yours, not the relay's
 
 `MESSAGE-ID` keeps coming from `gzmsg.mjs next-id`, which keeps its

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, nearestKnownKey } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, nearestKnownKey } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -598,4 +598,96 @@ test('unknown fields that are real extensions stay silent — §6 preserves them
     assert.equal(nearestKnownKey(key), want, key);
   for (const key of ['FROM', 'TO-ROLE', 'X-PRIORITY', 'MSG-ID'])
     assert.equal(nearestKnownKey(key), undefined, key);
+});
+
+// Both reported from live traffic once the relay carried real instances.
+// One root cause: nextId was the only accessor, so a session could neither
+// look at its counter without burning a number nor correct one that
+// started empty in a clone whose address had already numbered by hand.
+test('peek does not consume, and seed repairs a counter that started empty', () => {
+  const dir = new URL('./seq2.tmp/', import.meta.url).pathname;
+  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    // peek on an untouched counter, twice, then the take it predicted
+    assert.equal(peekId('web', dir), 'web-0001');
+    assert.equal(peekId('web', dir), 'web-0001');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'peek must not create the file');
+    assert.equal(nextId('web', dir), 'web-0001');
+    assert.equal(peekId('web', dir), 'web-0002');
+    assert.equal(fs.readFileSync(`${dir}/web.seq`, 'utf8').trim(), '1', 'peek must not advance it');
+
+    // an address that hand-numbered 0001-0006 before adopting the tool
+    const r = seedSeq('gzapp', 6, dir);
+    assert.deepEqual(r, { was: 0, now: 6, next: 'gzapp-0007', lowered: false });
+    assert.equal(nextId('gzapp', dir), 'gzapp-0007', 'the number after the hand-numbered ones');
+
+    // lowering is allowed but reported, since it re-circulates issued ids
+    assert.equal(seedSeq('gzapp', 2, dir).lowered, true);
+    assert.equal(peekId('gzapp', dir), 'gzapp-0003');
+
+    assert.throws(() => seedSeq('gzapp', -1, dir), /non-negative/);
+    assert.throws(() => seedSeq('gzapp', 1.5, dir), /non-negative/);
+    assert.throws(() => peekId('bad/instance', dir), /half of an address/);
+    assert.equal(formatId('web', 42), 'web-0042');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('next-id CLI: --peek prints without taking, --seed reports the move', () => {
+  const dir = new URL('./seq3.tmp/', import.meta.url).pathname;
+  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const peek = gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir);
+    assert.equal(peek.status, 0, peek.stderr);
+    assert.equal(peek.stdout.trim(), 'web-0001');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
+
+    const seed = gzmsg('next-id', '--instance', 'web', '--seed', '6', '--state-dir', dir);
+    assert.equal(seed.status, 0, seed.stderr);
+    assert.equal(seed.stdout.trim(), 'web-0007', 'stdout is the id to use next');
+    assert.match(seed.stderr, /counter for web: 0 -> 6/);
+    assert.doesNotMatch(seed.stderr, /warning/, 'raising is not a warning');
+    assert.equal(gzmsg('next-id', '--instance', 'web', '--state-dir', dir).stdout.trim(), 'web-0007');
+
+    const lower = gzmsg('next-id', '--instance', 'web', '--seed', '1', '--state-dir', dir);
+    assert.match(lower.stderr, /warning: lowered from 7 to 1; ids web-0002\.\.web-0007 go back into circulation/);
+
+    const bad = gzmsg('next-id', '--instance', 'web', '--seed', 'seven', '--state-dir', dir);
+    assert.notEqual(bad.status, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
+// delivery: the body of a message not addressed to this session is never
+// printed. forMe() is that decision, kept pure so it can be pinned.
+import { forMe, identity } from '../scripts/inbox.mjs';
+test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/db-admin\n'), me), true, 'TO is my address');
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/web-dev-01\n'), me), false, 'TO is someone else');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), me), true, 'TO-ROLE is my slug');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: backend-dev\n'), me), false, 'TO-ROLE is another slug');
+  assert.equal(forMe(mk('INFO', 'BROADCAST: true\n'), me), true, 'broadcast reaches everyone');
+  assert.equal(forMe(mk('HELLO', ''), me), true, 'HELLO is a broadcast by definition');
+  assert.equal(forMe(mk('GOODBYE', ''), me), true, 'GOODBYE too');
+  assert.equal(forMe(mk('INFO', ''), me), false, 'no addressing field at all: not for anyone');
+  // A session with no resolvable role never matches a TO-ROLE.
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), { ...me, slug: undefined }), false);
+});
+
+test('inbox identity: address from the working copy, slug from record then basename', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-inbox-'));
+  try {
+    const root = path.join(dir, 'architect-cto-01'); fs.mkdirSync(path.join(root, '.roles', '.instance'), { recursive: true });
+    fs.copyFileSync(taxonomy.path, path.join(root, '.roles', 'taxonomy.json'));
+    const tax = loadTaxonomy(path.join(root, '.roles', 'taxonomy.json'));
+    const host = os.hostname().split('.')[0];
+    // no record: the basename's slug
+    assert.deepEqual(identity(root, tax), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: 'architect-cto' });
+    // a record wins over the basename
+    fs.writeFileSync(path.join(root, '.roles', '.instance', 'state.json'), JSON.stringify({ role: 'backend-dev' }));
+    assert.equal(identity(root, tax).slug, 'backend-dev');
+    // no catalogue at all: address still derives, slug does not
+    assert.deepEqual(identity(root, undefined), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: undefined });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

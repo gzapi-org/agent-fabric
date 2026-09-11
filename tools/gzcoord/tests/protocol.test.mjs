@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -614,5 +614,47 @@ test('next-id CLI: --peek prints without taking, --seed reports the move', () =>
 
     const bad = gzmsg('next-id', '--instance', 'web', '--seed', 'seven', '--state-dir', dir);
     assert.notEqual(bad.status, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A checkout that predated --peek accepted `next-id --peek` in silence and
+// took a number: a gap nothing can fill. Every flag a command takes is now
+// declared, and an unrecognised one is refused BEFORE any side effect.
+test('parseArgs: unknown, valueless, repeated and surplus arguments are refused', () => {
+  const spec = { valued: ['instance', 'seed'], boolean: ['peek'], positional: 0 };
+  assert.deepEqual(parseArgs(['--instance', 'x', '--peek'], spec), { flags: { instance: 'x', peek: true }, positional: [] });
+  assert.throws(() => parseArgs(['--instance', 'x', '--seeed', '9'], spec), /unknown flag --seeed; this command takes --instance, --seed, --peek/);
+  assert.throws(() => parseArgs(['--instance', 'x', '--seed'], spec), /--seed needs a value/);
+  assert.throws(() => parseArgs(['--seed', '--peek'], spec), /--seed needs a value/, 'a following flag is not a value');
+  assert.throws(() => parseArgs(['--instance', 'a', '--instance', 'b'], spec), /--instance given twice/);
+  assert.throws(() => parseArgs(['stray'], spec), /unexpected argument: stray/);
+  const one = { valued: [], boolean: [], positional: 1 };
+  assert.deepEqual(parseArgs(['file.txt'], one), { flags: {}, positional: ['file.txt'] });
+  assert.throws(() => parseArgs(['a', 'b'], one), /unexpected argument: b/);
+  assert.throws(() => parseArgs(['--nope'], one), /this command takes no flags/);
+});
+
+test('CLI: an unknown flag on a counter-mutating command takes nothing', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-flags-'));
+  try {
+    const typo = gzmsg('next-id', '--instance', 'web', '--seeed', '9', '--state-dir', dir);
+    assert.equal(typo.status, 2);
+    assert.match(typo.stderr, /unknown flag --seeed/);
+    assert.equal(typo.stdout, '');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'no number was taken');
+    const peekTypo = gzmsg('next-id', '--instance', 'web', '--peek', '--typo', '--state-dir', dir);
+    assert.equal(peekTypo.status, 2);
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
+    const hello = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/web', '--role', 'R', '--project', 'p', '--bogus', '--state-dir', dir);
+    assert.equal(hello.status, 2);
+    assert.match(hello.stderr, /unknown flag --bogus/);
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'hello took no number either');
+    const file = path.join(dir, 'm.txt'); fs.writeFileSync(file, '[GZCOORD/1] HELLO\nFROM: a/b\nROLE: R\nPROJECT: p\nMESSAGE-ID: b-0001\n');
+    const v = gzmsg('validate', file, '--nope');
+    assert.equal(v.status, 2);
+    assert.match(v.stderr, /unknown flag --nope/);
+    // and the declared paths are untouched
+    assert.equal(gzmsg('validate', file, '--no-taxonomy').status, 0);
+    assert.equal(gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir).stdout.trim(), 'web-0001');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

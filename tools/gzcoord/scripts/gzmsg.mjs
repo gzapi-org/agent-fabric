@@ -192,7 +192,13 @@ export function validate(text, { taxonomy } = {}) {
   try { msg = parse(text); }
   catch (e) { return { ok: false, errors: [e.message], warnings, message: null }; }
   if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(`unknown type: ${msg.type}`);
-  for (const key of ['FROM','ROLE','PROJECT']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
+  // MESSAGE-ID joined the required set (§7.1) once a real transport made
+  // its absence expensive: without one a message cannot be deduplicated by
+  // an at-least-once carrier, answered by IN-REPLY-TO, or named in a
+  // reconciliation by either side. Unnumbered messages were sent here and
+  // had to be superseded. Uniqueness stays a SENDER obligation — a
+  // validator sees one message and cannot know a sender's history.
+  for (const key of ['FROM','ROLE','PROJECT','MESSAGE-ID']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
   if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');
   if (msg.metadata.TO && !addressRe.test(msg.metadata.TO)) errors.push('TO must be <host>/<instance>');
   if (msg.metadata['REPLY-EXPECTED'] !== undefined && !['yes','no'].includes(msg.metadata['REPLY-EXPECTED'])) errors.push('REPLY-EXPECTED must be yes or no');
@@ -387,8 +393,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (arg('role') && recorded.role && arg('role') !== recorded.role)
       console.error(`warning: --role ${arg('role')} disagrees with ${recorded.file}, which records ${recorded.role}`);
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the working copy records a role or the address names one');
+    // MESSAGE-ID is required (§7.1), so hello takes the next one rather
+    // than emitting a message its own validate would reject. An instance
+    // that announced itself unnumbered is the failure this closes; the
+    // id comes from the address's instance half unless one is given.
+    // A malformed --from cannot be numbered, and must still fail on the
+    // address rather than on the id: validate() below reports both, and
+    // the address is the fault worth naming first.
+    const id = arg('message-id')
+      ?? (addressRe.test(from ?? '') ? nextId(from.split('/')[1], arg('state-dir') ?? '.gzcoord') : undefined);
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
-    if (arg('message-id')) lines.push(`MESSAGE-ID: ${arg('message-id')}`);
+    if (id) lines.push(`MESSAGE-ID: ${id}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
     if (arg('capabilities')) lines.push(`CAPABILITIES: ${arg('capabilities')}`);
     // A HELLO is how peers learn an address, so emitting one this same tool

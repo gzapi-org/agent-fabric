@@ -17,6 +17,7 @@ A conforming parser:
 - rejects a metadata key that appears more than once;
 - rejects a `BROADCAST` value other than `true`;
 - rejects more than one of `TO`, `TO-ROLE` and `BROADCAST`, and any of them on `HELLO` or `GOODBYE`;
+- rejects a message with no `MESSAGE-ID`;
 - does not infer project authority from messages.
 
 ## Agent runtime

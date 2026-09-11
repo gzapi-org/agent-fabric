@@ -37,6 +37,7 @@ gzapp/
         │   ├── PROJECT-TREE.md
         │   ├── TRANSPORT-ADAPTER-CONTRACT.md
         │   ├── BRIDGE-RELAY-SETUP.md
+        │   ├── TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md
         │   ├── HUMAN-RELAY-TRANSPORT.md
         │   └── CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md
         ├── history/
@@ -50,7 +51,9 @@ gzapp/
 
 There is no `adapters/` directory: the current transport is a human relay
 (`docs/HUMAN-RELAY-TRANSPORT.md`) and needs no adapter code. The interface an
-automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
+automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`;
+candidates evaluated against it get one `TRANSPORT-CANDIDATE-*.md` each,
+and evaluating one is not selecting it.
 
 Local, not committed:
 

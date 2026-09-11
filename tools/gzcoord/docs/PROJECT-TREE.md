@@ -36,6 +36,7 @@ gzapp/
         │   ├── INSTALL-IN-GZAPP.md
         │   ├── PROJECT-TREE.md
         │   ├── TRANSPORT-ADAPTER-CONTRACT.md
+        │   ├── BRIDGE-RELAY-SETUP.md
         │   ├── TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md
         │   ├── HUMAN-RELAY-TRANSPORT.md
         │   └── CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md

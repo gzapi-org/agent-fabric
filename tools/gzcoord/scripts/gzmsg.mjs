@@ -13,6 +13,36 @@ const FORBIDDEN = new Set([
 ]);
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
+// Every common metadata field the spec names (§7). Used only to ask
+// whether an unknown key looks like a misspelling of one — never to
+// reject: §6 requires unknown metadata to be preserved, because that is
+// how the protocol extends.
+const KNOWN_KEYS = ['FROM','ROLE','PROJECT','TO','TO-ROLE','BROADCAST','MESSAGE-ID','IN-REPLY-TO',
+  'REPOSITORY','BRANCH','COMMIT','REPLY-EXPECTED','SUBJECT','SPECIALTIES','CAPABILITIES'];
+// `<instance>-NNNN`, the shape the deployment numbers messages with.
+const ID_SHAPED = /^[a-z0-9._-]+-\d{4}$/;
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+// A known field this unknown key was plausibly meant to be: either the
+// key is a whole hyphen-separated run inside it (ID inside MESSAGE-ID,
+// IN-REPLY inside IN-REPLY-TO) or it is within two edits of it.
+export function nearestKnownKey(key) {
+  if (KNOWN_KEYS.includes(key)) return undefined;
+  const parts = k => k.split('-');
+  for (const known of KNOWN_KEYS) {
+    const kp = parts(key), np = parts(known);
+    for (let i = 0; i + kp.length <= np.length; i++)
+      if (kp.every((t, j) => t === np[i + j]) && kp.length < np.length) return known;
+  }
+  return KNOWN_KEYS.find(known => editDistance(key, known) <= 2);
+}
+
 // Terminal columns a line occupies. ECMAScript regexes cannot express
 // East_Asian_Width, so wide is the wcwidth range table (Wide and
 // Fullwidth, halfwidth forms excluded — Script=Katakana would have
@@ -223,6 +253,23 @@ export function validate(text, { taxonomy } = {}) {
   }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
+  // The deployment numbers every message (docs/HUMAN-RELAY-TRANSPORT.md,
+  // "Sending"), and the reconciliation after a lossy transport is only
+  // possible because each sender's numbering is complete. §7.2 keeps the
+  // field optional for the CORE protocol, so this rides with the
+  // deployment profile exactly as the catalogue checks do: a warning
+  // where a profile is in force, silent where the core stands alone.
+  if (taxonomy && msg.metadata['MESSAGE-ID'] === undefined)
+    warnings.push('no MESSAGE-ID: the deployment numbers every message, and a sender with gaps cannot be reconciled against');
+  // A key the sender believed was a known field. Two signals, neither of
+  // which rejects: it reads as a misspelling of a common field, or it
+  // carries an id-shaped value while not being an id field at all.
+  for (const [key, value] of Object.entries(msg.metadata)) {
+    const near = nearestKnownKey(key);
+    if (near) warnings.push(`${key} is not a known field — did you mean ${near}?`);
+    else if (ID_SHAPED.test(value) && !['MESSAGE-ID','IN-REPLY-TO'].includes(key))
+      warnings.push(`${key} carries an id-shaped value (${value}) but is not MESSAGE-ID or IN-REPLY-TO`);
+  }
   // A body line that is marker-shaped up to whitespace — indented, or with
   // trailing whitespace — is body text by SPEC §6, the grammar admits no
   // other reading; but it is also the exact shape a paste-indented or

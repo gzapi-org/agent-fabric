@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -436,9 +436,9 @@ test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
 // clone holding backend-dev with no slug in its name — an earlier cut of
 // this rule silenced it.
 test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to the role', () => {
-  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
+  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: architect-cto-01-0033\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
   assert.deepEqual(ok.errors, []);
-  assert.deepEqual(ok.warnings, []);
+  assert.deepEqual(ok.warnings, [], 'a well-formed message under the profile warns about nothing');
   for (const role of ['Application Architect', 'Architect / CTO']) {
     const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: ${role}\nPROJECT: gzapp\nBROADCAST: true\n`, { taxonomy });
     assert.ok(r.errors.some(e => e.startsWith(`ROLE "${role}" is not a role slug`)), `${role}: ${r.errors}`);
@@ -559,6 +559,45 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^ROLE: web-dev$/m);
   });
+});
+
+// Reported from live use: a message with no MESSAGE-ID, and one whose id
+// sat under a bogus `ID:` key, both validated clean — so nothing caught
+// the error. Neither can be an ERROR: §7.2 makes the field optional and
+// §6 requires unknown metadata to be preserved, since that is how the
+// protocol extends. Both are warnings.
+test('a missing MESSAGE-ID, and a key that misspells one, are both named', () => {
+  const head = '[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nBROADCAST: true\n';
+  const none = validate(head, { taxonomy });
+  assert.equal(none.ok, true, 'still valid — §7.2 keeps it optional');
+  assert.ok(none.warnings.some(w => w.startsWith('no MESSAGE-ID')), none.warnings);
+  // The core protocol alone says nothing about numbering, so it stays quiet.
+  assert.deepEqual(validate(head).warnings, [], 'no profile, no numbering convention');
+
+  const bogus = validate(`${head}ID: db-admin-0007\n`);
+  assert.equal(bogus.ok, true);
+  assert.ok(bogus.warnings.some(w => w === 'ID is not a known field — did you mean MESSAGE-ID?'), bogus.warnings);
+
+  // Caught by the value's shape rather than the key's spelling.
+  const msgid = validate(`${head}MSG-ID: db-admin-0007\n`);
+  assert.ok(msgid.warnings.some(w => w.startsWith('MSG-ID carries an id-shaped value')), msgid.warnings);
+
+  // A real id silences the missing-id warning and draws no others.
+  const good = validate(`${head}MESSAGE-ID: db-admin-0007\n`);
+  assert.deepEqual(good.warnings, []);
+});
+
+test('unknown fields that are real extensions stay silent — §6 preserves them', () => {
+  const head = '[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nBROADCAST: true\nMESSAGE-ID: db-admin-0007\n';
+  for (const key of ['X-PRIORITY', 'X-TRACE', 'SEVERITY', 'DEADLINE', 'ATTN', 'THREAD', 'LOCALE']) {
+    const r = validate(`${head}${key}: something\n`);
+    assert.deepEqual(r.warnings, [], `${key} must not warn`);
+    assert.equal(r.message.metadata[key], 'something', `${key} must be preserved`);
+  }
+  for (const [key, want] of [['ID','MESSAGE-ID'], ['MESSAGEID','MESSAGE-ID'], ['IN-REPLY','IN-REPLY-TO'], ['SUBJET','SUBJECT']])
+    assert.equal(nearestKnownKey(key), want, key);
+  for (const key of ['FROM', 'TO-ROLE', 'X-PRIORITY', 'MSG-ID'])
+    assert.equal(nearestKnownKey(key), undefined, key);
 });
 
 // Both reported from live traffic once the relay carried real instances.

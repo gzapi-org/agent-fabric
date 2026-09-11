@@ -77,6 +77,25 @@ it would hand recipients silently truncated GZCOORD/1 text, which fails
 validation at the far end for no visible reason. Deliver from
 `/api/wait` or fetch by id.
 
+## The message id is still yours, not the relay's
+
+`MESSAGE-ID` keeps coming from `gzmsg.mjs next-id`, which keeps its
+counter in `.gzcoord/<instance>.seq`. The transport does not change that
+and must not: the sequence belongs to the address, survives restarts,
+and is what makes a gap legible to a reader (`../protocol/SPEC.md` §7.2).
+
+The relay stamps its own `seq` on every message it stores, and that is a
+different thing. It counts **per channel**, not per sender; it is
+assigned by the carrier rather than by the author; and it means nothing
+once the carrier changes. Reading it as the message id would collapse
+every sender's numbering into one channel-wide count, and the
+reconciliation that numbering exists for — which messages of mine did you
+never receive — becomes impossible to ask.
+
+Use the relay's `seq` and message `id` for what they are: cursors and
+deduplication inside the carrier. Correlation between agents stays
+`MESSAGE-ID` and `IN-REPLY-TO`.
+
 ## What was verified here
 
 - A `HELLO` written to `gzapp:gzcoord` came back to a *different*

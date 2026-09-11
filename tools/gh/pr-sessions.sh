@@ -340,13 +340,37 @@ fi
 # THE RECORD IS .roles/registry/bindings.jsonl -- tracked, lint-governed,
 # and written by the roles pipeline, so it is maintained by something
 # other than memory. A clone is retired when every window for it is
-# closed; its successor is the clone holding an OPEN window for the same
-# role on the same host. A retired clone WITH a successor is OWNED by the
-# successor -- scoped into its default sweep, marked as its own -- while
-# still DISPLAYING the retired name, because that is where the work lives.
-# One with no live holder of its role is nobody's and joins the
-# /unattributed rows. Anything the registry does not positively record as
-# retired stays LIVE, which is the pre-existing behaviour.
+# closed. A retired clone WITH a successor is OWNED by the successor --
+# scoped into its default sweep, marked as its own -- while still
+# DISPLAYING the retired name, because that is where the work lives. One
+# with no successor is nobody's and joins the /unattributed rows. Anything
+# the registry does not positively record as retired stays LIVE, which is
+# the pre-existing behaviour.
+#
+# SUCCESSION IS RESOLVED TWICE, most reliable first.
+#
+#   1. clone_id CONTINUITY. A working copy that is renamed keeps its
+#      clone_id, so the row that closed and the row now open are the same
+#      clone under two names. That is exact, and it is how
+#      gzapp-architect-cto -> architect-cto-01 resolves. Nothing about the
+#      directory NAME is consulted: names carry no scheme to key on --
+#      some clones are numbered (backend-dev-01, backend-dev-02) and some
+#      are not (db-admin, devex-tooling) -- so any rule reading the name
+#      would be guessing.
+#
+#   2. A UNIQUE live holder of the same role on the same host. The
+#      fallback for a genuinely new working copy that took over a retired
+#      one's work, where no clone_id links them.
+#
+# THE FALLBACK REQUIRES EXACTLY ONE HEIR, and that is the point rather
+# than an edge case. A role is a slug (`backend-dev`), while a clone is a
+# working copy, and one role can be held by two live clones at once --
+# backend-dev-01 and backend-dev-02 both do. The first version took
+# $heirs[0], so with two holders it silently handed a retired clone's PRs
+# to whichever sorted first, letting the WRONG session reply and refusing
+# the right one. Ambiguous now means unowned: the rows surface under
+# /unattributed, where a person can see them, instead of being quietly
+# misassigned. Record a rename (which keeps the clone_id) to make it exact.
 CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
 INHERIT_JSON='{}'; ORPHANS_JSON='[]'
 if [[ -r "$CLONE_BINDINGS" ]]; then
@@ -357,12 +381,18 @@ if [[ -r "$CLONE_BINDINGS" ]]; then
             ( [ $all[] | select(.host == $c.h and .dir_basename == $c.d) ] ) as $mine
             | if ($mine | map(select(.valid_to == null)) | length) > 0 then .
               else
-                ( $mine | sort_by(.valid_to) | last | .role ) as $role
+                ( $mine | sort_by(.valid_to) | last ) as $lastrow
+                | ( $lastrow | .role ) as $role
+                | ( [ $all[] | select(.valid_to == null
+                                      and .clone_id == $lastrow.clone_id
+                                      and .dir_basename != $c.d) ] ) as $chain
                 | ( [ $all[] | select(.valid_to == null and .host == $c.h
                                       and $role != null and .role == $role
                                       and .dir_basename != $c.d) ] ) as $heirs
                 | ($c.h + "/" + $c.d) as $key
-                | if ($heirs | length) > 0
+                | if ($chain | length) > 0
+                  then .inherit[$key] = ($chain[0] | .host + "/" + .dir_basename)
+                  elif ($heirs | length) == 1
                   then .inherit[$key] = ($heirs[0] | .host + "/" + .dir_basename)
                   else .orphans += [$key] end
               end)' "$CLONE_BINDINGS" 2>/dev/null)" || registry=""

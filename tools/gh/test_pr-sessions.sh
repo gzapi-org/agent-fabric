@@ -430,6 +430,54 @@ run_env "GZAPP_CLONE_BINDINGS=$SANDBOX/fixtures/no-such.jsonl" -- --no-threads
 assert_not_contains "control: without the registry the inherited PR is invisible" "#40"
 default_pr_list
 
+echo "pr-sessions: clone_id continuity resolves a rename the role cannot"
+# The case that role-matching CANNOT reach: the retired row predates roles
+# and carries no `role` at all, so there is nothing to match on. It is the
+# same working copy under a new name, which the shared clone_id says
+# exactly. Real instance: gzapp-claude3, seeded 2026-06-19 with reason
+# "initial" and no role field.
+BINDINGS="$SANDBOX/fixtures/bindings-chain.jsonl"
+: > "$BINDINGS"
+jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"gzapp-renamed-away",
+    host:$h, valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
+jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c9", dir_basename:$d,
+    host:$h, role:"devex-tooling", valid_to:null}' >> "$BINDINGS"
+write_pr_list "$(jq -n --arg old "$HOST/gzapp-renamed-away"     --arg t "$(ago '1 hour')" '[
+  {number: 50, state: "MERGED", headRefName: ($old + "/fix/renamed"),
+   title: "renamed", updatedAt: $t, isDraft: false, mergedAt: $t}
+]')"
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
+assert_rc       "clone_id chain exits 0" 0
+assert_contains "a roleless retired row still resolves via clone_id" "#50"
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
+assert_not_contains "the chained row is NOT an orphan" "#50"
+default_pr_list
+
+echo "pr-sessions: two live holders of one role is unowned, not a guess"
+# A role slug is held by a working copy, and one role can have two live
+# ones at once (backend-dev-01 and backend-dev-02). Taking heirs[0] handed
+# the retired clone's PRs to whichever sorted first -- letting the WRONG
+# session reply and refusing the right one. Ambiguity must surface, not
+# resolve arbitrarily.
+BINDINGS="$SANDBOX/fixtures/bindings-ambiguous.jsonl"
+: > "$BINDINGS"
+jq -nc --arg h "$HOST" '{clone_id:"r1", dir_basename:"gzapp-ambiguous",
+    host:$h, role:"backend-dev", valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
+jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"r2", dir_basename:$d,
+    host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
+jq -nc --arg h "$HOST" '{clone_id:"r3", dir_basename:"other-live-holder",
+    host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
+write_pr_list "$(jq -n --arg old "$HOST/gzapp-ambiguous"     --arg t "$(ago '1 hour')" '[
+  {number: 51, state: "MERGED", headRefName: ($old + "/fix/ambiguous"),
+   title: "ambiguous", updatedAt: $t, isDraft: false, mergedAt: $t}
+]')"
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
+assert_rc           "ambiguous succession exits 0" 0
+assert_not_contains "two heirs: NOT silently claimed by this clone" "#51"
+run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
+assert_contains     "two heirs: surfaces under /unattributed instead" "#51"
+default_pr_list
+
 echo "pr-sessions: pool filters"
 run /all /lastItem:1
 assert_rc           "exits 0" 0

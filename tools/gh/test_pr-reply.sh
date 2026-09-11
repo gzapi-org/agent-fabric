@@ -331,6 +331,26 @@ mk_bindings() {
         role:"backend-dev", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
     jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"gzapp-second-backend",
         host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
+    # HOST-MOVE that keeps the directory name. The clone key is the PAIR
+    # (host, dir_basename), so excluding only the NAME from the chain made
+    # a clone unable to claim its own PRs after moving host -- it saw
+    # itself as already excluded and reported nobody. `host-move` is a
+    # first-class `reason` in bindings.schema.json.
+    jq -nc '{clone_id:"cm", dir_basename:"gzapp-moved", host:"otherhost-far",
+        role:"edge-hosting", valid_to:"2026-09-01T00:00:00Z",
+        reason:"host-move"}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" '{clone_id:"cm", dir_basename:"gzapp-moved", host:$h,
+        role:"edge-hosting", valid_to:null, reason:"host-move"}' >> "$BINDINGS"
+    # BOTH routes available at once: a clone_id chain to one clone, and a
+    # single role heir to THIS one. Pins the ORDERING -- clone_id is exact,
+    # role is an inference, so the exact one must win. Without this,
+    # swapping the two rules left both suites green.
+    jq -nc --arg h "$HOST" '{clone_id:"co", dir_basename:"gzapp-both", host:$h,
+        role:"product-i18n", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" '{clone_id:"co", dir_basename:"gzapp-chain-heir",
+        host:$h, valid_to:null}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"cz", dir_basename:$d,
+        host:$h, role:"product-i18n", valid_to:null}' >> "$BINDINGS"
 }
 mk_bindings
 MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$BINDINGS")
@@ -338,7 +358,7 @@ MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$BINDINGS")
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc       "inherited: exits 0" 0
-assert_contains "inherited: says whose role it now is" "role this clone now holds"
+assert_contains "inherited: names the succession, not a role" "which this clone succeeds"
 assert_contains "inherited: the override is announced" "clone registry overridden"
 if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
     pass "inherited: replied AND resolved, as its own"
@@ -349,7 +369,7 @@ fi
 thread_fixture "$HOST/gzapp-orphan/fix/nobody" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc       "orphan: exits 0" 0
-assert_contains "orphan: names the gap" "no live clone holds its role"
+assert_contains "orphan: names the gap" "no live clone succeeds it"
 if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
     pass "orphan: replied but left OPEN by default"
 else
@@ -376,7 +396,7 @@ assert_rc "a clone with an open window is still refused" 2
 thread_fixture "$HOST/gzapp-preroles/fix/renamed" false
 invoke "Answering my predecessor's thread." "$THREAD_ID"
 assert_rc       "pre-roles rename: exits 0" 0
-assert_contains "pre-roles rename: claimed as this clone's" "clone registry overridden"
+assert_contains "pre-roles rename: claimed via the succession path" "which this clone succeeds"
 if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
     pass "pre-roles rename: replied AND resolved, as its own"
 else
@@ -388,11 +408,29 @@ fi
 thread_fixture "$HOST/gzapp-ambig/fix/two-heirs" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc       "ambiguous heir: exits 0 on the unowned path" 0
-assert_contains "ambiguous heir: reported as unowned" "no live clone holds its role"
+assert_contains "ambiguous heir: says TWO could be, not none" "MORE THAN ONE live"
 if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
     pass "ambiguous heir: replied but left OPEN, like any unowned PR"
 else
     fail "ambiguous heir: expected reply without resolve" "$(calls)"
+fi
+
+# A host-move that keeps the directory name is still the same clone.
+thread_fixture "otherhost-far/gzapp-moved/fix/moved" false
+invoke "I would like to answer this." "$THREAD_ID"
+assert_rc       "host-move: exits 2, the heir is another clone" 2
+assert_contains "host-move: names the moved clone as the heir" "$HOST/gzapp-moved"
+
+# clone_id is exact and role is an inference, so clone_id must win when
+# both are available. If the order flips, this clone claims the PR instead.
+thread_fixture "$HOST/gzapp-both/fix/ordering" false
+invoke "I would like to answer this." "$THREAD_ID"
+assert_rc       "ordering: exits 2 because the CHAIN heir is not me" 2
+assert_contains "ordering: the clone_id heir wins over the role heir" "gzapp-chain-heir"
+if [[ "$(calls)" != *REPLY* ]]; then
+    pass "ordering: nothing posted to the chain heir's PR"
+else
+    fail "ordering: role fallback beat the clone_id chain" "$(calls)"
 fi
 
 # CONTROLS. The registry is what changes the verdict, and everything the

@@ -375,24 +375,26 @@ CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.ro
 INHERIT_JSON='{}'; ORPHANS_JSON='[]'
 if [[ -r "$CLONE_BINDINGS" ]]; then
     registry="$(jq -s '
+        def open: (.valid_to == null or .valid_to == "");
         . as $all
         | ( [ $all[] | {h: .host, d: .dir_basename} ] | unique ) as $clones
         | reduce $clones[] as $c ({inherit: {}, orphans: []};
             ( [ $all[] | select(.host == $c.h and .dir_basename == $c.d) ] ) as $mine
-            | if ($mine | map(select(.valid_to == null)) | length) > 0 then .
+            | if ($mine | map(select(open)) | length) > 0 then .
               else
-                ( $mine | sort_by(.valid_to) | last ) as $lastrow
+                ( $mine | sort_by(.valid_to_epoch // .valid_to) | last ) as $lastrow
                 | ( $lastrow | .role ) as $role
-                | ( [ $all[] | select(.valid_to == null
+                | ( [ $all[] | select(open
+                                      and $lastrow.clone_id != null
                                       and .clone_id == $lastrow.clone_id
-                                      and .dir_basename != $c.d) ] ) as $chain
-                | ( [ $all[] | select(.valid_to == null and .host == $c.h
+                                      and (.host != $c.h or .dir_basename != $c.d)) ] ) as $chain
+                | ( [ $all[] | select(open and .host == $c.h
                                       and $role != null and .role == $role
                                       and .dir_basename != $c.d) ] ) as $heirs
                 | ($c.h + "/" + $c.d) as $key
-                | if ($chain | length) > 0
+                | if ($chain | length) == 1
                   then .inherit[$key] = ($chain[0] | .host + "/" + .dir_basename)
-                  elif ($heirs | length) == 1
+                  elif ($heirs | length) == 1 and ($chain | length) == 0
                   then .inherit[$key] = ($heirs[0] | .host + "/" + .dir_basename)
                   else .orphans += [$key] end
               end)' "$CLONE_BINDINGS" 2>/dev/null)" || registry=""
@@ -518,7 +520,8 @@ unattributed_note() {
     [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
     echo "  NOTE: $UNATTRIBUTED PR(s) name no live session — the branch does not" >&2
     echo "  parse as <host>/<clone>/<type>/<short-desc>, or names a retired clone" >&2
-    echo "  with no recorded successor — so they cannot be scoped to a" >&2
+    echo "  with no recorded successor, or one with SEVERAL possible" >&2
+    echo "  successors — so they cannot be scoped to a" >&2
     echo "  session and are not listed. Pass /unattributed to list exactly" >&2
     echo "  those, or /all to stop filtering." >&2
 }

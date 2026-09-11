@@ -255,6 +255,18 @@ branch_names_a_session() {
 # Anything the registry does not positively say is retired is
 # treated as LIVE and refused: unknown prefixes, an unreadable file, a jq
 # failure. Fail-closed is the only safe default for a script that posts.
+#
+# ONE CAVEAT ON "UNOWNED", because the word arrived here from a listing
+# and does not mean the same thing in a script that POSTS. In
+# pr-sessions.sh an unowned PR is merely visible; here it is one this
+# clone MAY reply to. So widening anything into the unowned bucket widens
+# write access, and the ambiguous case below does exactly that: it used to
+# exit 2. That is deliberate — refusing was not safety, it came with
+# NAMING one of several possible successors, so the wrong clone was
+# invited to answer while the right one was turned away — and it is
+# bounded by leave_open_unless_explicit, which makes resolving opt-in on
+# every unowned path. Replying to a thread nobody owns is recoverable;
+# resolving it, or sending the owner away, is not.
 CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
 if [[ -n "${GZAPP_CLONE_BINDINGS:-}" ]]; then
     # An ownership input that can be pointed anywhere deserves to be
@@ -270,26 +282,30 @@ clone_status() {
     out="$(jq -s -r --arg want "$want" '
         ( $want | split("/") ) as $w
         | [ .[] | select(.host == $w[0] and .dir_basename == $w[1]) ] as $mine
-        | if ($mine | length) == 0 then "LIVE"
-          elif ($mine | map(select(.valid_to == null)) | length) > 0 then "LIVE"
+        | def open: (.valid_to == null or .valid_to == "");
+          if ($mine | length) == 0 then "LIVE"
+          elif ($mine | map(select(open)) | length) > 0 then "LIVE"
           else
             . as $all
-            | ( $mine | sort_by(.valid_to) | last ) as $lastrow
+            | ( $mine | sort_by(.valid_to_epoch // .valid_to) | last ) as $lastrow
             | ( $lastrow | .role ) as $role
-            | ( [ $all[] | select(.valid_to == null
+            | ( [ $all[] | select(open
+                                  and $lastrow.clone_id != null
                                   and .clone_id == $lastrow.clone_id
-                                  and .dir_basename != $w[1]) ] ) as $chain
-            | ( [ $all[] | select(.valid_to == null and .host == $w[0]
+                                  and (.host != $w[0] or .dir_basename != $w[1])) ] ) as $chain
+            | ( [ $all[] | select(open and .host == $w[0]
                                   and $role != null and .role == $role
                                   and .dir_basename != $w[1]) ] ) as $heirs
-            | if ($chain | length) > 0
+            | if ($chain | length) == 1
               then "HEIR " + ($chain[0] | .host + "/" + .dir_basename)
+              elif ($chain | length) > 1 then "AMBIGUOUS"
               elif ($heirs | length) == 1
               then "HEIR " + ($heirs[0] | .host + "/" + .dir_basename)
+              elif ($heirs | length) > 1 then "AMBIGUOUS"
               else "ORPHAN" end
           end' "$CLONE_BINDINGS" 2>/dev/null)" || out=""
     case "$out" in
-        ORPHAN|HEIR\ */*) printf '%s' "$out" ;;
+        ORPHAN|AMBIGUOUS|HEIR\ */*) printf '%s' "$out" ;;
         *)                printf 'LIVE' ;;
     esac
 }
@@ -325,9 +341,24 @@ elif [[ "$OWNER" != "$ME" ]] && [[ "$(clone_status "$OWNER")" != "LIVE" ]]; then
     # by whether it records an heir.
     STATUS="$(clone_status "$OWNER")"
     if [[ "$STATUS" == "HEIR $ME" ]]; then
-        # Inherited: this clone holds the open window for that role, so the
-        # PR is its own -- no warning, resolve stays the default.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', whose role this clone now holds." >&2
+        # Inherited: this clone is the recorded successor, so the PR is its
+        # own -- no warning, resolve stays the default. Deliberately does
+        # NOT say "whose role this clone now holds": the succession may
+        # have been resolved by clone_id, i.e. this IS that working copy
+        # under its old name, and the row that retired may carry no role at
+        # all. Naming the role there was simply false.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which this clone succeeds." >&2
+    elif [[ "$STATUS" == "AMBIGUOUS" ]]; then
+        # More than one live successor. NOT the same as nobody: saying "no
+        # live clone holds its role" here would be the exact inverse of the
+        # truth, and the old code silently picked one of them instead --
+        # which in this script meant refusing the session that owns the
+        # work and naming one that does not.
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and MORE THAN ONE live" >&2
+        echo "  clone could be its successor, so the registry cannot say whose it is." >&2
+        echo "  Replying without claiming it. To make this exact, record the" >&2
+        echo "  succession for '$OWNER' rather than leaving it to be inferred." >&2
+        leave_open_unless_explicit
     elif [[ "$STATUS" == HEIR\ * ]]; then
         # Somebody else holds it. That is a live session's PR now.
         echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', inherited by '${STATUS#HEIR }'." >&2
@@ -335,9 +366,9 @@ elif [[ "$OWNER" != "$ME" ]] && [[ "$(clone_status "$OWNER")" != "LIVE" ]]; then
         echo "  be unsent. Raise it in the PR, or from that clone." >&2
         exit 2
     else
-        # Retired with no open window for its role: nobody's, like a branch
+        # Retired with no recorded successor at all: nobody's, like a branch
         # that names no session, and treated the same way.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and no live clone holds its role." >&2
+        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and no live clone succeeds it." >&2
         echo "  No session owns it, so there is nobody to defer to — replying." >&2
         leave_open_unless_explicit
     fi

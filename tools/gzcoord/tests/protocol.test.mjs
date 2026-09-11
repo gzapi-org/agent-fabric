@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -559,4 +559,60 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^ROLE: web-dev$/m);
   });
+});
+
+// Both reported from live traffic once the relay carried real instances.
+// One root cause: nextId was the only accessor, so a session could neither
+// look at its counter without burning a number nor correct one that
+// started empty in a clone whose address had already numbered by hand.
+test('peek does not consume, and seed repairs a counter that started empty', () => {
+  const dir = new URL('./seq2.tmp/', import.meta.url).pathname;
+  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    // peek on an untouched counter, twice, then the take it predicted
+    assert.equal(peekId('web', dir), 'web-0001');
+    assert.equal(peekId('web', dir), 'web-0001');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'peek must not create the file');
+    assert.equal(nextId('web', dir), 'web-0001');
+    assert.equal(peekId('web', dir), 'web-0002');
+    assert.equal(fs.readFileSync(`${dir}/web.seq`, 'utf8').trim(), '1', 'peek must not advance it');
+
+    // an address that hand-numbered 0001-0006 before adopting the tool
+    const r = seedSeq('gzapp', 6, dir);
+    assert.deepEqual(r, { was: 0, now: 6, next: 'gzapp-0007', lowered: false });
+    assert.equal(nextId('gzapp', dir), 'gzapp-0007', 'the number after the hand-numbered ones');
+
+    // lowering is allowed but reported, since it re-circulates issued ids
+    assert.equal(seedSeq('gzapp', 2, dir).lowered, true);
+    assert.equal(peekId('gzapp', dir), 'gzapp-0003');
+
+    assert.throws(() => seedSeq('gzapp', -1, dir), /non-negative/);
+    assert.throws(() => seedSeq('gzapp', 1.5, dir), /non-negative/);
+    assert.throws(() => peekId('bad/instance', dir), /half of an address/);
+    assert.equal(formatId('web', 42), 'web-0042');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('next-id CLI: --peek prints without taking, --seed reports the move', () => {
+  const dir = new URL('./seq3.tmp/', import.meta.url).pathname;
+  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const peek = gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir);
+    assert.equal(peek.status, 0, peek.stderr);
+    assert.equal(peek.stdout.trim(), 'web-0001');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
+
+    const seed = gzmsg('next-id', '--instance', 'web', '--seed', '6', '--state-dir', dir);
+    assert.equal(seed.status, 0, seed.stderr);
+    assert.equal(seed.stdout.trim(), 'web-0007', 'stdout is the id to use next');
+    assert.match(seed.stderr, /counter for web: 0 -> 6/);
+    assert.doesNotMatch(seed.stderr, /warning/, 'raising is not a warning');
+    assert.equal(gzmsg('next-id', '--instance', 'web', '--state-dir', dir).stdout.trim(), 'web-0007');
+
+    const lower = gzmsg('next-id', '--instance', 'web', '--seed', '1', '--state-dir', dir);
+    assert.match(lower.stderr, /warning: lowered from 7 to 1; ids web-0002\.\.web-0007 go back into circulation/);
+
+    const bad = gzmsg('next-id', '--instance', 'web', '--seed', 'seven', '--state-dir', dir);
+    assert.notEqual(bad.status, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -303,15 +303,47 @@ export function normalize(text) {
 // restarted at 0001 repeated four numbers a peer had already seen, and a
 // repeat defeats gap detection the same way a gap does. The counter lives
 // beside the working copy in a gitignored file, one per instance.
-export function nextId(instance, stateDir = '.gzcoord') {
+function seqFile(instance, stateDir) {
   if (!/^[a-z0-9._-]+$/.test(instance)) throw new Error('instance must be the <instance> half of an address');
-  fs.mkdirSync(stateDir, { recursive: true });
-  const file = `${stateDir}/${instance}.seq`;
+  return `${stateDir}/${instance}.seq`;
+}
+function readSeq(file) {
   const last = fs.existsSync(file) ? Number.parseInt(fs.readFileSync(file, 'utf8'), 10) : 0;
   if (!Number.isInteger(last) || last < 0) throw new Error(`${file} does not hold a sequence number`);
-  const next = last + 1;
+  return last;
+}
+export const formatId = (instance, n) => `${instance}-${String(n).padStart(4, '0')}`;
+
+export function nextId(instance, stateDir = '.gzcoord') {
+  const file = seqFile(instance, stateDir);
+  fs.mkdirSync(stateDir, { recursive: true });
+  const next = readSeq(file) + 1;
   fs.writeFileSync(file, `${next}\n`);
-  return `${instance}-${String(next).padStart(4, '0')}`;
+  return formatId(instance, next);
+}
+
+// What nextId WOULD return, without taking it. Reported by an instance
+// that burned a number simply looking at its counter — "no message was
+// ever composed under it" — which is the one failure mode the sequence
+// cannot absorb, since a gap and a repeat are equally unreadable.
+export function peekId(instance, stateDir = '.gzcoord') {
+  return formatId(instance, readSeq(seqFile(instance, stateDir)) + 1);
+}
+
+// Set the counter so the NEXT id is n+1. The counter is per-clone and
+// starts empty, so an address that numbered its messages by hand before
+// adopting this tool re-issues every one of them — two of the two
+// instances that used the human relay hit exactly that, which makes it
+// the default case on adoption rather than an edge one. Lowering is a
+// legitimate repair and is allowed, but it is announced: it puts ids
+// back into circulation that peers may already hold.
+export function seedSeq(instance, n, stateDir = '.gzcoord') {
+  if (!Number.isInteger(n) || n < 0) throw new Error('seed must be a non-negative integer');
+  const file = seqFile(instance, stateDir);
+  fs.mkdirSync(stateDir, { recursive: true });
+  const was = readSeq(file);
+  fs.writeFileSync(file, `${n}\n`);
+  return { was, now: n, next: formatId(instance, n + 1), lowered: n < was };
 }
 
 function arg(name) {
@@ -374,9 +406,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (cmd === 'next-id') {
     const instance = arg('instance');
     if (!instance) throw new Error('next-id requires --instance');
-    console.log(nextId(instance, arg('state-dir') ?? '.gzcoord'));
+    const dir = arg('state-dir') ?? '.gzcoord';
+    const seed = arg('seed');
+    if (seed !== undefined) {
+      const n = Number.parseInt(seed, 10);
+      if (!/^\d+$/.test(seed)) throw new Error('--seed takes a non-negative integer');
+      const r = seedSeq(instance, n, dir);
+      if (r.lowered) console.error(`warning: lowered from ${r.was} to ${r.now}; ids ${formatId(instance, r.now + 1)}..${formatId(instance, r.was)} go back into circulation and peers may already hold them`);
+      console.error(`counter for ${instance}: ${r.was} -> ${r.now}`);
+      console.log(r.next);
+    } else if (process.argv.includes('--peek')) {
+      console.log(peekId(instance, dir));
+    } else {
+      console.log(nextId(instance, dir));
+    }
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | next-id --instance <instance> [--state-dir <dir>]   (--taxonomy <path> | --no-taxonomy)');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | next-id --instance <instance> [--peek | --seed N] [--state-dir <dir>]   (--taxonomy <path> | --no-taxonomy)');
     process.exit(2);
   }
 }

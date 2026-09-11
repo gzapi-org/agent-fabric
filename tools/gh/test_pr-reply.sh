@@ -318,6 +318,19 @@ mk_bindings() {
     # a clone with an OPEN window is NOT retired, whatever else is true
     jq -nc --arg h "$HOST" '{clone_id:"c6", dir_basename:"gzapp-stillhere", host:$h,
         role:"backend-dev", valid_to:null}' >> "$BINDINGS"
+    # PRE-ROLES RENAME: closed, carries NO role at all, and shares c2 with
+    # this clone's live row -- one working copy under two names. Role
+    # matching cannot reach it; clone_id continuity can. Real instance:
+    # gzapp-claude3, seeded 2026-06-19 with reason "initial" and no role.
+    jq -nc --arg h "$HOST" '{clone_id:"c2", dir_basename:"gzapp-preroles",
+        host:$h, valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
+    # AMBIGUOUS: retired backend-dev with TWO live holders (c6 above and c9
+    # here), which must resolve to nobody rather than to whichever sorts
+    # first. backend-dev-01 and backend-dev-02 are the real pair.
+    jq -nc --arg h "$HOST" '{clone_id:"c8", dir_basename:"gzapp-ambig", host:$h,
+        role:"backend-dev", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
+    jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"gzapp-second-backend",
+        host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
 }
 mk_bindings
 MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$BINDINGS")
@@ -357,6 +370,30 @@ fi
 thread_fixture "$HOST/gzapp-stillhere/fix/theirs" false
 invoke "I would like to answer this." "$THREAD_ID"
 assert_rc "a clone with an open window is still refused" 2
+
+# A roleless retired row resolves through clone_id, which is the only rule
+# that can reach the clones seeded before roles existed.
+thread_fixture "$HOST/gzapp-preroles/fix/renamed" false
+invoke "Answering my predecessor's thread." "$THREAD_ID"
+assert_rc       "pre-roles rename: exits 0" 0
+assert_contains "pre-roles rename: claimed as this clone's" "clone registry overridden"
+if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
+    pass "pre-roles rename: replied AND resolved, as its own"
+else
+    fail "pre-roles rename: expected reply and resolve" "$(calls)"
+fi
+
+# Two live holders of one role must NOT silently elect a winner: doing so
+# lets the wrong session reply and refuses the right one.
+thread_fixture "$HOST/gzapp-ambig/fix/two-heirs" false
+invoke "Verified against main; obsolete." "$THREAD_ID"
+assert_rc       "ambiguous heir: exits 0 on the unowned path" 0
+assert_contains "ambiguous heir: reported as unowned" "no live clone holds its role"
+if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
+    pass "ambiguous heir: replied but left OPEN, like any unowned PR"
+else
+    fail "ambiguous heir: expected reply without resolve" "$(calls)"
+fi
 
 # CONTROLS. The registry is what changes the verdict, and everything the
 # registry does not positively call retired must FAIL CLOSED.

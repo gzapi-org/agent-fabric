@@ -232,9 +232,27 @@ branch_names_a_session() {
 # for any clone to answer their PRs. A second record that can disagree
 # with the first is worse than no second record.
 #
-# A clone is RETIRED when every binding window for it is closed. Its
-# successor is the clone with an OPEN window for the SAME role on the same
-# host. Anything the registry does not positively say is retired is
+# A clone is RETIRED when every binding window for it is closed. Succession
+# is then resolved twice, most reliable first: (1) clone_id CONTINUITY — a
+# renamed working copy keeps its clone_id, so the closed row and the open
+# row are one clone under two names; (2) a UNIQUE live holder of the same
+# role on the same host. The role fallback REQUIRES exactly one heir,
+# because one role slug can be held by two live clones at once
+# (backend-dev-01 and backend-dev-02 both hold backend-dev) and picking
+# the first silently lets the WRONG session reply. Neither rule reads the
+# directory NAME: some clones are numbered and some are not (db-admin,
+# devex-tooling), so there is no scheme there to key on.
+#
+# THIS BLOCK IS DUPLICATED IN tools/gh/pr-sessions.sh, and the two must
+# agree — a PR that one says is inherited and the other says is unowned is
+# the disagreement this whole file exists to prevent. They were fixed
+# together; fix them together. They are not shared because the two jq
+# programs have different shapes — this one answers about a single clone,
+# pr-sessions.sh reduces over every clone in the file — and each has its
+# own self-test. If a third caller ever needs the rule, extract it then,
+# with a self-test that runs both callers against one fixture.
+#
+# Anything the registry does not positively say is retired is
 # treated as LIVE and refused: unknown prefixes, an unreadable file, a jq
 # failure. Fail-closed is the only safe default for a script that posts.
 CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
@@ -255,11 +273,19 @@ clone_status() {
         | if ($mine | length) == 0 then "LIVE"
           elif ($mine | map(select(.valid_to == null)) | length) > 0 then "LIVE"
           else
-            ( $mine | sort_by(.valid_to) | last | .role ) as $role
-            | [ .[] | select(.valid_to == null and .host == $w[0]
-                             and $role != null and .role == $role
-                             and .dir_basename != $w[1]) ]
-            | if length > 0 then "HEIR " + (.[0] | .host + "/" + .dir_basename)
+            . as $all
+            | ( $mine | sort_by(.valid_to) | last ) as $lastrow
+            | ( $lastrow | .role ) as $role
+            | ( [ $all[] | select(.valid_to == null
+                                  and .clone_id == $lastrow.clone_id
+                                  and .dir_basename != $w[1]) ] ) as $chain
+            | ( [ $all[] | select(.valid_to == null and .host == $w[0]
+                                  and $role != null and .role == $role
+                                  and .dir_basename != $w[1]) ] ) as $heirs
+            | if ($chain | length) > 0
+              then "HEIR " + ($chain[0] | .host + "/" + .dir_basename)
+              elif ($heirs | length) == 1
+              then "HEIR " + ($heirs[0] | .host + "/" + .dir_basename)
               else "ORPHAN" end
           end' "$CLONE_BINDINGS" 2>/dev/null)" || out=""
     case "$out" in

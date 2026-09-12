@@ -700,7 +700,7 @@ test('CLI: an unknown flag on a counter-mutating command takes nothing', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -731,4 +731,45 @@ test('inbox identity: address from the working copy, slug from record then basen
     // no catalogue at all: address still derives, slug does not
     assert.deepEqual(identity(root, undefined), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: undefined });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The wait exits ONLY on a message addressed to this session: a slice
+// holding only others' traffic is acknowledged and the arm CONTINUES —
+// waking a session for its neighbours' messages is the noise the tool
+// exists to remove. Injected fetch/ack pages make the loop deterministic.
+test('waitLoop exits only on an addressed message; others pass acknowledged', async () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const rec = (id, type, extra) => ({ id, sender: 'develop-qzapp/x', timestamp: 't', content: `[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-${id}\n${extra}` });
+  const forYou = rec('m3', 'INFO', 'BROADCAST: true\n');
+  const othersPage = { messages: [rec('m1', 'INFO', 'TO: develop-qzapp/web-dev-01\n'), rec('m2', 'OBSERVATION', 'TO-ROLE: backend-dev\n')] };
+  const acked = [];
+  const ack = id => { acked.push(id); return Promise.resolve(); };
+  const pages = [othersPage, { messages: [forYou] }];
+  const fetchPage = async () => pages.shift();
+  let fetches = 0;
+  const countingFetch = async () => { fetches += 1; return pages.shift(); };
+  const r = await waitLoop({ fetchPage: countingFetch, ack, waitTotal: 1800, forMeFn: msg => forMe(msg, me) });
+  assert.equal(r.delivered, true, 'exits on the addressed message, not the neighbours\' one');
+  assert.equal(fetches, 2, 'two slices: the passed one and the delivering one');
+  assert.equal(r.waited, 110, 'budget accounting: two 55 s slices');
+  assert.equal(r.classified.find(c => c.rec.id === 'm3').isMine, true);
+  assert.deepEqual(acked.sort(), ['m1', 'm2', 'm3'], 'every shown message is acknowledged');
+  // A page of nothing-but-others at budget end: quiet exit, counted.
+  const r2 = await waitLoop({
+    fetchPage: async () => ({ messages: [rec('m9', 'INFO', 'TO: develop-qzapp/web-dev-01\n')] }),
+    ack: async () => {}, waitTotal: 4, forMeFn: msg => forMe(msg, me) });
+  assert.equal(r2.delivered, false);
+  assert.equal(r2.othersPassed, 1);
+  assert.equal(r2.waited, 4, 'spent the whole budget');
+  // Drain mode returns the first page whatever it holds.
+  const r3 = await waitLoop({
+    fetchPage: async () => ({ messages: [rec('m1', 'INFO', 'TO: develop-qzapp/web-dev-01\n')] }),
+    ack: async () => {}, waitTotal: 0, forMeFn: msg => forMe(msg, me) });
+  assert.equal(r3.delivered, false, 'drain does not exit early — it lists');
+  assert.equal(r3.classified.length, 1);
+  // A HELLO is a broadcast by definition: it wakes the waiter.
+  const r4 = await waitLoop({
+    fetchPage: async () => ({ messages: [rec('h', 'HELLO', '')] }),
+    ack: async () => {}, waitTotal: 1800, forMeFn: msg => forMe(msg, me) });
+  assert.equal(r4.delivered, true, 'HELLO is a broadcast by definition');
 });

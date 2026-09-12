@@ -25,7 +25,8 @@
 // Three exits end it, and all three are followed by a fresh arm: a
 // message addressed to this session; the budget expiring on slices that
 // held none (quiet, counted, never printed in detail); the budget
-// itself.
+// itself. The quiet exit is how the budget is spent, not a signal to
+// stop listening.
 //
 // The WAIT exits only on a message addressed to this session (SPEC §7.1:
 // a broadcast, `TO` its address, or `TO-ROLE` its slug). Anything else —

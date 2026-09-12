@@ -22,8 +22,10 @@
 #     every clone).
 #
 # NOT CHECKED: .claude/settings.local.json (gitignored, per-session) and
-# ~/.claude/settings.json (per user) — the launcher handles the latter by
-# refusing a launch when it carries ANTHROPIC_DEFAULT_* pins.
+# the user scopes (~/.claude/settings.json, ~/.claude/settings.local.json,
+# $CLAUDE_CONFIG_DIR/settings.json) — tools/launch/ori fences ALL of them,
+# this file included, refusing a launch when any carries a pin. This guard
+# is about what is COMMITTED; the launcher is about what is LIVE.
 #
 # guards: .claude/settings.json
 set -euo pipefail

@@ -700,7 +700,7 @@ test('CLI: an unknown flag on a counter-mutating command takes nothing', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -772,4 +772,64 @@ test('waitLoop exits only on an addressed message; others pass acknowledged', as
     fetchPage: async () => ({ messages: [rec('h', 'HELLO', '')] }),
     ack: async () => {}, waitTotal: 1800, forMeFn: msg => forMe(msg, me) });
   assert.equal(r4.delivered, true, 'HELLO is a broadcast by definition');
+});
+
+// --keyword: reasons to stop waiting on a message NOT addressed to this
+// session. Guardrails exist because the abusable shape — a keyword that
+// fires on every message — is the address-blind wake with extra steps.
+test('checkKeywords: minimum length, hard cap, dedup', () => {
+  assert.deepEqual(checkKeywords(['663', 'geocode']), ['663', 'geocode']);
+  assert.deepEqual(checkKeywords(['663', '663']), ['663'], 'deduplicated');
+  for (const bad of ['ab', '6', '', 'a']) assert.throws(() => checkKeywords([bad]), /shorter than 3 characters/, JSON.stringify(bad));
+  assert.throws(() => checkKeywords(['aaa','bbb','ccc','ddd','eee','fff','ggg','hhh','iii']), /at most 8 keywords/);
+  assert.doesNotThrow(() => checkKeywords(['aaa','bbb','ccc','ddd','eee','fff','ggg','hhh']), 'exactly 8 is allowed');
+});
+
+test('keywordHit: whole-token, case-insensitive, full text; own echo never hits', () => {
+  const text = '[GZCOORD/1] INFO\nFROM: develop-qzapp/x\nPROJECT: gzapp\nMESSAGE-ID: x-0001\nBROADCAST: true\nSUBJECT: PR 663 discussion\n\nNOTES:\nsee REFERENCES - github-pr: #663 and #2663\n';
+  const own = 'develop-qzapp/x';
+  for (const [kw, want] of [['663', true], ['pr', true], ['2663', true], ['references', true], ['6', false], ['66', false], ['GEQ', false], ['266', false], ['663-x', false]])
+    assert.equal(keywordHit(text, [kw], own), want, kw);
+  // multiple keywords: any hit wakes
+  assert.equal(keywordHit(text, ['zzz', 'geocode'], own), false);
+  assert.equal(keywordHit(text, ['zzz', 'pr-'], own), false, 'whole-token, not substring');
+  // the armed session's own messages never wake it — the echo exemption
+  assert.equal(keywordHit(text, ['663'], undefined), true, 'no ownAddress known: token match stands');
+  assert.equal(keywordHit(text, ['develop-qzapp'], own), false, 'own FROM token removed');
+  assert.equal(keywordHit(text, ['pr'], undefined), true, 'PR token matches without own address too');
+  assert.equal(keywordHit('', ['anything'], undefined), false, 'empty text never hits');
+});
+
+test('waitLoop --keyword: a passing non-addressed message ends the arm with code-3 data', async () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const rec = (id, type, extra) => ({ id, sender: 'develop-qzapp/x', timestamp: 't', content: `[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-${id}\n${extra}` });
+  // a message addressed to SOMEONE ELSE whose body mentions the keyword
+  const pages = [
+    { messages: [rec('m1', 'INFO', 'TO: develop-qzapp/web-dev-01\n'), rec('m2', 'OBSERVATION', 'TO-ROLE: backend-dev\nSUBJECT: unrelated schema review\n')] },
+    { messages: [rec('m3', 'REPLY', 'TO: develop-qzapp/web-dev-01\n\nREFERENCES:\n- github-pr: #663\n')] },
+  ];
+  let fetches = 0; const acked = [];
+  const r = await waitLoop({
+    fetchPage: async () => { fetches += 1; return pages.shift(); },
+    ack: async id => { acked.push(id); },
+    waitTotal: 1800, forMeFn: msg => forMe(msg, me), keywords: checkKeywords(['663']), ownAddress: me.address });
+  assert.equal(r.delivered, false, 'never addressed to me');
+  assert.equal(r.keywordHit.id, 'm3', 'the keyword message is the exit reason');
+  assert.equal(fetches, 2, 'the first slice (no hit) continued the arm');
+  assert.deepEqual(acked.sort(), ['m1', 'm2', 'm3'], 'passed messages are acknowledged too');
+  assert.equal(r.othersPassed, 1, 'one other in the delivering slice is passed');
+  // the echo exemption inside waitLoop: a message FROM my address never ends the arm
+  const selfPage = () => ({ messages: [rec('me-1', 'INFO', 'BROADCAST: true\n')] });
+  const echoFromSelf = rec('echo', 'INFO', 'BROADCAST: true\n');
+  echoFromSelf.sender = me.address; echoFromSelf.content = echoFromSelf.content.replace('develop-qzapp/x', me.address);
+  const r2 = await waitLoop({
+    fetchPage: async () => ({ messages: [echoFromSelf] }),
+    ack: async () => {}, waitTotal: 1800, forMeFn: msg => forMe(msg, me), keywords: checkKeywords(['663']), ownAddress: me.address });
+  assert.equal(r2.keywordHit, null, 'own echo: no hit');
+  assert.equal(r2.delivered, true, 'a broadcast from self is still addressed to me (unchanged)');
+  // budget expiry with a keyword set and no hit: quiet, counted
+  const r3 = await waitLoop({
+    fetchPage: async () => ({ messages: [rec('m9', 'INFO', 'TO: develop-qzapp/web-dev-01\n')] }),
+    ack: async () => {}, waitTotal: 4, forMeFn: msg => forMe(msg, me), keywords: checkKeywords(['663']), ownAddress: me.address });
+  assert.equal(r3.keywordHit, null); assert.equal(r3.delivered, false); assert.equal(r3.waited, 4);
 });

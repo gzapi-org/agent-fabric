@@ -114,8 +114,40 @@ function oneLine(msg, raw) {
 // loop continues or returns, so the cursor always advances past what was
 // shown — and past what was passed: an acknowledgement means "shown this
 // position", not "read the body".
-export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe }) {
+// Alert keywords: reasons to stop waiting on a message that is NOT
+// addressed to this session. Whole-token, case-insensitive, matched
+// against the full message text (metadata + body — PR numbers live in
+// REFERENCES). Guardrails against the abusable shape: 3+ characters (a
+// 1–2 char token fires on nearly everything), at most 8 per arm, and a
+// message from the armed session's own address never counts — a session
+// must not wake on its own echo.
+export const KEYWORD_MIN = 3;
+export const KEYWORD_MAX = 8;
+export function checkKeywords(keywords = []) {
+  const seen = [];
+  for (const k of keywords) {
+    if (typeof k !== 'string' || k.length < KEYWORD_MIN)
+      throw new Error(`keyword ${JSON.stringify(k)} is shorter than ${KEYWORD_MIN} characters — a short token fires on nearly everything`);
+    if (seen.includes(k)) continue;
+    if (seen.length >= KEYWORD_MAX) throw new Error(`at most ${KEYWORD_MAX} keywords per arm`);
+    seen.push(k);
+  }
+  return seen;
+}
+export function keywordHit(text, keywords, ownAddress) {
+  if (!keywords.length || !text) return false;
+  const tokens = new Set(text.toLowerCase().split(/[^a-z0-9_-]+/).filter(Boolean));
+  if (ownAddress)
+    // The exemption removes each TOKEN of the own address — the address is
+    // never one token, and a keyword naming another session's instance half
+    // must still fire on that session's message.
+    for (const t of ownAddress.toLowerCase().split(/[^a-z0-9_-]+/).filter(Boolean)) tokens.delete(t);
+  return keywords.some(k => tokens.has(k.toLowerCase()));
+}
+
+export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, keywords = [], ownAddress }) {
   let waited = 0;
+  let hit = null;
   for (;;) {
     const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
     const page = await fetchPage(slice);
@@ -130,16 +162,28 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe }) {
       if (isMine) delivered = true;
     }
     for (const { rec } of classified) { try { await ack(rec.id); } catch { /* the next arm re-shows it */ } }
-    if (delivered || waitTotal === 0 || waited >= waitTotal)
-      return { classified, waited, delivered, othersPassed: classified.filter(c => !c.isMine).length };
-    // Nothing for this session in the slice: the cursor is past it, and
-    // the remaining budget keeps waiting.
+    // A keyword hit is a reason to stop waiting on a message that is not
+    // addressed to this session. A delivered message wins the exit (it is
+    // shown in full); a keyword on a passing message names it and exits
+    // with code 3. A message from my own address never hits — a session
+    // must not wake on its own echo.
+    if (!delivered && !hit)
+      for (const { rec, msg, isMine } of classified)
+        if (!isMine && msg && keywordHit(rec.content, keywords, ownAddress)) { hit = rec; break; }
+    if (delivered || hit || waitTotal === 0 || waited >= waitTotal)
+      return { classified, waited, delivered, keywordHit: hit, othersPassed: classified.filter(c => !c.isMine).length };
+    // Nothing for this session, no keyword hit: the cursor is past the
+    // slice, and the remaining budget keeps waiting.
   }
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const waitIdx = argv.indexOf('--wait');
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
+  // --keyword K, repeatable, validated BEFORE the arm starts: a bad
+  // keyword refused at arm time costs nothing, refused mid-wait wastes
+  // the budget.
+  const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
   const root = repoRoot();
   const tok = token(root);
   if (!tok) { console.error('gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, infra/local/.env.local or .claude/settings.local.json — skipping'); return 0; }
@@ -154,10 +198,16 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }) });
     const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`);
-    res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me) });
+    res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address });
   } catch (e) {
     console.error(`gzcoord inbox: relay unreachable at ${RELAY} (${e.message}) — skipping`);
     return 0;
+  }
+  if (res.keywordHit && waitIdx >= 0) {
+    const m = res.classified.find(c => c.rec.id === res.keywordHit.id);
+    console.log(`gzcoord inbox: keyword watch on ${CHANNEL} — a message matching one of [${keywords.join(', ')}] landed (not addressed to you, metadata only):`);
+    console.log(`  ${(m?.msg ? oneLine(m.msg) : `${res.keywordHit.id} (unparsable)  from ${res.keywordHit.sender}`)}`);
+    process.exit(3);
   }
   if (!res.delivered && waitIdx >= 0)
     console.log(`gzcoord inbox: nothing for you on ${CHANNEL} in ${res.waited}s (${res.othersPassed} passed for others)`);

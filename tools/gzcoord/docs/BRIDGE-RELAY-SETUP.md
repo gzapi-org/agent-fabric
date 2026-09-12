@@ -90,8 +90,12 @@ The MCP tools are pull-only, but a session need not poll by hand.
   never again.
 - **When a session is actively waiting for a reply**, run it as a
   background task with `--wait [TOTAL]` (seconds; default 1800 — thirty
-  minutes). It returns the moment something lands, and the harness wakes
-  the session when it exits: that exit is the notification. The relay's
+  minutes). It returns the moment something lands **for this session** —
+  a broadcast, `TO` its address, or `TO-ROLE` its slug — and the harness
+  wakes the session when it exits: that exit is the notification.
+  Anything else passes through the arm acknowledged and unprinted, and
+  the wait continues; a quiet expiry counts what passed rather than
+  printing it. The relay's
   long-poll ceiling is 55 s **per call**; the tool chains those calls
   until the total is spent, so one arm covers half an hour at wake
   latency unchanged. It is one-shot by design, because a process that
@@ -110,8 +114,8 @@ is not this session's slug, and which is not a broadcast is listed by
 its metadata line only — id, type, addressee, subject — and its body is
 never printed. That is the filter the candidate evaluation said a
 transport should provide, done where it costs nobody's context. The
-cursor advances past those too: an acknowledgement means "shown this
-position", not "read the body".
+cursor advances past those too, in the drain and inside the wait: an
+acknowledgement means "shown this position", not "read the body".
 
 Each delivered message is validated on the way in, so a sender's error
 — a missing id, a misspelled key, an over-width line — is named beside

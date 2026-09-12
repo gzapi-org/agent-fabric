@@ -22,9 +22,20 @@
 // session actively expecting a reply: run it as a background task and its
 // exit is the notification — the harness wakes the session when it ends.
 // It is one-shot by design; a process that never exits never notifies.
-// Both exits — a delivered message, or the total expiring quietly — end
-// the waiter, and both are followed by a fresh arm: the quiet exit is
-// how the budget is spent, not a signal to stop listening.
+// Three exits end it, and all three are followed by a fresh arm: a
+// message addressed to this session; the budget expiring on slices that
+// held none (quiet, counted, never printed in detail); the budget
+// itself. The quiet exit is how the budget is spent, not a signal to
+// stop listening.
+//
+// The WAIT exits only on a message addressed to this session (SPEC §7.1:
+// a broadcast, `TO` its address, or `TO-ROLE` its slug). Anything else —
+// including a message this session itself sent — passes through the arm
+// acknowledged but unprinted, and the arm continues: waking a session for
+// its neighbours' traffic is the noise this tool exists to remove, and
+// every such wake is context spent on someone else's work. The drain
+// (SessionStart) still lists non-addressed messages by their metadata
+// line; only the wait is silent about them.
 //
 // The addressee rule is applied HERE, at delivery, not left to the reader:
 // a message whose TO is not this address, whose TO-ROLE is not this role,
@@ -98,6 +109,34 @@ function oneLine(msg, raw) {
   return `${m['MESSAGE-ID'] ?? '(no id)'}  ${msg.type}  ${to}  ${m.SUBJECT ?? ''}`.trimEnd();
 }
 
+// One arm of the waiter. `delivered` iff some slice carried a message
+// for this session. Every slice's messages are acknowledged before the
+// loop continues or returns, so the cursor always advances past what was
+// shown — and past what was passed: an acknowledgement means "shown this
+// position", not "read the body".
+export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe }) {
+  let waited = 0;
+  for (;;) {
+    const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
+    const page = await fetchPage(slice);
+    waited += slice;
+    const classified = [];
+    let delivered = false;
+    for (const rec of page.messages ?? []) {
+      let msg = null;
+      try { msg = parse(rec.content); } catch { /* not GZCOORD/1: never addressed */ }
+      const isMine = msg ? forMeFn(msg) : false;
+      classified.push({ rec, msg, isMine });
+      if (isMine) delivered = true;
+    }
+    for (const { rec } of classified) { try { await ack(rec.id); } catch { /* the next arm re-shows it */ } }
+    if (delivered || waitTotal === 0 || waited >= waitTotal)
+      return { classified, waited, delivered, othersPassed: classified.filter(c => !c.isMine).length };
+    // Nothing for this session in the slice: the cursor is past it, and
+    // the remaining budget keeps waiting.
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const waitIdx = argv.indexOf('--wait');
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
@@ -108,31 +147,26 @@ export async function main(argv = process.argv.slice(2)) {
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(root, taxonomy);
 
-  // Drain mode spends 1 s on the cursor page; wait mode chains 55 s polls
-  // until the total budget is spent, exiting early on the first slice that
-  // carries a message.
-  let page;
-  let waited = 0;
+  // Drain mode spends 1 s on the cursor page and lists everything; wait
+  // mode chains slices until a message ADDRESSED TO THIS SESSION lands,
+  // passing others' traffic through acknowledged and unprinted.
+  let res;
   try {
-    for (;;) {
-      const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
-      const q = new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' });
-      page = await api(tok, `/api/wait?${q}`);
-      waited += slice;
-      if ((page.messages ?? []).length > 0 || waitTotal === 0 || waited >= waitTotal) break;
-    }
+    const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }) });
+    const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`);
+    res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me) });
   } catch (e) {
     console.error(`gzcoord inbox: relay unreachable at ${RELAY} (${e.message}) — skipping`);
     return 0;
   }
-  const messages = page.messages ?? [];
-  if (messages.length === 0) { if (waitIdx >= 0) console.log(`gzcoord inbox: nothing new on ${CHANNEL} in ${waited}s`); return 0; }
+  if (!res.delivered && waitIdx >= 0)
+    console.log(`gzcoord inbox: nothing for you on ${CHANNEL} in ${res.waited}s (${res.othersPassed} passed for others)`);
+  if (!res.delivered) return 0;
 
   const mine = [], others = [];
-  for (const rec of messages) {
-    let msg;
-    try { msg = parse(rec.content); } catch { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
-    (forMe(msg, me) ? mine : others).push({ rec, msg });
+  for (const { rec, msg, isMine } of res.classified) {
+    if (!msg) { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
+    (isMine ? mine : others).push({ rec, msg });
   }
 
   const out = [];
@@ -148,12 +182,8 @@ export async function main(argv = process.argv.slice(2)) {
   }
   console.log(out.join('\n'));
 
-  // Advance this consumer's cursor past everything seen, addressed or not:
-  // an ack says "I have been shown this position", not "I read the body".
-  for (const rec of messages) {
-    try { await api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: rec.id }) }); }
-    catch (e) { console.error(`gzcoord inbox: ack failed for ${rec.id} (${e.message}); it will be shown again`); }
-  }
+  // The cursor is already advanced past everything shown — waitLoop
+  // acknowledges every slice it sees, delivered or passed.
   return 0;
 }
 

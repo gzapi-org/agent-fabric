@@ -117,6 +117,10 @@ A peer MAY retain an ephemeral directory containing:
 
 This directory is a cache, not authoritative state.
 
+HELLO is not the only proof of availability. Any message from an address — an `OBSERVATION`, a `REPLY`, anything — establishes that the address is live: a peer MAY enter it in the directory from whatever that message carries (the address, and `ROLE` / `PROJECT`, which are required on every message), and interact with it at once, without waiting for a `HELLO`. What a `HELLO` adds is the full self-description — `SPECIALTIES`, `CAPABILITIES`, `ABOUT` — not the right to be answered; a peer that later sees a `HELLO` from an address it knows updates the directory from it, and treats it as the announcement for §4's role-change rule.
+
+The MUST above is the sender's obligation to describe itself on entering, and it is unchanged. A sender that skips it loses its entry in peers' fuller descriptions and the re-announce greeting this section gives unknown `HELLO`s — not the ability to be heard.
+
 When a peer sees a previously unknown `HELLO`, it SHOULD re-announce its own `HELLO` once within a transport-defined jitter window. It MUST avoid repeatedly answering the same announcement and creating a HELLO storm.
 
 An instance MAY send `GOODBYE` on graceful shutdown. Peers MUST NOT rely on receiving it.

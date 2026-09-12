@@ -89,11 +89,13 @@ The MCP tools are pull-only, but a session need not poll by hand.
   clone shows the whole channel once — tens of kilobytes today — and
   never again.
 - **When a session is actively waiting for a reply**, run it as a
-  background task with `--wait` (up to 55 s, the relay's ceiling). It
-  returns the moment something lands, and the harness wakes the session
-  when it exits: that exit is the notification. It is one-shot by
-  design, because a process that never exits never notifies, so re-arm
-  it after each return.
+  background task with `--wait [TOTAL]` (seconds; default 1800 — thirty
+  minutes). It returns the moment something lands, and the harness wakes
+  the session when it exits: that exit is the notification. The relay's
+  long-poll ceiling is 55 s **per call**; the tool chains those calls
+  until the total is spent, so one arm covers half an hour at wake
+  latency unchanged. It is one-shot by design, because a process that
+  never exits never notifies, so re-arm it after each return.
 
 Both apply SPEC §7.1 addressing and the §17 reading rule **at
 delivery**: a message whose `TO` is not this address, whose `TO-ROLE`

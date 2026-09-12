@@ -5,9 +5,17 @@
 // Two modes, one tool:
 //   node tools/gzcoord/scripts/inbox.mjs            drain: return at once
 //   node tools/gzcoord/scripts/inbox.mjs --wait [S] block up to S seconds
-//                                                  (default 55, the relay's
-//                                                  ceiling) and return the
-//                                                  moment something lands
+//                                                  TOTAL (default 1800 —
+//                                                  thirty minutes) and
+//                                                  return the moment
+//                                                  something lands
+//
+// The relay's long-poll ceiling is 55 s per HTTP call; --wait chains those
+// calls until the TOTAL budget is spent, so one arm covers half an hour
+// instead of one poll. Each call is min(55, remaining), and the moment a
+// slice returns a message the loop exits and delivers — the wake latency
+// is unchanged. A total budget, not a per-call one, is the point: arming
+// every 55 seconds was the noise the waiter exists to remove.
 //
 // The drain runs from the SessionStart hook in .claude/settings.json, so a
 // session begins knowing what arrived while it was away. The wait is for a
@@ -89,7 +97,7 @@ function oneLine(msg, raw) {
 
 export async function main(argv = process.argv.slice(2)) {
   const waitIdx = argv.indexOf('--wait');
-  const timeout = waitIdx >= 0 ? Number(argv[waitIdx + 1]) || 55 : 1;
+  const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
   const root = repoRoot();
   const tok = token(root);
   if (!tok) { console.error('gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, infra/local/.env.local or .claude/settings.local.json — skipping'); return 0; }
@@ -97,16 +105,25 @@ export async function main(argv = process.argv.slice(2)) {
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(root, taxonomy);
 
+  // Drain mode spends 1 s on the cursor page; wait mode chains 55 s polls
+  // until the total budget is spent, exiting early on the first slice that
+  // carries a message.
   let page;
+  let waited = 0;
   try {
-    const q = new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(timeout), limit: '50' });
-    page = await api(tok, `/api/wait?${q}`);
+    for (;;) {
+      const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
+      const q = new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' });
+      page = await api(tok, `/api/wait?${q}`);
+      waited += slice;
+      if ((page.messages ?? []).length > 0 || waitTotal === 0 || waited >= waitTotal) break;
+    }
   } catch (e) {
     console.error(`gzcoord inbox: relay unreachable at ${RELAY} (${e.message}) — skipping`);
     return 0;
   }
   const messages = page.messages ?? [];
-  if (messages.length === 0) { if (waitIdx >= 0) console.log(`gzcoord inbox: nothing new on ${CHANNEL} in ${timeout}s`); return 0; }
+  if (messages.length === 0) { if (waitIdx >= 0) console.log(`gzcoord inbox: nothing new on ${CHANNEL} in ${waited}s`); return 0; }
 
   const mine = [], others = [];
   for (const rec of messages) {

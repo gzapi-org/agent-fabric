@@ -13,6 +13,36 @@ const FORBIDDEN = new Set([
 ]);
 const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 
+// Every common metadata field the spec names (§7). Used only to ask
+// whether an unknown key looks like a misspelling of one — never to
+// reject: §6 requires unknown metadata to be preserved, because that is
+// how the protocol extends.
+const KNOWN_KEYS = ['FROM','ROLE','PROJECT','TO','TO-ROLE','BROADCAST','MESSAGE-ID','IN-REPLY-TO',
+  'REPOSITORY','BRANCH','COMMIT','REPLY-EXPECTED','SUBJECT','SPECIALTIES','CAPABILITIES'];
+// `<instance>-NNNN`, the shape the deployment numbers messages with.
+const ID_SHAPED = /^[a-z0-9._-]+-\d{4}$/;
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+// A known field this unknown key was plausibly meant to be: either the
+// key is a whole hyphen-separated run inside it (ID inside MESSAGE-ID,
+// IN-REPLY inside IN-REPLY-TO) or it is within two edits of it.
+export function nearestKnownKey(key) {
+  if (KNOWN_KEYS.includes(key)) return undefined;
+  const parts = k => k.split('-');
+  for (const known of KNOWN_KEYS) {
+    const kp = parts(key), np = parts(known);
+    for (let i = 0; i + kp.length <= np.length; i++)
+      if (kp.every((t, j) => t === np[i + j]) && kp.length < np.length) return known;
+  }
+  return KNOWN_KEYS.find(known => editDistance(key, known) <= 2);
+}
+
 // Terminal columns a line occupies. ECMAScript regexes cannot express
 // East_Asian_Width, so wide is the wcwidth range table (Wide and
 // Fullwidth, halfwidth forms excluded — Script=Katakana would have
@@ -229,6 +259,15 @@ export function validate(text, { taxonomy } = {}) {
   }
   for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
   for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
+  // A key the sender believed was a known field. Two signals, neither of
+  // which rejects: it reads as a misspelling of a common field, or it
+  // carries an id-shaped value while not being an id field at all.
+  for (const [key, value] of Object.entries(msg.metadata)) {
+    const near = nearestKnownKey(key);
+    if (near) warnings.push(`${key} is not a known field — did you mean ${near}?`);
+    else if (ID_SHAPED.test(value) && !['MESSAGE-ID','IN-REPLY-TO'].includes(key))
+      warnings.push(`${key} carries an id-shaped value (${value}) but is not MESSAGE-ID or IN-REPLY-TO`);
+  }
   // A body line that is marker-shaped up to whitespace — indented, or with
   // trailing whitespace — is body text by SPEC §6, the grammar admits no
   // other reading; but it is also the exact shape a paste-indented or
@@ -352,20 +391,52 @@ export function seedSeq(instance, n, stateDir = '.gzcoord') {
   return { was, now: n, next: formatId(instance, n + 1), lowered: n < was };
 }
 
-function arg(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+// Every flag a command accepts, declared, so an unrecognised one is an
+// error BEFORE any side effect rather than a silent no-op. A checkout that
+// predated --peek accepted `next-id --peek` in silence and took a number —
+// a gap in a sequence that nothing can fill — and a typo like --seeed does
+// the same today. On a counter-mutating command, silence is the defect.
+const FLAGS = {
+  validate:  { valued: ['taxonomy'], boolean: ['no-taxonomy'], positional: 1 },
+  normalize: { valued: [], boolean: [], positional: 1 },
+  hello:     { valued: ['from', 'role', 'project', 'message-id', 'specialties', 'capabilities', 'state-dir', 'taxonomy'], boolean: ['no-taxonomy'], positional: 0 },
+  'next-id': { valued: ['instance', 'state-dir', 'seed'], boolean: ['peek'], positional: 0 },
+};
+export function parseArgs(argv, spec) {
+  const flags = {}; const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) { positional.push(a); continue; }
+    const name = a.slice(2);
+    if (spec.boolean.includes(name)) { flags[name] = true; continue; }
+    if (spec.valued.includes(name)) {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--')) throw new Error(`--${name} needs a value`);
+      if (name in flags) throw new Error(`--${name} given twice`);
+      flags[name] = v; i++; continue;
+    }
+    const known = [...spec.valued, ...spec.boolean].map(f => `--${f}`).join(', ');
+    throw new Error(`unknown flag ${a}; this command takes ${known || 'no flags'}`);
+  }
+  if (positional.length > spec.positional) throw new Error(`unexpected argument: ${positional[spec.positional]}`);
+  return { flags, positional };
 }
+let ARGS = { flags: {}, positional: [] };
+function arg(name) { return ARGS.flags[name]; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cmd = process.argv[2];
+  if (cmd in FLAGS) {
+    try { ARGS = parseArgs(process.argv.slice(3), FLAGS[cmd]); }
+    catch (e) { console.error(`gzmsg ${cmd}: ${e.message}`); process.exit(2); }
+  }
   // The deployment's catalogue is found by walking up from the working
   // directory; --taxonomy names one explicitly, --no-taxonomy validates
   // the wire grammar alone.
-  const taxonomyPath = process.argv.includes('--no-taxonomy') ? undefined : (arg('taxonomy') ?? findTaxonomy());
+  const taxonomyPath = ARGS.flags['no-taxonomy'] ? undefined : (arg('taxonomy') ?? findTaxonomy());
   const taxonomy = taxonomyPath ? loadTaxonomy(taxonomyPath) : undefined;
   if (cmd === 'validate') {
-    const file = process.argv[3];
+    const file = ARGS.positional[0];
     if (!file) throw new Error('usage: gzmsg.mjs validate <file>');
     const result = validate(fs.readFileSync(file, 'utf8'), { taxonomy });
     // Warnings print on both paths: on a failure they are often the cause
@@ -414,7 +485,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);
   } else if (cmd === 'normalize') {
-    const file = process.argv[3];
+    const file = ARGS.positional[0];
     if (!file) throw new Error('usage: gzmsg.mjs normalize <file>');
     // Prints the normalised message; validate the output, not the paste.
     process.stdout.write(normalize(fs.readFileSync(file, 'utf8')));
@@ -430,7 +501,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       if (r.lowered) console.error(`warning: lowered from ${r.was} to ${r.now}; ids ${formatId(instance, r.now + 1)}..${formatId(instance, r.was)} go back into circulation and peers may already hold them`);
       console.error(`counter for ${instance}: ${r.was} -> ${r.now}`);
       console.log(r.next);
-    } else if (process.argv.includes('--peek')) {
+    } else if (ARGS.flags.peek) {
       console.log(peekId(instance, dir));
     } else {
       console.log(nextId(instance, dir));

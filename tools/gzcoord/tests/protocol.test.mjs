@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -436,9 +436,9 @@ test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
 // clone holding backend-dev with no slug in its name — an earlier cut of
 // this rule silenced it.
 test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to the role', () => {
-  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: test-0001\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
+  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: architect-cto-01-0033\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
   assert.deepEqual(ok.errors, []);
-  assert.deepEqual(ok.warnings, []);
+  assert.deepEqual(ok.warnings, [], 'a well-formed message under the profile warns about nothing');
   for (const role of ['Application Architect', 'Architect / CTO']) {
     const r = validate(`[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: ${role}\nPROJECT: gzapp\nMESSAGE-ID: test-0001\nBROADCAST: true\n`, { taxonomy });
     assert.ok(r.errors.some(e => e.startsWith(`ROLE "${role}" is not a role slug`)), `${role}: ${r.errors}`);
@@ -561,6 +561,44 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
   });
 });
 
+// Reported from live use: a message with no MESSAGE-ID, and one whose id
+// sat under a bogus `ID:` key, both validated clean -- so nothing caught
+// the error. MESSAGE-ID is now REQUIRED (§7.1): absence is an error, and
+// a misspelled key still warns, never rejects (§6 preserves unknown
+// metadata -- that is how the protocol extends).
+test('a missing MESSAGE-ID is an error; a key that misspells one is named', () => {
+  const head = '[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nBROADCAST: true\n';
+  const none = validate(head);
+  assert.equal(none.ok, false, 'required since #641');
+  assert.ok(none.errors.some(e => e === 'missing MESSAGE-ID'), none.errors);
+
+  const bogus = validate(`${head}ID: db-admin-0007\n`);
+  assert.equal(bogus.ok, false, 'the bogus key does not satisfy the required field');
+  assert.ok(bogus.errors.some(e => e === 'missing MESSAGE-ID'), bogus.errors);
+  assert.ok(bogus.warnings.some(w => w === 'ID is not a known field — did you mean MESSAGE-ID?'), bogus.warnings);
+
+  // Caught by the value's shape rather than the key's spelling.
+  const msgid = validate(`${head}MSG-ID: db-admin-0007\n`);
+  assert.ok(msgid.warnings.some(w => w.startsWith('MSG-ID carries an id-shaped value')), msgid.warnings);
+
+  // A real id silences everything.
+  const good = validate(`${head}MESSAGE-ID: db-admin-0007\n`);
+  assert.deepEqual(good.warnings, []);
+});
+
+test('unknown fields that are real extensions stay silent — §6 preserves them', () => {
+  const head = '[GZCOORD/1] INFO\nFROM: develop-qzapp/db-admin\nROLE: db-admin\nPROJECT: gzapp\nBROADCAST: true\nMESSAGE-ID: db-admin-0007\n';
+  for (const key of ['X-PRIORITY', 'X-TRACE', 'SEVERITY', 'DEADLINE', 'ATTN', 'THREAD', 'LOCALE']) {
+    const r = validate(`${head}${key}: something\n`);
+    assert.deepEqual(r.warnings, [], `${key} must not warn`);
+    assert.equal(r.message.metadata[key], 'something', `${key} must be preserved`);
+  }
+  for (const [key, want] of [['ID','MESSAGE-ID'], ['MESSAGEID','MESSAGE-ID'], ['IN-REPLY','IN-REPLY-TO'], ['SUBJET','SUBJECT']])
+    assert.equal(nearestKnownKey(key), want, key);
+  for (const key of ['FROM', 'TO-ROLE', 'X-PRIORITY', 'MSG-ID'])
+    assert.equal(nearestKnownKey(key), undefined, key);
+});
+
 // Both reported from live traffic once the relay carried real instances.
 // One root cause: nextId was the only accessor, so a session could neither
 // look at its counter without burning a number nor correct one that
@@ -614,5 +652,83 @@ test('next-id CLI: --peek prints without taking, --seed reports the move', () =>
 
     const bad = gzmsg('next-id', '--instance', 'web', '--seed', 'seven', '--state-dir', dir);
     assert.notEqual(bad.status, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A checkout that predated --peek accepted `next-id --peek` in silence and
+// took a number: a gap nothing can fill. Every flag a command takes is now
+// declared, and an unrecognised one is refused BEFORE any side effect.
+test('parseArgs: unknown, valueless, repeated and surplus arguments are refused', () => {
+  const spec = { valued: ['instance', 'seed'], boolean: ['peek'], positional: 0 };
+  assert.deepEqual(parseArgs(['--instance', 'x', '--peek'], spec), { flags: { instance: 'x', peek: true }, positional: [] });
+  assert.throws(() => parseArgs(['--instance', 'x', '--seeed', '9'], spec), /unknown flag --seeed; this command takes --instance, --seed, --peek/);
+  assert.throws(() => parseArgs(['--instance', 'x', '--seed'], spec), /--seed needs a value/);
+  assert.throws(() => parseArgs(['--seed', '--peek'], spec), /--seed needs a value/, 'a following flag is not a value');
+  assert.throws(() => parseArgs(['--instance', 'a', '--instance', 'b'], spec), /--instance given twice/);
+  assert.throws(() => parseArgs(['stray'], spec), /unexpected argument: stray/);
+  const one = { valued: [], boolean: [], positional: 1 };
+  assert.deepEqual(parseArgs(['file.txt'], one), { flags: {}, positional: ['file.txt'] });
+  assert.throws(() => parseArgs(['a', 'b'], one), /unexpected argument: b/);
+  assert.throws(() => parseArgs(['--nope'], one), /this command takes no flags/);
+});
+
+test('CLI: an unknown flag on a counter-mutating command takes nothing', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-flags-'));
+  try {
+    const typo = gzmsg('next-id', '--instance', 'web', '--seeed', '9', '--state-dir', dir);
+    assert.equal(typo.status, 2);
+    assert.match(typo.stderr, /unknown flag --seeed/);
+    assert.equal(typo.stdout, '');
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'no number was taken');
+    const peekTypo = gzmsg('next-id', '--instance', 'web', '--peek', '--typo', '--state-dir', dir);
+    assert.equal(peekTypo.status, 2);
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
+    const hello = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/web', '--role', 'R', '--project', 'p', '--bogus', '--state-dir', dir);
+    assert.equal(hello.status, 2);
+    assert.match(hello.stderr, /unknown flag --bogus/);
+    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'hello took no number either');
+    const file = path.join(dir, 'm.txt'); fs.writeFileSync(file, '[GZCOORD/1] HELLO\nFROM: a/b\nROLE: R\nPROJECT: p\nMESSAGE-ID: b-0001\n');
+    const v = gzmsg('validate', file, '--nope');
+    assert.equal(v.status, 2);
+    assert.match(v.stderr, /unknown flag --nope/);
+    // and the declared paths are untouched
+    assert.equal(gzmsg('validate', file, '--no-taxonomy').status, 0);
+    assert.equal(gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir).stdout.trim(), 'web-0001');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
+// delivery: the body of a message not addressed to this session is never
+// printed. forMe() is that decision, kept pure so it can be pinned.
+import { forMe, identity } from '../scripts/inbox.mjs';
+test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/db-admin\n'), me), true, 'TO is my address');
+  assert.equal(forMe(mk('INFO', 'TO: develop-qzapp/web-dev-01\n'), me), false, 'TO is someone else');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), me), true, 'TO-ROLE is my slug');
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: backend-dev\n'), me), false, 'TO-ROLE is another slug');
+  assert.equal(forMe(mk('INFO', 'BROADCAST: true\n'), me), true, 'broadcast reaches everyone');
+  assert.equal(forMe(mk('HELLO', ''), me), true, 'HELLO is a broadcast by definition');
+  assert.equal(forMe(mk('GOODBYE', ''), me), true, 'GOODBYE too');
+  assert.equal(forMe(mk('INFO', ''), me), false, 'no addressing field at all: not for anyone');
+  // A session with no resolvable role never matches a TO-ROLE.
+  assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), { ...me, slug: undefined }), false);
+});
+
+test('inbox identity: address from the working copy, slug from record then basename', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-inbox-'));
+  try {
+    const root = path.join(dir, 'architect-cto-01'); fs.mkdirSync(path.join(root, '.roles', '.instance'), { recursive: true });
+    fs.copyFileSync(taxonomy.path, path.join(root, '.roles', 'taxonomy.json'));
+    const tax = loadTaxonomy(path.join(root, '.roles', 'taxonomy.json'));
+    const host = os.hostname().split('.')[0];
+    // no record: the basename's slug
+    assert.deepEqual(identity(root, tax), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: 'architect-cto' });
+    // a record wins over the basename
+    fs.writeFileSync(path.join(root, '.roles', '.instance', 'state.json'), JSON.stringify({ role: 'backend-dev' }));
+    assert.equal(identity(root, tax).slug, 'backend-dev');
+    // no catalogue at all: address still derives, slug does not
+    assert.deepEqual(identity(root, undefined), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: undefined });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

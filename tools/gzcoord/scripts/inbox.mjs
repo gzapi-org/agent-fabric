@@ -49,7 +49,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from './gzmsg.mjs';
 
 const RELAY = process.env.CLAUDE_BRIDGE_URL ?? 'http://127.0.0.1:8765';
@@ -92,6 +92,33 @@ export function forMe(msg, me) {
   if (m.TO !== undefined) return m.TO === me.address;
   if (m['TO-ROLE'] !== undefined) return me.slug !== undefined && m['TO-ROLE'] === me.slug;
   return false;
+}
+
+// The relay dies with its hosting session, and the hosting clone — the
+// one holding .gzcoord/venv and the token — is this role's. So the host's
+// session start IS the activation: if the relay is not answering, bring
+// it up before draining, exactly as the runbook says. Clones without the
+// venv return false and skip silently: they are clients, not hosts, and
+// nothing in a client session may try to host.
+export function ensureRelay(root, relayUrl = RELAY) {
+  const bin = path.join(root, '.gzcoord', 'venv', 'bin', 'claude-bridge');
+  if (!fs.existsSync(bin)) return { hosted: false, started: false };
+  try { execFileSync('curl', ['-sf', '-m', '2', `${relayUrl}/status`], { stdio: 'ignore' }); return { hosted: true, started: false }; }
+  catch { /* down or unreachable: start it */ }
+  const tokenFile = path.join(root, '.gzcoord', 'bridge-token');
+  const db = path.join(root, '.gzcoord', 'claude-bridge.db');
+  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: 'no .gzcoord/bridge-token; cannot start' };
+  const out = fs.openSync(path.join(root, '.gzcoord', 'bridge.log'), 'a');
+  const child = spawn(bin, [
+    '--host', '127.0.0.1', '--port', '8765',
+    '--db', db, '--auth-token-file', tokenFile,
+  ], { detached: true, stdio: ['ignore', out, out], unref: true });
+  for (let waited = 0; waited < 8000; waited += 500) {
+    try { execFileSync('curl', ['-sf', '-m', '1', `${relayUrl}/status`], { stdio: 'ignore' });
+      return { hosted: true, started: true, pid: child.pid }; } catch { /* not up yet */ }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+  }
+  return { hosted: true, started: false, note: 'relay did not answer within 8s; check .gzcoord/bridge.log' };
 }
 
 async function api(tok, pathAndQuery, init = {}) {
@@ -185,6 +212,11 @@ export async function main(argv = process.argv.slice(2)) {
   // the budget.
   const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
   const root = repoRoot();
+  // Activate what this session owns before anything else: the hosting
+  // clone starts its relay here, so a session restart is also the relay's.
+  const up = ensureRelay(root);
+  if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
+  else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
   const tok = token(root);
   if (!tok) { console.error('gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, infra/local/.env.local or .claude/settings.local.json — skipping'); return 0; }
   const taxPath = findTaxonomy(root);

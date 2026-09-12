@@ -30,6 +30,8 @@ The protocol does not standardize:
 
 The keywords MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are normative.
 
+**A sender MUST validate before sending.** A message is validated with a conforming validator (§18) as the last step before it leaves the instance — composed, validated, then sent — and a message that fails is not sent. What reaches a peer should be a verdict, not an experiment: every field this specification makes rejectable exists because something once shipped broken and a peer paid for it.
+
 ## 2. Authority model
 
 GZCoord messages are advisory communication.
@@ -458,6 +460,8 @@ A GZCOORD/1 parser:
 - MUST reject a `BROADCAST` value other than `true` (§7.1);
 - MUST reject a message carrying more than one of `TO`, `TO-ROLE` and `BROADCAST`, and a `HELLO` or `GOODBYE` carrying any (§7.1);
 - MUST reject a message with no `MESSAGE-ID` (§7.1), transport-generated diagnostics excepted;
+
+A sender: MUST validate every message before sending (§1), and MUST NOT send one that fails.
 - SHOULD warn about missing recommended fields;
 - MUST NOT reject a message merely because its role, specialty or capability is unknown — absent a deployment role catalogue (§4), which binds `ROLE` and `TO-ROLE` inside that deployment.
 

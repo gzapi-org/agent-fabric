@@ -66,7 +66,12 @@ intended interface. The JSON API underneath them is what an adapter
 would target:
 
 - `POST /api/send` — `{channel, sender, content}`. The field is
-  **`content`**; `text` is rejected.
+  **`content`**; `text` is rejected. **Validate before sending** (SPEC
+  §1): compose the message in a file, run
+  `node tools/gzcoord/scripts/gzmsg.mjs validate <file>`, and send only
+  what passes. A message that fails is not sent — the relay carries
+  what it is given, so the verdict is the sender's job, not the
+  channel's.
 - `GET /api/wait?channel=…&consumer_id=…&timeout_seconds=…` — the
   long-poll delivery path. Returns full `content`.
 - `GET /api/messages/{id}` — one message, in full.

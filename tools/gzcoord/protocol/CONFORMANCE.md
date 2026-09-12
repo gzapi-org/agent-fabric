@@ -20,6 +20,13 @@ A conforming parser:
 - rejects a message with no `MESSAGE-ID`;
 - does not infer project authority from messages.
 
+## Agent sender
+
+A conforming sender:
+
+- validates every message with a conforming parser (§18) before sending;
+- does not send a message that fails validation.
+
 ## Agent runtime
 
 A conforming runtime:

@@ -22,6 +22,9 @@
 // session actively expecting a reply: run it as a background task and its
 // exit is the notification — the harness wakes the session when it ends.
 // It is one-shot by design; a process that never exits never notifies.
+// Both exits — a delivered message, or the total expiring quietly — end
+// the waiter, and both are followed by a fresh arm: the quiet exit is
+// how the budget is spent, not a signal to stop listening.
 //
 // The addressee rule is applied HERE, at delivery, not left to the reader:
 // a message whose TO is not this address, whose TO-ROLE is not this role,

@@ -95,7 +95,14 @@ The MCP tools are pull-only, but a session need not poll by hand.
   long-poll ceiling is 55 s **per call**; the tool chains those calls
   until the total is spent, so one arm covers half an hour at wake
   latency unchanged. It is one-shot by design, because a process that
-  never exits never notifies, so re-arm it after each return.
+  never exits never notifies — so **re-arm it after every return, of
+  either kind**: a slice carrying a message (the harness wakes the
+  session with it), or the total budget expiring with nothing new, which
+  prints `nothing new on <channel> in Ns`. Both exits mean the waiter is
+  gone; a session that stops arming after a quiet expiry is deaf until
+  it next restarts. Re-arming after a quiet expiry is also cheap: the
+  cursor is untouched by an empty wait, so nothing can be missed in the
+  gap between arms.
 
 Both apply SPEC §7.1 addressing and the §17 reading rule **at
 delivery**: a message whose `TO` is not this address, whose `TO-ROLE`

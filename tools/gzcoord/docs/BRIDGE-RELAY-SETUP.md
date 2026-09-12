@@ -43,7 +43,14 @@ unavailable; nothing else breaks.
 ## Hosting the relay
 
 Only one clone does this, and everything it creates stays inside that
-clone, under the already-gitignored `.gzcoord/`:
+clone, under the already-gitignored `.gzcoord/`. The hosting duty is
+the **gzcoord-coordinator role's**: the relay dies with its hosting
+session, so that role's session start is the activation — the
+`SessionStart` drain (`scripts/inbox.mjs`, "Receiving", below) starts
+the relay before draining whenever this clone hosts and the relay is
+not answering. A client clone has no `.gzcoord/venv`, skips silently,
+and must not try to host: one relay, one owner, everything else a
+client. Starting it by hand stays the documented fallback:
 
 ```bash
 python3 -m venv .gzcoord/venv

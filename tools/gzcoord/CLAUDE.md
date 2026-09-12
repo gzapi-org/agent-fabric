@@ -23,6 +23,11 @@ session's prompt. That is the whole transport, and it is the current one:
   have is refused, not guessed past: the person resolves `TO-ROLE` by
   equality against the last `HELLO` they saw, and one addressing field
   per message is the whole routing rule.
+- **Do** activate what you own at session start. The relay dies with
+  its hosting session and this role hosts it: the `SessionStart` drain
+  brings the relay up before draining, and only the hosting clone (the
+  one holding `.gzcoord/venv`) can — client clones skip by design, one
+  relay, one owner.
 - **Do** expect your inbox at session start — `scripts/inbox.mjs` drains
   the relay from the `SessionStart` hook and shows what is addressed to
   you, bodies included, and only the metadata line of what is not. When

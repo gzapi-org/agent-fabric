@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "MODEL FAMILY -> COMPATIBILITY SHIM. A shim is what a model family needs to speak a harness's wire protocol (here: Claude Code's Anthropic-compatible API through OpenRouter). It is independent of which capability class a model serves: the same family gets the same shim whether it is the code-low or the code-high model. Matched by glob against the canonical model id, first match wins; a model with no matching family gets no shim. Only families with a live-tested shim belong here — do not add speculative entries.",
+  "shims": [
+    {
+      "family": "z-ai/glm-*",
+      "shim": "@preset/glm-claude-compat",
+      "harness": "claude-code",
+      "tested": "2026-09",
+      "note": "Z.ai GLM through OpenRouter needs the glm-claude-compat preset for Claude Code tool calling. The composite the runtime derives is `<model>@preset/glm-claude-compat`."
+    }
+  ]
+}

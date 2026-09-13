@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/checks/test_check_repo_settings_carry_no_model_pins.sh
+# policies/test_check_repo_settings_carry_no_model_pins.sh
 #
 # Self-test: every way a model pin can sneak into the committed settings
 # scope, and the case where the file is absent.

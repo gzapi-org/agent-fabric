@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-fabric:routing:capabilities",
+  "title": "Capability classes and the concrete model each provider currently binds to them",
+  "type": "object",
+  "required": [
+    "version",
+    "classes",
+    "providers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "classes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "required": [
+            "resolution",
+            "models"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "resolution": {
+              "description": "harness: values are the harness's own model references (a tier alias, or a full model id), resolved by the harness. model-id: values are canonical vendor/model ids the launcher resolves, shims applied.",
+              "enum": [
+                "harness",
+                "model-id"
+              ]
+            },
+            "description": {
+              "type": "string"
+            },
+            "models": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-z][a-z0-9-]*$": {
+                  "description": "A canonical model id (vendor/model) or a harness model reference (alias or full id, no vendor prefix). Never a composite: `@preset/...` is a shim and is attached at runtime.",
+                  "type": "string",
+                  "pattern": "^(~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\\[1m\\])?|[a-z][a-z0-9.-]*(\\[1m\\])?)$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

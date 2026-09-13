@@ -1,19 +1,10 @@
 {
-  "version": 1,
-  "review_grade": [
-    "anthropic/claude-opus-5",
-    "anthropic/claude-opus-5[1m]"
-  ],
+  "version": 2,
+  "description": "Per-role and per-agent overrides for the OpenRouter launch path, layered over routing/capabilities.json: defaults <- roles.<role> <- agents.<login> <- the agent's gitignored model-profile.local.json. Each layer may set `session` (the main conversation's model) and any `capabilities.<class>` model. `agents` is keyed by the Linux login — the agent — never by a directory name. Credentials are never here.",
   "defaults": {
     "session": "anthropic/claude-sonnet-5",
-    "tiers": {
-      "haiku": "anthropic/claude-haiku-4.5",
-      "sonnet": "anthropic/claude-sonnet-5",
-      "opus": "anthropic/claude-opus-5",
-      "fable": "anthropic/claude-fable-5.1"
-    },
-    "notes": "The ori launcher's own defaults with concrete ids instead of the ~latest aliases: /fast attaches speed:fast only when the opus pin is a concrete Opus id. An ori session on these defaults is a provider switch, not a cost switch; the cheaper tiers are per-role and per-instance choices below."
+    "notes": "The session model is the main agent's; the capability classes come from routing/capabilities.json unless a layer overrides one. A session on these defaults is a provider switch, not a cost switch."
   },
   "roles": {},
-  "instances": {}
+  "agents": {}
 }

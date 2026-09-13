@@ -289,36 +289,50 @@ def _structural_check(schema: dict[str, Any], doc: Any, where: str, path: str = 
     return problems
 
 
-def model_profile_findings(doc: dict[str, Any], known_roles: set[str]) -> list[str]:
+def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]) -> list[str]:
     """Invariants the schema cannot express for routing/profiles.json.
 
-    The file is layered — defaults <- roles.<role> <- instances.<name> — and
-    the launcher resolves the opus tier by merging the layers. So the check
-    is on the MERGED opus of every row, not on each layer's own value: a
-    role row that sets no opus inherits the default and is fine; one that
-    sets a cheaper model is the defect this exists to catch, because the
-    review class runs on it and a review's failure mode is a green PR that
-    merges. Role rows must name roles the taxonomy knows, so a typo cannot
-    create a row nobody ever resolves to.
+    The file is layered — defaults <- roles.<role> <- agents.<login> — over
+    routing/capabilities.json, and the launcher resolves each capability
+    by merging the layers. So the review gate is on the MERGED review
+    model of every row, not on each layer's own value: a row that sets no
+    review model inherits the provider's and is fine; one that sets a
+    cheaper model is the defect this exists to catch, because a review's
+    failure mode is a green PR that merges. Role rows must name roles the
+    catalogue knows; agent rows are keyed by login, never by a directory.
+    The rest of the routing consistency — classes, providers, shims,
+    aliases, the declared review id — is tools/fabric/routing.py's check().
     """
     findings: list[str] = []
     where = "routing/profiles.json"
-    grade = set(doc.get("review_grade", []))
-    default_opus = doc.get("defaults", {}).get("tiers", {}).get("opus")
-    if default_opus not in grade:
-        findings.append(f"{where}: defaults.tiers.opus {default_opus!r} is not in review_grade")
-    for layer in ("roles", "instances"):
-        for name, row in (doc.get(layer) or {}).items():
-            opus = (row.get("tiers") or {}).get("opus", default_opus)
-            if opus not in grade:
-                findings.append(
-                    f"{where}: {layer}.{name} resolves opus to {opus!r}, which is not in "
-                    "review_grade; the review class would run on it"
-                )
+    routing_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "routing.py")
+    spec = importlib.util.spec_from_file_location("fabric_routing", routing_path)
+    routing = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(routing)
+    findings += [f"routing: {f}" for f in routing.check(root)]
+    grade = routing.load_review_grade(root)
+    gated = grade.get("capability", "review")
+    try:
+        base = routing.load_capabilities(root)["providers"]["openrouter"]["models"]
+    except (OSError, KeyError, ValueError):
+        return findings
+    rows = [("defaults", None, None)]
+    rows += [("roles", name, None) for name in (doc.get("roles") or {})]
+    rows += [("agents", None, name) for name in (doc.get("agents") or {})]
+    for layer, role, agent in rows:
+        merged = routing.merged_profile(role, agent, None, root)
+        model = (merged.get("capabilities") or {}).get(gated) or base.get(gated)
+        if model and not routing.review_grade_ok(model, root):
+            label = layer if layer == "defaults" else f"{layer}.{role or agent}"
+            findings.append(f"{where}: {label} resolves {gated} to {model!r}, which is not in "
+                            "routing/policies/review-grade.json; the review class would run on it")
     if known_roles:
         for name in (doc.get("roles") or {}):
             if name not in known_roles:
                 findings.append(f"{where}: roles.{name} is not a role in identities/roles/catalog.json")
+    for name in (doc.get("agents") or {}):
+        if "/" in name or name.startswith("clone-"):
+            findings.append(f"{where}: agents.{name} is not a Linux login")
     return findings
 
 
@@ -470,7 +484,7 @@ def main() -> int:
             schema_findings = validate_json(profiles_schema, profiles, "routing/profiles.json")
             findings += schema_findings
             if not schema_findings:
-                findings += model_profile_findings(profiles, known_roles)
+                findings += model_profile_findings(root, profiles, known_roles)
 
     # --- role identities ---------------------------------------------------
     template_schema = load_schema(root, schemas, "role-template")

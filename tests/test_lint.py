@@ -49,7 +49,8 @@ ROOT = os.path.dirname(HERE)
 LINT = os.path.join(ROOT, "tools", "fabric", "lint.py")
 REAL_SCHEMAS = os.path.join(ROOT, "identities", "schemas")
 REAL_PROJECT_SCHEMAS = os.path.join(ROOT, "projects", "schemas")
-REAL_ROUTING_SCHEMAS = os.path.join(ROOT, "routing", "schemas")
+REAL_ROUTING = os.path.join(ROOT, "routing")
+REAL_ALIASES = os.path.join(ROOT, "runtime", "claude-code", "aliases.json")
 PROJECT = "demo"
 
 SKILL = """---
@@ -107,19 +108,10 @@ TAXONOMY = {
     "roles": [{"id": "web-dev", "paths": ["apps/admin_web/"]}],
 }
 PROFILES = {
-    "version": 1,
-    "review_grade": ["anthropic/claude-opus-5"],
-    "defaults": {
-        "session": "anthropic/claude-sonnet-5",
-        "tiers": {
-            "haiku": "anthropic/claude-haiku-4.5",
-            "sonnet": "anthropic/claude-sonnet-5",
-            "opus": "anthropic/claude-opus-5",
-            "fable": "anthropic/claude-fable-5.1",
-        },
-    },
-    "roles": {"web-dev": {"session": "z-ai/glm-5.3", "tiers": {"haiku": "z-ai/glm-5.3-flash"}}},
-    "instances": {"web-dev-01": {"session": "~z-ai/glm-flash-latest"}},
+    "version": 2,
+    "defaults": {"session": "anthropic/claude-sonnet-5"},
+    "roles": {"web-dev": {"session": "z-ai/glm-5.3", "capabilities": {"code-low": "z-ai/glm-5.3-flash"}}},
+    "agents": {"web-dev-01": {"session": "~z-ai/glm-flash-latest"}},
 }
 
 
@@ -135,8 +127,12 @@ def make_base(root: str) -> str:
     fabric = os.path.join(root, "fabric")
     shutil.copytree(REAL_SCHEMAS, os.path.join(fabric, "identities", "schemas"))
     shutil.copytree(REAL_PROJECT_SCHEMAS, os.path.join(fabric, "projects", "schemas"))
-    if os.path.isdir(REAL_ROUTING_SCHEMAS):
-        shutil.copytree(REAL_ROUTING_SCHEMAS, os.path.join(fabric, "routing", "schemas"))
+    # The real routing files (minus the profiles, which each case writes)
+    # and the Claude Code alias binding, so the routing checks actually run.
+    shutil.copytree(REAL_ROUTING, os.path.join(fabric, "routing"),
+                    ignore=shutil.ignore_patterns("profiles.json"))
+    os.makedirs(os.path.join(fabric, "runtime", "claude-code"))
+    shutil.copy2(REAL_ALIASES, os.path.join(fabric, "runtime", "claude-code", "aliases.json"))
     write(os.path.join(fabric, "identities", "roles", "catalog.json"), json.dumps(CATALOG))
     write(os.path.join(fabric, "projects", PROJECT, "taxonomy.json"), json.dumps(TAXONOMY))
     write(os.path.join(fabric, "identities", "roles", "web-dev", "charter.md"), CHARTER)
@@ -338,16 +334,34 @@ def case_model_profiles_layered_file_passes() -> None:
         assert code == 0, f"a well-formed layered profile tripped the linter:\n{out}"
 
 
-def case_model_profiles_cheap_opus_is_refused() -> None:
+def case_model_profiles_cheap_review_is_refused() -> None:
+    """A row that moves the review class off the review-grade list is a
+    finding; a row that moves a CODING class to a cheap model is not."""
     import copy
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         doc = copy.deepcopy(PROFILES)
-        doc["instances"]["web-dev-01"]["tiers"] = {"opus": "z-ai/glm-5.3-flash"}
+        doc["agents"]["web-dev-01"]["capabilities"] = {"review": "z-ai/glm-5.3-flash"}
         write_profiles(fabric, doc)
         code, out = run_lint(fabric)
-        assert code == 1, f"a non-review-grade opus passed:\n{out}"
-        assert "instances.web-dev-01" in out and "review_grade" in out, f"the row went unnamed:\n{out}"
+        assert code == 1, f"a non-review-grade review model passed:\n{out}"
+        assert "agents.web-dev-01" in out and "review-grade" in out, f"the row went unnamed:\n{out}"
+        doc = copy.deepcopy(PROFILES)
+        doc["agents"]["web-dev-01"]["capabilities"] = {"code-high": "z-ai/glm-5.3-flash"}
+        write_profiles(fabric, doc)
+        code, out = run_lint(fabric)
+        assert code == 0, f"a cheap coding class was review-gated:\n{out}"
+
+
+def case_model_profiles_agents_are_logins() -> None:
+    import copy
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        doc = copy.deepcopy(PROFILES)
+        doc["agents"]["clone-74e1ddd4096a45ce"] = {"session": "z-ai/glm-5.3"}
+        write_profiles(fabric, doc)
+        code, out = run_lint(fabric)
+        assert code == 1 and "is not a Linux login" in out, out
 
 
 def case_model_profiles_unknown_role_is_refused() -> None:
@@ -367,7 +381,7 @@ def case_model_profiles_schema_is_enforced() -> None:
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         doc = copy.deepcopy(PROFILES)
-        doc["defaults"]["tiers"]["haiku"] = "Claude Haiku"
+        doc["defaults"]["session"] = "Claude Sonnet"
         write_profiles(fabric, doc)
         code, out = run_lint(fabric)
         assert code == 1, f"a malformed model id passed the schema:\n{out}"
@@ -390,7 +404,8 @@ def main() -> int:
         case_knowledge_not_in_identities,
         case_taxonomy_roles_are_catalogued,
         case_model_profiles_layered_file_passes,
-        case_model_profiles_cheap_opus_is_refused,
+        case_model_profiles_cheap_review_is_refused,
+        case_model_profiles_agents_are_logins,
         case_model_profiles_unknown_role_is_refused,
         case_model_profiles_schema_is_enforced,
     ]

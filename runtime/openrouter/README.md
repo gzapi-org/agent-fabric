@@ -1,43 +1,81 @@
-# tools/launch — how a session starts, and which provider it gets
+# runtime/openrouter — the broker launch path
 
-Two launch paths, one decision per launch (owner decision 2026-09-12,
-Shape D from architect-cto-01-0060/0062):
+How a Claude Code session starts through OpenRouter, and which model each
+capability class gets there. One decision per launch: the provider chosen
+at launch applies to everything under the session, subagents included.
 
-| | vanilla (`claude`) | broker (`tools/launch/ori`) |
+| | vanilla (`claude`) | broker (`runtime/openrouter/launch`) |
 |---|---|---|
 | provider | Anthropic, by construction | OpenRouter (`ori claude`) |
-| session model | harness default | `session` from the profile |
-| subagent tiers | harness defaults | `ANTHROPIC_DEFAULT_*_MODEL` exported by the launcher |
-| per-role/instance choice | none | `.roles/registry/model-profiles.json` (+ gitignored local override) |
-| review-class floor | harness opus | `review_grade` in the registry, checked at launch |
-| how to inspect | `tools/launch/model-audit.sh` | same, plus `ori auth --json` |
+| who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding |
+| session model | harness default | `session` from `routing/profiles.json` (+ family shim) |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`) | `routing/capabilities.json` → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
+| review class | `claude-opus-5[1m]`, declared in the agent file | the same declared id; the launcher refuses a profile that resolves review elsewhere |
+| per-role / per-agent choice | none | `routing/profiles.json` (`roles.<role>`, `agents.<login>`) + the agent's gitignored `model-profile.local.json` |
+| review-grade floor | Opus, by the declared id | `routing/policies/review-grade.json`, checked at launch |
+| how to inspect | `model-audit.sh` | same, plus `ori auth --json` |
+
+## The three steps, and where each lives
+
+```text
+capability class  --routing/capabilities.json-->  concrete model
+concrete model    --routing/shims.json-------->  family shim (or none)
+model + shim      --tools/fabric/routing.py--->  model@preset/slug   (runtime only)
+```
+
+Today's OpenRouter policy resolves to:
+
+```text
+code-low     z-ai/glm-5.3-flash  + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
+code-medium  z-ai/glm-5.2        + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_SONNET_MODEL
+code-high    z-ai/glm-5.3        + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_OPUS_MODEL
+review       anthropic/claude-opus-5[1m]   (no shim)           declared in agents/blind-reviewer.md, not exported
+```
+
+Only the Z.ai/GLM family has a shim. A model of any other family gets none
+(`tools/fabric/routing.py table` shows it). Do not add a family until a live
+test has shown it works.
 
 ## The invariant
 
-**The repo pins harness ALIASES only.** No committed settings scope may
-carry a model pin (`check_repo_settings_carry_no_model_pins.sh`), and the
-launcher refuses to run when any settings scope — user, user-local,
-`$CLAUDE_CONFIG_DIR`, project, or the gitignored project-local one the
-guard cannot see — or the caller's `CLAUDE_CODE_SUBAGENT_MODEL` would
-race its pins. Every merged model is validated against the registry
-schema's `model_id` pattern before it is exported. Anything that resolves
-an alias to a concrete model happens in exactly one place: the launcher,
-from the committed profile, before exec.
+**Canonical files hold classes, models and shims separately; the composite
+exists only in the child's environment.** No committed settings scope may
+carry a model pin (`policies/check_repo_settings_carry_no_model_pins.sh`),
+and the launcher refuses to run when any settings scope — user, user-local,
+`$CLAUDE_CONFIG_DIR`, the launch working copy's, or the gitignored local one
+the guard cannot see — or the caller's `CLAUDE_CODE_SUBAGENT_MODEL` would
+race its pins. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is refused outright: it
+discards every dispatch's own model, and capability classes would stop
+meaning anything.
+
+The main agent's GLM compatibility is the same shim applied to the
+`session` model and passed as `--model` — separate from, and unaffected by,
+how the capability classes resolve.
+
+## Who is launching
+
+The agent is the Linux login; the launcher asks `runtime/identity.py` and
+reads the role from that agent's runtime binding (`/role`). The launch
+directory decides which settings scopes are fenced and which working copy
+the child starts in. It never decides who the agent is: `test_launch.sh`
+launches from a directory named for another agent with `USER` forged and
+checks the label still reads this login.
 
 ## Files
 
-- `ori` — the launcher. `--print` resolves without spawning — it is the
+- `launch` — the launcher. `--print` resolves without spawning — it is the
   launcher's flag, not claude's: for a headless run use claude's short
   form, `-p "prompt"`, which passes through.
 - `model-audit.sh` — what is the current session actually routed through,
   and how to read back the served model.
-- `test_ori.sh` — the behavioural suite for the launcher and the audit (the run prints its assertion count).
+- `test_launch.sh` — the behavioural suite for the launcher and the audit
+  (`bash policies/run_suite.sh runtime/openrouter/test_launch.sh`).
 
-## The profile registry
+## Not yet verified live
 
-`.roles/registry/model-profiles.json`, schema in
-`.roles/schema/model-profiles.schema.json`, linted by `tools/roles/lint.py`
-(every merged opus must be in `review_grade`; every roles key must be a
-taxonomy role). Merge order, later wins: `defaults` <- `roles.<role>` <-
-`instances.<dir_basename>` <- `.roles/.instance/model-profile.local.json`.
-Owned by architect-cto; `review_grade` is policy, not a cost dial.
+The review class rides a declared full id (`claude-opus-5[1m]`) rather
+than a tier alias so that, on the broker path, it never follows code-high
+onto the GLM export. Whether the `ori` broker forwards that unprefixed id
+to OpenRouter as `anthropic/claude-opus-5[1m]` has not been exercised in a
+live session yet; `model-audit.sh` describes how to read back what was
+served.

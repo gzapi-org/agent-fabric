@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# tools/launch/model-audit.sh
+# runtime/openrouter/model-audit.sh
 #
 # Which model is THIS session actually running on, and what would each
 # alias resolve to? Answers from the environment — the durable version is
 # OTel claude_code.llm_request (model, agent.name) against local Tempo; the
 # JSONL transcript is documented as internal and is not parsed.
 #
-#   tools/launch/model-audit.sh
+#   runtime/openrouter/model-audit.sh
 #
 # Prints: the effective provider variables, the four alias pins, the
 # session model, and how to read back what was actually SERVED (OpenRouter
@@ -66,14 +66,19 @@ done < <(env -0 | sort -z)
 (( found )) || say "  (none set — a vanilla Anthropic-routed launch, or variables not exported here)"
 
 say ""
-say "== the launcher's stamp (tools/launch/ori) =="
+say "== the launcher's stamp (runtime/openrouter/launch) =="
 # The session model reaches claude only as --model, which nothing inside
 # the session can read back; the launcher stamps what it applied.
-if [[ -n "${GZAPP_LAUNCH_SESSION_MODEL:-}" ]]; then
-    say "  profile : ${GZAPP_LAUNCH_PROFILE:-?}"
-    say "  session : $GZAPP_LAUNCH_SESSION_MODEL"
+# AGENT_FABRIC_LAUNCH_* is the stamp; GZAPP_LAUNCH_* is the name the
+# gzapp-embedded launcher used and is still read during the transition.
+STAMP_SESSION="${AGENT_FABRIC_LAUNCH_SESSION_MODEL:-${GZAPP_LAUNCH_SESSION_MODEL:-}}"
+STAMP_PROFILE="${AGENT_FABRIC_LAUNCH_PROFILE:-${GZAPP_LAUNCH_PROFILE:-?}}"
+if [[ -n "$STAMP_SESSION" ]]; then
+    say "  profile : $STAMP_PROFILE"
+    [[ -z "${AGENT_FABRIC_LAUNCH_AGENT:-}" ]] || say "  agent   : $AGENT_FABRIC_LAUNCH_AGENT"
+    say "  session : $STAMP_SESSION"
 else
-    say "  not launched via tools/launch/ori — the session model is the harness"
+    say "  not launched via runtime/openrouter/launch — the session model is the harness"
     say "  default or a settings-scope \"model\" key, and is not visible from the"
     say "  environment. /status inside the session shows it."
 fi

@@ -150,7 +150,9 @@ learned one at a time, and each was load-bearing on its own:
   brief that the tree is read-only and it runs no git writes — and,
   because a promise is not a fence and this clone auto-allows `git
   push`, an agent-scoped `PreToolUse` hook in the definition
-  (`.claude/review-bash-guard.sh`, tested by its sibling) denies
+  (`runtime/claude-code/hooks/review-bash-guard.sh`, tested by its
+  sibling; installed user-scope by `bootstrap.sh`, or a project's own
+  `.claude/` copy) denies
   state-changing git and every install/restore for that agent only.
 
 Keyed on the TYPE, deliberately, and not on prompt text alone. A hook

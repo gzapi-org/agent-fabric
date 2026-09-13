@@ -27,6 +27,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "dispatch guard" bash runtime/claude-code/hooks/test_agent-dispatch-guard.sh
+    run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
     run "gzapp pr-reply" bash projects/gzapp/integration/gh/test_pr-reply.sh

@@ -12,6 +12,9 @@
 #   ~/.claude/commands/role.md         /role for this account, from runtime/claude-code/commands/
 #   ~/.claude/agents/{code-*,blind-reviewer}.md
 #                                      the capability-class agent files, from runtime/claude-code/agents/
+#   ~/.claude/hooks/review-bash-guard.sh
+#                                      the review class's Bash fence; the blind-reviewer agent file
+#                                      looks here when the launch project has no .claude/ copy
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
 # session start. Nothing here makes projects/ a git repository. A managed
@@ -99,6 +102,11 @@ put "$CLAUDE_HOME/commands/role.md" "$TMP/role.md"
 for f in code-low.md code-medium.md code-high.md blind-reviewer.md; do
     put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
 done
+# The review class's Bash fence rides with its agent file: the agent runs
+# unisolated in the session's clone, and a review dispatched from
+# projects/ (no .claude/ of its own) found no guard and lost Bash entirely
+# (docs/live-checks/2026-09-13-openrouter-routing.md).
+put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/hooks/review-bash-guard.sh"
 
 # 4. The agent-fabric checkout this runs from enforces its own git
 #    discipline at commit time (policies/githooks/commit-msg). A repo

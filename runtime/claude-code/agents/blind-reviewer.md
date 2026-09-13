@@ -8,7 +8,7 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: f="${CLAUDE_PROJECT_DIR:-.}/.claude/review-bash-guard.sh"; if [ -f "$f" ]; then bash "$f"; else printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The review-class bash guard script was not found, so Bash is denied for the reviewer. Report without it."}}'; fi
+          command: f="${CLAUDE_PROJECT_DIR:-.}/.claude/review-bash-guard.sh"; [ -f "$f" ] || f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/review-bash-guard.sh"; if [ -f "$f" ]; then bash "$f"; else printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The review-class bash guard script was not found (neither in the project .claude/ nor user-scope under ~/.claude/hooks/ — run agent-fabric/runtime/claude-code/bootstrap.sh), so Bash is denied for the reviewer. Report without it."}}'; fi
           timeout: 10
           statusMessage: "Review class: checking the command is read-only…"
 ---
@@ -65,7 +65,7 @@ determine" on exactly the question that was asked.
 stash, no reset, no creating or entering or removing a worktree — you
 are in the session's own clone, it is read-only for you, and the
 session owns every commit. This is not only a promise: a hook scoped
-to this agent (`.claude/review-bash-guard.sh`) denies state-changing
+to this agent (`review-bash-guard.sh`, from the project's `.claude/` or user-scope `~/.claude/hooks/`) denies state-changing
 git, every install or restore (they rewrite tracked lockfiles in the
 clone), in-place file writes and shell escapes — the routine path, not
 a sandbox; what it cannot see, this charter still forbids. Building and running tests is fine and often

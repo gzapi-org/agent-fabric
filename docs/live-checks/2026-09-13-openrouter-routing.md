@@ -92,5 +92,7 @@ went through.
 Dispatched from `projects/` (not a working copy), the reviewer's `Bash`
 was denied because `review-bash-guard.sh` is looked up under
 `$CLAUDE_PROJECT_DIR/.claude/` and only gzapp carries it; it reviewed the
-working tree, not the range. Open follow-up: install the guard with
-`bootstrap.sh` or resolve it from `$AGENT_FABRIC_ROOT`.
+working tree, not the range. Fixed the same day: the guard now lives in
+`runtime/claude-code/hooks/`, `bootstrap.sh` installs it at
+`~/.claude/hooks/review-bash-guard.sh`, and the agent file falls back to
+that path when the launch project has no `.claude/` copy.

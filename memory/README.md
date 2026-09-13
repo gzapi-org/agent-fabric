@@ -8,9 +8,7 @@ memory/                          (this repository — field knowledge)
 ├── domains/<domain>/            reusable knowledge about a field
 ├── agents/<login>/              knowledge genuinely tied to one agent (rare)
 ├── shared/                      field knowledge two or more roles own
-├── RUBRIC.md                    what earns a place here, and what does not
-└── projects/<project>/          TRANSITION: a project whose memory has not
-                                 moved into its repository yet (gzapp)
+└── RUBRIC.md                    what earns a place here, and what does not
 
 <working copy>/.agent-fabric/    (each managed project's own repository)
 └── memory/
@@ -162,8 +160,7 @@ working copy's `.agent-fabric/memory/` (`--working-copy`; the agent's
 binding supplies it when omitted) and the domain classes into this
 repository — so a drain lands as a branch in the project's repository,
 opened by a fabric-coordinator holder under that project's contribution
-rules, plus a commit here. A project still under `memory/projects/<id>/`
-here is written there until it moves.
+rules, plus a commit here.
 
 **Merge mode is the default from cycle two onward.** New claims fold into
 existing slices; the existing file is the calibration anchor for what

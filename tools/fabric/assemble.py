@@ -850,9 +850,11 @@ def main() -> int:
 
         # INDEX.md is generated, never hand-maintained: it is the only thing a
         # session sees before choosing what to load, so it must not drift.
-        # Paths are relative to the agent-fabric root, because the slices a
-        # role knows live in three places (its identity, its domain, this
-        # project) and a reader should not have to reconstruct `../../..`.
+        # Paths are relative to the project's working copy, because that is
+        # where a session stands; the slices a role knows live in three
+        # places (its identity and its domain in the fabric, this project
+        # here), and the fabric ones are reached through ../agent-fabric/ so
+        # a reader never reconstructs `../../..`.
         lines = [
             render_frontmatter({
                 "role": role,
@@ -873,7 +875,8 @@ def main() -> int:
             "Tier 1 — the charter, this index, and every `workflow` slice —",
             "loads at activation. Every other section waits for a cue: open a",
             "slice when its description matches what you are working on.",
-            "Paths are relative to the agent-fabric root.",
+            "Paths are relative to this working copy; `../agent-fabric/` is the",
+            "control plane checked out beside it.",
             "",
         ]
         by_class_index: dict[str, list[dict[str, str]]] = defaultdict(list)

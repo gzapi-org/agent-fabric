@@ -57,8 +57,7 @@ directory, the repository, the branch or the session.
 - **Knowledge** you retrieve: `memory/domains/<domain>/` here for the
   field, `memory/shared/` for what several roles own, and — for the
   system you are working on — `.agent-fabric/memory/<role>/` **in that
-  project's working copy** (gzapp's is still under `memory/projects/gzapp/`
-  here until it moves). `solution` slices decay: where one disagrees with
+  project's working copy**. `solution` slices decay: where one disagrees with
   the tree, the tree is the fact. `.agent-fabric/` is fabric-coordinator's
   to write; you read it. Durable new knowledge goes to your own Claude
   memory with a `roles_class`; a drain (`memory/README.md`), run by a
@@ -103,7 +102,7 @@ avoid silent shell expansion.
 
 ```text
 identities/     roles (charter, recall, skills), the role catalogue, schemas
-memory/         domains/ projects/<project>/ agents/<login>/ shared/ — the corpus
+memory/         domains/ agents/<login>/ shared/ — field knowledge; project knowledge is in each project
 routing/        capability classes -> models; model families -> shims; review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
 runtime/        identity.py (the resolver), claude-code/ openrouter/ provisioning/ adapters
@@ -115,10 +114,10 @@ docs/migration/ how this repository was extracted from gzapp, and what maps to w
 ```
 
 The control plane is Apache-2.0. A project's knowledge lives in the
-project's repository under its own license; the subtrees still here
-(`memory/projects/<id>/`, `projects/<id>/`) carry that project's license
-(`REUSE.toml`, `projects/registry.json`). Do not move project-derived
-material out of those subtrees except into the project.
+project's repository under its own license; a project's `projects/<id>/`
+here carries that project's license (`REUSE.toml`,
+`projects/registry.json`). Do not move project-derived material out of
+that subtree except into the project.
 
 Runtime state is never in this repository: your binding, role history and
 local overrides live under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`.

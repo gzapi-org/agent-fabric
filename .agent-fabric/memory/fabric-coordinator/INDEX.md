@@ -11,7 +11,8 @@ distilled_at: "2026-09-13"
 Tier 1 — the charter, this index, and every `workflow` slice —
 loads at activation. Every other section waits for a cue: open a
 slice when its description matches what you are working on.
-Paths are relative to the working copy root (for agent-fabric, this checkout).
+Paths are relative to this working copy; `../agent-fabric/` is the
+control plane checked out beside it.
 
 ## charter
 

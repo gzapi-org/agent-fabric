@@ -194,8 +194,10 @@ def test_committed_indexes_carry_the_banner_the_assembler_emits(tmp: str) -> Non
     banner = body.split("\n## ", 1)[0].strip()
     assert banner, generated
 
-    # The committed project indexes: memory/projects/<project>/<role>/INDEX.md.
-    roles_dir = os.path.join(ROOT, "memory", "projects", "gzapp")
+    # The committed project indexes this repository holds: its own, under
+    # .agent-fabric/memory/<role>/INDEX.md (a managed project's live in that
+    # project's repository and are checked there by lint).
+    roles_dir = os.path.join(ROOT, ".agent-fabric", "memory")
     committed = sorted(
         os.path.join(roles_dir, d, "INDEX.md") for d in os.listdir(roles_dir)
         if os.path.isfile(os.path.join(roles_dir, d, "INDEX.md")))

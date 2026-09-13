@@ -21,7 +21,7 @@ agent-fabric contains agent infrastructure
 |---|---|---|
 | **AGENT IDENTITY** | Which Linux user is this agent? | `runtime/identity.py` — `pwd.getpwuid(os.geteuid())`, nothing else; `bin/fabric-whoami` |
 | **ROLE** | What function is this agent currently performing? | `identities/roles/<role>/` (charter, recall, skills); the catalogue `identities/roles/catalog.json`; bound at runtime by `tools/fabric/role.py` (`/role`) |
-| **MEMORY** | What durable knowledge can it retrieve? | `memory/domains/`, `memory/projects/<project>/<role>/`, `memory/agents/<login>/`, `memory/shared/` — generated indexes, provenance, tiered loading (`memory/README.md`) |
+| **MEMORY** | What durable knowledge can it retrieve? | `memory/domains/`, `memory/agents/<login>/`, `memory/shared/` here; `<working copy>/.agent-fabric/memory/<role>/` in each project — generated indexes, provenance, tiered loading (`memory/README.md`) |
 | **PROJECT** | Which logical system is it working on? | `projects/registry.json`, matched from a working copy's remote by `tools/fabric/workingcopy.py` |
 | **WORKING COPY** | Which filesystem/Git checkout is being used? | the cwd's git toplevel, recorded in the agent's runtime binding as a path and a label |
 | **CAPABILITY** | How much reasoning does a task require? | `routing/capabilities.json` classes: `code-low`, `code-medium`, `code-high`, `review` |
@@ -97,11 +97,14 @@ The control plane — roles, routing, runtime, communication, policies,
 tools, tests, docs, `memory/domains/`, `memory/shared/` — is
 **Apache-2.0** (`LICENSE`). A managed project's knowledge lives in the
 project's own repository (`<working copy>/.agent-fabric/memory/`), under
-that project's license. The project subtrees still here during the
-transition — `memory/projects/<id>/` and `projects/<id>/` — are derived
-from that project and carry **its license**, named per project in
+that project's license. A project's `projects/<id>/` here (its taxonomy
+and integration scripts) is derived from that project and carries **its
+license**, named per project in
 `projects/registry.json` and assigned per path in `REUSE.toml`
 (`LICENSES/` holds every text; `reuse lint` passes). gzapp's subtrees are
 proprietary and confidential, which is why this repository is private
 while they are in it. `tools/fabric/lint.py` refuses a project subtree
 with no assignment, or one that disagrees with the registry.
+
+gzapp's knowledge moved into gzapp on 2026-09-13; nothing project-derived
+remains here except `projects/gzapp/`.

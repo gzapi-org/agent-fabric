@@ -4,15 +4,14 @@
 #   the control plane — roles, routing, runtime, communication, policies,
 #   tools, tests, docs, memory/domains, memory/shared — is Apache-2.0;
 #
-#   a managed PROJECT's subtrees — memory/projects/<id>/ (knowledge distilled
-#   from that project's tree and sessions, here only until it moves into the
-#   project's own repository under .agent-fabric/memory/) and projects/<id>/
-#   (its taxonomy and integration scripts, extracted from its history) —
-#   carry THAT project's license, whatever it is. They are derived from the
-#   project and are not the fabric's to relicense. projects/registry.json
-#   names the license per project; tools/fabric/lint.py refuses a project
-#   subtree this file does not assign, and an assignment that disagrees with
-#   the registry. Once a project's subtrees have left, its override goes too.
+#   a managed PROJECT's knowledge lives in the project's own repository
+#   (<working copy>/.agent-fabric/memory/) under that project's license, and
+#   is not here. What IS still here per project is projects/<id>/ — its
+#   taxonomy and integration scripts, extracted from its history — which
+#   carries THAT project's license: derived from the project, not the
+#   fabric's to relicense. projects/registry.json names the license per
+#   project; tools/fabric/lint.py refuses a project subtree this file does
+#   not assign, and an assignment that disagrees with the registry.
 #
 # Later annotations take precedence over earlier ones for the paths they
 # match, so the project subtrees are listed after the catch-all.
@@ -30,7 +29,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # gzapp — proprietary and confidential (LICENSES/LicenseRef-gzapp-Proprietary.txt).
 # While these subtrees are here, the repository stays private.
 [[annotations]]
-path = ["memory/projects/gzapp/**", "projects/gzapp/**"]
+path = ["projects/gzapp/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Andrea Benetton"
 SPDX-License-Identifier = "LicenseRef-gzapp-Proprietary"

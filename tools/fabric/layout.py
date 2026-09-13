@@ -35,9 +35,9 @@ working copy root; a fabric-side slice (charter, domain, memory/shared) is
 linked as `../agent-fabric/<path>`, the sibling-checkout layout every
 adapter already assumes.
 
-TRANSITION. A project whose memory has not moved yet still has it under
+A project whose memory has not moved yet would still have it under
 `memory/projects/<project>/` here; that location is honoured while it
-exists and is listed in docs/migration/REMOVAL-PLAN.md.
+exists (no project is there today).
 
 Domain ids currently equal role ids: the extracted corpus filed domain
 knowledge per role, and renaming domains was not part of the extraction.

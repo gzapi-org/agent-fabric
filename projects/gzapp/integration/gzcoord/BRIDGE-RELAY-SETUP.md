@@ -57,7 +57,7 @@ unavailable; nothing else breaks.
 
 Only one clone does this, and everything it creates stays inside that
 clone, under the already-gitignored `.gzcoord/`. The hosting duty is
-the **gzcoord-coordinator role's**: the relay dies with its hosting
+the **fabric-coordinator role's**: the relay dies with its hosting
 session, so that role's session start is the activation — the
 `SessionStart` drain (`scripts/inbox.mjs`, "Receiving", below) starts
 the relay before draining whenever this clone hosts and the relay is

@@ -448,7 +448,8 @@ test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to t
 });
 
 test('slugOf finds the longest whole-token slug an instance carries', () => {
-  assert.equal(slugOf('gzapp-gzcoord-coordinator', taxonomy), 'gzcoord-coordinator');
+  assert.equal(slugOf('agent-fabric-coordinator', taxonomy), 'fabric-coordinator');
+  assert.equal(slugOf('gzapp-gzcoord-coordinator', taxonomy), undefined);   // renamed role: the old slug is not in the catalogue
   assert.equal(slugOf('architect-cto-01', taxonomy), 'architect-cto');
   assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
   assert.equal(slugOf('gzapp-claude2', taxonomy), undefined);
@@ -559,7 +560,10 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, new RegExp(`^FROM: ${os.hostname().split('.')[0]}/${login}$`, 'm'));
     assert.match(r.stdout, /^ROLE: web-dev$/m);
-    assert.match(r.stdout, /^PROJECT: gzapp$/m);
+    // The project is the WORKING COPY's when the suite runs inside a
+    // registered one (agent-fabric is a managed project itself); the
+    // binding's project applies only outside any.
+    assert.match(r.stdout, new RegExp(`^PROJECT: ${whoami().project ?? 'gzapp'}$`, 'm'));
   });
 });
 

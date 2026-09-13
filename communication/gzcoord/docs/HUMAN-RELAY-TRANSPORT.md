@@ -147,7 +147,7 @@ account named otherwise (`user`) is an agent like any other. The
 working copy the session is in is not part of the address.
 
 `ROLE` MUST be the role's **slug** in agent-fabric's
-`identities/roles/catalog.json` — its `id`: `gzcoord-coordinator`,
+`identities/roles/catalog.json` — its `id`: `fabric-coordinator`,
 `architect-cto`, `backend-dev` — never a title such as `Architect / CTO`
 or a free description such as `Application Architect`
 (`runtime/README.md`, "Role sourcing"). The person resolves `TO-ROLE` by

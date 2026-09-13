@@ -112,7 +112,7 @@ export function forMe(msg, me) {
 
 // The relay dies with its hosting session, and the hosting working copy —
 // the one holding the relay runtime (venv) and the token — is the
-// gzcoord-coordinator's (a project integration rule, not a protocol
+// fabric-coordinator's (a project integration rule, not a protocol
 // one). So the host's session start IS the activation: if the relay is
 // not answering, bring it up before draining, exactly as the runbook
 // says. Working copies without the venv return false and skip silently:

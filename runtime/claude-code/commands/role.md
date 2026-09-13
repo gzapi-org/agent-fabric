@@ -1,5 +1,5 @@
 ---
-description: Activate a role for this agent — install its skills and load its knowledge (flutter-dev, backend-dev, db-admin, web-dev, edge-hosting, devex-tooling, architect-cto, product-i18n, domain-transit, gzcoord-coordinator, fabric-coordinator)
+description: Activate a role for this agent — install its skills and load its knowledge (flutter-dev, backend-dev, db-admin, web-dev, edge-hosting, devex-tooling, architect-cto, product-i18n, domain-transit, fabric-coordinator)
 argument-hint: "<role> | status | deactivate | <role> --force | <role> --project <id>"
 allowed-tools: Bash(python3 __AGENT_FABRIC_ROOT__/tools/fabric/role.py:*), Read
 ---

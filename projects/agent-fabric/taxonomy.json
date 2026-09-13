@@ -1,7 +1,7 @@
 {
   "version": 1,
   "project": "agent-fabric",
-  "note": "Binding rules for agent-fabric as a managed repository of its own. The control plane belongs to fabric-coordinator; the protocol text stays additionally attributable to gzcoord-coordinator; distilled project knowledge under memory/projects/<id>/ is that project's roles' work and is not bound here.",
+  "note": "Binding rules for agent-fabric as a managed repository of its own. The whole control plane, protocol text included, is fabric-coordinator's; distilled project knowledge under memory/projects/<id>/ is that project's roles' work and is not bound here.",
   "projects": {
     "include": [
       "agent-fabric"
@@ -48,24 +48,15 @@
         "routing",
         "shim",
         "charter",
-        "authority"
-      ],
-      "types": [
-        "decision"
-      ]
-    },
-    {
-      "id": "gzcoord-coordinator",
-      "paths": [
-        "communication/gzcoord/protocol/"
-      ],
-      "keywords": [
+        "authority",
         "gzcoord",
         "GZCOORD/1",
         "message format",
         "conformance"
       ],
-      "types": []
+      "types": [
+        "decision"
+      ]
     }
   ]
 }

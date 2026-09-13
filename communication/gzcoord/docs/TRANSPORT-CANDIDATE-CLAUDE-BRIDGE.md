@@ -5,7 +5,7 @@ candidate against
 [`TRANSPORT-ADAPTER-CONTRACT.md`](TRANSPORT-ADAPTER-CONTRACT.md) so the
 decision has something to stand on. Selecting a transport, and building
 the adapter, belong to whoever owns the runtime surface — not to the
-gzcoord-coordinator role, which owns the protocol the adapter carries.
+fabric-coordinator role (formerly gzcoord-coordinator), which owns the protocol the adapter carries.
 
 Evaluated from the project's own documentation
 (<https://github.com/constripacity/Claude-Bridge>), not from a running

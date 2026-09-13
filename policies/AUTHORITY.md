@@ -27,7 +27,7 @@ explicitly names one.
 | `projects/<project>/taxonomy.json` (where roles apply in a repository) | `fabric-coordinator` | same |
 | `routing/policies/review-grade.json`, the review class's model | `fabric-coordinator` | same; `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |
 | `policies/authority.json`, who holds `fabric-coordinator` | `fabric-coordinator` | same, read from the base side of the diff so a branch cannot appoint itself |
-| `communication/gzcoord/protocol/*` | `fabric-coordinator`, and `gzcoord-coordinator` as the narrower protocol role | no tripwire yet — both charters state it |
+| `communication/gzcoord/protocol/*` | `fabric-coordinator` | no tripwire yet — its charter states it |
 | a managed project's architecture (gzapp: ADRs, contracts) | that project's roles (`architect-cto`) | the project's own guards, in its repository |
 | a distilled slice under `memory/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |
 | `recall.md` for a role | the role itself | authored, exempt from provenance; must stay under `identities/roles/` |

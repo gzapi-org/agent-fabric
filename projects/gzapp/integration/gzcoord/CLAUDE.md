@@ -8,7 +8,7 @@ about it.
 ## GZCoord is ACTIVE — over the relay the coordinator hosts
 
 **A relay carries the messages, and a person can.** The
-gzcoord-coordinator's working copy hosts a Claude-Bridge relay on this
+fabric-coordinator's working copy hosts a Claude-Bridge relay on this
 host ([`BRIDGE-RELAY-SETUP.md`](BRIDGE-RELAY-SETUP.md)); every gzapp
 session drains it at start and can wait on it. When the relay is down,
 the sending session prints a validated GZCOORD/1 message in a fenced
@@ -30,7 +30,7 @@ block and the person copies it into the receiving session's prompt
   the last `HELLO` they saw, and one addressing field per message is the
   whole routing rule.
 - **Do** activate what you own at session start. The relay dies with
-  its hosting session and the gzcoord-coordinator hosts it: the
+  its hosting session and the fabric-coordinator hosts it: the
   `SessionStart` drain brings the relay up before draining, and only the
   hosting working copy (the one holding `.gzcoord/venv`) can — every
   other skips by design, one relay, one owner.
@@ -98,8 +98,8 @@ itself again.
 
 ## Authority over the spec
 
-The **gzcoord-coordinator** role
-(`agent-fabric/identities/roles/gzcoord-coordinator/charter.md`) is the
+The **fabric-coordinator** role
+(`agent-fabric/identities/roles/fabric-coordinator/charter.md`) is the
 only role that changes `communication/gzcoord/protocol/*`. Other sessions
 may propose changes and route them through that role rather than editing
 the spec directly. Holding the role is an agent's runtime binding, not a

@@ -4,7 +4,7 @@
 agent-fabric under `communication/gzcoord/`; gzapp's integration — the
 relay it hosts, the channel, the session-start drain — is
 `projects/gzapp/integration/gzcoord/` there. Messages travel over the
-Claude-Bridge relay the gzcoord-coordinator hosts
+Claude-Bridge relay the fabric-coordinator hosts
 (`BRIDGE-RELAY-SETUP.md`), with a person as the fallback carrier
 (`communication/gzcoord/docs/HUMAN-RELAY-TRANSPORT.md`). GZCoord is
 advisory: sessions still coordinate authoritatively through `origin` —

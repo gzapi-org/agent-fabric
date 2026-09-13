@@ -74,27 +74,34 @@ setup git -C "$repo" config gpg.format openpgp
 setup git -C "$repo" commit -q --allow-empty -m "first"
 setup git -C "$repo" branch -M main
 
-assert_eq "the title is <clone>/<branch>" "my-clone/main" "$(run_hook "$repo" | title_of)"
+# The agent (the login) leads the title; the working copy and branch follow.
+agent="$(id -un)"
+assert_eq "the title is <agent> <working-copy>/<branch>" "$agent my-clone/main" "$(run_hook "$repo" | title_of)"
 
 # ── the repo's own branch naming, whose prefix must be stripped ─────
 # Branches here are <host>/<clone>/<type>/<desc>; used whole, the clone
 # appears twice and the task falls off the end of a narrow tab.
 host="$(hostname -s 2>/dev/null || hostname 2>/dev/null)"
 setup git -C "$repo" checkout -q -b "$host/my-clone/feat/some-task"
-assert_eq "this clone's own branch prefix is stripped" \
-  "my-clone/feat/some-task" "$(run_hook "$repo" | title_of)"
+assert_eq "this working copy's own (legacy) branch prefix is stripped" \
+  "$agent my-clone/feat/some-task" "$(run_hook "$repo" | title_of)"
+
+# The current convention names the AGENT in the second segment.
+setup git -C "$repo" checkout -q -b "$host/$agent/feat/mine"
+assert_eq "this agent's branch prefix is stripped" \
+  "$agent my-clone/feat/mine" "$(run_hook "$repo" | title_of)"
 
 # A prefix belonging to a DIFFERENT clone is not this clone's, so it stays:
 # stripping it would claim work that is not ours.
 setup git -C "$repo" checkout -q -b "$host/other-clone/feat/theirs"
-assert_eq "another clone's prefix is left alone" \
-  "my-clone/$host/other-clone/feat/theirs" "$(run_hook "$repo" | title_of)"
+assert_eq "another session's prefix is left alone" \
+  "$agent my-clone/$host/other-clone/feat/theirs" "$(run_hook "$repo" | title_of)"
 
 # ── detached HEAD: every subagent worktree runs in one ──────────────
 setup git -C "$repo" checkout -q --detach
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 assert_eq "detached HEAD shows the short SHA, not an empty half-title" \
-  "my-clone/$sha" "$(run_hook "$repo" | title_of)"
+  "$agent my-clone/$sha" "$(run_hook "$repo" | title_of)"
 
 # ── a linked worktree reports the SESSION, not the worktree ─────────
 #
@@ -106,7 +113,7 @@ setup git -C "$repo" checkout -q main
 linked="$SANDBOX/linked/agent-probe"
 setup git -C "$repo" worktree add -q -b worktree-agent-probe "$linked" main
 assert_eq "a linked worktree reports the main clone and ITS branch" \
-  "my-clone/main" "$(run_hook "$linked" | title_of)"
+  "$agent my-clone/main" "$(run_hook "$linked" | title_of)"
 git -C "$repo" worktree remove --force "$linked" >/dev/null 2>&1 || true
 
 # ── the never-fail-loudly contract ──────────────────────────────────

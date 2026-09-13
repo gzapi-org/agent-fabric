@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:claims",
+  "title": "Distiller output — the contract between judgement and assembly",
+  "description": "Distillers judge; tools assemble. A distiller never writes a role file: it emits claims, and the assembler decides which slice each one lands in, writes the frontmatter, regenerates the index and merges the citation graph. Same claims in, byte-identical tree out — which is what makes a drain reviewable as a content diff.",
+  "type": "object",
+  "required": [
+    "role",
+    "claims"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "role": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "drain": {
+      "type": "string",
+      "description": "Drain cycle identifier."
+    },
+    "telemetry": {
+      "description": "Density is size-invariant by construction, and this is how that is checked: a ratio that jumps an order of magnitude against history is an alarm for review, never a quota to hit.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observations_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admitted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "merged_into_existing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "description": "An empty array is a correct output. A drain that admits nothing has found nothing that clears the bar.",
+      "items": {
+        "type": "object",
+        "required": [
+          "class",
+          "topic",
+          "body",
+          "evidence"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "description": "The epistemic class. These decay and verify differently: domain against the field, solution against the tree, intersection against the governing decisions, rationale until it is promoted to an ADR.",
+            "enum": [
+              "domain",
+              "solution",
+              "intersection",
+              "rationale",
+              "workflow",
+              "threads"
+            ]
+          },
+          "topic": {
+            "description": "Slice key. Claims sharing a topic land in the same slice; a slice that outgrows its budget splits.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 240,
+            "description": "A one-line statement of the finding, not a topic label. Distillers naturally write these as claims ('X causes Y, and the cost is Z'), which is exactly what makes a useful retrieval cue in the index."
+          },
+          "body": {
+            "description": "Prose, with inline citations where the source carried them. Written to be read by whoever holds the role.",
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "description": "Observation content hashes supporting the claim. The rubric asks for at least two independent observations, or one decision-type observation.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "citations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "knowledge_scope": {
+            "enum": [
+              "full",
+              "domain-only"
+            ],
+            "default": "full"
+          },
+          "merge_target": {
+            "description": "Existing slice/section this claim strengthens rather than adds to. Preferring a merge over an addition is what keeps a long-lived role file dense instead of merely long.",
+            "type": "string"
+          },
+          "shared_with": {
+            "description": "Other roles that own this claim. Two or more owners route it to a shared slice, so the knowledge lives once and cannot drift between copies.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            }
+          }
+        },
+        "allOf": [
+          {
+            "$comment": "Domain-only evidence comes from a sibling project: it is transferable knowledge about a FIELD, never a statement about this repository. Filed as `solution` it asserts what this system implements; as `workflow` or `rationale` it asserts how this team works. tools/roles/assemble.py enforces this in code as well, because lint's fallback validator cannot evaluate a conditional when jsonschema is absent.",
+            "if": {
+              "properties": {
+                "knowledge_scope": {
+                  "const": "domain-only"
+                }
+              },
+              "required": [
+                "knowledge_scope"
+              ]
+            },
+            "then": {
+              "properties": {
+                "class": {
+                  "const": "domain"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

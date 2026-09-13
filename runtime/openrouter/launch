@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# tools/launch/ori
+#
+# Launch this working copy's Claude Code session through OpenRouter, with
+# the model tiers this ROLE INSTANCE is assigned, from the committed
+# profile registry.
+#
+#   tools/launch/ori [claude args...]     # resolve, export, exec
+#   tools/launch/ori --print              # resolve and print; no exec
+#
+# WHY THIS EXISTS. Launching is a decision no session can make for itself:
+# the owner ruled (2026-09-12, on architect-cto-01-0060) that one launch
+# decides the provider for EVERYTHING under it, subagents included, and
+# that the tiers on the ori path are per-tier profile — haiku/sonnet cheap,
+# opus a reviewer-grade target. Neither modelOverrides nor repo settings
+# can do this: modelOverrides is taken as the WHOLE MAP from the highest
+# precedence scope that sets it (so any scope both paths share binds both
+# paths), while ANTHROPIC_DEFAULT_*_MODEL are OVERRIDABLE process env —
+# the launcher exports them, `exec ori claude` carries them to every agent.
+#
+# THE CHAIN IT RESOLVES, deep-merged in order, later wins (per 0062):
+#   defaults
+#   <- roles.<role>          (from .roles/.instance/state.json)
+#   <- instances.<dir_basename>
+#   <- .roles/.instance/model-profile.local.json   (gitignored, optional)
+#
+# The merged opus tier MUST be in review_grade (.roles/registry/
+# model-profiles.json — policy owned by architect-cto): a review's failure
+# mode is a green PR that merges, so the reviewer's model is never a cost
+# cut. Lint enforces this on the committed file; the launcher enforces it
+# again on the MERGED result, because the local override layer is where a
+# cheap-opus experiment would sneak in.
+#
+# REFUSES, fail-closed, before spawning anything:
+#   - no .roles/.instance/state.json         -> "run /role first"
+#   - no .roles/registry/model-profiles.json -> the registry is not pulled
+#   - merged opus not in review_grade
+#   - pass-through args carrying --settings or --setting-sources
+#     (ori's own provider fence uses --settings; a caller's one would
+#     override it and the session could silently leave OpenRouter)
+#   - any settings scope (the managed-policy file, ~/.claude/settings.json,
+#     ~/.claude/settings.local.json, $CLAUDE_CONFIG_DIR/settings.json, the
+#     launch clone's and $PWD's .claude/settings{,.local}.json) carrying a
+#     model pin — env.ANTHROPIC_*, env.CLAUDE_CODE_SUBAGENT_MODEL,
+#     modelOverrides — or CLAUDE_CODE_SUBAGENT_MODEL in the caller's
+#     environment (a settings-scope pin outranks the profile's exports;
+#     the subagent variable overrides every dispatch's model)
+#   - a merged model that is not a model id per the registry schema
+#     (a local override of null, a number, "" or prose)
+#   - ori not authenticated, or authenticated from anything but the
+#     environment (`ori auth --json`: authenticated AND source.kind ==
+#     environment, exit 0)
+#
+# CREDENTIAL: an OpenRouter API key per session account, as
+# OPENROUTER_API_KEY in that account's ~/.bashrc — never in the repo.
+# `ori auth --json` must report the environment as the source.
+set -uo pipefail
+
+# Derived from the launch directory ONLY — never inherited. The scopes this
+# fence inspects must be the scopes the child loads, and the child starts
+# in $PWD: an inherited REPO_ROOT pointing at another clone let the fence
+# pass on that clone's clean .claude/ while exec'ing in this one, pinned
+# (review on PR #679, judged CONFIRMED). The guards keep the overridable
+# idiom because a guard only reports; this file spawns.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+REGISTRY="$REPO_ROOT/.roles/registry/model-profiles.json"
+STATE="$REPO_ROOT/.roles/.instance/state.json"
+LOCAL_OVERRIDE="$REPO_ROOT/.roles/.instance/model-profile.local.json"
+
+die() { echo "ori-launch: $*" >&2; exit 1; }
+
+# --print may sit anywhere in the arguments; as $1 only, `ori --verbose
+# --print` passed it through to claude and exec'd a real session.
+PRINT_ONLY=0
+ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--print" ]]; then PRINT_ONLY=1; else ARGS+=("$arg"); fi
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
+# ── refusals ────────────────────────────────────────────────────────
+[[ -f "$STATE" ]] || die ".roles/.instance/state.json is absent in this clone.
+  The launcher resolves the profile from this instance's role. Run
+  /role <role> first, then re-run."
+[[ -f "$REGISTRY" ]] || die "$REGISTRY is missing — pull main; #670 adds it."
+command -v ori >/dev/null 2>&1 || die "the ori CLI is not on PATH."
+
+# Pass-through args must not be able to fence ori out of OpenRouter.
+for arg in "$@"; do
+    [[ "$arg" == --settings || "$arg" == --settings=* ]] &&
+        die "passing --settings would disable ori's provider fence (its own
+  --settings carries apiKeyHelper and blanks every other provider
+  variable). Launch without it; per-session settings go through the
+  profile layers, not the CLI."
+    [[ "$arg" == --setting-sources || "$arg" == --setting-sources=* ]] &&
+        die "passing --setting-sources would disable ori's provider fence."
+done
+
+# A settings-scope pin outranks the profile's exports (ori composes the
+# child env as settings-env-first for the four alias keys; Claude Code
+# merges every scope's env block into the process, local > project >
+# user), so the launcher refuses rather than race — in EVERY scope, not
+# only the user file: the committed guard deliberately leaves the
+# gitignored .claude/settings.local.json to the launcher, and the first
+# version fenced ~/.claude/settings.json alone (review, judged CONFIRMED).
+# The predicate: env.ANTHROPIC_* (not only _DEFAULT_ — ANTHROPIC_MODEL is
+# a pin too), env.CLAUDE_CODE_SUBAGENT_MODEL, modelOverrides. NOT a top-
+# level `model`: that is the session default, which the explicit
+# `--model <session>` this launcher passes outranks, and it touches no
+# tier alias — the committed guard refuses it in committed scopes for a
+# different reason (nothing committed may pin), but a user preference
+# there is harmless here. An unreadable file is not evidence of pins.
+# $PWD's .claude/ is scanned as well when the launch directory is not the
+# toplevel, and the managed-policy file (root-owned; outranks every other
+# scope) — a missing file is skipped either way.
+for f in /etc/claude-code/managed-settings.json \
+         "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
+         "${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/settings.json}" \
+         "$REPO_ROOT/.claude/settings.json" "$REPO_ROOT/.claude/settings.local.json" \
+         "$PWD/.claude/settings.json" "$PWD/.claude/settings.local.json"; do
+    [[ -n "$f" && -f "$f" ]] || continue
+    PINS="$(python3 - "$f" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1])) or {}
+except Exception:
+    sys.exit(0)
+bad = []
+env = d.get("env") or {}
+if isinstance(env, dict):
+    bad += sorted("env." + k for k in env if k.startswith("ANTHROPIC_") or k == "CLAUDE_CODE_SUBAGENT_MODEL")
+if "modelOverrides" in d: bad.append("modelOverrides")
+print(" ".join(bad))
+PY
+)"
+    [[ -z "$PINS" ]] || die "$f carries model pins ($PINS), which would silently outrank the profile. Remove them; per-session tiers go through .roles/.instance/model-profile.local.json."
+done
+[[ -z "${CLAUDE_CODE_SUBAGENT_MODEL:-}" ]] ||
+    die "CLAUDE_CODE_SUBAGENT_MODEL is set in the environment; it overrides every subagent's model regardless of review_grade. Unset it."
+
+# ── resolve the profile ─────────────────────────────────────────────
+SCHEMA="$REPO_ROOT/.roles/schema/model-profiles.schema.json"
+[[ -f "$SCHEMA" ]] || die "$SCHEMA is missing — pull main; #670 adds it."
+PROFILE_JSON="$(python3 - "$REGISTRY" "$STATE" "$LOCAL_OVERRIDE" "$SCHEMA" <<'PY'
+import json, os, re, sys
+registry_path, state_path, local_path, schema_path = sys.argv[1:5]
+reg = json.load(open(registry_path))
+state = json.load(open(state_path)) if os.path.exists(state_path) else {}
+local = json.load(open(local_path)) if os.path.exists(local_path) else {}
+if not isinstance(local, dict):
+    sys.exit("model-profile.local.json is %s, not an object" % type(local).__name__)
+
+def deep_merge(base, over):
+    if not isinstance(over, dict):
+        sys.exit("a profile layer is %r, not an object" % (over,))
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+role = state.get("role")
+instance = state.get("dir_basename")
+merged = deep_merge(reg.get("defaults", {}), {})
+merged = deep_merge(merged, reg.get("roles", {}).get(role, {}) if role else {})
+merged = deep_merge(merged, reg.get("instances", {}).get(instance, {}) if instance else {})
+merged = deep_merge(merged, local)
+if not role:
+    print("ori-launch: warning — state.json names no role; resolving from defaults/instance only.", file=sys.stderr)
+
+# Every merged model must be a model id per the registry schema — the
+# committed file is schema-checked by tools/roles/lint.py, the local
+# layer is not, and a null/number/""/prose there passed the emptiness
+# checks as the string "None" (or as nothing, which ori silently replaces
+# with its own default) and reached `--model` (review, judged CONFIRMED).
+pat = re.compile(json.load(open(schema_path))["$defs"]["model_id"]["pattern"])
+tiers = merged.get("tiers")
+if not isinstance(tiers, dict):
+    sys.exit("merged profile: tiers is %r, not an object" % (tiers,))
+for name, val in [("session", merged.get("session"))] + [("tiers." + t, tiers.get(t)) for t in ("haiku", "sonnet", "opus", "fable")]:
+    # fullmatch: with re.match, the pattern's trailing $ accepts a value
+    # ending in "\n" (review on PR #679) — bash's $(…) happened to strip it
+    # downstream, which is not a contract.
+    if not isinstance(val, str) or not pat.fullmatch(val):
+        sys.exit("merged profile: %s is %r, not a model id (%s)" % (name, val, pat.pattern))
+merged["_role"] = role
+merged["_instance"] = instance
+print(json.dumps(merged))
+PY
+)" || die "could not resolve the profile (see the message above)."
+
+SESSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"])' <<<"$PROFILE_JSON")"
+OPUS="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tiers"]["opus"])' <<<"$PROFILE_JSON")"
+
+# review_grade check on the MERGED result — the local layer is where a
+# cheap-opus experiment would otherwise sneak through.
+if ! python3 - "$REGISTRY" "$OPUS" <<'PY'
+import json, sys
+rg = json.load(open(sys.argv[1])).get("review_grade", [])
+sys.exit(0 if sys.argv[2] in rg else 1)
+PY
+then
+    die "merged opus tier '$OPUS' is not in review_grade (.roles/registry/model-profiles.json).
+  A review's failure mode is a green PR that merges, so the reviewer's
+  model is policy, not a cost dial. Change the profile or extend
+  review_grade with architect-cto's approval."
+fi
+
+# ── the pins ─────────────────────────────────────────────────────────
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$(python3 -c 'import json,sys;print((json.load(sys.stdin).get("tiers") or {}).get("haiku",""))' <<<"$PROFILE_JSON")"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$(python3 -c 'import json,sys;print((json.load(sys.stdin).get("tiers") or {}).get("sonnet",""))' <<<"$PROFILE_JSON")"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$OPUS"
+export ANTHROPIC_DEFAULT_FABLE_MODEL="$(python3 -c 'import json,sys;print((json.load(sys.stdin).get("tiers") or {}).get("fable",""))' <<<"$PROFILE_JSON")"
+
+# Auth: ori must be working from the environment BEFORE we exec, because a
+# prompt at this point would come after we already exported the pins.
+# The check is a CONJUNCTION on the documented shape — {"ok":true,"data":
+# {"authenticated":true,"source":{"kind":"environment",...}}} — and keeps
+# ori's exit status. The first version accepted `authenticated OR a
+# source naming the environment`, which admitted an unauthenticated
+# environment key, an authenticated `ori login`/workspace credential,
+# and even a refusal MESSAGE containing the word "environment" (review,
+# judged CONFIRMED, all three exec'd).
+AUTH="$(ori auth --json 2>/dev/null)"; AUTH_RC=$?
+if [[ $AUTH_RC -ne 0 ]] || ! python3 - "$AUTH" <<'PY'
+import json, sys
+try:
+    d = json.loads(sys.argv[1] or "{}")
+except Exception:
+    sys.exit(1)
+if not isinstance(d, dict): sys.exit(1)
+data = d.get("data") if isinstance(d.get("data"), dict) else d
+src = data.get("source") if isinstance(data.get("source"), dict) else {}
+sys.exit(0 if data.get("authenticated") is True and src.get("kind") == "environment" else 1)
+PY
+then
+    die "ori is not authenticated from the environment (ori auth exit $AUTH_RC). This account needs OPENROUTER_API_KEY in ~/.bashrc — a stored \`ori login\` credential is deliberately not accepted, because per-instance spend follows the key (ori auth --json to inspect)."
+fi
+
+LABEL="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("_role") or "?") + "/" + (d.get("_instance") or "?"))' <<<"$PROFILE_JSON")"
+
+# The session model reaches claude only as `--model`, which nothing inside
+# the session can read back — so tools/launch/model-audit.sh could not
+# report it (review on PR #679, judged CONFIRMED). Stamp it into the
+# child's environment, together with the profile it came from. The stamp
+# records what is ACTUALLY applied: 0060 says an explicit --model on the
+# command line wins, so when the caller passes one, that value is
+# stamped, not the profile's.
+EFFECTIVE_SESSION="$SESSION"
+CALLER_MODEL=0
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--model" ]]; then EFFECTIVE_SESSION="$arg"; CALLER_MODEL=1; fi
+    if [[ "$arg" == --model=* ]]; then EFFECTIVE_SESSION="${arg#--model=}"; CALLER_MODEL=1; fi
+    prev="$arg"
+done
+export GZAPP_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
+export GZAPP_LAUNCH_PROFILE="$LABEL"
+
+if (( PRINT_ONLY )); then
+    echo "# resolved profile for $LABEL"
+    echo "  session : $SESSION"
+    [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
+    echo "  haiku   : $ANTHROPIC_DEFAULT_HAIKU_MODEL"
+    echo "  sonnet  : $ANTHROPIC_DEFAULT_SONNET_MODEL"
+    echo "  opus    : $ANTHROPIC_DEFAULT_OPUS_MODEL"
+    echo "  fable   : $ANTHROPIC_DEFAULT_FABLE_MODEL"
+    echo ""
+    echo "  export ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL"
+    echo "  export ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL"
+    echo "  export ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_DEFAULT_OPUS_MODEL"
+    echo "  export ANTHROPIC_DEFAULT_FABLE_MODEL=$ANTHROPIC_DEFAULT_FABLE_MODEL"
+    echo "  export GZAPP_LAUNCH_SESSION_MODEL=$GZAPP_LAUNCH_SESSION_MODEL"
+    echo "  export GZAPP_LAUNCH_PROFILE=$GZAPP_LAUNCH_PROFILE"
+    exit 0
+fi
+
+# When the caller supplied --model, the launcher's own is OMITTED rather
+# than placed first: "last wins" would be an assumption about claude's
+# argv handling, and the stamp above must not be able to disagree with
+# what the child actually applies.
+if (( CALLER_MODEL )); then
+    exec ori claude "$@"
+fi
+exec ori claude --model "$SESSION" "$@"

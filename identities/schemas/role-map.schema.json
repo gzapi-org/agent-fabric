@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:role-map",
+  "title": "Observation to role assignment",
+  "description": "Which roles each observation informs, and how that was decided. Provenance is recorded so a mechanical path match is never mistaken for a judgement, and vice versa.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "required": ["roles", "provenance"],
+    "additionalProperties": false,
+    "properties": {
+      "roles": {
+        "type": "array", "minItems": 1, "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+      },
+      "provenance": {
+        "description": "path/type/keyword are mechanical; model is the classification pass; needs-project-attribution means the row was deferred because its project was unsettled.",
+        "enum": ["path", "type", "path+type", "keyword", "model", "needs-project-attribution"]
+      },
+      "knowledge_scope": {
+        "description": "domain-only rows come from a sibling project: they may support domain theory and never a claim about what this system implements.",
+        "enum": ["full", "domain-only"],
+        "default": "full"
+      },
+      "confidence": { "enum": ["high", "low"] }
+    }
+  }
+}

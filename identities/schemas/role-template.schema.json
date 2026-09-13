@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:role-template",
+  "title": "Provenance frontmatter carried by every role knowledge file",
+  "description": "Written by the assembler, never by hand. It is what makes a claim auditable back to its sources — including which clone and host produced them, and including after the observation store has been archived and emptied.",
+  "type": "object",
+  "required": [
+    "role",
+    "class",
+    "description",
+    "distilled_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "role": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "class": {
+      "enum": [
+        "charter",
+        "domain",
+        "solution",
+        "intersection",
+        "rationale",
+        "workflow",
+        "recall",
+        "threads",
+        "index",
+        "shared"
+      ]
+    },
+    "description": {
+      "description": "One line, written as a retrieval cue: it becomes this slice's line in the role INDEX, which is the only thing a session sees before deciding to read further.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "tier": {
+      "description": "1 = loaded at role activation; 2 = loaded on demand via the index.",
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "derived_from": {
+      "description": "Observation content hashes. Never local ids: those are per-database autoincrements that collide across hosts.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "origin": {
+      "description": "Which clone and host the evidence came from, resolved through the append-only binding registry so a rename or a host move does not break the trail.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clone_id": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "corpus": {
+      "type": "string"
+    },
+    "distilled_at": {
+      "type": "string"
+    },
+    "knowledge_scope": {
+      "enum": [
+        "full",
+        "domain-only"
+      ],
+      "default": "full"
+    },
+    "shared_with": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "token_budget": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "collisions": {
+      "description": "Titles that collided in this slice and were kept as '(N)' rather than replaced. The assembler writes it so the warning is a fact the file states — surviving drains that admit nothing for this slice — rather than something inferred from heading shapes, which an authored document may legitimately match.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

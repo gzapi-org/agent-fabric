@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:model-profiles",
+  "title": "Per-role-instance model profiles for the ori (OpenRouter) launch path",
+  "description": "Committed at .roles/registry/model-profiles.json. The repo pins subagent model TIERS (haiku / sonnet / opus / fable) as policy; this file says which OpenRouter model each tier resolves to when a session is launched through the ori path, per role and per role instance. The ori launcher exports the resolved tiers as ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL and the session model as `ori claude --model`, so every subagent in that session follows the same path. Resolution is a deep merge, later wins: defaults <- roles.<role> <- instances.<dir_basename> <- the gitignored .roles/.instance/model-profile.local.json. The vanilla `claude` path never reads this file. Credentials are never here: each session account holds its own OPENROUTER_API_KEY. Authored by architect-cto like charter.md: the review_grade allowlist is policy, the rows are the owner's choices.",
+  "type": "object",
+  "required": [
+    "version",
+    "review_grade",
+    "defaults"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "model_id": {
+      "description": "An OpenRouter model reference as the Anthropic-compatible endpoint accepts it in the `model` field: `vendor/model`, a dated `vendor/model-YYYYMMDD`, a family alias `~vendor/family-latest`, a router `openrouter/<router>`, or a preset `@preset/<slug>`; an optional `:variant` suffix (floor, nitro, exacto) and an optional `[1m]` context hint (a Claude-Code-side marker, stripped by OpenRouter).",
+      "type": "string",
+      "pattern": "^(~?[a-z0-9-]+/[a-z0-9.-]+|@preset/[a-z0-9-]+)(:[a-z]+)?(\\[1m\\])?$"
+    },
+    "profile": {
+      "description": "One layer of the merge. Every field is optional in a layer; the merged result must have a session and all four tiers.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "description": "The main conversation's model: what `ori claude --model` receives unless an explicit --model is given on the command line.",
+          "$ref": "#/$defs/model_id"
+        },
+        "tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "haiku": { "$ref": "#/$defs/model_id" },
+            "sonnet": { "$ref": "#/$defs/model_id" },
+            "opus": {
+              "description": "The review class and every other opus dispatch. The merged value MUST be one of review_grade; lint and the launcher both refuse otherwise.",
+              "$ref": "#/$defs/model_id"
+            },
+            "fable": { "$ref": "#/$defs/model_id" }
+          }
+        },
+        "notes": {
+          "description": "Why this layer differs from the one below it — one or two sentences, for the reader of the file.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "review_grade": {
+      "description": "The closed set of model references the opus tier may resolve to. Policy, owned by architect-cto: a review's failure mode is a green PR that merges, so the reviewer's model is never a cost decision. Add a router or preset here only after a live test has shown Claude Code forwards that reference verbatim.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/model_id" }
+    },
+    "defaults": {
+      "description": "The bottom layer. Must be complete on its own: a session and all four tiers.",
+      "allOf": [
+        { "$ref": "#/$defs/profile" },
+        {
+          "required": ["session", "tiers"],
+          "properties": {
+            "tiers": { "required": ["haiku", "sonnet", "opus", "fable"] }
+          }
+        }
+      ]
+    },
+    "roles": {
+      "description": "Per-role layer, keyed by the role id as in taxonomy.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": { "$ref": "#/$defs/profile" }
+      }
+    },
+    "instances": {
+      "description": "Per-instance layer, keyed by the instance's dir_basename as recorded in .roles/.instance/state.json and registry/bindings.jsonl (e.g. backend-dev-02).",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": { "$ref": "#/$defs/profile" }
+      }
+    }
+  }
+}

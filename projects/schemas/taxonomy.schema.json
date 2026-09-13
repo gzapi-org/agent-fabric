@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:taxonomy",
+  "title": "Role taxonomy and attribution rules",
+  "description": "The rules table the harvest reads. Rules are DATA validated against this schema, never code: adding a role or a path rule is a data change, reviewable as a diff.",
+  "type": "object",
+  "required": ["version", "projects", "reattribution", "roles"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "note": { "type": "string" },
+    "multi_tag_note": { "type": "string" },
+    "projects": {
+      "type": "object",
+      "required": ["include", "exclude", "unattributed_bucket"],
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "description": "Project labels whose observations are ours.",
+          "type": "array", "items": { "type": "string" }, "uniqueItems": true
+        },
+        "exclude": {
+          "description": "Sibling projects with nothing transferable.",
+          "type": "array", "items": { "type": "string" }, "uniqueItems": true
+        },
+        "cross_domain": {
+          "description": "Sibling projects that teach transferable domain theory. Harvested with knowledge_scope=domain-only: eligible for domain claims, never solution claims.",
+          "type": "array", "items": { "type": "string" }, "uniqueItems": true
+        },
+        "cross_domain_note": { "type": "string" },
+        "unattributed_bucket": {
+          "description": "The label the memory plugin's own observer sessions write under, regardless of the work they describe. Rows here carry no project attribution and must be re-attributed.",
+          "type": "string"
+        }
+      }
+    },
+    "reattribution": {
+      "type": "object",
+      "required": ["path_markers", "keywords"],
+      "additionalProperties": false,
+      "properties": {
+        "path_markers": {
+          "type": "object",
+          "required": ["include", "exclude"],
+          "additionalProperties": false,
+          "properties": {
+            "include": { "type": "array", "items": { "type": "string" } },
+            "exclude": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "keywords": {
+          "type": "object",
+          "required": ["include", "exclude"],
+          "additionalProperties": false,
+          "properties": {
+            "include": {
+              "description": "Markers specific to this project. Generic documentation habits (ADR-, ARCH-) do NOT belong here: sibling repos keep their own, so they identify a practice rather than a project.",
+              "type": "array", "items": { "type": "string" }
+            },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "cross_domain": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "paths"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "title": { "type": "string" },
+          "paths": {
+            "description": "Path rules deliberately over-approximate; a path cannot tell one kind of knowledge from another, so several roles may claim the same prefix and the per-claim layer decides.",
+            "type": "array", "items": { "type": "string" }
+          },
+          "keywords": { "type": "array", "items": { "type": "string" } },
+          "types": {
+            "description": "Observation types that assign this role regardless of path.",
+            "type": "array", "items": { "type": "string" }
+          },
+          "candidate": {
+            "description": "True while the cluster has not yet proved it carries its own weight.",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:crossref",
+  "title": "A role's slice of the citation graph, inverted",
+  "description": "artifact -> where it was learned and where that knowledge landed. Answers 'which sessions touched ADR-054, and which slice carries what they learned' — and keeps answering it after the observation store is emptied, because ADRs, PRs, commits and migrations resolve against git and GitHub rather than against the buffer.",
+  "type": "object",
+  "required": ["role", "index"],
+  "additionalProperties": false,
+  "properties": {
+    "role": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "generated_at": { "type": "string" },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(adrs|archs|prs|commits|contracts|error_codes|migrations|files)$": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "observations": {
+                "type": "array", "items": { "type": "string" }, "uniqueItems": true
+              },
+              "slices": {
+                "description": "Role files whose claims cite this artifact.",
+                "type": "array", "items": { "type": "string" }, "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gzapp:roles:references",
+  "title": "Citation graph, keyed by observation content hash",
+  "description": "What each observation cites. This outlives the observation store itself: commits, PRs, ADRs and migrations remain resolvable long after the memory buffer is drained and emptied, which is what keeps distilled claims traceable.",
+  "type": "object",
+  "propertyNames": { "$comment": "content_hash — the only key that is stable across hosts" },
+  "additionalProperties": {
+    "type": "object",
+    "minProperties": 1,
+    "additionalProperties": false,
+    "properties": {
+      "adrs": { "type": "array", "items": { "type": "string", "pattern": "^ADR-\\d{3}$" }, "uniqueItems": true },
+      "archs": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-" }, "uniqueItems": true },
+      "prs": { "type": "array", "items": { "type": "string", "pattern": "^#\\d+$" }, "uniqueItems": true },
+      "commits": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }, "uniqueItems": true },
+      "contracts": { "type": "array", "items": { "type": "string", "pattern": "^urn:gzapp:" }, "uniqueItems": true },
+      "error_codes": { "type": "array", "items": { "type": "string", "pattern": "^error\\." }, "uniqueItems": true },
+      "migrations": {
+        "description": "Numbered, append-only, and the unit the semantic-collision scan guards — its own class, not a plain file path.",
+        "type": "array", "items": { "type": "string" }, "uniqueItems": true
+      },
+      "files": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+    }
+  }
+}

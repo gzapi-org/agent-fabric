@@ -213,10 +213,15 @@ def link_rel(path: str, project: str | None = None) -> str:
     sibling checkout (`../agent-fabric/...`)."""
     path = os.path.abspath(path)
     base = project_link_root(project) if project else FABRIC_ROOT
+    fabric = os.path.abspath(FABRIC_ROOT)
+    # The fabric first, when it is not the base itself: a checkout of the
+    # fabric may sit INSIDE the working copy (CI checks it out under the
+    # workspace), and a fabric slice is still reached through the sibling
+    # prefix, never through wherever this run happened to put the checkout.
+    if base != fabric and os.path.commonpath([path, fabric]) == fabric:
+        return os.path.join(FABRIC_LINK_PREFIX, os.path.relpath(path, fabric))
     if os.path.commonpath([path, base]) == base:
         return os.path.relpath(path, base)
-    if os.path.commonpath([path, FABRIC_ROOT]) == FABRIC_ROOT:
-        return os.path.join(FABRIC_LINK_PREFIX, os.path.relpath(path, FABRIC_ROOT))
     return os.path.relpath(path, base)
 
 

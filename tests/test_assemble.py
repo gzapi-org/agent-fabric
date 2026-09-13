@@ -208,6 +208,32 @@ def test_committed_indexes_carry_the_banner_the_assembler_emits(tmp: str) -> Non
             f"current banner — regenerate it or revert the generator:\n{banner}")
 
 
+def test_fabric_links_use_the_sibling_prefix_even_when_the_checkout_is_nested(tmp: str) -> None:
+    """CI checks agent-fabric out INSIDE the working copy. A fabric slice is
+    still linked as ../agent-fabric/<path>: the prefix names the layout the
+    adapters assume, never where this run put the checkout. Caught live:
+    an index linted clean beside a sibling checkout and drifted in CI."""
+    sys.path.insert(0, os.path.join(ROOT, "tools", "fabric"))
+    import importlib
+    layout = importlib.import_module("layout")
+    wc = os.path.join(tmp, "wc")
+    nested_fabric = os.path.join(wc, "_agent-fabric")
+    os.makedirs(os.path.join(nested_fabric, "memory", "domains", "web-dev"))
+    os.makedirs(os.path.join(wc, ".agent-fabric", "memory", "web-dev"))
+    saved = layout.FABRIC_ROOT
+    try:
+        layout.FABRIC_ROOT = nested_fabric
+        layout.set_working_copy("demo", wc)
+        slice_ = os.path.join(nested_fabric, "memory", "domains", "web-dev", "x.md")
+        assert layout.link_rel(slice_, "demo") == "../agent-fabric/memory/domains/web-dev/x.md"
+        own = os.path.join(wc, ".agent-fabric", "memory", "web-dev", "y.md")
+        assert layout.link_rel(own, "demo") == ".agent-fabric/memory/web-dev/y.md"
+        assert layout.resolve_link("../agent-fabric/memory/domains/web-dev/x.md", "demo") == slice_
+    finally:
+        layout.FABRIC_ROOT = saved
+        layout.set_working_copy("demo", None)
+
+
 def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
     """The committed record must answer "since when" for the next drain.
 
@@ -1058,6 +1084,7 @@ def main() -> int:
         test_index_lists_every_slice,
         test_index_banner_names_which_sections_load_when,
         test_committed_indexes_carry_the_banner_the_assembler_emits,
+        test_fabric_links_use_the_sibling_prefix_even_when_the_checkout_is_nested,
         test_drain_report_carries_the_watermark_forward,
         test_drain_report_records_unattributable_rows,
         test_drain_report_tolerates_a_drain_with_no_harvest_report,

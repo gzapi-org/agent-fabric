@@ -24,6 +24,8 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "launcher" bash policies/run_suite.sh runtime/openrouter/test_launch.sh
     run "charter authority guard" bash policies/run_suite.sh policies/test_check_charter_authority.sh
     run "no-model-pins guard" bash policies/run_suite.sh policies/test_check_repo_settings_carry_no_model_pins.sh
+    run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
+    run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "dispatch guard" bash runtime/claude-code/hooks/test_agent-dispatch-guard.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh

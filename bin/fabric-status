@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# bin/fabric-status — one call, the whole picture: who this session is,
+# what it is bound to, which API path it runs on, and how the capability
+# classes resolve there. Read-only; prints no credentials (a provider
+# variable is reported set or unset, never echoed).
+#
+#   agent-fabric/bin/fabric-status            # human-readable
+#   agent-fabric/bin/fabric-status --json     # the same, as one object
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
+exec python3 - "$ROOT" "${1:-}" <<'PY'
+import importlib.util, json, os, sys
+from urllib.parse import urlsplit
+
+root, mode = sys.argv[1], sys.argv[2]
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+identity = load("fabric_identity", os.path.join(root, "runtime", "identity.py"))
+routing = load("fabric_routing", os.path.join(root, "tools", "fabric", "routing.py"))
+
+ctx = identity.resolve_context()
+binding = identity.read_binding(ctx["agent"])
+
+# --- which API path is this process on? --------------------------------
+base = os.environ.get("ANTHROPIC_BASE_URL", "")
+try:
+    host = (urlsplit(base).hostname or "") if base else ""
+except ValueError:
+    host = ""
+if host == "openrouter.ai" or host.endswith(".openrouter.ai"):
+    provider, path = "openrouter", "broker (ori)"
+elif base:
+    provider, path = "anthropic", "custom base URL (%s)" % host
+else:
+    provider, path = "anthropic", "vanilla claude, Anthropic direct"
+stamp = os.environ.get("AGENT_FABRIC_LAUNCH_SESSION_MODEL") or os.environ.get("GZAPP_LAUNCH_SESSION_MODEL")
+pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                                       "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")}
+present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL"))
+credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BASE_URL"}
+
+# --- how the classes resolve on that provider --------------------------
+classes = {}
+for klass in routing.load_capabilities(root)["classes"]:
+    try:
+        r = routing.resolve(klass, provider, binding.get("role"), ctx["agent"], root=root)
+        classes[klass] = r["composite"] + (" (exported)" if pins.get(routing._load(os.path.join(root, "runtime", "claude-code", "aliases.json"))["env"].get(r["model"], "")) else "")
+    except KeyError as exc:
+        classes[klass] = "unresolved: %s" % exc
+checks = routing.check(root)
+
+report = {
+    "agent": ctx["agent"], "host": ctx["host"],
+    "role": binding.get("role"), "project": ctx["project"], "working_copy": ctx["working_copy"],
+    "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
+    "api": {"provider": provider, "path": path, "base_url_host": host or None,
+            "session_model": stamp or "harness default (not visible from the environment; /status shows it)",
+            "launch_profile": os.environ.get("AGENT_FABRIC_LAUNCH_PROFILE"),
+            "pins": {k: v for k, v in pins.items() if v} or "none (harness defaults)",
+            "credentials": credentials or "none visible in the environment"},
+    "capabilities": classes,
+    "routing_check": "clean" if not checks else checks,
+    "control_plane": root,
+}
+if mode == "--json":
+    print(json.dumps(report, indent=2)); sys.exit(0)
+
+print(f"agent        {report['agent']}@{report['host']}")
+print(f"role         {report['role'] or '(none — /role <role>)'}")
+print(f"project      {report['project'] or '(none)'}    working copy  {report['working_copy'] or '(none)'}")
+print(f"session      {report['session'] or '(unknown)'}    binding updated {report['binding_updated'] or '-'}")
+print()
+print(f"api          {path}")
+print(f"session model {report['api']['session_model']}")
+if report['api']['launch_profile']: print(f"launch profile {report['api']['launch_profile']}")
+print(f"pins         {report['api']['pins'] if isinstance(report['api']['pins'], str) else ', '.join(f'{k}={v}' for k, v in report['api']['pins'].items())}")
+print(f"credentials  {report['api']['credentials'] if isinstance(report['api']['credentials'], str) else ', '.join(f'{k}: set' for k in report['api']['credentials'])}")
+print()
+print(f"capabilities on {provider}:")
+for k, v in classes.items(): print(f"  {k:12} {v}")
+print(f"routing      {report['routing_check'] if isinstance(report['routing_check'], str) else str(len(checks)) + ' finding(s): ' + '; '.join(checks)}")
+print(f"control plane {root}")
+PY

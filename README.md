@@ -79,6 +79,12 @@ inside the gzapp repository, extracted with `git filter-repo`
 the identity migration record and the plan for removing the embedded
 copies from gzapp are all under `docs/migration/`.
 
+## One-call status
+
+```sh
+agent-fabric/bin/fabric-status        # agent, binding, API path, pins, capability resolution, routing health
+```
+
 ## Tests
 
 ```sh

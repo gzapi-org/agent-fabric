@@ -18,7 +18,13 @@ Your name is the account this session runs under. Ask it, never guess it:
 ```sh
 agent-fabric/bin/fabric-whoami          # the agent name (== id -un)
 agent-fabric/bin/fabric-whoami --json   # agent, host, role, project, working copy
+agent-fabric/bin/fabric-status          # all of that plus the API path, model pins,
+                                        # capability resolution and routing health — ONE call
 ```
+
+When asked who you are, what you are bound to, or which API or model
+path this session runs on, run `bin/fabric-status` first and answer from
+it; do not reconstruct the picture from individual files and variables.
 
 Changing directory, renaming a working copy, or opening another project
 changes your context and never your name. Another login in the same

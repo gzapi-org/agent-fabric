@@ -85,8 +85,11 @@ open(out, "a").write("\n")
 PY
 put "$PROJECTS/.claude/settings.json" "$TMP/settings.json"
 
-# 3. /role for this account, and the capability-class agent files.
-put "$CLAUDE_HOME/commands/role.md" "$FABRIC_ROOT/runtime/claude-code/commands/role.md"
+# 3. /role for this account (the command runner refuses shell parameter
+#    expansion, so the control-plane path is substituted literally), and
+#    the capability-class agent files.
+sed "s|__AGENT_FABRIC_ROOT__|$FABRIC_ROOT|g" "$FABRIC_ROOT/runtime/claude-code/commands/role.md" > "$TMP/role.md"
+put "$CLAUDE_HOME/commands/role.md" "$TMP/role.md"
 for f in code-low.md code-medium.md code-high.md; do
     put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
 done

@@ -1,12 +1,15 @@
 ---
 description: Activate a role for this agent — install its skills and load its knowledge (flutter-dev, backend-dev, db-admin, web-dev, edge-hosting, devex-tooling, architect-cto, product-i18n, domain-transit, gzcoord-coordinator)
 argument-hint: "<role> | status | deactivate | <role> --force | <role> --project <id>"
-allowed-tools: Bash(python3:*), Read
+allowed-tools: Bash(python3 __AGENT_FABRIC_ROOT__/tools/fabric/role.py:*), Read
 ---
 
 ## Activate
 
-!`python3 "${AGENT_FABRIC_ROOT:-$HOME/projects/agent-fabric}/tools/fabric/role.py" $ARGUMENTS`
+<!-- __AGENT_FABRIC_ROOT__ is substituted by runtime/claude-code/bootstrap.sh: the
+     command runner refuses shell parameter expansion, so the path is literal. -->
+
+!`python3 __AGENT_FABRIC_ROOT__/tools/fabric/role.py $ARGUMENTS`
 
 ## Now load the role
 

@@ -336,6 +336,61 @@ def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]
     return findings
 
 
+def license_findings(root: str) -> list[str]:
+    """Every project in projects/registry.json names its license, and every
+    project subtree in this repository — memory/projects/<id>/, projects/<id>/
+    — is assigned exactly that license in REUSE.toml. The fabric is
+    Apache-2.0; a project's subtrees are derived from the project and carry
+    the project's terms, so a subtree the REUSE file does not assign would
+    silently read as Apache-2.0, and an assignment that disagrees with the
+    registry is a misstatement either way. The license text itself must be
+    present under LICENSES/ for every identifier used."""
+    findings: list[str] = []
+    reg_path = os.path.join(root, "projects", "registry.json")
+    reuse_path = os.path.join(root, "REUSE.toml")
+    if not os.path.exists(reg_path):
+        return findings
+    try:
+        registry = json.load(open(reg_path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return findings  # the registry's own parse is reported elsewhere
+    projects = registry.get("projects") or {}
+    if not os.path.exists(reuse_path):
+        findings.append("REUSE.toml: missing; every project subtree needs a license assignment")
+        return findings
+    try:
+        import tomllib
+        reuse = tomllib.load(open(reuse_path, "rb"))
+    except Exception as exc:  # noqa: BLE001 - any parse failure is the finding
+        return [f"REUSE.toml: does not parse ({exc})"]
+    assigned: dict[str, str] = {}
+    for ann in reuse.get("annotations") or []:
+        for glob in ann.get("path") or []:
+            assigned[glob] = ann.get("SPDX-License-Identifier", "")
+    licenses_dir = os.path.join(root, "LICENSES")
+    for pid, entry in sorted(projects.items()):
+        lic = entry.get("license")
+        if not isinstance(lic, str) or not lic:
+            findings.append(f"projects/registry.json: project {pid!r} names no license")
+            continue
+        if not os.path.exists(os.path.join(licenses_dir, lic + ".txt")):
+            findings.append(f"projects/registry.json: project {pid!r} license {lic!r} has no LICENSES/{lic}.txt")
+        for sub in (f"memory/projects/{pid}", f"projects/{pid}"):
+            if not os.path.isdir(os.path.join(root, sub)):
+                continue
+            got = assigned.get(sub + "/**")
+            fabric_lic = (projects.get("agent-fabric") or {}).get("license")
+            if got is None:
+                # A project that IS the fabric needs no override: the catch-all is its license.
+                if pid == "agent-fabric" and assigned.get("**") == fabric_lic:
+                    continue
+                findings.append(f"REUSE.toml: {sub}/ is not assigned a license (registry says {lic!r}); "
+                                "it would read as the catch-all")
+            elif got != lic:
+                findings.append(f"REUSE.toml: {sub}/** is {got!r} but projects/registry.json says project {pid!r} is {lic!r}")
+    return findings
+
+
 def load_schema(root: str, subdir: str, name: str) -> dict[str, Any] | None:
     path = os.path.join(root, subdir, f"{name}.schema.json")
     if not os.path.exists(path):
@@ -475,6 +530,9 @@ def main() -> int:
                     if os.path.isabs(prefix) or prefix.startswith("~"):
                         findings.append(f"{where}: role {rid!r} path {prefix!r} is machine-specific; "
                                         "paths must be repository-relative")
+
+    # --- licenses ----------------------------------------------------------
+    findings += license_findings(root)
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

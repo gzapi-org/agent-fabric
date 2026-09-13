@@ -90,3 +90,16 @@ agent-fabric/bin/fabric-status        # agent, binding, API path, pins, capabili
 ```sh
 tests/run.sh
 ```
+
+## License
+
+The control plane — roles, routing, runtime, communication, policies,
+tools, tests, docs, `memory/domains/`, `memory/shared/` — is
+**Apache-2.0** (`LICENSE`). A managed project's subtrees here —
+`memory/projects/<id>/` and `projects/<id>/` — are derived from that
+project and carry **that project's license**, named per project in
+`projects/registry.json` and assigned per path in `REUSE.toml`
+(`LICENSES/` holds every text; `reuse lint` passes). gzapp's subtrees are
+proprietary and confidential, which is why this repository is private
+while they are in it. `tools/fabric/lint.py` refuses a project subtree
+with no assignment, or one that disagrees with the registry.

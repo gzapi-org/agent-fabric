@@ -109,6 +109,11 @@ tests/          python suites; tests/run.sh runs everything
 docs/migration/ how this repository was extracted from gzapp, and what maps to what
 ```
 
+The control plane is Apache-2.0; a managed project's subtrees
+(`memory/projects/<id>/`, `projects/<id>/`) carry that project's license
+(`REUSE.toml`, `projects/registry.json`). Do not move project-derived
+material out of those subtrees.
+
 Runtime state is never in this repository: your binding, role history and
 local overrides live under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`.
 Credentials never enter any committed file.

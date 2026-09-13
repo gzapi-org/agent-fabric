@@ -1,0 +1,34 @@
+# REUSE (https://reuse.software, spec 3.3) — which license each part of
+# this repository carries. One repository, two kinds of content:
+#
+#   the control plane — roles, routing, runtime, communication, policies,
+#   tools, tests, docs, memory/domains, memory/shared — is Apache-2.0;
+#
+#   a managed PROJECT's subtrees — memory/projects/<id>/ (knowledge distilled
+#   from that project's tree and sessions) and projects/<id>/ (its taxonomy
+#   and integration scripts, extracted from its history) — carry THAT
+#   project's license, whatever it is. They are derived from the project and
+#   are not the fabric's to relicense. projects/registry.json names the
+#   license per project; tools/fabric/lint.py refuses a project subtree this
+#   file does not assign, and an assignment that disagrees with the registry.
+#
+# Later annotations take precedence over earlier ones for the paths they
+# match, so the project subtrees are listed after the catch-all.
+version = 1
+SPDX-PackageName = "agent-fabric"
+SPDX-PackageSupplier = "Andrea Benetton"
+SPDX-PackageDownloadLocation = "https://github.com/gzapi-org/agent-fabric"
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Andrea Benetton"
+SPDX-License-Identifier = "Apache-2.0"
+
+# gzapp — proprietary and confidential (LICENSES/LicenseRef-gzapp-Proprietary.txt).
+# While these subtrees are here, the repository stays private.
+[[annotations]]
+path = ["memory/projects/gzapp/**", "projects/gzapp/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Andrea Benetton"
+SPDX-License-Identifier = "LicenseRef-gzapp-Proprietary"

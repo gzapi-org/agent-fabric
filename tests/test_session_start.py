@@ -101,6 +101,17 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert settings["permissions"] == {"allow": ["Bash(ls:*)"]}
     assert any("echo mine" in json.dumps(g) for g in settings["hooks"]["SessionStart"])
     assert any("session-start.sh" in json.dumps(g) for g in settings["hooks"]["SessionStart"])
+    # Entries from an EARLIER bootstrap out of another checkout are replaced,
+    # not kept beside the new ones: an account that moved from a shared path
+    # to its own clone must end up with one set of hooks.
+    with open(os.path.join(projects, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
+        json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+                   "command": "bash \"/somewhere/else/agent-fabric/runtime/claude-code/hooks/session-start.sh\""}]}]}}, fh)
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+    settings = json.load(open(os.path.join(projects, ".claude", "settings.json"), encoding="utf-8"))
+    starts = [json.dumps(g) for g in settings["hooks"]["SessionStart"]]
+    assert not any("/somewhere/else" in g for g in starts), starts
+    assert sum("session-start.sh" in g for g in starts) == 1, starts
 
 
 def main() -> int:

@@ -186,14 +186,35 @@ deduplication inside the carrier. Correlation between agents stays
   only the listing truncates.
 - Authentication is enforced: `/mcp` answers 401 without the token.
 
-## What is NOT yet true
+## One consumer id per agent, and the raw API when MCP is not there
 
-- **The acceptance bar is still unmet.** It is two *real* instances, B
-  receiving A's `HELLO` — not one instance and a second consumer id.
-  Until a second session actually reads from this channel, delivery
-  between instances is demonstrated only in the single-process sense.
-- **The relay is owned by one clone and dies with it.** A shared
-  transport whose lifetime is one session's is not yet a transport.
+The cursor key is the agent's **address**, `<host>/<login>` — exactly
+what `inbox.mjs` reads and acks as. A session that reaches the relay
+through the MCP tools with a bare login (or any other string) creates a
+second cursor for the same agent, and the next `SessionStart` drain
+replays everything that second cursor never acknowledged (seen
+2026-09-13: seq 105–110 handed back after they had been handled). Use
+the address, byte for byte, from every path.
+
+When the MCP connection is dead but the relay answers, the JSON API
+above works directly with the bearer token: `POST /api/send`,
+`GET /api/wait?channel=…&consumer_id=<address>&timeout_seconds=…`,
+`POST /api/ack {consumer_id, channel, message_id}` (used that way after
+the 2026-09-13 host reboot). Read with a throwaway consumer id only to
+*audit* history, and never ack as the real address from an audit.
+
+## What was once not yet true
+
+Both limits recorded at first bring-up are closed: real instances
+exchange traffic on the channel daily, and the relay's lifetime is the
+hosting working copy's (`.gzcoord/venv`), brought up by the
+fabric-coordinator's session start. One thing learned since: **renaming
+the hosting working copy strands the venv** — its scripts keep the old
+interpreter path — and nothing can start the relay again until
+`.gzcoord/venv` is rebuilt in place (`python3 -m venv .gzcoord/venv &&
+.gzcoord/venv/bin/pip install claude-code-bridge`; token, DB and log
+stay). The old process keeps running from open file handles, which
+hides the breakage until it exits.
   Giving it an owner that outlives a session — a user service, or a
   container — is the next decision, and it belongs to the runtime
   surface rather than to the protocol role.

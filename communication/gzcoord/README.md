@@ -18,7 +18,7 @@ This directory is agent-fabric's communication subsystem (`communication/gzcoord
   on the channel is a decision nobody can hold.
 - **Repository `CLAUDE.md`** governs how agents operate on the repository.
 - **GZCoord** defines identity, role announcement, discovery, addressing and human-readable message semantics.
-- **Transport adapters** deliver messages. **The current transport is a human relay** — a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). It carries real traffic until a purpose-built agent-to-agent transport replaces it; the first automated attempt is retired (`history/telegram-transport/`). The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
+- **Transport adapters** deliver messages. **The current transport is a Claude-Bridge relay** hosted on the developer host by the fabric-coordinator's working copy (a project's integration says where: `projects/<id>/integration/gzcoord/`), drained at session start by `scripts/inbox.mjs`; when the relay is down, a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). The first automated attempt before the relay is retired (`history/telegram-transport/`). The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
 - **Local runtime config** contains model/provider and subagent policy; those values are not sent in messages.
 
 ## Identity

@@ -204,7 +204,7 @@ VIOLATION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("review
 [[ -z "$VIOLATION" ]] || die "merged review model '$VIOLATION' is not in routing/policies/review-grade.json.
   A review's failure mode is a green PR that merges, so the reviewer's
   model is policy, not a cost dial. Change the profile or extend
-  review-grade.json with architect-cto's approval."
+  review-grade.json through fabric-coordinator (policies/AUTHORITY.md)."
 
 SESSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["composite"])' <<<"$RESOLVED")"
 

@@ -49,7 +49,8 @@ directory, the repository, the branch or the session.
   the project's index and workflow for that role. Everything else loads
   when its index line matches what you are doing. `/role status` says what
   you are; `/role deactivate` clears it. Holding a role never entitles you
-  to change its charter (`policies/AUTHORITY.md`).
+  to change its charter; role definitions and this repository's policies
+  are `fabric-coordinator`'s (`policies/AUTHORITY.md`).
 - **Work in the project's working copy**, under that project's
   `CLAUDE.md`. From `projects/`, `cd` into the working copy first; the
   session-start hook records which one you are in.

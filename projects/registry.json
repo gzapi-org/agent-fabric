@@ -12,6 +12,17 @@
       "taxonomy": "projects/gzapp/taxonomy.json",
       "memory": "memory/projects/gzapp",
       "integration": "projects/gzapp/integration"
+    },
+    "agent-fabric": {
+      "title": "agent-fabric, the control plane itself",
+      "remotes": [
+        "git@github.com:gzapi-org/agent-fabric.git",
+        "https://github.com/gzapi-org/agent-fabric"
+      ],
+      "default_branch": "main",
+      "taxonomy": "projects/agent-fabric/taxonomy.json",
+      "memory": "memory/projects/agent-fabric",
+      "integration": null
     }
   }
 }

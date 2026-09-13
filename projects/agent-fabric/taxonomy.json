@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "project": "agent-fabric",
+  "note": "Binding rules for agent-fabric as a managed repository of its own. The control plane belongs to fabric-coordinator; the protocol text stays additionally attributable to gzcoord-coordinator; distilled project knowledge under memory/projects/<id>/ is that project's roles' work and is not bound here.",
+  "projects": {
+    "include": [
+      "agent-fabric"
+    ],
+    "exclude": [],
+    "unattributed_bucket": "observer-sessions"
+  },
+  "reattribution": {
+    "path_markers": {
+      "include": [
+        "projects/agent-fabric"
+      ],
+      "exclude": []
+    },
+    "keywords": {
+      "include": [
+        "agent-fabric",
+        "fabric-whoami",
+        "fabric-status",
+        "capability class",
+        "review-grade",
+        "gzcoord"
+      ],
+      "exclude": []
+    }
+  },
+  "roles": [
+    {
+      "id": "fabric-coordinator",
+      "paths": [
+        "identities/",
+        "routing/",
+        "policies/",
+        "runtime/",
+        "projects/",
+        "communication/",
+        "tools/fabric/",
+        "tests/",
+        "docs/migration/"
+      ],
+      "keywords": [
+        "control plane",
+        "identity invariant",
+        "routing",
+        "shim",
+        "charter",
+        "authority"
+      ],
+      "types": [
+        "decision"
+      ]
+    },
+    {
+      "id": "gzcoord-coordinator",
+      "paths": [
+        "communication/gzcoord/protocol/"
+      ],
+      "keywords": [
+        "gzcoord",
+        "GZCOORD/1",
+        "message format",
+        "conformance"
+      ],
+      "types": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "description": "Who holds the role that may change role definitions. Authority attaches to the ROLE (fabric-coordinator); this file names the Linux logins currently recognised as its holders, because the charter guard cannot read another account's runtime binding. An account named for the role (fabric-coordinator, fabric-coordinator-02, ...) is recognised without an entry. This file is itself a role definition and is guarded.",
+  "role_definitions": {
+    "role": "fabric-coordinator",
+    "holders": [
+      "gzcoord-coordinator"
+    ]
+  }
+}

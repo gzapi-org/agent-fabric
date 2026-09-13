@@ -2,16 +2,19 @@
 #
 # policies/check_charter_authority.sh
 #
-# A role's DEFINITION is architect-cto's to change: `identities/roles/*/
-# charter.md`, the catalogue `identities/roles/catalog.json`, and the
-# per-project binding rules `projects/*/taxonomy.json`. This fails when one
-# of those changes on a branch that is not an architect-cto branch.
+# A role's DEFINITION is fabric-coordinator's to change: `identities/roles/*/
+# charter.md`, the catalogue `identities/roles/catalog.json`, the
+# per-project binding rules `projects/*/taxonomy.json`, the routing policy
+# `routing/policies/*` and `policies/authority.json` itself. This fails
+# when one of those changes on a branch that is not a fabric-coordinator
+# branch.
 #
 # AUTHORITY BELONGS TO THE ROLE, NOT TO THE ACCOUNT. The branch's second
-# segment names the agent (Linux login) that opened it; the check asks
-# whether that agent is an architect-cto INSTANCE by the provisioning
-# convention that accounts are named for the role they were stood up as.
-# An account currently HOLDING a role does not thereby own the role's
+# segment names the agent (Linux login) that opened it. The check asks
+# whether that agent is a recognised holder of fabric-coordinator: named
+# in policies/authority.json, or named FOR the role by the provisioning
+# convention (fabric-coordinator, fabric-coordinator-02). An account
+# currently HOLDING some other role does not thereby own that role's
 # definition — that is exactly the widening this tripwire exists to catch.
 #
 # WHY THIS EXISTS. Every distilled slice is generated -- the
@@ -38,10 +41,11 @@
 #
 # guards: identities/**
 # guards: projects/*/taxonomy.json
+# guards: routing/policies/**
 # guards: policies/**
 #
 # Exit codes:
-#   0  no protected file changed, or the branch is architect-cto's, or the
+#   0  no protected file changed, or the branch is fabric-coordinator's, or the
 #      head branch is not knowable in this context
 #   1  a protected file changed on another role's branch
 #   0  also when no base ref is resolvable -- an environment that cannot
@@ -95,7 +99,7 @@ BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GZAPP_CHARTER_BRANCH:-${GITHUB_HEAD_REF
 
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- \
     'identities/roles/*/charter.md' 'identities/roles/catalog.json' \
-    'projects/*/taxonomy.json' 2>/dev/null)
+    'projects/*/taxonomy.json' 'routing/policies/*' 'policies/authority.json' 2>/dev/null)
 
 if (( ${#changed[@]} == 0 )); then
     echo "check_charter_authority: OK — no role definition changed."
@@ -126,9 +130,24 @@ if [[ "$BRANCH" != */*/* || -z "$agent" ]]; then
     exit 0
 fi
 
-if [[ "$agent" == architect-cto* ]]; then
+# Holders: the committed list, or an account named for the role. Read from
+# the BASE side of the diff, so a branch cannot add itself to the list in
+# the same change it uses the list to justify.
+holders="$(git show "$BASE:policies/authority.json" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+print(" ".join((d.get("role_definitions") or {}).get("holders") or []))' 2>/dev/null)"
+owner_role="$(git show "$BASE:policies/authority.json" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["role_definitions"]["role"])
+except Exception: print("fabric-coordinator")' 2>/dev/null)"
+is_holder=0
+for h in $holders; do [[ "$agent" == "$h" ]] && is_holder=1; done
+[[ "$agent" == "$owner_role"* ]] && is_holder=1
+if (( is_holder )); then
     echo "check_charter_authority: OK — ${#changed[@]} role definition(s)" \
-         "changed on an architect-cto branch."
+         "changed on a $owner_role branch ($agent)."
     exit 0
 fi
 
@@ -136,15 +155,16 @@ echo "FAIL: a role's DEFINITION changed on a branch owned by agent '$agent'." >&
 printf '       %s\n' "${changed[@]}" >&2
 cat >&2 <<'MSG'
 
-`identities/roles/*/charter.md`, the role catalogue and a project's
-taxonomy say what a role is and is not, and where it applies. They are
-architect-cto's to change -- a role does not redefine
-itself, for the same reason gzcoord-coordinator owns the protocol spec it
-constrains others with.
+`identities/roles/*/charter.md`, the role catalogue, a project's
+taxonomy, the routing policies and policies/authority.json say what a
+role is and is not, where it applies, and who may change that. They are
+fabric-coordinator's to change (policies/AUTHORITY.md) -- a role does not
+redefine itself, and holding a role is not owning its definition.
 
-Propose it instead: open a PR touching only the charter, say what the role
-is being asked to take on or give up, and leave it for architect-cto. Do
-not self-approve on the grounds that you are the only session that
-understands the surface; that is the argument this exists to refuse.
+Propose it instead: open a PR touching only the definition, say what the
+role is being asked to take on or give up, and leave it for
+fabric-coordinator. Do not self-approve on the grounds that you are the
+only session that understands the surface; that is the argument this
+exists to refuse.
 MSG
 exit 1

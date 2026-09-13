@@ -44,6 +44,10 @@
       "id": "gzcoord-coordinator",
       "title": "GZCoord protocol coordinator",
       "candidate": true
+    },
+    {
+      "id": "fabric-coordinator",
+      "title": "Control-plane coordinator (agent-fabric)"
     }
   ]
 }

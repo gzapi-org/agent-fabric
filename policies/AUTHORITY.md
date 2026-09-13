@@ -22,33 +22,41 @@ explicitly names one.
 
 | what | who may change it | how it is made visible |
 |---|---|---|
-| `identities/roles/<role>/charter.md` (any role) | `architect-cto` | `policies/check_charter_authority.sh` |
-| `identities/roles/catalog.json` | `architect-cto` | same |
-| `projects/<project>/taxonomy.json` (where roles apply in a repository) | `architect-cto` | same |
-| `communication/gzcoord/protocol/*` | `gzcoord-coordinator` | no tripwire yet — `identities/roles/gzcoord-coordinator/charter.md` states it |
-| `routing/policies/review-grade.json`, the review class's model | `architect-cto` | `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |
+| `identities/roles/<role>/charter.md` (any role) | `fabric-coordinator` | `policies/check_charter_authority.sh` |
+| `identities/roles/catalog.json` | `fabric-coordinator` | same |
+| `projects/<project>/taxonomy.json` (where roles apply in a repository) | `fabric-coordinator` | same |
+| `routing/policies/review-grade.json`, the review class's model | `fabric-coordinator` | same; `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |
+| `policies/authority.json`, who holds `fabric-coordinator` | `fabric-coordinator` | same, read from the base side of the diff so a branch cannot appoint itself |
+| `communication/gzcoord/protocol/*` | `fabric-coordinator`, and `gzcoord-coordinator` as the narrower protocol role | no tripwire yet — both charters state it |
+| a managed project's architecture (gzapp: ADRs, contracts) | that project's roles (`architect-cto`) | the project's own guards, in its repository |
 | a distilled slice under `memory/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |
 | `recall.md` for a role | the role itself | authored, exempt from provenance; must stay under `identities/roles/` |
 
 ## What the tripwire can and cannot do
 
 `check_charter_authority.sh` reads the agent segment of the branch name
-(`<host>/<agent>/<type>/<desc>`) and passes an `architect-cto*` agent.
+(`<host>/<agent>/<type>/<desc>`) and passes a recognised holder of
+`fabric-coordinator`: a login listed in `policies/authority.json` (at the
+base of the diff, never the branch's own copy) or an account named for the
+role.
 Every session pushes as the same GitHub account, so there is no identity
 to check; the branch name is self-declared. This is a **tripwire**: it
 stops the accident and the absent-minded edit, and it makes a deliberate
 change visible in review. A session that means to route around it can,
 by naming its branch differently, and nothing in this repository would
 catch that. It also does not confuse the two questions above: an agent
-named `flutter-dev-02` editing `flutter-dev`'s charter is refused
-(`test_check_charter_authority.sh`, "an agent HOLDING a role does not own
-its definition").
+named `flutter-dev-02` editing `flutter-dev`'s charter is refused, and so
+is `architect-cto-01` — gzapp's architecture authority is not the control
+plane's (`test_check_charter_authority.sh`).
 
 ## What did not weaken in the migration
 
 - The charter and taxonomy authority rule, and its tripwire, moved from
-  `tools/checks/` to `policies/` unchanged in force, widened to the
-  catalogue and to every project's taxonomy.
+  `tools/checks/` to `policies/`, widened to the catalogue, every
+  project's taxonomy, the routing policies and the holders file. The
+  owning role changed from `architect-cto` (gzapp's architecture role,
+  which owned charters only because they lived in gzapp) to
+  `fabric-coordinator`, the role whose remit is this repository.
 - The review-grade gate moved from "the opus tier" to "the review
   capability" and is enforced in the same two places (lint on the
   committed files, the launcher on the merged result).

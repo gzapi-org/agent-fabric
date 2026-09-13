@@ -42,6 +42,7 @@ new_repo() {
   cp "$UNDER_TEST" "$SANDBOX/policies/"
   printf 'scope\n' > "$SANDBOX/identities/roles/flutter-dev/charter.md"
   printf '{"roles":[]}\n' > "$SANDBOX/identities/roles/catalog.json"
+  printf '{"role_definitions":{"role":"fabric-coordinator","holders":["gzcoord-coordinator"]}}\n' > "$SANDBOX/policies/authority.json"
   printf '{"roles":[]}\n' > "$SANDBOX/projects/demo/taxonomy.json"
   printf 'other\n' > "$SANDBOX/memory/projects/demo/flutter-dev/workflow.md"
   git -C "$SANDBOX" init -q
@@ -75,9 +76,32 @@ out="$(check develop-qzapp/flutter-dev-01/feat/thing)"
 [[ "$out" == *"charter.md"* ]] && pass "names the file" || fail "names the file" "$out"
 [[ "$out" == *"Propose it instead"* ]] && pass "says what to do instead" || fail "says what to do instead" "$out"
 
-echo "the same change by architect-cto"
+echo "the same change by a recognised holder of fabric-coordinator"
+rc="$(rc_of develop-qzapp/gzcoord-coordinator/feat/x)"
+[[ "$rc" == 0 ]] && pass "allowed for a listed holder (exit 0)" || fail "allowed for a listed holder (exit 0)" "exit $rc"
+rc="$(rc_of develop-qzapp/fabric-coordinator-02/feat/x)"
+[[ "$rc" == 0 ]] && pass "allowed for an account named for the role" || fail "allowed for an account named for the role" "exit $rc"
+
+echo "architect-cto no longer owns role definitions"
 rc="$(rc_of develop-qzapp/architect-cto-01/feat/x)"
-[[ "$rc" == 0 ]] && pass "allowed (exit 0)" || fail "allowed (exit 0)" "exit $rc"
+[[ "$rc" == 1 ]] && pass "refused (exit 1)" || fail "refused (exit 1)" "exit $rc"
+
+echo "a branch cannot add itself to the holders in the same change"
+new_repo
+python3 - "$SANDBOX/policies/authority.json" <<'PY2'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["role_definitions"]["holders"].append("web-dev-01"); json.dump(d,open(p,"w"))
+PY2
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm "self-appoint"
+rc="$(rc_of develop-qzapp/web-dev-01/feat/x)"
+[[ "$rc" == 1 ]] && pass "the holders list is read from the base side" || fail "the holders list is read from the base side" "exit $rc"
+
+echo "routing policy is protected too"
+new_repo; mkdir -p "$SANDBOX/routing/policies"; printf '{}\n' > "$SANDBOX/routing/policies/review-grade.json"
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm "add policy"; git -C "$SANDBOX" branch -f base-ref
+commit_change "routing/policies/review-grade.json"
+rc="$(rc_of develop-qzapp/backend-dev-02/feat/x)"
+[[ "$rc" == 1 ]] && pass "refused" || fail "refused" "exit $rc"
 
 echo "the catalogue is protected too"
 new_repo; commit_change "identities/roles/catalog.json"

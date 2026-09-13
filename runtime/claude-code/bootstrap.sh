@@ -15,6 +15,8 @@
 #   ~/.claude/hooks/review-bash-guard.sh
 #                                      the review class's Bash fence; the blind-reviewer agent file
 #                                      looks here when the launch project has no .claude/ copy
+#   ~/.claude/skills/subagent-dispatch/SKILL.md
+#                                      the dispatch policy as a loadable skill, from policies/
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
 # session start. Nothing here makes projects/ a git repository. A managed
@@ -107,6 +109,9 @@ done
 # projects/ (no .claude/ of its own) found no guard and lost Bash entirely
 # (docs/live-checks/2026-09-13-openrouter-routing.md).
 put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/hooks/review-bash-guard.sh"
+# The dispatch policy is a skill the project CLAUDE.md files tell a session
+# to load (`subagent-dispatch`); user-scope, so no project needs a copy.
+put "$CLAUDE_HOME/skills/subagent-dispatch/SKILL.md" "$FABRIC_ROOT/policies/subagent-dispatch/SKILL.md"
 
 # 4. The agent-fabric checkout this runs from enforces its own git
 #    discipline at commit time (policies/githooks/commit-msg). A repo

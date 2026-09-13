@@ -4,10 +4,10 @@
   "shims": [
     {
       "family": "z-ai/glm-*",
-      "shim": "@preset/glm-claude-compat",
+      "shim": "@preset/glm2claude-shim",
       "harness": "claude-code",
       "tested": "2026-09",
-      "note": "Z.ai GLM through OpenRouter needs the glm-claude-compat preset for Claude Code tool calling. The composite the runtime derives is `<model>@preset/glm-claude-compat`."
+      "note": "Z.ai GLM through OpenRouter needs the glm2claude-shim preset for Claude Code tool calling. The composite the runtime derives is `<model>@preset/glm2claude-shim`."
     }
   ]
 }

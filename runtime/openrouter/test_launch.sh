@@ -76,9 +76,9 @@ out="$(run --print)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$out"
 grep -q "resolved profile for backend-dev/$LOGIN (agent $LOGIN, role backend-dev)" <<<"$out" && ok "the label is role/agent, agent = login" || bad "label wrong" "$out"
 grep -q "session : anthropic/claude-sonnet-5" <<<"$out" && ok "default session" || bad "session wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm-claude-compat" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm-claude-compat" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm-claude-compat" <<<"$out" && ok "code-high -> glm-5.3 + shim -> opus alias" || bad "code-high wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "code-high -> glm-5.3 + shim -> opus alias" || bad "code-high wrong" "$out"
 grep -q "review      : anthropic/claude-opus-5\[1m\]  shim -  declared in the agent file as claude-opus-5\[1m\], not exported" <<<"$out" && ok "review is declared by full id, no shim, not exported" || bad "review wrong" "$out"
 ! grep -q "ANTHROPIC_DEFAULT_FABLE_MODEL" <<<"$out" && ok "no class rides the fable alias, so nothing is exported for it" || bad "fable exported" "$out"
 
@@ -86,11 +86,11 @@ echo "launch: a non-GLM override receives no shim; a GLM override keeps it"
 mkfabric; profile roles backend-dev '{"capabilities":{"code-high":"anthropic/claude-sonnet-5"}}'
 out="$(run --print)"
 grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-sonnet-5$" <<<"$out" && ok "a role override to a non-GLM model gets no shim" || bad "shim attached to a non-GLM model" "$out"
-grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm-claude-compat" <<<"$out" && ok "the untouched GLM class keeps its shim" || bad "shim lost" "$out"
+grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "the untouched GLM class keeps its shim" || bad "shim lost" "$out"
 mkfabric; profile agents "$LOGIN" '{"capabilities":{"code-low":"z-ai/glm-5.2"},"session":"z-ai/glm-5.3"}'
 out="$(run --print)"
-grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.2@preset/glm-claude-compat" <<<"$out" && ok "an agent (login-keyed) override to another GLM model keeps the family shim" || bad "agent override ignored or unshimmed" "$out"
-grep -q "session : z-ai/glm-5.3@preset/glm-claude-compat" <<<"$out" && ok "the session (main agent) gets the family shim too, separately from the classes" || bad "session shim wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "an agent (login-keyed) override to another GLM model keeps the family shim" || bad "agent override ignored or unshimmed" "$out"
+grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the session (main agent) gets the family shim too, separately from the classes" || bad "session shim wrong" "$out"
 
 echo "launch: merge order — defaults <- role <- agent <- local, later wins"
 mkfabric
@@ -111,7 +111,7 @@ mkfabric; printf '%s\n' '{"capabilities":{"review":"z-ai/glm-5.3"}}' > "$STATE/a
 run_err --print; [[ $? -ne 0 ]] && ok "a cheap review model in the local override is REFUSED" || bad "review gate bypassed by local override"
 mkfabric; printf '%s\n' '{"capabilities":{"code-high":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3-flash@preset/glm-claude-compat" <<<"$out" && ok "the coding classes are NOT review-gated: a cheap code-high is allowed" || bad "code-high wrongly gated" "$out"
+[[ $rc -eq 0 ]] && grep -q "ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "the coding classes are NOT review-gated: a cheap code-high is allowed" || bad "code-high wrongly gated" "$out"
 
 echo "launch: the refusals"
 mkfabric; rm "$STATE/agents/$LOGIN/binding.json"
@@ -180,7 +180,7 @@ override '{"capabilities": {"code-low": "Not A Model"}}'
 [[ $rc -eq 1 ]] && ok "a class that is not a model id refused" || bad "prose accepted" "$out"
 override '{"capabilities": {"code-low": ""}}'
 [[ $rc -eq 1 ]] && ok "an empty class refused (ori would silently substitute its own default)" || bad "empty accepted" "$out"
-override '{"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm-claude-compat"}}'
+override '{"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}'
 [[ $rc -eq 1 ]] && ok "a COMPOSITE in a profile layer is refused: the shim is derived, never configured" || bad "composite accepted as canonical" "$out"
 override '{"session": "anthropic/claude-opus-5:floor[1m]"}'
 [[ $rc -eq 0 ]] && ok "variant and [1m] spellings accepted" || bad "valid ids refused" "$out"
@@ -209,9 +209,9 @@ mkfabric
 out="$(run --version 2>&1)"; rc=$?
 grep -q "ORI-EXECCED:" <<<"$out" && ok "execs via ori claude" || bad "no exec" "$out"
 grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "session model passed as --model" || bad "session missing" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm-claude-compat" <<<"$out" && ok "HAIKU pin (code-low composite) is in the child's environment" || bad "haiku pin not exported" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm-claude-compat" <<<"$out" && ok "SONNET pin (code-medium composite) is in the child's environment" || bad "sonnet pin not exported" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm-claude-compat" <<<"$out" && ok "OPUS pin (code-high composite) is in the child's environment" || bad "opus pin not exported" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "HAIKU pin (code-low composite) is in the child's environment" || bad "haiku pin not exported" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "SONNET pin (code-medium composite) is in the child's environment" || bad "sonnet pin not exported" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "OPUS pin (code-high composite) is in the child's environment" || bad "opus pin not exported" "$out"
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=$" <<<"$out" && ok "FABLE is not pinned (no class rides it; ori's default applies)" || bad "fable pinned" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=anthropic/claude-sonnet-5" <<<"$out" && ok "session model stamped in the child env" || bad "no session stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped as role/agent" || bad "no profile stamp" "$out"

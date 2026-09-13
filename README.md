@@ -26,7 +26,7 @@ agent-fabric contains agent infrastructure
 | **WORKING COPY** | Which filesystem/Git checkout is being used? | the cwd's git toplevel, recorded in the agent's runtime binding as a path and a label |
 | **CAPABILITY** | How much reasoning does a task require? | `routing/capabilities.json` classes: `code-low`, `code-medium`, `code-high`, `review` |
 | **MODEL ROUTING** | Which concrete model satisfies that capability now? | `routing/capabilities.json` providers, layered by `routing/profiles.json` (per role, per login) |
-| **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm-claude-compat` |
+| **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm2claude-shim` |
 | **COMMUNICATION** | How do independent agents exchange work and knowledge? | `communication/gzcoord/` — GZCOORD/1; the address is `<host>/<login>` |
 | **PROJECT BINDING** | Which roles, domains and path rules apply to each managed repository? | `projects/<project>/taxonomy.json`, `projects/<project>/integration/` |
 | **RUNTIME ADAPTER** | How does all of this become Claude Code / OpenRouter / another harness's configuration? | `runtime/claude-code/` (hooks, `/role`, agent files, bootstrap), `runtime/openrouter/launch`, `runtime/provisioning/` |

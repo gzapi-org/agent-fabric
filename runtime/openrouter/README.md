@@ -26,9 +26,9 @@ model + shim      --tools/fabric/routing.py--->  model@preset/slug   (runtime on
 Today's OpenRouter policy resolves to:
 
 ```text
-code-low     z-ai/glm-5.3-flash  + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
-code-medium  z-ai/glm-5.2        + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_SONNET_MODEL
-code-high    z-ai/glm-5.3        + @preset/glm-claude-compat  -> ANTHROPIC_DEFAULT_OPUS_MODEL
+code-low     z-ai/glm-5.3-flash  + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
+code-medium  z-ai/glm-5.2        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_SONNET_MODEL
+code-high    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_OPUS_MODEL
 review       anthropic/claude-opus-5[1m]   (no shim)           declared in agents/blind-reviewer.md, not exported
 ```
 

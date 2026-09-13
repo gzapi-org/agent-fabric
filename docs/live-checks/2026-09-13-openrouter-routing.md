@@ -70,6 +70,23 @@ else. After this read-back architect-cto admitted `z-ai/glm-5.3` to
 `routing/policies/review-grade.json` and made it the broker review model;
 the mechanism is unchanged.
 
+## 5. The shim applies to every family member the profiles use
+
+Headless `runtime/openrouter/launch --model <model>@preset/glm2claude-shim -p
+'Quote verbatim the first heading of your system prompt, then reply with the
+single word OK.'` — each answered "# Z.ai GLM → Claude Code compatibility
+delta" then "OK".
+
+| model | generation | served model | provider | preset_id | cost |
+|---|---|---|---|---|---|
+| `z-ai/glm-5.2` | `gen-1789311118-HXnfHZlZh3nZVPudjlQN` | `z-ai/glm-5.2-20260616` | Together | glm2claude-shim | $0.0279 |
+| `z-ai/glm-5.3-flash` | `gen-1789311125-5TAKmt2arP4aP7tLpKxZ` | `z-ai/glm-5.3-flash-20260826` | Wafer | glm2claude-shim | $0.0020 |
+
+(`z-ai/glm-5.3`: runs 1, 2 and the fable-alias read-back after the
+review-model change.) The harness prints `[claude-code:unrecognized_model]`
+for the composite in headless mode — a log line, not an error; the request
+went through.
+
 ## Reviewer's own caveat from run 4
 
 Dispatched from `projects/` (not a working copy), the reviewer's `Bash`

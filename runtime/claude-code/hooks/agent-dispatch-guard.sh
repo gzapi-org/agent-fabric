@@ -31,6 +31,19 @@
 #                      was GLM 5.3. fable is the alias nothing else
 #                      rides; the launcher exports the review-grade
 #                      model under it and gates exactly that export.
+#   CODING class   -> subagent_type code-low / code-medium / code-high:
+#                      the class DECIDES the tier. `model` must be the
+#                      alias runtime/claude-code/aliases.json binds to
+#                      that class (haiku / sonnet / opus); anything
+#                      else is denied, unset included. A class whose
+#                      alias could be overridden per call is decorative:
+#                      code-high on sonnet is "high" work on the cheap
+#                      tier with nothing to say so. The alias stays on
+#                      the call rather than being inferred, because it
+#                      is what the harness resolves and what the broker
+#                      launcher exports per session; the class is the
+#                      vocabulary, the alias its binding, and the two
+#                      must agree. code-high asks (premium).
 #   everything else -> model required; isolation "worktree" required;
 #                      opus/fable ask (per-dispatch authorisation).
 #
@@ -55,7 +68,13 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-jq -c '
+# The class->alias binding, from the file the launcher exports from. A
+# missing or unreadable file must not silently loosen the check: the
+# class branch then denies with a message that says so.
+ALIASES="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/aliases.json"
+ALIAS_JSON="$(jq -c '.aliases // {}' "$ALIASES" 2>/dev/null || echo '{}')"
+
+jq -c --argjson aliases "$ALIAS_JSON" '
   def deny(reason): {hookSpecificOutput:{hookEventName:"PreToolUse",
                      permissionDecision:"deny",
                      permissionDecisionReason:reason}};
@@ -79,6 +98,17 @@ jq -c '
       else empty end
     elif $review_desc then
       deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the blind-reviewer class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
+    elif ($type | test("^code-(low|medium|high)$")) then
+      ($aliases[$type] // "") as $alias
+      | if $alias == "" then
+          deny("Dispatch names the class \"" + $type + "\" but runtime/claude-code/aliases.json binds no alias to it (file missing, unreadable, or the class is not in it). The class decides the tier and this guard cannot tell which; nothing is inferred. Fix the binding, or set model to the alias the class is documented to ride. See CLAUDE.md - Subagent dispatch.")
+        elif $model != $alias then
+          deny("Dispatch names the class \"" + $type + "\" with model \"" + ($t.model // "unset") + "\"; that class rides the " + $alias + " alias (runtime/claude-code/aliases.json), and the two must agree -- a class whose tier a call can override is a label, and " + $type + " on another tier is that work on a model nothing chose for it. Set model: " + $alias + ", or name the class that rides the tier you mean. See CLAUDE.md - Subagent dispatch.")
+        elif $iso != "worktree" then
+          deny("Agent dispatch does not set isolation to worktree. Every writing subagent works in its own worktree, never the session clone: the dispatcher opens and closes it, the agent stays in the path it is given, runs no git, and never commits. A premium-model authorisation grants a model tier, not an isolation exemption. Forks and the review class are the only carve-outs. See CLAUDE.md - Subagent dispatch.")
+        elif $type == "code-high" then
+          ask("Agent dispatch names code-high, the premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
+        else empty end
     elif ($model | length) == 0 then
       deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")
     elif $iso != "worktree" then

@@ -76,6 +76,24 @@ if grep -q "green PR that merges" <<<"$r"; then pass "the tier denial names the 
 r="$(reason '{"subagent_type":"blind-reviewer","model":"fable","isolation":"worktree","description":"Review PR 626"}')"
 if grep -q "baseRef" <<<"$r"; then pass "the isolation denial names baseRef"; else fail "the isolation denial names baseRef" "$r"; fi
 
+echo "a coding class decides its tier: model must be the class's alias (aliases.json)"
+expect "code-low on haiku is allowed" allow '{"subagent_type":"code-low","model":"haiku","isolation":"worktree","description":"Extract the table"}'
+expect "code-medium on sonnet is allowed" allow '{"subagent_type":"code-medium","model":"sonnet","isolation":"worktree","description":"Rework the mapper"}'
+expect "code-high on opus asks (premium), never silently" ask '{"subagent_type":"code-high","model":"opus","isolation":"worktree","description":"Design the protocol"}'
+expect "code-low on sonnet is denied: the class decides, not the call" deny '{"subagent_type":"code-low","model":"sonnet","isolation":"worktree","description":"Extract the table"}'
+expect "code-high on haiku is denied: high work on the cheap tier with nothing saying so" deny '{"subagent_type":"code-high","model":"haiku","isolation":"worktree","description":"Design the protocol"}'
+expect "code-high on sonnet is denied, not downgraded" deny '{"subagent_type":"code-high","model":"sonnet","isolation":"worktree","description":"Design the protocol"}'
+expect "a class with model unset is denied (nothing is inferred)" deny '{"subagent_type":"code-medium","isolation":"worktree","description":"Rework the mapper"}'
+expect "a class with a full model id is denied" deny '{"subagent_type":"code-low","model":"claude-haiku-4-5","isolation":"worktree","description":"Extract the table"}'
+expect "a class without worktree isolation is denied" deny '{"subagent_type":"code-low","model":"haiku","description":"Extract the table"}'
+r="$(reason '{"subagent_type":"code-low","model":"sonnet","isolation":"worktree","description":"Extract the table"}')"
+if grep -q "rides the haiku alias" <<<"$r"; then pass "the mismatch denial names the class's alias"; else fail "the mismatch denial names the class's alias" "$r"; fi
+# aliases.json unreadable: the class branch denies and says why, never loosens.
+# A copy of the guard placed where no ../aliases.json exists beside it.
+ORPHAN="$(mktemp -d)"; mkdir -p "$ORPHAN/hooks"; cp "$UNDER_TEST" "$ORPHAN/hooks/guard.sh"
+out="$(printf '{"tool_input":{"subagent_type":"code-low","model":"haiku","isolation":"worktree","description":"x"}}' | bash "$ORPHAN/hooks/guard.sh" 2>/dev/null)"; rm -rf "$ORPHAN"
+if grep -q '"deny"' <<<"$out" && grep -q "binds no alias" <<<"$out"; then pass "an unreadable aliases.json denies a class dispatch rather than allowing it"; else fail "an unreadable aliases.json denies a class dispatch rather than allowing it" "$out"; fi
+
 echo "a guard that cannot run asks; it never silently allows"
 out="$(printf '{"tool_input":{"model":"sonnet","isolation":"worktree","description":"x"}}' | env PATH=/nonexistent /bin/bash "$UNDER_TEST" 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "ask"' >/dev/null 2>&1; then

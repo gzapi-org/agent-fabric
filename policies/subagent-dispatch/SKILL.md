@@ -31,16 +31,29 @@ premium model — every one of them ran premium, for work that was mostly
 mechanical. Fan-out multiplies the per-agent cost by the count, so the
 tier decision is where the bill is actually made:
 
-| tier | for |
-|---|---|
-| `haiku` | mechanical, well-specified work: pattern-following edits, extraction, formatting, single-file lookups, structured search |
-| `sonnet` | judgement work: multi-file reasoning, reviews, prose that must hold a convention |
-| `opus` / `fable` | only on the user's explicit instruction for that dispatch |
+| class (`subagent_type`) | alias (`model`) | for |
+|---|---|---|
+| `code-low` | `haiku` | mechanical, well-specified work: pattern-following edits, extraction, formatting, single-file lookups, structured search |
+| `code-medium` | `sonnet` | judgement work: multi-file reasoning, prose that must hold a convention |
+| `code-high` | `opus` | only on the user's explicit instruction for that dispatch (the guard asks) |
+| `blind-reviewer` | `fable` | the review class, its own export; see below |
+
+**The class decides the tier, and the call says both.** The binding is
+`runtime/claude-code/aliases.json` — the same file the broker launcher
+exports from — and the dispatch guard denies a class dispatch whose
+`model` is not that class's alias, unset included. Both fields, because
+they do different jobs: the class is the vocabulary a repository's
+instructions can use without naming a model; the alias is what the
+harness resolves and what a launch binds per session. A class whose
+tier a call could override would be a label — `code-high` on `sonnet`
+is high-consequence work on the cheap tier with nothing saying so — and
+a guard that inferred the alias from the class would move a routing
+decision into a hook that cannot read `routing/`. Decided 2026-09-13.
 
 Pinning the tier on every call is also what keeps a campaign
 reproducible: if the session model changes while a batch is in flight,
-unset-field agents change with it. The hook in `.claude/settings.json`
-denies an unset `model` and prompts on a premium one.
+unset-field agents change with it. The hook denies an unset `model`, a
+class on the wrong alias, and prompts on a premium one.
 
 ### Review is the standing premium-alias exception (`fable`)
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much reasoning a task needs; a provider entry says which model currently satisfies it there. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py — it is never written here.",
+  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much reasoning a task needs; a provider entry says which model currently satisfies it there. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py \u2014 it is never written here.",
   "classes": {
     "code-low": {
       "title": "Inexpensive, mechanical delegated coding work",
@@ -22,17 +22,17 @@
   "providers": {
     "anthropic": {
       "resolution": "harness",
-      "description": "Plain `claude`, Anthropic by construction. Values are harness model references: a tier alias (haiku, sonnet, opus) the harness binds to its current Claude model of that tier, or a full model id where a class must not share an alias with another. The review class declares the full id so that, on the broker path, it never rides the same export as code-high. No shim applies to a native Claude model.",
+      "description": "Plain `claude`, Anthropic by construction. Values are harness tier aliases (haiku, sonnet, opus, fable) the harness binds to its current Claude model of that tier; the Agent tool accepts nothing else. The review class rides `fable`, the alias no coding class uses, so that on the broker path it never shares code-high's export. No shim applies to a native Claude model.",
       "models": {
         "code-low": "haiku",
         "code-medium": "sonnet",
         "code-high": "opus",
-        "review": "claude-opus-5[1m]"
+        "review": "fable"
       }
     },
     "openrouter": {
       "resolution": "model-id",
-      "description": "The broker path (runtime/openrouter/launch via the ori CLI). Values are OpenRouter model ids; the launcher derives the composite with the family shim and exports it under the harness alias the class maps to (runtime/claude-code/aliases.json). A class the harness binds by full id rather than by alias (review) is not exported: its agent file names the model and the launcher checks the two agree.",
+      "description": "The broker path (runtime/openrouter/launch via the ori CLI). Values are OpenRouter model ids; the launcher derives the composite with the family shim and exports it under the harness alias the class maps to (runtime/claude-code/aliases.json). The review class is exported under the fable alias and gated by routing/policies/review-grade.json.",
       "models": {
         "code-low": "z-ai/glm-5.3-flash",
         "code-medium": "z-ai/glm-5.2",

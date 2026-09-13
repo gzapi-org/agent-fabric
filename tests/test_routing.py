@@ -55,7 +55,7 @@ def test_current_glm_policy() -> None:
 def test_native_fallback_is_harness_references() -> None:
     got = {k: routing.resolve(k, "anthropic")["composite"] for k in ("code-low", "code-medium", "code-high", "review")}
     assert got == {"code-low": "haiku", "code-medium": "sonnet", "code-high": "opus",
-                   "review": "claude-opus-5[1m]"}, got
+                   "review": "fable"}, got
     assert all(routing.resolve(k, "anthropic")["shim"] is None for k in got), "no shim on the native path"
 
 
@@ -120,11 +120,25 @@ def test_check_refuses_a_preset_as_a_model(tmp: str) -> None:
     assert any("preset" in f for f in findings), findings
 
 
-def test_declared_class_must_match_its_broker_model(tmp: str) -> None:
+def test_every_class_rides_its_own_alias(tmp: str) -> None:
+    """The Agent tool accepts only tier aliases, so nothing may be `declared`
+    by full id, the review class must ride an alias of its own (fable), and
+    the harness provider must say the same."""
+    aliases = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "aliases.json")))
+    assert "declared" not in aliases
+    assert aliases["aliases"]["review"] == "fable"
+    assert aliases["aliases"]["code-high"] == "opus", "review and code-high must not share an export"
     root = scratch_root(tmp)
-    set_model(root, "openrouter", "review", "anthropic/claude-opus-5")
+    path = os.path.join(root, "runtime", "claude-code", "aliases.json")
+    d = json.load(open(path))
+    d["declared"] = {"review": d["aliases"].pop("review")}
+    json.dump(d, open(path, "w"))
     findings = routing.check(root)
-    assert any("declared harness id" in f for f in findings), findings
+    assert any("declared" in f and "retired" in f for f in findings), findings
+    root2 = scratch_root(os.path.join(tmp, "b"))
+    set_model(root2, "anthropic", "review", "claude-opus-5[1m]")
+    findings = routing.check(root2)
+    assert any("not a harness model reference" in f for f in findings), findings
 
 
 def test_real_files_are_clean() -> None:
@@ -145,7 +159,7 @@ def main() -> int:
         test_only_glm_has_a_shim_today,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,
-        test_declared_class_must_match_its_broker_model,
+        test_every_class_rides_its_own_alias,
         test_real_files_are_clean,
     ]
     failures = 0

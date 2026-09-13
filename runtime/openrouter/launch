@@ -23,12 +23,14 @@
 #                                 <- $STATE_DIR/model-profile.local.json (gitignored)
 #   model -> family shim          routing/shims.json
 #   class -> harness alias        runtime/claude-code/aliases.json
-# and exports, per alias-bound class, ANTHROPIC_DEFAULT_<ALIAS>_MODEL=
-# <model@shim>. The composite string exists only here, in the child's
-# environment. A class the adapter binds by DECLARED full id (review:
-# claude-opus-5[1m] in its agent file) is not exported — the request
-# names the id — and the launcher refuses if the broker profile resolves
-# that class to a different model.
+# and exports, per class, ANTHROPIC_DEFAULT_<ALIAS>_MODEL=<model@shim>.
+# The composite string exists only here, in the child's environment.
+# Every class rides an alias: the Agent tool's `model` field accepts
+# only the tier aliases, so a "declared full id" in an agent file can
+# never be named by a dispatch (verified live 2026-09-13 — the reviewer
+# fell through to the opus alias and ran on GLM). The review class
+# rides `fable`, the alias no coding class uses, so its export is its
+# own and the review gate below guards exactly that export.
 #
 # WHO IS LAUNCHING. The agent is the Linux login (runtime/identity.py);
 # the role comes from that agent's runtime binding (tools/fabric/role.py).
@@ -181,23 +183,13 @@ merged = routing.merged_profile(role, agent, local)
 valid("session", merged.get("session"))
 for klass, val in (merged.get("capabilities") or {}).items():
     valid("capabilities." + klass, val)
-out = {"role": role, "agent": agent, "exports": {}, "classes": {}, "declared": {}}
+out = {"role": role, "agent": agent, "exports": {}, "classes": {}}
 for klass, alias in aliases["aliases"].items():
     res = routing.resolve(klass, "openrouter", role, agent, local)
     if not routing.COMPOSITE.fullmatch(res["composite"]):
         sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
     out["classes"][klass] = res
     out["exports"][aliases["env"][alias]] = res["composite"]
-# A DECLARED class is named by full id in its agent file and rides no
-# export: the request carries that id. The broker profile must resolve the
-# class to the same model (vendor prefix aside), or the profile would claim
-# something the session cannot deliver.
-for klass, ref in (aliases.get("declared") or {}).items():
-    res = routing.resolve(klass, "openrouter", role, agent, local)
-    if res["model"].split("/", 1)[-1] != ref:
-        sys.exit("%s resolves to %r on the broker, but the agent file declares %r; the request names the declared id, so the profile must agree" % (klass, res["model"], ref))
-    out["classes"][klass] = res
-    out["declared"][klass] = ref
 session = routing.resolve_session(role, agent, local)
 out["session"] = session
 grade = routing.load_review_grade()
@@ -270,11 +262,7 @@ if (( PRINT_ONLY )); then
 import json, sys
 d = json.loads(sys.argv[1])
 for klass, res in d["classes"].items():
-    if klass in d["declared"]:
-        how = "declared in the agent file as %s, not exported" % d["declared"][klass]
-    else:
-        how = "=> %s" % res["composite"]
-    print("  %-12s: %s  shim %s  %s" % (klass, res["model"], res["shim"] or "-", how))
+    print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
 print()
 for k, v in sorted(d["exports"].items()):
     print("  export %s=%s" % (k, v))

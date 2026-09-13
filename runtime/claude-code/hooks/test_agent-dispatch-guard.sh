@@ -45,19 +45,19 @@ echo "forks"
 expect "a fork is allowed with nothing set" allow '{"subagent_type":"fork","description":"continue"}'
 
 echo "the review class: all four conditions, or denied -- never asked"
-R='{"subagent_type":"blind-reviewer","model":"opus","description":"Review PR 626 diff","prompt":"..."}'
-expect "blind-reviewer + review + opus + no isolation is allowed without a prompt" allow "$R"
-expect "re-review is a review" allow '{"subagent_type":"blind-reviewer","model":"opus","description":"Re-review PR 626 after fixes"}'
-expect "case-insensitive prefix" allow '{"subagent_type":"blind-reviewer","model":"opus","description":"REVIEW of the delta"}'
-expect "any word form beginning review (Reviewing) is a review" allow '{"subagent_type":"blind-reviewer","model":"opus","description":"Reviewing PR 626"}'
-expect "a full opus model id satisfies the class" allow '{"subagent_type":"blind-reviewer","model":"claude-opus-5","description":"Review PR 626"}'
-expect "review type with a writing description is denied" deny '{"subagent_type":"blind-reviewer","model":"opus","description":"Address review feedback on PR 626"}'
-expect "review anywhere but not at the start is denied" deny '{"subagent_type":"blind-reviewer","model":"opus","description":"Fix and review the mapper"}'
+R='{"subagent_type":"blind-reviewer","model":"fable","description":"Review PR 626 diff","prompt":"..."}'
+expect "blind-reviewer + review + fable + no isolation is allowed without a prompt" allow "$R"
+expect "re-review is a review" allow '{"subagent_type":"blind-reviewer","model":"fable","description":"Re-review PR 626 after fixes"}'
+expect "case-insensitive prefix" allow '{"subagent_type":"blind-reviewer","model":"fable","description":"REVIEW of the delta"}'
+expect "any word form beginning review (Reviewing) is a review" allow '{"subagent_type":"blind-reviewer","model":"fable","description":"Reviewing PR 626"}'
+expect "review type with a full model id is denied (the Agent tool only accepts aliases; fable is the review alias)" deny '{"subagent_type":"blind-reviewer","model":"claude-opus-5[1m]","description":"Review PR 626"}'
+expect "review type with a writing description is denied" deny '{"subagent_type":"blind-reviewer","model":"fable","description":"Address review feedback on PR 626"}'
+expect "review anywhere but not at the start is denied" deny '{"subagent_type":"blind-reviewer","model":"fable","description":"Fix and review the mapper"}'
 expect "review type on sonnet is denied, not asked" deny '{"subagent_type":"blind-reviewer","model":"sonnet","description":"Review PR 626"}'
 expect "review type on haiku is denied" deny '{"subagent_type":"blind-reviewer","model":"haiku","description":"Review PR 626"}'
 expect "review type with model unset is denied" deny '{"subagent_type":"blind-reviewer","description":"Review PR 626"}'
-expect "review type with fable is denied (opus only)" deny '{"subagent_type":"blind-reviewer","model":"fable","description":"Review PR 626"}'
-expect "review type WITH isolation is denied" deny '{"subagent_type":"blind-reviewer","model":"opus","isolation":"worktree","description":"Review PR 626"}'
+expect "review type with opus is denied (opus is code-high's alias on the broker path)" deny '{"subagent_type":"blind-reviewer","model":"opus","description":"Review PR 626"}'
+expect "review type WITH isolation is denied" deny '{"subagent_type":"blind-reviewer","model":"fable","isolation":"worktree","description":"Review PR 626"}'
 expect "the review prefix on a general agent is denied" deny '{"subagent_type":"general-purpose","model":"sonnet","isolation":"worktree","description":"Review the diff"}'
 
 echo "everything else: model and worktree required, premium asks"
@@ -73,7 +73,7 @@ expect "Opus in caps still asks" ask '{"model":"Opus","isolation":"worktree","de
 echo "the denial says why"
 r="$(reason '{"subagent_type":"blind-reviewer","model":"sonnet","description":"Review PR 626"}')"
 if grep -q "green PR that merges" <<<"$r"; then pass "the tier denial names the failure mode"; else fail "the tier denial names the failure mode" "$r"; fi
-r="$(reason '{"subagent_type":"blind-reviewer","model":"opus","isolation":"worktree","description":"Review PR 626"}')"
+r="$(reason '{"subagent_type":"blind-reviewer","model":"fable","isolation":"worktree","description":"Review PR 626"}')"
 if grep -q "baseRef" <<<"$r"; then pass "the isolation denial names baseRef"; else fail "the isolation denial names baseRef" "$r"; fi
 
 echo "a guard that cannot run asks; it never silently allows"

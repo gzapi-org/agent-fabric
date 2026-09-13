@@ -9,10 +9,10 @@ at launch applies to everything under the session, subagents included.
 | provider | Anthropic, by construction | OpenRouter (`ori claude`) |
 | who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding |
 | session model | harness default | `session` from `routing/profiles.json` (+ family shim) |
-| capability classes | harness aliases (`haiku`/`sonnet`/`opus`) | `routing/capabilities.json` → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
-| review class | `claude-opus-5[1m]`, declared in the agent file | the same declared id; the launcher refuses a profile that resolves review elsewhere |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | `routing/capabilities.json` → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
+| review class | the `fable` alias, bound by the harness to its Fable tier | `review` → `anthropic/claude-opus-5[1m]` → `ANTHROPIC_DEFAULT_FABLE_MODEL`; the launcher refuses a profile that resolves review outside review-grade |
 | per-role / per-agent choice | none | `routing/profiles.json` (`roles.<role>`, `agents.<login>`) + the agent's gitignored `model-profile.local.json` |
-| review-grade floor | Opus, by the declared id | `routing/policies/review-grade.json`, checked at launch |
+| review-grade floor | the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch |
 | how to inspect | `model-audit.sh` | same, plus `ori auth --json` |
 
 ## The three steps, and where each lives
@@ -29,7 +29,7 @@ Today's OpenRouter policy resolves to:
 code-low     z-ai/glm-5.3-flash  + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
 code-medium  z-ai/glm-5.2        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_SONNET_MODEL
 code-high    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_OPUS_MODEL
-review       anthropic/claude-opus-5[1m]   (no shim)           declared in agents/blind-reviewer.md, not exported
+review       anthropic/claude-opus-5[1m]  (no shim)               -> ANTHROPIC_DEFAULT_FABLE_MODEL
 ```
 
 Only the Z.ai/GLM family has a shim. A model of any other family gets none
@@ -71,11 +71,28 @@ checks the label still reads this login.
 - `test_launch.sh` — the behavioural suite for the launcher and the audit
   (`bash policies/run_suite.sh runtime/openrouter/test_launch.sh`).
 
-## Not yet verified live
+## Why the review class rides `fable` (verified live 2026-09-13)
 
-The review class rides a declared full id (`claude-opus-5[1m]`) rather
-than a tier alias so that, on the broker path, it never follows code-high
-onto the GLM export. Whether the `ori` broker forwards that unprefixed id
-to OpenRouter as `anthropic/claude-opus-5[1m]` has not been exercised in a
-live session yet; `model-audit.sh` describes how to read back what was
-served.
+The Agent tool's `model` field accepts **only the four tier aliases**
+(`haiku`, `sonnet`, `opus`, `fable`); a full id such as `claude-opus-5[1m]`
+is rejected as an invalid parameter. So a class cannot be "declared" by
+full id in its agent file and named at dispatch — the first design tried
+exactly that, the dispatch guard refused the unset model, the session fell
+back to `opus`, and OpenRouter's `/generation` record showed the reviewer
+served as `z-ai/glm-5.3` (Modal, GLM preset applied): code-high's export.
+
+Every class therefore rides an alias, and one alias carries one export.
+`fable` is the alias no coding class uses, so the review class rides it;
+the launcher exports the review-grade model under
+`ANTHROPIC_DEFAULT_FABLE_MODEL`, the dispatch guard requires `model: fable`
+on a review dispatch (and denies `opus`, which is code-high's), and the
+review gate guards exactly that export. On vanilla `claude`, `fable`
+binds to the harness's current Fable tier.
+
+Also verified the same day: `ori` forwards an unprefixed Anthropic id
+untouched (`--model claude-opus-5[1m]` was served as
+`anthropic/claude-opus-5-20260723` by "Claude Platform on AWS"), so the
+composite in the fable export needs no vendor rewriting. `ori` prints
+"not in the OpenRouter catalog, passing it through untouched" for that id
+and for every `@preset/` composite; the public catalog lists neither
+form, and the warning is cosmetic.

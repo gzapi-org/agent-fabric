@@ -79,8 +79,8 @@ grep -q "session : anthropic/claude-sonnet-5" <<<"$out" && ok "default session" 
 grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "code-high -> glm-5.3 + shim -> opus alias" || bad "code-high wrong" "$out"
-grep -q "review      : anthropic/claude-opus-5\[1m\]  shim -  declared in the agent file as claude-opus-5\[1m\], not exported" <<<"$out" && ok "review is declared by full id, no shim, not exported" || bad "review wrong" "$out"
-! grep -q "ANTHROPIC_DEFAULT_FABLE_MODEL" <<<"$out" && ok "no class rides the fable alias, so nothing is exported for it" || bad "fable exported" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5\[1m\]$" <<<"$out" && ok "review -> opus 5 (1m), no shim -> fable alias, its own export" || bad "review wrong" "$out"
+[[ "$(grep -c 'export ANTHROPIC_DEFAULT_' <<<"$out")" == 4 ]] && ok "four aliases, four exports: the review class never shares code-high's" || bad "export count" "$out"
 
 echo "launch: a non-GLM override receives no shim; a GLM override keeps it"
 mkfabric; profile roles backend-dev '{"capabilities":{"code-high":"anthropic/claude-sonnet-5"}}'
@@ -106,7 +106,7 @@ grep -q "session : vendor/local-session" <<<"$out" && ok "the local override win
 echo "launch: the review gate"
 mkfabric; printf '%s\n' '{"capabilities":{"review":"anthropic/claude-opus-5"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -ne 0 ]] && grep -q "resolves to 'anthropic/claude-opus-5' on the broker, but the agent file declares 'claude-opus-5\[1m\]'" <<<"$out" && ok "a review-grade model that is not the DECLARED id is still refused (the request names the declared id)" || bad "declared/profile mismatch admitted" "$out"
+[[ $rc -eq 0 ]] && grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5$" <<<"$out" && ok "another review-grade model in the local override is allowed and rides the fable export" || bad "review-grade override refused" "$out"
 mkfabric; printf '%s\n' '{"capabilities":{"review":"z-ai/glm-5.3"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 run_err --print; [[ $? -ne 0 ]] && ok "a cheap review model in the local override is REFUSED" || bad "review gate bypassed by local override"
 mkfabric; printf '%s\n' '{"capabilities":{"code-high":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
@@ -212,7 +212,7 @@ grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "session model pa
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "HAIKU pin (code-low composite) is in the child's environment" || bad "haiku pin not exported" "$out"
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "SONNET pin (code-medium composite) is in the child's environment" || bad "sonnet pin not exported" "$out"
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "OPUS pin (code-high composite) is in the child's environment" || bad "opus pin not exported" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=$" <<<"$out" && ok "FABLE is not pinned (no class rides it; ori's default applies)" || bad "fable pinned" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5\[1m\]$" <<<"$out" && ok "FABLE pin (review composite) is in the child's environment, separate from OPUS" || bad "fable pin not exported" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=anthropic/claude-sonnet-5" <<<"$out" && ok "session model stamped in the child env" || bad "no session stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped as role/agent" || bad "no profile stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_AGENT=$LOGIN" <<<"$out" && ok "agent stamped" || bad "no agent stamp" "$out"

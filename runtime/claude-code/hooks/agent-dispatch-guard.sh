@@ -13,17 +13,24 @@
 #   fork            -> allowed; a fork continues the session.
 #   REVIEW class    -> subagent_type "blind-reviewer" AND description
 #                      beginning "review" / "re-review" (any word
-#                      form: Reviewing, Re-review of ...) AND a model
-#                      naming opus (the alias or a full id) AND NO
-#                      isolation. All four, or denied -- never
-#                      asked. Standing authorisation for the class:
-#                      a review's failure mode is not a retry, it is a
-#                      green PR that merges, so no per-dispatch prompt
-#                      and no dropping to a cheaper tier because a
-#                      review looks small. No worktree, because a
+#                      form: Reviewing, Re-review of ...) AND model
+#                      "fable" AND NO isolation. All four, or denied --
+#                      never asked. Standing authorisation for the
+#                      class: a review's failure mode is not a retry,
+#                      it is a green PR that merges, so no per-dispatch
+#                      prompt and no dropping to a cheaper tier because
+#                      a review looks small. No worktree, because a
 #                      review writes nothing and worktree.baseRef=head
 #                      would hide uncommitted work from the one agent
 #                      that must see it; the tree is read-only for it.
+#                      WHY fable and not opus: the Agent tool's model
+#                      field accepts only the tier aliases, and on the
+#                      broker path one alias carries one exported
+#                      model. code-high rides opus, so a reviewer on
+#                      opus IS code-high's model -- on 2026-09-13 that
+#                      was GLM 5.3. fable is the alias nothing else
+#                      rides; the launcher exports the review-grade
+#                      model under it and gates exactly that export.
 #   everything else -> model required; isolation "worktree" required;
 #                      opus/fable ask (per-dispatch authorisation).
 #
@@ -65,13 +72,13 @@ jq -c '
     elif $type == "blind-reviewer" then
       if ($review_desc | not) then
         deny("blind-reviewer dispatch whose description does not BEGIN with review or re-review. The review class is read-only and unisolated; a writing task under this type would run in the session clone. Describe a review as one, or dispatch a normal agent with isolation worktree. See CLAUDE.md - Subagent dispatch.")
-      elif ($model | test("opus") | not) then
-        deny("Review dispatch with model \"" + ($t.model // "unset") + "\". The review class runs Opus, always: a review is not a retryable step, its failure mode is a green PR that merges, so no dropping to a cheaper tier because the review looks small. Set model: claude-opus-5[1m] (the id the blind-reviewer agent file declares) or opus. The review capability is gated by agent-fabric routing/policies/review-grade.json, and the broker launcher (runtime/openrouter/launch) refuses a profile that resolves it to anything else, so policy stays here and vendor plumbing stays in routing/. See CLAUDE.md - Subagent dispatch.")
+      elif $model != "fable" then
+        deny("Review dispatch with model \"" + ($t.model // "unset") + "\". The review class rides the fable alias, always: set model: fable. Not opus -- code-high rides opus, and on the broker path one alias carries one exported model, so a reviewer on opus is whatever code-high resolves to (GLM). Not unset -- the review is not a retryable step, its failure mode is a green PR that merges. The Agent tool accepts no full model id. The review capability is gated by agent-fabric routing/policies/review-grade.json, and the broker launcher (runtime/openrouter/launch) refuses a profile that resolves it to anything else, so policy stays here and vendor plumbing stays in routing/. See CLAUDE.md - Subagent dispatch.")
       elif $iso != "" then
         deny("Review dispatch sets isolation. A review writes nothing, so isolation protects nothing, and it hurts: worktree.baseRef is head, so a reviewer in a worktree cannot see uncommitted work. Omit isolation, pass the repository path, and tell the agent the tree is read-only and it runs no git writes. See CLAUDE.md - Subagent dispatch.")
       else empty end
     elif $review_desc then
-      deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the blind-reviewer class (opus, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
+      deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the blind-reviewer class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
     elif ($model | length) == 0 then
       deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")
     elif $iso != "worktree" then

@@ -10,7 +10,8 @@
 #   <projects>/CLAUDE.md               3 lines; imports agent-fabric/CLAUDE.md
 #   <projects>/.claude/settings.json   hooks + status line pointing at agent-fabric
 #   ~/.claude/commands/role.md         /role for this account, from runtime/claude-code/commands/
-#   ~/.claude/agents/code-*.md         the capability-class agent files, from runtime/claude-code/agents/
+#   ~/.claude/agents/{code-*,blind-reviewer}.md
+#                                      the capability-class agent files, from runtime/claude-code/agents/
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
 # session start. Nothing here makes projects/ a git repository. A managed
@@ -95,7 +96,7 @@ put "$PROJECTS/.claude/settings.json" "$TMP/settings.json"
 #    the capability-class agent files.
 sed "s|__AGENT_FABRIC_ROOT__|$FABRIC_ROOT|g" "$FABRIC_ROOT/runtime/claude-code/commands/role.md" > "$TMP/role.md"
 put "$CLAUDE_HOME/commands/role.md" "$TMP/role.md"
-for f in code-low.md code-medium.md code-high.md; do
+for f in code-low.md code-medium.md code-high.md blind-reviewer.md; do
     put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
 done
 

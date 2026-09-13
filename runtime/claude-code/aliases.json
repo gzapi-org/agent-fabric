@@ -1,13 +1,11 @@
 {
   "version": 1,
-  "description": "The Claude Code adapter's binding of capability classes to harness model references. The Agent tool's `model` field and each agent file's `model:` accept a tier alias (haiku, sonnet, opus, fable) or a full model id. A class bound to an ALIAS is exported by the broker launcher under the matching ANTHROPIC_DEFAULT_*_MODEL variable, so one alias can carry one model per launch. A class bound by DECLARED full id is named in its agent file and rides no export — which is how the review class stays separate from code-high on the broker path, where both would otherwise share the opus alias. Harness-specific by nature; nothing outside runtime/ reads this file.",
+  "description": "The Claude Code adapter's binding of capability classes to harness tier aliases. The Agent tool's `model` field accepts ONLY the tier aliases (haiku, sonnet, opus, fable) \u2014 never a full model id, verified live 2026-09-13 \u2014 so every class rides an alias, and the broker launcher exports each under its ANTHROPIC_DEFAULT_*_MODEL variable: one alias carries one model per launch. The review class rides `fable`, the one alias no coding class uses, so that on the broker path it never shares code-high's export (both on `opus`, the reviewer would have followed code-high onto the cheap tier \u2014 which is exactly what happened before this binding). Harness-specific by nature; nothing outside runtime/ reads this file.",
   "aliases": {
     "code-low": "haiku",
     "code-medium": "sonnet",
-    "code-high": "opus"
-  },
-  "declared": {
-    "review": "claude-opus-5[1m]"
+    "code-high": "opus",
+    "review": "fable"
   },
   "env": {
     "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",

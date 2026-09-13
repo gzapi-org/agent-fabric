@@ -30,9 +30,9 @@ FABRIC_ROOT = os.environ.get("AGENT_FABRIC_ROOT") or os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 MODEL_ID = re.compile(r"^~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\[1m\])?$")
-# A harness model reference: a tier alias (`opus`) or a full id without a
-# vendor prefix (`claude-opus-5[1m]`).
-HARNESS_REF = re.compile(r"^[a-z][a-z0-9.-]*(\[1m\])?$")
+# A harness model reference: a tier alias (`opus`, `fable`) — the only form
+# the Agent tool's `model` field accepts.
+HARNESS_REF = re.compile(r"^(haiku|sonnet|opus|fable)$")
 PRESET = re.compile(r"^@preset/[a-z0-9-]+$")
 COMPOSITE = re.compile(r"^~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\[1m\])?(@preset/[a-z0-9-]+)?$")
 
@@ -184,19 +184,19 @@ def check(root: str | None = None) -> list[str]:
             if model and not review_grade_ok(model, root):
                 findings.append(f"capabilities.json: providers.{name}.{grade.get('capability')} {model!r} "
                                 "is not in routing/policies/review-grade.json")
-    # The Claude Code binding: every class is either alias-bound or declared
-    # by full id, aliases are unique (one export per alias), and the harness
-    # provider in capabilities.json says the same thing.
+    # The Claude Code binding: every class rides a harness tier alias (the
+    # Agent tool's `model` field accepts nothing else), aliases are unique
+    # (one export per alias), and the harness provider in capabilities.json
+    # says the same thing.
     aliases_path = os.path.join(root or FABRIC_ROOT, "runtime", "claude-code", "aliases.json")
     if os.path.exists(aliases_path):
         doc = _load(aliases_path)
         aliases = doc.get("aliases") or {}
-        declared = doc.get("declared") or {}
-        bound = set(aliases) | set(declared)
-        if bound != classes:
-            findings.append(f"runtime/claude-code/aliases.json: bound classes {sorted(bound)} != {sorted(classes)}")
-        if set(aliases) & set(declared):
-            findings.append("runtime/claude-code/aliases.json: a class is both alias-bound and declared")
+        if "declared" in doc:
+            findings.append("runtime/claude-code/aliases.json: `declared` is retired; the Agent tool cannot "
+                            "name a full model id, so every class must ride an alias")
+        if set(aliases) != classes:
+            findings.append(f"runtime/claude-code/aliases.json: bound classes {sorted(aliases)} != {sorted(classes)}")
         if len(set(aliases.values())) != len(aliases):
             findings.append("runtime/claude-code/aliases.json: two classes share one harness alias; "
                             "the launcher could not export them separately")
@@ -204,28 +204,11 @@ def check(root: str | None = None) -> list[str]:
             if alias not in (doc.get("env") or {}):
                 findings.append(f"runtime/claude-code/aliases.json: alias {alias!r} has no export variable")
         native = ((caps.get("providers") or {}).get("anthropic") or {}).get("models") or {}
-        for klass, ref in {**aliases, **declared}.items():
+        for klass, ref in aliases.items():
             if native.get(klass) not in (None, ref):
                 findings.append(f"aliases.json binds {klass} to {ref!r} but capabilities.providers.anthropic "
                                 f"says {native.get(klass)!r}")
-        # A declared class's broker model must be the same model the agent
-        # file names (vendor prefix aside): the request carries the declared
-        # id, so a broker profile saying otherwise would be a lie.
-        for name, prov in (caps.get("providers") or {}).items():
-            if prov.get("resolution") != "model-id":
-                continue
-            for klass, ref in declared.items():
-                model = (prov.get("models") or {}).get(klass) or ""
-                if model.split("/", 1)[-1] != ref:
-                    findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} does not name the "
-                                    f"declared harness id {ref!r} (aliases.json); the request names the declared id")
     return findings
-
-
-def declared_classes(root: str | None = None) -> dict[str, str]:
-    """Classes the Claude Code adapter binds by full model id, not alias."""
-    path = os.path.join(root or FABRIC_ROOT, "runtime", "claude-code", "aliases.json")
-    return (_load(path).get("declared") or {}) if os.path.exists(path) else {}
 
 
 def main(argv: list[str] | None = None) -> int:

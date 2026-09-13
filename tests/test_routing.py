@@ -45,7 +45,7 @@ def test_current_glm_policy() -> None:
         "code-low": ("z-ai/glm-5.3-flash", GLM_SHIM, "z-ai/glm-5.3-flash@preset/glm2claude-shim"),
         "code-medium": ("z-ai/glm-5.2", GLM_SHIM, "z-ai/glm-5.2@preset/glm2claude-shim"),
         "code-high": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
-        "review": ("anthropic/claude-opus-5[1m]", None, "anthropic/claude-opus-5[1m]"),
+        "review": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
     }
     for klass, (model, shim, comp) in expected.items():
         res = routing.resolve(klass, "openrouter")
@@ -103,9 +103,11 @@ def test_only_glm_has_a_shim_today() -> None:
 def test_review_grade_gate_is_on_review_only(tmp: str) -> None:
     assert routing.review_grade_ok("anthropic/claude-opus-5")
     assert routing.review_grade_ok("anthropic/claude-opus-5[1m]")
-    assert not routing.review_grade_ok("z-ai/glm-5.3")
+    assert routing.review_grade_ok("z-ai/glm-5.3"), "admitted by architect-cto 2026-09-13"
+    assert not routing.review_grade_ok("z-ai/glm-5.3-flash")
+    assert not routing.review_grade_ok("z-ai/glm-5.2")
     root = scratch_root(tmp)
-    set_model(root, "openrouter", "review", "z-ai/glm-5.3")
+    set_model(root, "openrouter", "review", "z-ai/glm-5.3-flash")
     findings = routing.check(root)
     assert any("review" in f and "review-grade" in f for f in findings), findings
     root2 = scratch_root(tmp + "/b") if os.path.isdir(tmp + "/b") else scratch_root(os.path.join(tmp, "b"))

@@ -16,7 +16,7 @@
     },
     "review": {
       "title": "The review class",
-      "description": "The adversarial substitute reviewer. Not a coding class: a review's failure mode is a green PR that merges, so its model is gated by routing/policies/review-grade.json and is never a cost decision."
+      "description": "The adversarial substitute reviewer. Not a coding class: it rides its own harness alias (fable) so a profile can give it a different model from code-high, and its model is gated by routing/policies/review-grade.json \u2014 chosen there by architect-cto, never by a profile layer alone."
     }
   },
   "providers": {
@@ -37,7 +37,7 @@
         "code-low": "z-ai/glm-5.3-flash",
         "code-medium": "z-ai/glm-5.2",
         "code-high": "z-ai/glm-5.3",
-        "review": "anthropic/claude-opus-5[1m]"
+        "review": "z-ai/glm-5.3"
       }
     }
   }

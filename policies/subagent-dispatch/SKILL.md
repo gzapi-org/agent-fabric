@@ -1,6 +1,6 @@
 ---
 name: subagent-dispatch
-description: "Why every writing subagent dispatch in this repo pins `model` and `isolation: \"worktree\"`, why the REVIEW CLASS (blind-reviewer, description beginning review/re-review, opus, NO isolation) is a standing authorisation the dispatch guard enforces rather than asks about, what the PreToolUse hook cannot see (a Workflow script's agent() calls), how worktree isolation actually behaves — what an agent sees, what survives, and why collection is a copy — and the review brief (base..head, revert test, quoted hunks, pre-existing section, re-review scoped to new hunks). Load it before dispatching agents or writing a Workflow script, when an agent reports files that \"do not exist\", when a worktree or worktree-agent branch is left behind, or when tempted to merge an agent's branch."
+description: "Why every writing subagent dispatch in this repo pins `model` and `isolation: \"worktree\"`, why the REVIEW CLASS (blind-reviewer, description beginning review/re-review, fable, NO isolation) is a standing authorisation the dispatch guard enforces rather than asks about, what the PreToolUse hook cannot see (a Workflow script's agent() calls), how worktree isolation actually behaves — what an agent sees, what survives, and why collection is a copy — and the review brief (base..head, revert test, quoted hunks, pre-existing section, re-review scoped to new hunks). Load it before dispatching agents or writing a Workflow script, when an agent reports files that \"do not exist\", when a worktree or worktree-agent branch is left behind, or when tempted to merge an agent's branch."
 ---
 
 # Why dispatch looks like this
@@ -42,17 +42,17 @@ reproducible: if the session model changes while a batch is in flight,
 unset-field agents change with it. The hook in `.claude/settings.json`
 denies an unset `model` and prompts on a premium one.
 
-### Review is the standing `opus` exception
+### Review is the standing premium-alias exception (`fable`)
 
 One role escapes the premium ban without a per-dispatch ask: a
 **substitute reviewer**, dispatched either at step 26 (judging an
 automated review claim) or when `pr-review-status.sh` reports a
 DECLINE and no automated review is coming at all.
 
-**`opus` is a tier alias, and the target is agent-fabric's routing.**
-The Agent tool's `model` field accepts the harness aliases (or a full
-Claude model id), never a provider-qualified vendor model, so a dispatch
-literally cannot name one. The mapping lives in agent-fabric, not in
+**`fable` is a tier alias, and the target is agent-fabric's routing.**
+The Agent tool's `model` field accepts ONLY the four harness aliases —
+not a full Claude model id, not a provider-qualified vendor model — so a
+dispatch literally cannot name a model. The mapping lives in agent-fabric, not in
 settings: `routing/capabilities.json` binds each capability class
 (`code-low`, `code-medium`, `code-high`, `review`) to a concrete model
 per provider, `routing/shims.json` binds a model family to its
@@ -114,7 +114,8 @@ enforced by `.claude/agent-dispatch-guard.sh` (the `PreToolUse` hook for
    (`.claude/agents/blind-reviewer.md`), reviewable like any other,
    whose charter is review-only;
 2. `description` that BEGINS with `review` or `re-review`;
-3. `model: "opus"`;
+3. `model: "fable"` — the alias no coding class rides, so on the broker
+   path its export is the review model and nothing else's;
 4. **no `isolation`** at all.
 
 All four, or the dispatch is **denied** — never asked. These were
@@ -122,13 +123,18 @@ learned one at a time, and each was load-bearing on its own:
 
 - **The model condition was missing when this first shipped.** Keyed on
   the type alone, the branch returned before the premium check for ANY
-  model — `blind-reviewer` with `fable` skipped the prompt while the
-  rule authorises `opus` only. The same hole runs the other way: a
+  model — `blind-reviewer` with any alias skipped the prompt while the
+  rule authorised one alias only. The same hole runs the other way: a
   `sonnet` review would take the exemption and evade the rule beside
-  it. So the class REQUIRES opus, and denies anything else rather than
-  asking: a review is not a retryable step, its failure mode is a green
-  PR that merges, and "this review looks small" is exactly the moment a
-  cheaper tier is tempting and wrong.
+  it. So the class REQUIRES its one alias, and denies anything else
+  rather than asking: a review is not a retryable step, its failure
+  mode is a green PR that merges, and "this review looks small" is
+  exactly the moment a different tier is tempting and wrong. Which
+  alias: `fable`, not `opus` — code-high rides `opus`, and on the broker
+  path one alias is one export, so a reviewer on `opus` is code-high's
+  model. What `fable` resolves to is `routing/capabilities.json`, gated
+  by `routing/policies/review-grade.json` (architect-cto's decision, not
+  the dispatcher's).
 - **The description prefix** stops a writing dispatch from wearing the
   review type. Another project's guard matched `review` ANYWHERE in the
   description and let "Address review feedback" through — a writing

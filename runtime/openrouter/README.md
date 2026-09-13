@@ -10,7 +10,7 @@ at launch applies to everything under the session, subagents included.
 | who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding |
 | session model | harness default | `session` from `routing/profiles.json` (+ family shim) |
 | capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | `routing/capabilities.json` → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
-| review class | the `fable` alias, bound by the harness to its Fable tier | `review` → `anthropic/claude-opus-5[1m]` → `ANTHROPIC_DEFAULT_FABLE_MODEL`; the launcher refuses a profile that resolves review outside review-grade |
+| review class | the `fable` alias, bound by the harness to its Fable tier | `review` → `z-ai/glm-5.3` (+ shim) → `ANTHROPIC_DEFAULT_FABLE_MODEL`; the launcher refuses a profile that resolves review outside review-grade |
 | per-role / per-agent choice | none | `routing/profiles.json` (`roles.<role>`, `agents.<login>`) + the agent's gitignored `model-profile.local.json` |
 | review-grade floor | the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch |
 | how to inspect | `model-audit.sh` | same, plus `ori auth --json` |
@@ -29,7 +29,7 @@ Today's OpenRouter policy resolves to:
 code-low     z-ai/glm-5.3-flash  + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
 code-medium  z-ai/glm-5.2        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_SONNET_MODEL
 code-high    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_OPUS_MODEL
-review       anthropic/claude-opus-5[1m]  (no shim)               -> ANTHROPIC_DEFAULT_FABLE_MODEL
+review       z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_FABLE_MODEL   (review-grade.json admits it; Opus 5 stays admitted)
 ```
 
 Only the Z.ai/GLM family has a shim. A model of any other family gets none
@@ -83,11 +83,22 @@ served as `z-ai/glm-5.3` (Modal, GLM preset applied): code-high's export.
 
 Every class therefore rides an alias, and one alias carries one export.
 `fable` is the alias no coding class uses, so the review class rides it;
-the launcher exports the review-grade model under
+the launcher exports the review model under
 `ANTHROPIC_DEFAULT_FABLE_MODEL`, the dispatch guard requires `model: fable`
 on a review dispatch (and denies `opus`, which is code-high's), and the
 review gate guards exactly that export. On vanilla `claude`, `fable`
 binds to the harness's current Fable tier.
+
+Which model rides the export is `routing/capabilities.json`, gated by
+`routing/policies/review-grade.json`. The read-back on the new binding
+(a `model: fable` reviewer from a GLM 5.3 session served as
+`anthropic/claude-opus-5` on every generation) proved the export is the
+reviewer's own; architect-cto then admitted `z-ai/glm-5.3` to
+review-grade and made it the broker review model (2026-09-13), so today
+the reviewer is GLM 5.3 with the family shim, and Opus 5 remains an
+admitted choice for a profile that wants it. The separation still
+matters: review and code-high can be given different models, and the
+review model can be raised without touching the coding classes.
 
 Also verified the same day: `ori` forwards an unprefixed Anthropic id
 untouched (`--model claude-opus-5[1m]` was served as

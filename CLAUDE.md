@@ -78,10 +78,15 @@ directory, the repository, the branch or the session.
   fabric-coordinator holder, distils it into the corpus with your name on
   it. A slice you believe is wrong is raised to fabric-coordinator, never
   edited in place.
-- **Subagents** name a capability class, never a vendor model: `code-low`,
-  `code-medium`, `code-high`, and the review class (`blind-reviewer`).
-  What each resolves to is `routing/`; the dispatch guard refuses a
-  dispatch with no model or no worktree isolation.
+- **Subagents** name a capability class in `subagent_type` — `code-low`,
+  `code-medium`, `code-high`, or the review class `blind-reviewer` — and
+  a harness tier alias in `model` (`haiku`, `sonnet`, `opus`; `fable`
+  for a review), never a vendor model: what an alias resolves to is
+  `routing/`, decided at launch. The dispatch guard
+  (`runtime/claude-code/hooks/agent-dispatch-guard.sh`) refuses a
+  dispatch with no `model`, a review on anything but `fable`, or a
+  writing dispatch without worktree isolation. Decided 2026-09-13; a
+  guard that infers the tier from the class is not this design.
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Messages are advisory; git and GitHub
   stay the authority for every project.

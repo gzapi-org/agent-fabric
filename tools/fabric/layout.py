@@ -70,6 +70,28 @@ def agent_memory_dir(agent: str) -> str:
     return os.path.join(FABRIC_ROOT, "memory", "agents", agent)
 
 
+def shared_home(klass: str, project: str | None = None) -> str:
+    """Where a slice owned by several roles lives: field knowledge under
+    memory/shared/, project knowledge under that project's shared/."""
+    if klass in DOMAIN_CLASSES:
+        return shared_dir()
+    if not project:
+        raise ValueError(f"shared {klass!r} is project-scoped; no project given")
+    return os.path.join(projects_memory_dir(), project, "shared")
+
+
+def root_rel(path: str) -> str:
+    """A path as the corpus writes it into indexes: relative to the root."""
+    return os.path.relpath(path, FABRIC_ROOT)
+
+
+def list_projects() -> list[str]:
+    base = projects_memory_dir()
+    if not os.path.isdir(base):
+        return []
+    return sorted(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)))
+
+
 def class_home(klass: str, role: str, project: str | None = None) -> str:
     """The directory a slice of `klass` for `role` belongs in."""
     if klass in IDENTITY_CLASSES:

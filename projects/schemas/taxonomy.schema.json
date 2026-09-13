@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gzapp:roles:taxonomy",
-  "title": "Role taxonomy and attribution rules",
-  "description": "The rules table the harvest reads. Rules are DATA validated against this schema, never code: adding a role or a path rule is a data change, reviewable as a diff.",
+  "$id": "urn:agent-fabric:project-taxonomy",
+  "title": "Project binding rules: where each role applies inside one managed repository",
+  "description": "projects/<project-id>/taxonomy.json. The rules table the harvest reads for ONE project: which path prefixes, keywords and observation types attribute work to which role, and how observations recorded under working-copy labels are re-attributed to the project. Rules are DATA validated against this schema, never code. Role ids refer to identities/roles/catalog.json; a role's identity (title, charter) is not repeated here.",
   "type": "object",
   "required": ["version", "projects", "reattribution", "roles"],
   "additionalProperties": false,
   "properties": {
     "version": { "type": "integer", "minimum": 1 },
+    "project": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$", "description": "The logical project id from projects/registry.json." },
     "note": { "type": "string" },
     "multi_tag_note": { "type": "string" },
     "projects": {
@@ -16,7 +17,7 @@
       "additionalProperties": false,
       "properties": {
         "include": {
-          "description": "Project labels whose observations are ours.",
+          "description": "Labels under which observations of THIS project were recorded by legacy stores: the basenames of its working copies. Labels, never identities — every one of them is a copy of the same project.",
           "type": "array", "items": { "type": "string" }, "uniqueItems": true
         },
         "exclude": {
@@ -71,20 +72,15 @@
         "required": ["id", "paths"],
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "title": { "type": "string" },
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "A role id from identities/roles/catalog.json." },
           "paths": {
-            "description": "Path rules deliberately over-approximate; a path cannot tell one kind of knowledge from another, so several roles may claim the same prefix and the per-claim layer decides.",
+            "description": "Repository-relative path prefixes, never machine paths. Path rules deliberately over-approximate; a path cannot tell one kind of knowledge from another, so several roles may claim the same prefix and the per-claim layer decides.",
             "type": "array", "items": { "type": "string" }
           },
           "keywords": { "type": "array", "items": { "type": "string" } },
           "types": {
             "description": "Observation types that assign this role regardless of path.",
             "type": "array", "items": { "type": "string" }
-          },
-          "candidate": {
-            "description": "True while the cluster has not yet proved it carries its own weight.",
-            "type": "boolean"
           }
         }
       }

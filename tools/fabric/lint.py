@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-"""tools/roles/lint.py
+"""tools/fabric/lint.py
 
 >>> help
-Guard the committed role base the way the contract validators guard the
+Guard the committed corpus the way the contract validators guard the
 wire surface.
 
-    tools/roles/lint.py            # lints .roles/
-    tools/roles/lint.py --roles PATH
+    tools/fabric/lint.py                 # lints this agent-fabric checkout
+    tools/fabric/lint.py --fabric PATH
 
-The role base is written by tools and read by sessions, so the failures
+The corpus is written by tools and read by sessions, so the failures
 worth catching are the quiet ones: an index that no longer matches the
-slices beside it, a slice that grew past what a session can afford to
-load, provenance that points at nothing, a binding history that cannot be
-resolved, or content that should never have been committed at all.
+slices it points at, a slice that grew past what a session can afford to
+load, provenance that points at nothing, or content that should never
+have been committed at all.
 
 Checks:
-  schemas    every structured file validates against .roles/schema/
-  frontmatter every slice carries provenance, and it parses
-  index      every slice is indexed, and every index line resolves
+  schemas    the role catalogue, every project taxonomy, the routing
+             profiles and every slice's frontmatter validate
+  identity   every role directory is catalogued; charter and recall are
+             the only authored classes; payload is well-shaped
+  index      every (project, role) index lists every slice the role has —
+             its domain slices, its project slices, its charter and recall,
+             its shared slices — and every index line resolves
   budgets    no slice exceeds its token budget
   shared     a shared slice really is shared (two or more owners)
-  bindings   one open window per clone; closures only ever move forward
-  profiles   every opus tier in model-profiles.json is review-grade, and
-             every role row names a role the taxonomy knows
+  profiles   every review-grade gate in routing/profiles.json holds, and
+             every role row names a catalogued role
   hygiene    no city or country names, no external project names, no
              credentials, no non-English prose
 
@@ -35,6 +38,7 @@ clean machine can still run it.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -42,7 +46,10 @@ import sys
 from collections import defaultdict
 from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_spec = importlib.util.spec_from_file_location(
+    "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
+layout = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(layout)
 
 BUDGET_TOKENS = 1800
 CHARS_PER_TOKEN = 4
@@ -77,8 +84,8 @@ def hygiene_findings(where: str, text: str) -> list[str]:
     """Banned patterns and the language check — for slices AND payload.
 
     Payload is exempt from the slice judgements; it is never exempt from
-    this. lint.py is the only CI pass over `.roles/**`, and switch.py copies
-    payload verbatim into `.claude/` in every clone that adopts the role, so
+    this. lint.py is the only CI pass over the corpus, and role.py copies
+    payload verbatim into `.claude/` in every workspace that adopts the role, so
     this is the only thing between a pasted credential and every one of them.
     """
     out: list[str] = []
@@ -95,9 +102,9 @@ def hygiene_findings(where: str, text: str) -> list[str]:
 
 
 def payload_shape_findings(role: str, role_path: str) -> list[str]:
-    """Assert what switch.py can actually install, where it is authored.
+    """Assert what role.py can actually install, where it is authored.
 
-    switch.py installs a DIRECTORY under skills/ and a .md FILE under
+    role.py installs a DIRECTORY under skills/ and a .md FILE under
     commands/, and skips anything else without a word. Exempting payload
     from the slice checks would otherwise make misplaced payload invisible
     twice over: silent here, silently dropped at install time.
@@ -107,7 +114,7 @@ def payload_shape_findings(role: str, role_path: str) -> list[str]:
         for name in sorted(PAYLOAD_DIRS):
             if os.path.isdir(os.path.join(role_path, name)):
                 out.append(
-                    f"shared/{name}/: shared ships no payload — switch.py "
+                    f"shared/{name}/: shared ships no payload — role.py "
                     "resolves it as no role and never installs from it"
                 )
         return out
@@ -117,7 +124,7 @@ def payload_shape_findings(role: str, role_path: str) -> list[str]:
             entry = os.path.join(skills_dir, name)
             if not os.path.isdir(entry):
                 out.append(
-                    f"{role}/skills/{name}: not a directory — switch.py "
+                    f"{role}/skills/{name}: not a directory — role.py "
                     "installs only directories here, and skips the rest silently"
                 )
             elif not os.path.isfile(os.path.join(entry, "SKILL.md")):
@@ -128,7 +135,7 @@ def payload_shape_findings(role: str, role_path: str) -> list[str]:
             entry = os.path.join(commands_dir, name)
             if not (os.path.isfile(entry) and name.endswith(".md")):
                 out.append(
-                    f"{role}/commands/{name}: not a .md file — switch.py "
+                    f"{role}/commands/{name}: not a .md file — role.py "
                     "installs only .md files here, and skips the rest silently"
                 )
     return out
@@ -283,7 +290,7 @@ def _structural_check(schema: dict[str, Any], doc: Any, where: str, path: str = 
 
 
 def model_profile_findings(doc: dict[str, Any], known_roles: set[str]) -> list[str]:
-    """Invariants the schema cannot express for registry/model-profiles.json.
+    """Invariants the schema cannot express for routing/profiles.json.
 
     The file is layered — defaults <- roles.<role> <- instances.<name> — and
     the launcher resolves the opus tier by merging the layers. So the check
@@ -295,7 +302,7 @@ def model_profile_findings(doc: dict[str, Any], known_roles: set[str]) -> list[s
     create a row nobody ever resolves to.
     """
     findings: list[str] = []
-    where = "model-profiles.json"
+    where = "routing/profiles.json"
     grade = set(doc.get("review_grade", []))
     default_opus = doc.get("defaults", {}).get("tiers", {}).get("opus")
     if default_opus not in grade:
@@ -311,236 +318,296 @@ def model_profile_findings(doc: dict[str, Any], known_roles: set[str]) -> list[s
     if known_roles:
         for name in (doc.get("roles") or {}):
             if name not in known_roles:
-                findings.append(f"{where}: roles.{name} is not a role in taxonomy.json")
+                findings.append(f"{where}: roles.{name} is not a role in identities/roles/catalog.json")
     return findings
 
 
-def load_schema(roles_dir: str, name: str) -> dict[str, Any] | None:
-    path = os.path.join(roles_dir, "schema", f"{name}.schema.json")
+def load_schema(root: str, subdir: str, name: str) -> dict[str, Any] | None:
+    path = os.path.join(root, subdir, f"{name}.schema.json")
     if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 
 
+def load_json(path: str, where: str, findings: list[str]) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except ValueError as exc:
+        findings.append(f"{where}: not valid JSON ({exc})")
+        return None
+
+
+CLASS_DIRS = ("domain", "solution", "intersection", "rationale", "workflow", "threads")
+
+
+def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | None,
+                findings: list[str], shared_owner_count: dict[str, set[str]],
+                descriptions: dict[str, str]) -> list[str]:
+    """Judge every slice under `base`; return their root-relative paths."""
+    slices: list[str] = []
+    if not os.path.isdir(base):
+        return slices
+    for dirpath, dirnames, filenames in os.walk(base):
+        # Payload is exempt only at the ROOT of a role identity directory:
+        # `identities/roles/<role>/skills/`. A `skills/` nested anywhere
+        # else is a directory of slices like any other.
+        if dirpath == base and where_prefix.startswith("identities/"):
+            dirnames[:] = [d for d in dirnames if d not in PAYLOAD_DIRS]
+        for filename in sorted(filenames):
+            if not filename.endswith(".md") or filename == "INDEX.md":
+                continue
+            full = os.path.join(dirpath, filename)
+            rel = layout.root_rel(full)
+            with open(full, encoding="utf-8") as fh:
+                text = fh.read()
+            slices.append(rel)
+            meta = parse_frontmatter(text)
+            if meta is None:
+                findings.append(f"{rel}: no provenance frontmatter")
+                continue
+            if template_schema:
+                findings += validate_json(template_schema, meta, rel)
+            if isinstance(meta.get("description"), str):
+                descriptions[rel] = meta["description"]
+            # charter and recall are authored, not distilled: they define
+            # the role rather than assert anything about the system, so
+            # they carry no evidence by nature — and they live ONLY under
+            # identities/roles/; a slice of that class anywhere in memory/
+            # is a hand-authored claim smuggled past provenance.
+            klass = meta.get("class")
+            if klass in ("charter", "recall") and not where_prefix.startswith("identities/"):
+                findings.append(f"{rel}: class {klass!r} is authored role identity and "
+                                "belongs under identities/roles/, not in memory/")
+            if not meta.get("derived_from") and klass not in ("charter", "recall"):
+                findings.append(f"{rel}: no derived_from — a claim with no evidence")
+            for owner in meta.get("shared_with", []) or []:
+                shared_owner_count[rel].add(owner)
+            body = FRONTMATTER_RE.sub("", text)
+            budget = TIER1_BUDGET_TOKENS if meta.get("tier") == 1 else BUDGET_TOKENS
+            approx = len(body) // CHARS_PER_TOKEN
+            if approx > budget * 1.35:
+                findings.append(f"{rel}: ~{approx} tokens exceeds the {budget} budget; split the slice")
+            findings += hygiene_findings(rel, body)
+    return slices
+
+
+def flat_and_dir_findings(base: str, label: str) -> list[str]:
+    """A class is either a flat file or a directory, never both. The
+    activator takes the directory branch and skips the flat file, so the
+    flat one is unreachable — and at tier 1 that silently retires knowledge
+    the index promises loads at activation."""
+    out: list[str] = []
+    for klass_dir in CLASS_DIRS:
+        if (os.path.isdir(os.path.join(base, klass_dir))
+                and os.path.exists(os.path.join(base, f"{klass_dir}.md"))):
+            out.append(f"{label}: has both {klass_dir}.md and {klass_dir}/ — the flat file is "
+                       "unreachable, the activator loads only the directory")
+    return out
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Lint the committed role base.")
-    ap.add_argument("--roles", default=".roles")
+    ap = argparse.ArgumentParser(description="Lint the committed corpus.")
+    ap.add_argument("--fabric", default=None, help="agent-fabric root (default: this checkout)")
     args = ap.parse_args()
-    roles_dir = args.roles
-    if not os.path.isdir(roles_dir):
-        print(f"lint: no role base at {roles_dir}", file=sys.stderr)
+    if args.fabric:
+        layout.FABRIC_ROOT = os.path.abspath(args.fabric)
+    root = layout.FABRIC_ROOT
+    if not os.path.isdir(os.path.join(root, "identities")):
+        print(f"lint: no agent-fabric checkout at {root}", file=sys.stderr)
         return 2
 
     findings: list[str] = []
+    schemas = os.path.join("identities", "schemas")
 
-    # --- structured files -------------------------------------------------
-    taxonomy_schema = load_schema(roles_dir, "taxonomy")
-    taxonomy_path = os.path.join(roles_dir, "taxonomy.json")
+    # --- the role catalogue ------------------------------------------------
     known_roles: set[str] = set()
-    if taxonomy_schema and os.path.exists(taxonomy_path):
-        with open(taxonomy_path, encoding="utf-8") as fh:
-            taxonomy = json.load(fh)
-        findings += validate_json(taxonomy_schema, taxonomy, "taxonomy.json")
-        known_roles = {r["id"] for r in taxonomy.get("roles", [])}
+    catalog_schema = load_schema(root, schemas, "catalog")
+    catalog_path = layout.catalog_path()
+    if os.path.exists(catalog_path):
+        catalog = load_json(catalog_path, "identities/roles/catalog.json", findings)
+        if catalog is not None:
+            if catalog_schema:
+                findings += validate_json(catalog_schema, catalog, "identities/roles/catalog.json")
+            known_roles = {r.get("id") for r in catalog.get("roles", []) if isinstance(r, dict)}
+    else:
+        findings.append("identities/roles/catalog.json: missing")
 
-    for name, filename in (("clones", "clones.jsonl"), ("bindings", "bindings.jsonl")):
-        schema = load_schema(roles_dir, name)
-        path = os.path.join(roles_dir, "registry", filename)
-        if not (schema and os.path.exists(path)):
-            continue
-        with open(path, encoding="utf-8") as fh:
-            for lineno, line in enumerate(fh, start=1):
-                if line.strip():
-                    findings += validate_json(schema, json.loads(line), f"{filename}:{lineno}")
-
-    # --- model profiles ---------------------------------------------------
-    profiles_schema = load_schema(roles_dir, "model-profiles")
-    profiles_path = os.path.join(roles_dir, "registry", "model-profiles.json")
-    if profiles_schema and os.path.exists(profiles_path):
-        with open(profiles_path, encoding="utf-8") as fh:
-            profiles = json.load(fh)
-        schema_findings = validate_json(profiles_schema, profiles, "model-profiles.json")
-        findings += schema_findings
-        if not schema_findings:
-            findings += model_profile_findings(profiles, known_roles)
-
-    # --- binding invariants ----------------------------------------------
-    bindings_path = os.path.join(roles_dir, "registry", "bindings.jsonl")
-    if os.path.exists(bindings_path):
-        with open(bindings_path, encoding="utf-8") as fh:
-            rows = [json.loads(line) for line in fh if line.strip()]
-        open_windows: dict[str, int] = defaultdict(int)
-        for row in rows:
-            if row.get("valid_to") in (None, ""):
-                open_windows[row["clone_id"]] += 1
-            elif row.get("valid_to_epoch") and row.get("valid_from_epoch"):
-                if row["valid_to_epoch"] < row["valid_from_epoch"]:
-                    findings.append(
-                        f"bindings.jsonl: clone {row['clone_id']} has a window that closes "
-                        "before it opens"
-                    )
-        for clone_id, count in open_windows.items():
-            if count > 1:
-                findings.append(
-                    f"bindings.jsonl: clone {clone_id} has {count} open windows; "
-                    "a clone is in one place at a time"
-                )
-
-    # --- slices -----------------------------------------------------------
-    template_schema = load_schema(roles_dir, "role-template")
-    crossref_schema = load_schema(roles_dir, "crossref")
-    shared_owner_count: dict[str, set[str]] = defaultdict(set)
-    role_dirs = [
-        d for d in sorted(os.listdir(roles_dir))
-        if os.path.isdir(os.path.join(roles_dir, d))
-        and d not in {"schema", "registry", ".instance"}
-    ]
-
-    for role in role_dirs:
-        role_path = os.path.join(roles_dir, role)
-        slices: list[str] = []
-        # Collected so the INDEX.md check below can compare the DESCRIPTION
-        # text, not only the link path. See that check for why.
-        slice_descriptions: dict[str, str] = {}
-        findings += payload_shape_findings(role, role_path)
-        if known_roles and role not in known_roles and role != "shared":
-            findings.append(f"{role}: not a role in taxonomy.json")
-        for dirpath, _dirnames, filenames in os.walk(role_path):
-            for filename in sorted(filenames):
-                if not filename.endswith(".md") or filename == "INDEX.md":
-                    continue
-                full = os.path.join(dirpath, filename)
-                rel = os.path.relpath(full, role_path)
-                where = f"{role}/{rel}"
-                with open(full, encoding="utf-8") as fh:
-                    text = fh.read()
-                # skills/ and commands/ at the role root are installable
-                # payload, not knowledge slices: switch.py copies them
-                # verbatim into .claude/, so they carry skill/command
-                # frontmatter and never provenance. Exempt from the slice
-                # judgements below, and from INDEX membership — but scanned
-                # for hygiene like everything else, whole file included,
-                # because a credential can sit in frontmatter too.
-                if rel.split(os.sep)[0] in PAYLOAD_DIRS:
-                    findings += hygiene_findings(where, text)
-                    continue
-                slices.append(rel)
-                meta = parse_frontmatter(text)
-                if meta is None:
-                    findings.append(f"{where}: no provenance frontmatter")
-                    continue
-                if template_schema:
-                    findings += validate_json(template_schema, meta, where)
-                if isinstance(meta.get("description"), str):
-                    slice_descriptions[rel] = meta["description"]
-                # charter and recall are authored, not distilled: they define
-                # the role rather than assert anything about the system, so
-                # they carry no evidence by nature.
-                if not meta.get("derived_from") and meta.get("class") not in ("charter", "recall"):
-                    findings.append(f"{where}: no derived_from — a claim with no evidence")
-                for owner in meta.get("shared_with", []) or []:
-                    shared_owner_count[where].add(owner)
-                body = FRONTMATTER_RE.sub("", text)
-                budget = TIER1_BUDGET_TOKENS if meta.get("tier") == 1 else BUDGET_TOKENS
-                approx = len(body) // CHARS_PER_TOKEN
-                if approx > budget * 1.35:
-                    findings.append(
-                        f"{where}: ~{approx} tokens exceeds the {budget} budget; split the slice"
-                    )
-                findings += hygiene_findings(where, body)
-
-        index_path = os.path.join(role_path, "INDEX.md")
-        if role == "shared":
-            continue
-
-        # A class is either a flat file or a directory, never both. switch.py
-        # takes the directory branch and skips the flat file, so the flat one is
-        # unreachable — and at tier 1 that silently retires knowledge the index
-        # promises loads at activation. The assembler no longer produces this,
-        # but the index is now generated from disk and so can no longer betray
-        # it, which is why the condition is checked here instead.
-        for klass_dir in ("domain", "solution", "intersection", "rationale",
-                          "workflow", "threads"):
-            if (os.path.isdir(os.path.join(role_path, klass_dir))
-                    and os.path.exists(os.path.join(role_path, f"{klass_dir}.md"))):
-                findings.append(
-                    f"{role}: has both {klass_dir}.md and {klass_dir}/ — the flat file is "
-                    "unreachable, switch.py loads only the directory"
-                )
-
-        if not os.path.exists(index_path):
-            if slices:
-                findings.append(f"{role}: has slices but no INDEX.md")
-            continue
-        with open(index_path, encoding="utf-8") as fh:
-            index_text = fh.read()
-        linked = set(re.findall(r"\]\(([^)]+)\)", index_text))
-        for rel in slices:
-            if rel not in linked:
-                findings.append(f"{role}/INDEX.md: does not list {rel} — the index has drifted")
-        for target in linked:
-            resolved = os.path.normpath(os.path.join(role_path, target))
-            if not os.path.exists(resolved):
-                findings.append(f"{role}/INDEX.md: links {target}, which does not exist")
-
-        # THE DESCRIPTION, NOT ONLY THE PATH.
-        #
-        # INDEX.md is generated from slice frontmatter (assemble.py), and it is
-        # the only thing a session reads before deciding whether to load a
-        # slice. Checking paths alone let a slice's `description:` change while
-        # the index kept the old wording: lint reported clean and the index
-        # quietly described something else, which is the "a hand-written index
-        # drifts and then lies" failure that .roles/README.md gives as the
-        # reason the index is generated at all.
-        #
-        # Two independent instances landed the same day in different roles
-        # (#610 and #618), each hand-syncing the slice and the index line
-        # together with nothing that would have caught them diverging.
-        #
-        # The line shape is assemble.py's, exactly:
-        #     - [`path`](path) — description
-        index_described: dict[str, str] = {}
-        for line in index_text.splitlines():
-            m = re.match(r"^- \[`([^`]+)`\]\(([^)]+)\) — (.*)$", line)
-            if m and m.group(1) == m.group(2):
-                index_described[m.group(2)] = m.group(3).strip()
-        for rel, described in sorted(slice_descriptions.items()):
-            listed = index_described.get(rel)
-            if listed is None:
-                # Already reported as missing above, or the line is shaped
-                # differently — not this check's business to guess.
+    # --- project bindings --------------------------------------------------
+    taxonomy_schema = load_schema(root, os.path.join("projects", "schemas"), "taxonomy")
+    projects_root = os.path.join(root, "projects")
+    project_ids: list[str] = []
+    if os.path.isdir(projects_root):
+        for pid in sorted(os.listdir(projects_root)):
+            tax_path = os.path.join(projects_root, pid, "taxonomy.json")
+            if not os.path.isfile(tax_path):
                 continue
-            if listed != described.strip():
-                findings.append(
-                    f"{role}/INDEX.md: the entry for {rel} describes it as "
-                    f"{listed!r} but the slice's frontmatter says "
-                    f"{described.strip()!r} — the index has drifted; "
-                    f"re-run tools/roles/assemble.py"
-                )
+            project_ids.append(pid)
+            where = f"projects/{pid}/taxonomy.json"
+            tax = load_json(tax_path, where, findings)
+            if tax is None:
+                continue
+            if taxonomy_schema:
+                findings += validate_json(taxonomy_schema, tax, where)
+            if tax.get("project") not in (None, pid):
+                findings.append(f"{where}: names project {tax.get('project')!r} but lives under {pid}/")
+            for r in tax.get("roles", []) or []:
+                rid = r.get("id") if isinstance(r, dict) else None
+                if known_roles and rid not in known_roles:
+                    findings.append(f"{where}: role {rid!r} is not in identities/roles/catalog.json")
+                for prefix in (r.get("paths") if isinstance(r, dict) else None) or []:
+                    if os.path.isabs(prefix) or prefix.startswith("~"):
+                        findings.append(f"{where}: role {rid!r} path {prefix!r} is machine-specific; "
+                                        "paths must be repository-relative")
 
-        crossref_path = os.path.join(role_path, "crossref.json")
-        if os.path.exists(crossref_path):
-            with open(crossref_path, encoding="utf-8") as fh:
-                crossref_doc = json.load(fh)
-            if crossref_schema:
-                findings += validate_json(
-                    crossref_schema, crossref_doc, f"{role}/crossref.json")
-            findings += check_durable_references(role, crossref_doc)
+    # --- routing profiles --------------------------------------------------
+    profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")
+    profiles_path = os.path.join(root, "routing", "profiles.json")
+    if profiles_schema and os.path.exists(profiles_path):
+        profiles = load_json(profiles_path, "routing/profiles.json", findings)
+        if profiles is not None:
+            schema_findings = validate_json(profiles_schema, profiles, "routing/profiles.json")
+            findings += schema_findings
+            if not schema_findings:
+                findings += model_profile_findings(profiles, known_roles)
 
+    # --- role identities ---------------------------------------------------
+    template_schema = load_schema(root, schemas, "role-template")
+    crossref_schema = load_schema(root, schemas, "crossref")
+    shared_owner_count: dict[str, set[str]] = defaultdict(set)
+    descriptions: dict[str, str] = {}
+    identity_slices: dict[str, list[str]] = {}
+    roles_dir = layout.roles_dir()
+    role_ids = [d for d in sorted(os.listdir(roles_dir))
+                if os.path.isdir(os.path.join(roles_dir, d))] if os.path.isdir(roles_dir) else []
+    for role in role_ids:
+        role_path = os.path.join(roles_dir, role)
+        if known_roles and role not in known_roles:
+            findings.append(f"identities/roles/{role}: not in identities/roles/catalog.json")
+        if not os.path.isfile(os.path.join(role_path, "charter.md")):
+            findings.append(f"identities/roles/{role}: no charter.md — a role without a charter has no boundary")
+        findings += payload_shape_findings(role, role_path)
+        for sub in sorted(PAYLOAD_DIRS):
+            payload = os.path.join(role_path, sub)
+            if os.path.isdir(payload):
+                for dirpath, _d, filenames in os.walk(payload):
+                    for filename in sorted(filenames):
+                        if filename.endswith(".md"):
+                            full = os.path.join(dirpath, filename)
+                            with open(full, encoding="utf-8") as fh:
+                                findings += hygiene_findings(layout.root_rel(full), fh.read())
+        identity_slices[role] = lint_slices(role_path, f"identities/roles/{role}", template_schema,
+                                            findings, shared_owner_count, descriptions)
+        for rel in identity_slices[role]:
+            klass = (parse_frontmatter(open(os.path.join(root, rel), encoding="utf-8").read()) or {}).get("class")
+            if klass not in ("charter", "recall"):
+                findings.append(f"{rel}: class {klass!r} is knowledge, not identity — it belongs under memory/")
+    for role in known_roles - set(role_ids):
+        findings.append(f"identities/roles/catalog.json: role {role!r} has no identities/roles/{role}/ directory")
+
+    # --- domain memory -----------------------------------------------------
+    domain_slices: dict[str, list[str]] = {}
+    domains_root = os.path.join(root, "memory", "domains")
+    if os.path.isdir(domains_root):
+        for domain in sorted(os.listdir(domains_root)):
+            base = os.path.join(domains_root, domain)
+            if not os.path.isdir(base):
+                continue
+            findings += flat_and_dir_findings(base, f"memory/domains/{domain}")
+            domain_slices[domain] = lint_slices(base, f"memory/domains/{domain}", template_schema,
+                                                findings, shared_owner_count, descriptions)
+
+    # --- project memory, and the indexes ------------------------------------
+    indexed_domains: set[str] = set()
+    for pid in layout.list_projects():
+        pbase = os.path.join(layout.projects_memory_dir(), pid)
+        if project_ids and pid not in project_ids:
+            findings.append(f"memory/projects/{pid}: no projects/{pid}/taxonomy.json binds this project")
+        for role in sorted(os.listdir(pbase)):
+            rbase = os.path.join(pbase, role)
+            if not os.path.isdir(rbase):
+                continue
+            label = f"memory/projects/{pid}/{role}"
+            if role == "shared":
+                lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions)
+                continue
+            if known_roles and role not in known_roles:
+                findings.append(f"{label}: not a role in identities/roles/catalog.json")
+            findings += flat_and_dir_findings(rbase, label)
+            slices = lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions)
+            expected = list(slices) + domain_slices.get(role, []) + identity_slices.get(role, [])
+            indexed_domains.add(role)
+
+            index_path = os.path.join(rbase, "INDEX.md")
+            if not os.path.exists(index_path):
+                if expected:
+                    findings.append(f"{label}: has slices but no INDEX.md")
+                continue
+            with open(index_path, encoding="utf-8") as fh:
+                index_text = fh.read()
+            linked = set(re.findall(r"\]\(([^)]+)\)", index_text))
+            for rel in expected:
+                if rel not in linked:
+                    findings.append(f"{label}/INDEX.md: does not list {rel} — the index has drifted")
+            for target in linked:
+                if not os.path.exists(os.path.join(root, target)):
+                    findings.append(f"{label}/INDEX.md: links {target}, which does not exist")
+
+            # THE DESCRIPTION, NOT ONLY THE PATH. INDEX.md is generated from
+            # slice frontmatter (assemble.py), and it is the only thing a
+            # session reads before deciding whether to load a slice. Checking
+            # paths alone let a slice's description change while the index
+            # kept the old wording: lint reported clean and the index quietly
+            # described something else. The line shape is assemble.py's:
+            #     - [`path`](path) — description
+            index_described: dict[str, str] = {}
+            for line in index_text.splitlines():
+                m = re.match(r"^- \[`([^`]+)`\]\(([^)]+)\) — (.*)$", line)
+                if m and m.group(1) == m.group(2):
+                    index_described[m.group(2)] = m.group(3).strip()
+            for rel in sorted(expected):
+                listed = index_described.get(rel)
+                described = descriptions.get(rel)
+                if listed is None or described is None:
+                    continue
+                if listed != described.strip():
+                    findings.append(
+                        f"{label}/INDEX.md: the entry for {rel} describes it as "
+                        f"{listed!r} but the slice's frontmatter says "
+                        f"{described.strip()!r} — the index has drifted; "
+                        f"re-run tools/fabric/assemble.py"
+                    )
+
+            crossref_path = os.path.join(rbase, "crossref.json")
+            if os.path.exists(crossref_path):
+                crossref_doc = load_json(crossref_path, f"{label}/crossref.json", findings)
+                if crossref_doc is not None:
+                    if crossref_schema:
+                        findings += validate_json(crossref_schema, crossref_doc, f"{label}/crossref.json")
+                    findings += check_durable_references(label, crossref_doc)
+
+    for domain, slices in domain_slices.items():
+        if slices and domain not in indexed_domains:
+            findings.append(f"memory/domains/{domain}: {len(slices)} slice(s) indexed by no project — "
+                            "no memory/projects/<project>/{domain}/INDEX.md lists them")
+
+    # --- shared ----------------------------------------------------------------
+    shared_root = layout.shared_dir()
+    if os.path.isdir(shared_root):
+        lint_slices(shared_root, "memory/shared", template_schema, findings, shared_owner_count, descriptions)
     for where, owners in shared_owner_count.items():
         if len(owners) < 2:
-            findings.append(
-                f"{where}: shared slice owned by {len(owners)} role(s); "
-                "fold it back into its single owner"
-            )
+            findings.append(f"{where}: shared slice owned by {len(owners)} role(s); "
+                            "fold it back into its single owner")
 
     if findings:
-        print(f"role-base lint: {len(findings)} finding(s)\n", file=sys.stderr)
+        print(f"corpus lint: {len(findings)} finding(s)\n", file=sys.stderr)
         for finding in findings:
             print(f"  {finding}", file=sys.stderr)
         return 1
-    print(f"role-base lint: clean ({len(role_dirs)} role directories)")
+    print(f"corpus lint: clean ({len(role_ids)} roles, {len(domain_slices)} domains, "
+          f"{len(layout.list_projects())} project(s))")
     return 0
 
 

@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# tools/roles/query.sh
+# tools/fabric/query.sh
 #
 # >>> help
-# Ask the role base what it knows about an artifact.
+# Ask the corpus what it knows about an artifact.
 #
-#   tools/roles/query.sh adr ADR-054       # who learned from it, where it landed
-#   tools/roles/query.sh pr 428
-#   tools/roles/query.sh migration 0007
-#   tools/roles/query.sh file apps/status_web
-#   tools/roles/query.sh obs <content-hash>
-#   tools/roles/query.sh roles             # what roles exist and how big they are
+#   tools/fabric/query.sh adr ADR-054       # who learned from it, where it landed
+#   tools/fabric/query.sh pr 428
+#   tools/fabric/query.sh migration 0007
+#   tools/fabric/query.sh file apps/status_web
+#   tools/fabric/query.sh obs <content-hash>
+#   tools/fabric/query.sh roles             # what roles exist, per project, and how big they are
 #
 # The citation graph is small — thousands of edges — so it lives in the
-# committed JSON the assembler writes, and jq answers everything in
-# milliseconds. A database would buy nothing here and would cost the one
-# property that matters most: the graph is reviewable in a pull request,
-# because it is a diff like everything else.
+# committed JSON the assembler writes (memory/projects/<project>/<role>/
+# crossref.json), and jq answers everything in milliseconds. A database
+# would buy nothing here and would cost the one property that matters
+# most: the graph is reviewable in a pull request, because it is a diff
+# like everything else.
 #
 # If multi-hop queries ever become routine, the next step is a generated
 # SQLite edge cache rebuilt from these files — derived, never authoritative.
@@ -24,12 +25,12 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ROLES="${GZAPP_ROLES_DIR:-$ROOT/.roles}"
+ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+MEMORY="$ROOT/memory"
 
 die() { printf '%s\n' "$*" >&2; exit 2; }
 command -v jq >/dev/null || die "query: jq is required"
-[ -d "$ROLES" ] || die "query: no role base at $ROLES"
+[ -d "$MEMORY/projects" ] || die "query: no corpus at $MEMORY"
 
 usage() {
   sed -n '/^# >>> help/,/^# <<< help/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^>>> help$/d; /^<<< help$/d'
@@ -49,16 +50,19 @@ kind_key() {
   esac
 }
 
-crossrefs() { find "$ROLES" -mindepth 2 -maxdepth 2 -name crossref.json | sort; }
+# memory/projects/<project>/<role>/crossref.json
+crossrefs() { find "$MEMORY/projects" -mindepth 3 -maxdepth 3 -name crossref.json | sort; }
+label_of() { local d; d="$(dirname "$1")"; printf '%s/%s' "$(basename "$(dirname "$d")")" "$(basename "$d")"; }
 
 cmd_roles() {
-  printf '%-16s %-7s %s\n' role slices citations
+  printf '%-28s %-8s %-8s %s\n' project/role project domain citations
   for f in $(crossrefs); do
-    local dir role slices cites
+    local dir role proj_slices dom_slices cites
     dir="$(dirname "$f")"; role="$(basename "$dir")"
-    slices="$(find "$dir" -name '*.md' ! -name INDEX.md | wc -l | tr -d ' ')"
+    proj_slices="$(find "$dir" -name '*.md' ! -name INDEX.md | wc -l | tr -d ' ')"
+    dom_slices="$( [ -d "$MEMORY/domains/$role" ] && find "$MEMORY/domains/$role" -name '*.md' ! -name INDEX.md | wc -l | tr -d ' ' || echo 0)"
     cites="$(jq '[.index[]? | length] | add // 0' "$f")"
-    printf '%-16s %-7s %s\n' "$role" "$slices" "$cites"
+    printf '%-28s %-8s %-8s %s\n' "$(label_of "$f")" "$proj_slices" "$dom_slices" "$cites"
   done
 }
 
@@ -66,7 +70,7 @@ cmd_lookup() {
   local key="$1" needle="$2" found=0
   for f in $(crossrefs); do
     local role hit
-    role="$(basename "$(dirname "$f")")"
+    role="$(label_of "$f")"
     hit="$(jq -r --arg k "$key" --arg n "$needle" '
       (.index[$k] // {}) | to_entries[]
       | select(.key == $n or (.key | ascii_downcase | contains($n | ascii_downcase)))
@@ -80,14 +84,14 @@ cmd_lookup() {
       printf '      slices: %s\n' "${slices:-none}"
     done
   done
-  [ "$found" = 1 ] || printf 'nothing in the role base cites %s\n' "$needle"
+  [ "$found" = 1 ] || printf 'nothing in the corpus cites %s\n' "$needle"
 }
 
 cmd_obs() {
   local hash="$1" found=0
   for f in $(crossrefs); do
     local role hit
-    role="$(basename "$(dirname "$f")")"
+    role="$(label_of "$f")"
     hit="$(jq -r --arg h "$hash" '
       .index | to_entries[] | .key as $kind | .value | to_entries[]
       | select(.value.observations | index($h))
@@ -102,13 +106,13 @@ cmd_obs() {
   done
   # Provenance runs the other way too: which slices were built from this row.
   local slices
-  slices="$(grep -rl "$hash" "$ROLES" --include='*.md' 2>/dev/null | sed "s|^$ROLES/||" | sort || true)"
+  slices="$(grep -rl "$hash" "$MEMORY" --include='*.md' 2>/dev/null | sed "s|^$ROOT/||" | sort || true)"
   if [ -n "$slices" ]; then
     found=1
     printf '\nevidence for:\n'
     printf '  %s\n' $slices
   fi
-  [ "$found" = 1 ] || printf 'observation %s is not referenced in the role base\n' "$hash"
+  [ "$found" = 1 ] || printf 'observation %s is not referenced in the corpus\n' "$hash"
 }
 
 case "${1:-}" in

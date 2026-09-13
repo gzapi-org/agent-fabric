@@ -61,12 +61,46 @@ def build(tmp: str, claim_files: dict[str, dict]) -> tuple[str, str, str]:
     return drain, claims_dir, out
 
 
+PROJECT = "demo"
+
+
 def run_assemble(drain: str, claims_dir: str, out: str, *extra: str) -> subprocess.CompletedProcess:
+    """`out` is a throwaway agent-fabric root; slices land by class under
+    memory/domains/<role>/ and memory/projects/demo/<role>/."""
     return subprocess.run(
         [sys.executable, ASSEMBLE, "--claims", claims_dir, "--drain", drain,
-         "--out", out, "--stamp", "2026-01-01", *extra],
+         "--fabric", out, "--project", PROJECT, "--stamp", "2026-01-01", *extra],
         capture_output=True, text=True,
     )
+
+
+def dom(out: str, role: str, *rest: str) -> str:
+    return os.path.join(out, "memory", "domains", role, *rest)
+
+
+def proj(out: str, role: str, *rest: str) -> str:
+    return os.path.join(out, "memory", "projects", PROJECT, role, *rest)
+
+
+def ident(out: str, role: str, *rest: str) -> str:
+    # Authored identity is never created by the assembler; the fixture
+    # makes room for a hand-written charter.
+    os.makedirs(os.path.join(out, "identities", "roles", role), exist_ok=True)
+    return os.path.join(out, "identities", "roles", role, *rest)
+
+
+def shared_path(out: str, filename: str) -> str:
+    return os.path.join(out, "memory", "shared", filename)
+
+
+def report_path(out: str) -> str:
+    return os.path.join(out, "memory", "last-drain-report.json")
+
+
+def walk_role(out: str, role: str):
+    """Every file a role's knowledge is spread over: its domain and project directories."""
+    for base in (dom(out, role), proj(out, role)):
+        yield from os.walk(base)
 
 
 def read(path: str) -> str:
@@ -82,7 +116,7 @@ def test_places_claims_and_writes_provenance(tmp: str) -> None:
     ])})
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
-    slice_path = os.path.join(out, "alpha", "domain.md")
+    slice_path = dom(out, "alpha", "domain.md")
     text = read(slice_path)
     assert "role: alpha" in text and "class: domain" in text
     assert "derived_from:" in text and "- h1" in text
@@ -97,7 +131,7 @@ def test_unresolved_origin_is_stated_not_invented(tmp: str) -> None:
         {"class": "domain", "topic": "x", "body": "b", "evidence": ["h3"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    assert "unresolved" in read(os.path.join(out, "alpha", "domain.md"))
+    assert "unresolved" in read(dom(out, "alpha", "domain.md"))
 
 
 def test_index_lists_every_slice(tmp: str) -> None:
@@ -107,7 +141,7 @@ def test_index_lists_every_slice(tmp: str) -> None:
         {"class": "workflow", "topic": "how", "title": "Third", "body": "b", "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    index = read(os.path.join(out, "alpha", "INDEX.md"))
+    index = read(proj(out, "alpha", "INDEX.md"))
     assert "domain/one.md" in index and "domain/two.md" in index
     assert "workflow.md" in index
     # The description is the retrieval cue: without it the index is a file
@@ -125,7 +159,7 @@ def test_index_banner_names_which_sections_load_when(tmp: str) -> None:
         {"class": "workflow", "topic": "how", "title": "T", "body": "b", "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    index = read(os.path.join(out, "alpha", "INDEX.md"))
+    index = read(proj(out, "alpha", "INDEX.md"))
     assert "Tier 1" in index, index
     assert "loads at activation" in index, index
     assert "Everything below loads on demand" not in index, index
@@ -143,7 +177,7 @@ def test_committed_indexes_carry_the_banner_the_assembler_emits(tmp: str) -> Non
         {"class": "workflow", "topic": "how", "title": "T", "body": "b", "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    generated = read(os.path.join(out, "alpha", "INDEX.md"))
+    generated = read(proj(out, "alpha", "INDEX.md"))
 
     # The banner is the block between the H1 and the first section heading.
     body = generated.split("# alpha — knowledge index\n", 1)[1]
@@ -177,7 +211,7 @@ def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
                    "since_watermark": 1000, "next_watermark": 2500,
                    "counts": {"provisional_agent": 0, "in_scope": 7}}, fh)
     run_assemble(drain, claims_dir, out)
-    report = json.loads(read(os.path.join(out, "last-drain-report.json")))
+    report = json.loads(read(report_path(out)))
 
     # .get throughout: a missing key must fail this test with a readable
     # message, not raise KeyError and abort the whole suite behind it.
@@ -188,7 +222,7 @@ def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
     assert harvest.get("host") == "boxA", harvest
     # An absolute path into somebody's home must not be committed.
     assert "database" not in harvest, harvest
-    assert "/home/someone" not in read(os.path.join(out, "last-drain-report.json"))
+    assert "/home/someone" not in read(report_path(out))
 
 
 def test_drain_report_records_unattributable_rows(tmp: str) -> None:
@@ -202,7 +236,7 @@ def test_drain_report_records_unattributable_rows(tmp: str) -> None:
         json.dump({"host": "boxA", "since_watermark": 0, "next_watermark": 9,
                    "counts": {"provisional_agent": 41, "in_scope": 41}}, fh)
     run_assemble(drain, claims_dir, out)
-    report = json.loads(read(os.path.join(out, "last-drain-report.json")))
+    report = json.loads(read(report_path(out)))
     harvest = report.get("harvest") or {}
     assert harvest.get("provisional_agent") == 41, harvest
     assert harvest.get("in_scope") == 41, harvest
@@ -216,7 +250,7 @@ def test_drain_report_tolerates_a_drain_with_no_harvest_report(tmp: str) -> None
     ])})
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
-    report = json.loads(read(os.path.join(out, "last-drain-report.json")))
+    report = json.loads(read(report_path(out)))
     assert report.get("harvest", "MISSING") is None, report.get("harvest", "MISSING")
     assert report.get("watermarks", "MISSING") == {}, report.get("watermarks", "MISSING")
 
@@ -280,7 +314,7 @@ def test_slice_splits_when_it_exceeds_budget(tmp: str) -> None:
         {"class": "domain", "topic": "big", "title": "B", "body": big, "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out, "--budget", "500")
-    files = sorted(os.listdir(os.path.join(out, "alpha", "domain")))
+    files = sorted(os.listdir(dom(out, "alpha", "domain")))
     assert len(files) >= 2, f"expected a split, got {files}"
 
 
@@ -313,7 +347,7 @@ def test_budget_accounts_for_what_merge_mode_carries(tmp: str) -> None:
     # Whichever layout it chose, no single slice may exceed the budget.
     limit = 500 * 4
     oversized = []
-    for dirpath, _dirs, files in os.walk(os.path.join(out, "alpha")):
+    for dirpath, _dirs, files in walk_role(out, "alpha"):
         for name in files:
             if not name.endswith(".md") or name == "INDEX.md":
                 continue
@@ -325,7 +359,7 @@ def test_budget_accounts_for_what_merge_mode_carries(tmp: str) -> None:
 
     # And both drains' content still exists somewhere.
     everything = ""
-    for dirpath, _dirs, files in os.walk(os.path.join(out, "alpha")):
+    for dirpath, _dirs, files in walk_role(out, "alpha"):
         for name in files:
             everything += read(os.path.join(dirpath, name))
     assert "First" in everything and "Second" in everything, \
@@ -344,12 +378,12 @@ def test_claim_owned_by_two_roles_is_stored_once(tmp: str) -> None:
     })
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
-    shared_path = os.path.join(out, "shared", "domain-observability.md")
-    assert os.path.exists(shared_path), "a multi-owner claim belongs in shared/"
-    assert not os.path.exists(os.path.join(out, "alpha", "domain.md")), \
+    shared_file = shared_path(out, "domain-observability.md")
+    assert os.path.exists(shared_file), "a multi-owner claim belongs in shared/"
+    assert not os.path.exists(dom(out, "alpha", "domain.md")), \
         "it must not also be copied into the owning role"
     for role in ("alpha", "beta"):
-        index = read(os.path.join(out, role, "INDEX.md"))
+        index = read(proj(out, role, "INDEX.md"))
         assert "shared/domain-observability.md" in index, f"{role} must point at the shared slice"
 
 
@@ -377,7 +411,7 @@ def test_shared_claims_reach_every_owner_crossref(tmp: str) -> None:
     # h1 carries ADR-054 and PR #428 per the fixture, so BOTH owners must be
     # able to answer "what backs my knowledge of ADR-054".
     for role in ("alpha", "beta"):
-        with open(os.path.join(out, role, "crossref.json"), encoding="utf-8") as fh:
+        with open(proj(out, role, "crossref.json"), encoding="utf-8") as fh:
             index = json.load(fh)["index"]
         assert "ADR-054" in index.get("adrs", {}), \
             f"{role} crossref lost the shared claim's ADR edge: {index}"
@@ -391,7 +425,7 @@ def test_crossref_maps_artifacts_to_slices(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "T", "body": "b", "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    with open(os.path.join(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
+    with open(proj(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
         doc = json.load(fh)
     entry = doc["index"]["adrs"]["ADR-054"]
     assert entry["observations"] == ["h1"]
@@ -418,7 +452,7 @@ def test_merge_mode_preserves_earlier_drains(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
 
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert "Learned in cycle one" in text, "the earlier drain's claim was destroyed"
     assert "Learned in cycle two" in text, "the new claim is missing"
     assert "- h1" in text and "- h2" in text, "provenance must union across drains"
@@ -436,7 +470,7 @@ def test_index_keeps_slices_this_drain_did_not_touch(tmp: str) -> None:
     ])}
     drain, claims_dir, out = build(tmp, first)
     run_assemble(drain, claims_dir, out)
-    assert "domain.md" in read(os.path.join(out, "alpha", "INDEX.md"))
+    assert "domain.md" in read(proj(out, "alpha", "INDEX.md"))
 
     second = claims("alpha", [
         {"class": "workflow", "topic": "fresh", "title": "Learned in cycle two",
@@ -447,7 +481,7 @@ def test_index_keeps_slices_this_drain_did_not_touch(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
 
-    index = read(os.path.join(out, "alpha", "INDEX.md"))
+    index = read(proj(out, "alpha", "INDEX.md"))
     assert "workflow.md" in index, "the new slice is missing from the index"
     assert "domain.md" in index, "an untouched slice vanished from the index"
 
@@ -465,12 +499,12 @@ def test_a_title_containing_a_newline_is_not_truncated(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
 
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     meta = text.split("---")[1]
     desc = [l for l in meta.splitlines() if l.startswith("description:")]
     assert len(desc) == 1, f"description spilled across lines: {meta}"
     assert "second line" in desc[0], "the tail of the title was dropped from frontmatter"
-    assert "second line" in read(os.path.join(out, "alpha", "INDEX.md"))
+    assert "second line" in read(proj(out, "alpha", "INDEX.md"))
 
 
 def test_a_class_never_gets_both_a_flat_file_and_a_directory(tmp: str) -> None:
@@ -485,7 +519,7 @@ def test_a_class_never_gets_both_a_flat_file_and_a_directory(tmp: str) -> None:
     ])}
     drain, claims_dir, out = build(tmp, first)
     run_assemble(drain, claims_dir, out)
-    assert os.path.isdir(os.path.join(out, "alpha", "workflow")), "expected a split class"
+    assert os.path.isdir(proj(out, "alpha", "workflow")), "expected a split class"
 
     second = claims("alpha", [
         {"class": "workflow", "topic": "aaa", "title": "A again", "body": "b", "evidence": ["h3"]},
@@ -495,9 +529,9 @@ def test_a_class_never_gets_both_a_flat_file_and_a_directory(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
 
-    flat = os.path.join(out, "alpha", "workflow.md")
+    flat = proj(out, "alpha", "workflow.md")
     assert not os.path.exists(flat), "a split class gained an unreachable flat file"
-    assert "A again" in read(os.path.join(out, "alpha", "workflow", "aaa.md"))
+    assert "A again" in read(proj(out, "alpha", "workflow", "aaa.md"))
 
 
 def test_a_hash_shaped_like_a_number_survives_the_frontmatter(tmp: str) -> None:
@@ -513,7 +547,7 @@ def test_a_hash_shaped_like_a_number_survives_the_frontmatter(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
 
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert f'"{tricky}"' in text, "a number-shaped hash was emitted unquoted"
 
     # Only the derived_from list: `origin:` renders nested mappings, not scalars.
@@ -541,7 +575,7 @@ def test_carried_full_scope_survives_a_domain_only_drain(tmp: str) -> None:
     ])}
     drain, claims_dir, out = build(tmp, first)
     run_assemble(drain, claims_dir, out)
-    path = os.path.join(out, "alpha", "domain.md")
+    path = dom(out, "alpha", "domain.md")
     assert "knowledge_scope: full" in read(path), read(path)
 
     second = claims("alpha", [
@@ -576,7 +610,7 @@ def test_merge_target_strengthens_instead_of_appending(tmp: str) -> None:
              "evidence": ["h2"]},
         ]), fh)
     run_assemble(drain, claims_dir, out)
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert text.count("## The finding") == 1, "merge_target must not duplicate the section"
     assert "Sharper statement" in text
     assert "First statement" not in text, "the strengthened claim replaces the old text"
@@ -594,7 +628,7 @@ def test_duplicate_title_keeps_both_claims(tmp: str) -> None:
     ])})
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert "The first claim." in text, "the earlier claim was silently discarded"
     assert "A genuinely different second claim." in text
     assert "TITLE COLLISIONS" in proc.stderr, "the collision must be reported, not hidden"
@@ -614,7 +648,7 @@ def test_carried_sections_keep_their_citation_edges(tmp: str) -> None:
              "body": "b", "evidence": ["h2"]},
         ]), fh)
     run_assemble(drain, claims_dir, out)
-    with open(os.path.join(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
+    with open(proj(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
         index = json.load(fh)["index"]
     assert "ADR-054" in index.get("adrs", {}), "the first drain's edge was lost"
     assert "migration-007" in index.get("migrations", {}), "the second drain's edge is missing"
@@ -634,7 +668,7 @@ def test_carried_evidence_keeps_its_origin(tmp: str) -> None:
              "body": "b", "evidence": ["h2"]},
         ]), fh)
     run_assemble(drain, claims_dir, out)
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert "- h1" in text and "- h2" in text
     assert "clone-aaa" in text, "the carried hash lost the clone that produced it"
     assert "clone-bbb" in text, "the new hash lost its origin"
@@ -651,9 +685,9 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
          "body": "Second.", "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    first = read(os.path.join(out, "last-drain-report.json"))
+    first = read(report_path(out))
     run_assemble(drain, claims_dir, out)
-    second = read(os.path.join(out, "last-drain-report.json"))
+    second = read(report_path(out))
     assert first == second, "the drain report must be identical for identical input"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
@@ -671,7 +705,7 @@ def test_collision_survives_a_drain_with_an_empty_delta(tmp: str) -> None:
          "body": "Second.", "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    assert json.loads(read(os.path.join(out, "last-drain-report.json")))["title_collisions"]
+    assert json.loads(read(report_path(out)))["title_collisions"]
 
     # A later drain that admits nothing for this slice — and touches a
     # different one entirely.
@@ -682,10 +716,10 @@ def test_collision_survives_a_drain_with_an_empty_delta(tmp: str) -> None:
         ]), fh)
     run_assemble(drain, claims_dir, out)
 
-    text = read(os.path.join(out, "alpha", "domain.md"))
+    text = read(dom(out, "alpha", "domain.md"))
     assert "## Same title" in text and "## Same title (2)" in text, \
         "both sections must still be on disk"
-    still = json.loads(read(os.path.join(out, "last-drain-report.json")))["title_collisions"]
+    still = json.loads(read(report_path(out)))["title_collisions"]
     assert still, "the unresolved collision must still be reported"
 
 
@@ -705,7 +739,7 @@ def test_merge_target_clears_the_collision_it_resolves(tmp: str) -> None:
     ])}
     drain, claims_dir, out = build(tmp, first)
     run_assemble(drain, claims_dir, out)
-    path = os.path.join(out, "alpha", "domain.md")
+    path = dom(out, "alpha", "domain.md")
     text = read(path)
     assert "Shared title (2)" in text, "precondition: the collision happened"
     assert "collisions:" in text, "precondition: it was recorded"
@@ -738,7 +772,7 @@ def test_collision_scan_ignores_authored_documents(tmp: str) -> None:
     ])})
     run_assemble(drain, claims_dir, out)          # creates the role directory
     # A charter (authored, class not generated) and a plain readme.
-    with open(os.path.join(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: charter\ndescription: d\n"
                  "tier: 1\ndistilled_at: 2026-01-01\n---\n\n"
                  "## Scope\n\ntext\n\n## Scope (2)\n\nmore text\n")
@@ -747,7 +781,7 @@ def test_collision_scan_ignores_authored_documents(tmp: str) -> None:
 
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
-    report = json.loads(read(os.path.join(out, "last-drain-report.json")))
+    report = json.loads(read(report_path(out)))
     assert report["title_collisions"] == [], \
         f"authored headings must not be reported: {report['title_collisions']}"
 
@@ -761,12 +795,12 @@ def test_authored_headings_are_not_mistaken_for_collisions(tmp: str) -> None:
          "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    with open(os.path.join(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: charter\ndescription: authored\n"
                  "tier: 1\ndistilled_at: 2026-01-01\n---\n\n"
                  "## Phase one\n\ntext\n\n## Phase one (2)\n\nmore text\n")
     run_assemble(drain, claims_dir, out)
-    report = json.loads(read(os.path.join(out, "last-drain-report.json")))
+    report = json.loads(read(report_path(out)))
     assert report["title_collisions"] == [], \
         f"authored headings were reported as a collision: {report['title_collisions']}"
 
@@ -783,12 +817,19 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
          "body": "Second.", "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    assert "collisions:" in read(os.path.join(out, "alpha", "domain.md")), \
+    assert "collisions:" in read(dom(out, "alpha", "domain.md")), \
         "the collision should have been recorded in the slice"
     if os.path.isdir(SCHEMA_DIR):
         import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "schema"), dirs_exist_ok=True)
-    proc = subprocess.run([sys.executable, LINT, "--roles", out], capture_output=True, text=True)
+        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    # Lint also wants the role catalogued; the assembler does not author that.
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+    run_assemble(drain, claims_dir, out)          # re-index with the charter present
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
     assert proc.returncode == 0, \
         f"lint rejected what the assembler wrote:\n{proc.stderr}"
 
@@ -807,12 +848,12 @@ def test_quoted_titles_survive_repeated_drains(tmp: str) -> None:
          "evidence": ["h2"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    first = read(os.path.join(out, "alpha", "domain.md"))
+    first = read(dom(out, "alpha", "domain.md"))
     assert first.count("collisions:") == 1
     entries_first = first.count(quoted.replace('"', '\\"'))
 
     run_assemble(drain, claims_dir, out)
-    second = read(os.path.join(out, "alpha", "domain.md"))
+    second = read(dom(out, "alpha", "domain.md"))
     assert second == first, "a repeated drain must not rewrite the slice"
     assert second.count(quoted.replace('"', '\\"')) == entries_first, \
         "the collision entry multiplied across drains"
@@ -837,7 +878,7 @@ def test_domain_only_evidence_may_only_support_a_domain_claim(tmp: str) -> None:
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "domain-only" in proc.stderr, proc.stderr
     # It must refuse BEFORE writing, so a rerun is enough to recover.
-    assert not os.path.exists(os.path.join(out, "alpha", "solution.md")), \
+    assert not os.path.exists(proj(out, "alpha", "solution.md")), \
         "a rejected drain must not leave a tree behind"
 
 
@@ -850,7 +891,7 @@ def test_domain_only_evidence_is_accepted_on_a_domain_claim(tmp: str) -> None:
     ])})
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert os.path.exists(os.path.join(out, "alpha", "domain.md"))
+    assert os.path.exists(dom(out, "alpha", "domain.md"))
 
 
 def test_hygiene_violation_fails_the_run(tmp: str) -> None:
@@ -873,8 +914,8 @@ def test_non_english_slice_is_flagged_by_lint(tmp: str) -> None:
     run_assemble(drain, claims_dir, out)
     if os.path.isdir(SCHEMA_DIR):
         import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "schema"), dirs_exist_ok=True)
-    proc = subprocess.run([sys.executable, LINT, "--roles", out], capture_output=True, text=True)
+        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
     assert proc.returncode == 1, "non-English prose must be reported"
     assert "non-English" in proc.stderr
 
@@ -886,11 +927,11 @@ def test_lint_detects_index_drift(tmp: str) -> None:
     run_assemble(drain, claims_dir, out)
     if os.path.isdir(SCHEMA_DIR):
         import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "schema"), dirs_exist_ok=True)
-    with open(os.path.join(out, "alpha", "solution.md"), "w", encoding="utf-8") as fh:
+        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    with open(proj(out, "alpha", "solution.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: solution\ndescription: added by hand\n"
                  "tier: 2\ndistilled_at: 2026-01-01\nderived_from:\n  - h1\n---\n\nbody\n")
-    proc = subprocess.run([sys.executable, LINT, "--roles", out], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
     assert proc.returncode == 1
     assert "drifted" in proc.stderr, proc.stderr
 
@@ -914,7 +955,7 @@ def test_scratchpad_references_are_normalized(tmp: str) -> None:
         json.dump({"hx": {"files": [scratch]}}, fh)
     run_assemble(drain, claims_dir, out)
 
-    with open(os.path.join(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
+    with open(proj(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
         files = json.load(fh)["index"].get("files", {})
     assert scratch not in files, f"raw session path survived: {sorted(files)}"
     # The digest distinguishes same-named artifacts from different
@@ -941,7 +982,7 @@ def test_a_tracked_scratchpad_path_is_left_alone(tmp: str) -> None:
         json.dump({"hx": {"files": [tracked]}}, fh)
     run_assemble(drain, claims_dir, out)
 
-    with open(os.path.join(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
+    with open(proj(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
         files = json.load(fh)["index"].get("files", {})
     assert tracked in files, sorted(files)
     assert not any(k.startswith("scratch:") for k in files), sorted(files)
@@ -961,7 +1002,7 @@ def test_same_named_temp_artifacts_stay_distinct(tmp: str) -> None:
                    "hb": {"files": ["/tmp/run-b/probe.cs"]}}, fh)
     run_assemble(drain, claims_dir, out)
 
-    with open(os.path.join(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
+    with open(proj(out, "alpha", "crossref.json"), encoding="utf-8") as fh:
         files = json.load(fh)["index"].get("files", {})
     keys = sorted(k for k in files if k.startswith("scratch:probe.cs#"))
     assert len(keys) == 2, keys
@@ -981,9 +1022,9 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
     run_assemble(drain, claims_dir, out)
     if os.path.isdir(SCHEMA_DIR):
         import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "schema"), dirs_exist_ok=True)
+        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
 
-    crossref_path = os.path.join(out, "alpha", "crossref.json")
+    crossref_path = proj(out, "alpha", "crossref.json")
     with open(crossref_path, encoding="utf-8") as fh:
         doc = json.load(fh)
     doc["index"].setdefault("files", {})[
@@ -993,7 +1034,7 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
         json.dump(doc, fh, ensure_ascii=False, indent=2, sort_keys=True)
 
     proc = subprocess.run(
-        [sys.executable, LINT, "--roles", out], capture_output=True, text=True)
+        [sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "session-local temp path" in proc.stderr, proc.stderr
 

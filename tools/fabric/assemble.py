@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""tools/roles/assemble.py
+"""tools/fabric/assemble.py
 
 >>> help
-Turn distiller claims into the role knowledge tree under `.roles/`.
+Turn distiller claims into the knowledge corpus, filed by scope.
 
-    tools/roles/assemble.py --claims DIR --drain DIR --out .roles
+    tools/fabric/assemble.py --claims DIR --drain DIR --project gzapp --stamp DATE
+
+Where a slice lands is decided by tools/fabric/layout.py from its class:
+domain knowledge under memory/domains/<role>/, everything learned about
+the project under memory/projects/<project>/<role>/, multi-owner slices
+under the matching shared/. The generated INDEX.md for each (project,
+role) lists all of it with root-relative paths, plus the role's authored
+charter and recall from identities/roles/<role>/.
 
 Distillers judge; this assembles. A distiller emits claims and nothing
 else — no files, no frontmatter, no index — because everything mechanical
@@ -39,6 +46,7 @@ so it is never done implicitly.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import hashlib
@@ -46,6 +54,11 @@ import re
 import sys
 from collections import defaultdict
 from typing import Any
+
+_spec = importlib.util.spec_from_file_location(
+    "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
+layout = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(layout)
 
 TIER1 = {"charter", "workflow", "index"}
 DEFAULT_SLICE_BUDGET_TOKENS = 1800
@@ -245,8 +258,8 @@ def hygiene_check(text: str, where: str) -> list[str]:
     return problems
 
 
-def scan_collisions(roles_dir: str) -> list[str]:
-    """Report title collisions still recorded in the committed role base.
+def scan_collisions(dirs: list[str]) -> list[str]:
+    """Report title collisions still recorded in the committed corpus.
 
     Read from the `collisions` frontmatter the assembler writes, not from the
     shape of the headings: an authored document may legitimately contain "X"
@@ -255,18 +268,18 @@ def scan_collisions(roles_dir: str) -> list[str]:
     the file states it — without inventing one where nothing collided.
     """
     found: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(roles_dir):
-        dirnames[:] = [d for d in dirnames if d not in {"schema", "registry", ".instance"}]
-        for name in sorted(filenames):
-            if not name.endswith(".md"):
-                continue
-            path = os.path.join(dirpath, name)
-            meta, _sections = read_existing_slice(path)
-            for title in meta.get("collisions", []) or []:
-                found.append(
-                    f"{os.path.relpath(path, roles_dir)}: {title!r} appears twice "
-                    "— set merge_target to resolve"
-                )
+    for base in dirs:
+        for dirpath, _dirnames, filenames in os.walk(base):
+            for name in sorted(filenames):
+                if not name.endswith(".md"):
+                    continue
+                path = os.path.join(dirpath, name)
+                meta, _sections = read_existing_slice(path)
+                for title in meta.get("collisions", []) or []:
+                    found.append(
+                        f"{layout.root_rel(path)}: {title!r} appears twice "
+                        "— set merge_target to resolve"
+                    )
     return sorted(found)
 
 
@@ -349,13 +362,23 @@ def claim_block(claim: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Assemble role knowledge from claims.")
+    ap = argparse.ArgumentParser(description="Assemble knowledge slices from claims.")
     ap.add_argument("--claims", required=True, help="directory of <role>.json claim files")
     ap.add_argument("--drain", required=True, help="harvest output directory")
-    ap.add_argument("--out", default=".roles", help="role base directory")
+    ap.add_argument("--project", required=True,
+                    help="logical project id the project-scoped classes are filed under")
+    ap.add_argument("--fabric", default=None,
+                    help="agent-fabric root (default: this checkout, or $AGENT_FABRIC_ROOT)")
     ap.add_argument("--stamp", required=True, help="distillation date (YYYY-MM-DD)")
     ap.add_argument("--budget", type=int, default=DEFAULT_SLICE_BUDGET_TOKENS)
     args = ap.parse_args()
+    if args.fabric:
+        layout.FABRIC_ROOT = os.path.abspath(args.fabric)
+    project = args.project
+
+    def base_for(role: str, klass: str) -> str:
+        """The directory a slice of `klass` for `role` lives in."""
+        return layout.class_home(klass, role, project)
 
     with open(os.path.join(args.drain, "references.json"), encoding="utf-8") as fh:
         references = json.load(fh)
@@ -565,7 +588,7 @@ def main() -> int:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.rstrip() + "\n")
         written.append(path)
-        problems.extend(hygiene_check(body, os.path.relpath(path, args.out)))
+        problems.extend(hygiene_check(body, layout.root_rel(path)))
 
     def carried_chars(*candidates: str) -> int:
         """How much text merge mode will carry into the FIRST part.
@@ -613,11 +636,25 @@ def main() -> int:
             groups.append(current)
         return groups
 
-    # Shared slices first, so role indexes can point at them.
-    shared_dir = os.path.join(args.out, "shared")
+    def described(path: str, fallback: str) -> str:
+        with open(path, encoding="utf-8") as fh:
+            head = fh.read(2000)
+        match = re.search(r"^description:\s*(.+)$", head, re.M)
+        description = match.group(1).strip() if match else fallback
+        if description.startswith('"'):
+            try:
+                description = json.loads(description)
+            except json.JSONDecodeError:
+                description = description.strip('"')
+        return description
+
+    # Shared slices first, so role indexes can point at them. A shared slice
+    # lives with its class: field knowledge under memory/shared/, project
+    # knowledge under the project's shared/.
     shared_index: dict[str, list[dict[str, str]]] = defaultdict(list)
     for (klass, topic), claims in sorted(shared.items()):
         owners = sorted(shared_owners[(klass, topic)])
+        shared_dir = layout.shared_home(klass, project)
         prior = carried_chars(os.path.join(shared_dir, f"{klass}-{topic}.md"))
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
@@ -629,84 +666,77 @@ def main() -> int:
             write_slice(shared_dir, filename, "shared", klass, group, description, owners)
             for owner in owners:
                 shared_index[owner].append(
-                    {"path": f"shared/{filename}", "description": description, "class": klass}
+                    {"path": layout.root_rel(os.path.join(shared_dir, filename)),
+                     "description": description, "class": klass}
                 )
 
-    # Every role that owns anything gets a directory and an index — including
-    # one whose claims all live in shared slices, which would otherwise end up
-    # with knowledge and no way to find it.
+    # Every role that owns anything gets a project directory and an index —
+    # including one whose claims all live in shared slices, which would
+    # otherwise end up with knowledge and no way to find it.
     owning_roles = sorted(set(per_role) | set(shared_index) | set(all_claims))
     for role in owning_roles:
         buckets = per_role.get(role, {})
-        role_dir = os.path.join(args.out, role)
-        os.makedirs(role_dir, exist_ok=True)
+        proj_dir = layout.project_dir(project, role)
+        os.makedirs(proj_dir, exist_ok=True)
         by_class: dict[str, list[tuple[str, list[dict[str, Any]]]]] = defaultdict(list)
         for (klass, topic), claims in sorted(buckets.items()):
             by_class[klass].append((topic, claims))
 
         for klass, topics in sorted(by_class.items()):
+            base = base_for(role, klass)
             # The layout is a property of the TREE, not of this drain. Deciding
             # it from `len(topics)` means a class that already has a `<class>/`
             # directory gains a flat `<class>.md` the moment a later drain
-            # touches exactly one topic in it — and switch.py takes the
+            # touches exactly one topic in it — and the activator takes the
             # directory branch and skips the flat file, so a tier-1 workflow
             # slice written that way is never loaded at activation. That is the
             # defect 08dd4164 fixed in code and this reintroduced through
             # content: two roles shipped workflow.md files no session would read.
-            already_split = os.path.isdir(os.path.join(role_dir, CLASS_FILES[klass]))
+            already_split = os.path.isdir(os.path.join(base, CLASS_FILES[klass]))
             multi = already_split or len(topics) > 1
             for topic, claims in topics:
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(
-                    os.path.join(role_dir, f"{CLASS_FILES[klass]}.md"),
-                    os.path.join(role_dir, CLASS_FILES[klass], f"{topic}.md"),
+                    os.path.join(base, f"{CLASS_FILES[klass]}.md"),
+                    os.path.join(base, CLASS_FILES[klass], f"{topic}.md"),
                 )
                 groups = split_by_budget(claims, prior)
                 for part, group in enumerate(groups, start=1):
                     suffix = "" if part == 1 else f"-{part}"
                     if multi or len(groups) > 1:
-                        directory = os.path.join(role_dir, CLASS_FILES[klass])
+                        directory = os.path.join(base, CLASS_FILES[klass])
                         filename = f"{topic}{suffix}.md"
-                        rel = f"{CLASS_FILES[klass]}/{filename}"
                     else:
-                        directory = role_dir
+                        directory = base
                         filename = f"{CLASS_FILES[klass]}.md"
-                        rel = filename
                     description = (
                         (group[0].get("title") if group else None)
                         or f"{topic.replace('-', ' ')} ({klass})"
                     )
                     write_slice(directory, filename, role, klass, group, description)
                     index_entries[role].append(
-                        {"path": rel, "description": description, "class": klass}
+                        {"path": layout.root_rel(os.path.join(directory, filename)),
+                         "description": description, "class": klass}
                     )
 
         for entry in shared_index.get(role, []):
             index_entries[role].append(
-                {"path": f"../{entry['path']}", "description": entry["description"] + " (shared)",
+                {"path": entry["path"], "description": entry["description"] + " (shared)",
                  "class": entry["class"]}
             )
 
         # Authored files (charter, recall) are not distilled from claims, but
-        # they are part of the role and the index must account for every file
-        # beside it — an index that lists only what this tool wrote would read
-        # as complete while omitting the first thing a session should open.
+        # they are part of the role and the index must account for them — an
+        # index that lists only what this tool wrote would read as complete
+        # while omitting the first thing a session should open.
         for filename, klass in (("charter.md", "charter"), ("recall.md", "recall")):
-            path = os.path.join(role_dir, filename)
+            path = os.path.join(layout.role_dir(role), filename)
             if not os.path.exists(path):
                 continue
-            with open(path, encoding="utf-8") as fh:
-                head = fh.read(2000)
-            match = re.search(r"^description:\s*(.+)$", head, re.M)
-            description = match.group(1).strip() if match else filename
-            if description.startswith('"'):
-                try:
-                    description = json.loads(description)
-                except json.JSONDecodeError:
-                    description = description.strip('"')
             index_entries[role].append(
-                {"path": filename, "description": description, "class": klass}
+                {"path": layout.root_rel(path), "description": described(path, filename),
+                 "class": klass}
             )
 
         # Every slice ON DISK, not merely the ones this run wrote. Merge mode
@@ -718,29 +748,19 @@ def main() -> int:
         # second drain dropped 101 entries across ten roles.
         listed = {e["path"] for e in index_entries[role]}
         for klass, subdir in CLASS_FILES.items():
-            for rel in (
-                sorted(
-                    f"{subdir}/{n}"
-                    for n in os.listdir(os.path.join(role_dir, subdir))
-                    if n.endswith(".md")
-                )
-                if os.path.isdir(os.path.join(role_dir, subdir))
-                else []
-            ) + ([f"{subdir}.md"] if os.path.exists(
-                os.path.join(role_dir, f"{subdir}.md")) else []):
+            base = base_for(role, klass)
+            candidates = (
+                sorted(os.path.join(base, subdir, n)
+                       for n in os.listdir(os.path.join(base, subdir)) if n.endswith(".md"))
+                if os.path.isdir(os.path.join(base, subdir)) else []
+            ) + ([os.path.join(base, f"{subdir}.md")]
+                 if os.path.exists(os.path.join(base, f"{subdir}.md")) else [])
+            for path in candidates:
+                rel = layout.root_rel(path)
                 if rel in listed:
                     continue
-                with open(os.path.join(role_dir, rel), encoding="utf-8") as fh:
-                    head = fh.read(2000)
-                match = re.search(r"^description:\s*(.+)$", head, re.M)
-                description = match.group(1).strip() if match else rel
-                if description.startswith('"'):
-                    try:
-                        description = json.loads(description)
-                    except json.JSONDecodeError:
-                        description = description.strip('"')
                 index_entries[role].append(
-                    {"path": rel, "description": description, "class": klass}
+                    {"path": rel, "description": described(path, rel), "class": klass}
                 )
                 listed.add(rel)
 
@@ -782,7 +802,7 @@ def main() -> int:
         # Carried sections keep their citation edges. Rebuilding the graph from
         # this drain alone would drop every ADR, PR and migration edge belonging
         # to knowledge that is still sitting in the role base.
-        crossref_path_existing = os.path.join(role_dir, "crossref.json")
+        crossref_path_existing = os.path.join(proj_dir, "crossref.json")
         if os.path.exists(crossref_path_existing):
             with open(crossref_path_existing, encoding="utf-8") as fh:
                 old = json.load(fh).get("index", {})
@@ -812,12 +832,15 @@ def main() -> int:
                 for kind, values in sorted(crossref.items())
             },
         }
-        with open(os.path.join(role_dir, "crossref.json"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(proj_dir, "crossref.json"), "w", encoding="utf-8") as fh:
             json.dump(crossref_doc, fh, ensure_ascii=False, indent=2, sort_keys=True)
             fh.write("\n")
 
         # INDEX.md is generated, never hand-maintained: it is the only thing a
         # session sees before choosing what to load, so it must not drift.
+        # Paths are relative to the agent-fabric root, because the slices a
+        # role knows live in three places (its identity, its domain, this
+        # project) and a reader should not have to reconstruct `../../..`.
         lines = [
             render_frontmatter({
                 "role": role,
@@ -838,6 +861,7 @@ def main() -> int:
             "Tier 1 — the charter, this index, and every `workflow` slice —",
             "loads at activation. Every other section waits for a cue: open a",
             "slice when its description matches what you are working on.",
+            "Paths are relative to the agent-fabric root.",
             "",
         ]
         by_class_index: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -853,15 +877,19 @@ def main() -> int:
             for entry in sorted(entries, key=lambda e: e["path"]):
                 lines.append(f"- [`{entry['path']}`]({entry['path']}) — {entry['description']}")
             lines.append("")
-        with open(os.path.join(role_dir, "INDEX.md"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(proj_dir, "INDEX.md"), "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines).rstrip() + "\n")
-        written.append(os.path.join(role_dir, "INDEX.md"))
+        written.append(os.path.join(proj_dir, "INDEX.md"))
 
-    # An unresolved collision is a property of the role base, not of the drain
+    # An unresolved collision is a property of the corpus, not of the drain
     # that happened to create it. Deriving it from the tree is what makes the
     # warning survive a drain with an empty delta for that slice — a valid and
     # expected outcome — instead of going quiet while both sections sit there.
-    collisions = scan_collisions(args.out)
+    collisions = scan_collisions([
+        os.path.join(layout.FABRIC_ROOT, "memory", "domains"),
+        os.path.join(layout.projects_memory_dir(), project),
+        layout.shared_dir(),
+    ])
 
     # The harvest's own provenance has to survive into the COMMITTED record,
     # because the drain directory it lives in is temporary. Two things were
@@ -901,6 +929,7 @@ def main() -> int:
 
     report = {
         "stamp": args.stamp,
+        "project": project,
         "roles": owning_roles,
         "files_written": len(written),
         "shared_slices": len(shared),
@@ -910,7 +939,9 @@ def main() -> int:
         "harvest": harvest_meta,
         "watermarks": watermarks,
     }
-    with open(os.path.join(args.out, "last-drain-report.json"), "w", encoding="utf-8") as fh:
+    report_path = os.path.join(layout.FABRIC_ROOT, "memory", "last-drain-report.json")
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)
         fh.write("\n")
 

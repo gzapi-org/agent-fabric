@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "description": "MODEL FAMILY -> COMPATIBILITY SHIM. A shim is what a model family needs to speak a harness's wire protocol (here: Claude Code's Anthropic-compatible API through OpenRouter). It is independent of which capability class a model serves: the same family gets the same shim whether it is the code-low or the code-high model. Matched by glob against the canonical model id, first match wins; a model with no matching family gets no shim. Only families with a live-tested shim belong here — do not add speculative entries.",
+  "description": "MODEL FAMILY -> COMPATIBILITY SHIM. A shim is what a model family needs to speak a harness's wire protocol (here: Claude Code's Anthropic-compatible API through OpenRouter). It is independent of which capability class a model serves: the same family gets the same shim whether it is the code-low or the code-high model. Matched by glob against the canonical model id, first match wins; a model with no matching family gets no shim. Only families with a live-tested shim belong here \u2014 do not add speculative entries.",
   "shims": [
     {
       "family": "z-ai/glm-*",
       "shim": "@preset/glm2claude-shim",
       "harness": "claude-code",
-      "tested": "2026-09",
-      "note": "Z.ai GLM through OpenRouter needs the glm2claude-shim preset for Claude Code tool calling. The composite the runtime derives is `<model>@preset/glm2claude-shim`."
+      "tested": "2026-09-13",
+      "note": "Z.ai GLM through OpenRouter needs the glm2claude-shim preset for Claude Code tool calling. The composite the runtime derives is `<model>@preset/glm2claude-shim`. The preset is system-prompt-only (OpenRouter `config: {}`: no provider routing, no parameter overrides); OpenRouter PREPENDS its text as the first system block, ahead of Claude Code's own billing-header block and main prompt, and injects it once (ori does not add it again). Verified live 2026-09-13 on z-ai/glm-5.3 via Friendli: the model quoted the delta's heading and the Claude Code opener that follows it, and OpenRouter's /generation record carried the preset_id. Because it is prepended, the text works as a priming delta that defers to the live harness; an instruction meant to override Claude Code's prompt would need client-side appending (ori), not the preset. ori warns that the composite is 'not in the OpenRouter catalog' and passes it through: presets are per-account and never in the public model list, so that warning is expected."
     }
   ]
 }

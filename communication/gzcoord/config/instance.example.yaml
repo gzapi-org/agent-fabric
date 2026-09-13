@@ -1,33 +1,40 @@
 # Local instance configuration example.
-# Copy outside Git, e.g. ~/.config/gzcoord/gzapp.yaml.
+# Copy outside Git, e.g. ~/.config/gzcoord/<project>.yaml.
+#
+# `identity` is informational: the runtime derives the address from the
+# operating system (host = short hostname, instance = the login of the
+# account the session runs under — agent-fabric's runtime/identity.py)
+# and never from this file or from the working directory.
 identity:
-  host: develop-gzapp
-  instance: gzapp
+  host: develop-qzapp
+  instance: backend-dev-02
 
-# `role.name`, `specialties` and `capabilities` should match the role
-# this working copy currently holds under the .roles/ system
-# (.roles/taxonomy.json — see `tools/roles/switch.py --status`), not
-# be authored independently. GZCoord keeps no role catalog of its own;
-# see runtime/README.md "Role sourcing".
+# `role.name` is the SLUG of the role the agent currently holds — its
+# runtime binding, written by `/role` (tools/fabric/role.py) — and
+# `specialties`/`capabilities` follow the same source. Never authored
+# independently. GZCoord keeps no role catalog of its own; the slugs are
+# agent-fabric's identities/roles/catalog.json (runtime/README.md,
+# "Role sourcing").
 role:
-  name: Application Architect
+  name: backend-dev
   specialties:
-    - architecture
-    - ADR
+    - .NET backend
+    - persistence
     - contracts
-    - system design
   capabilities:
     - github
     - code-review
     - repository-analysis
 
+# The logical project the agent is bound to (projects/registry.json),
+# not the working-copy directory name.
 project:
   name: gzapp
 
 runtime:
   # Local execution detail. Never sent in GZCOORD messages.
-  provider: openai
-  model: gpt-5.6-sol
+  provider: openrouter
+  model: z-ai/glm-5.3
 
 subagents:
   enabled: true
@@ -45,9 +52,10 @@ subagents:
     architecture_decision: false
 
 transport:
-  # The human relay: a person copies messages between session terminals
-  # (../docs/HUMAN-RELAY-TRANSPORT.md). It has no credentials and no
-  # state. The first automated attempt is retired in
-  # ../history/telegram-transport/.
+  # The reference transport is a human relay: a person copies messages
+  # between session terminals (../docs/HUMAN-RELAY-TRANSPORT.md). It has
+  # no credentials and no state. A project may run an automated relay
+  # instead (gzapp: projects/gzapp/integration/gzcoord/BRIDGE-RELAY-SETUP.md).
+  # The first automated attempt is retired in ../history/telegram-transport/.
   adapter: human-relay
   # Transport-specific credentials/mapping stay outside the protocol.

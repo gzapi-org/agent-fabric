@@ -24,8 +24,9 @@ const addressRe = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 // how the protocol extends.
 const KNOWN_KEYS = ['FROM','ROLE','PROJECT','TO','TO-ROLE','BROADCAST','MESSAGE-ID','IN-REPLY-TO',
   'REPOSITORY','BRANCH','COMMIT','REPLY-EXPECTED','SUBJECT','SPECIALTIES','CAPABILITIES'];
-// `<instance>-NNNN`, the shape the deployment numbers messages with.
-const ID_SHAPED = /^[a-z0-9._-]+-\d{4}$/;
+// An id-shaped value: a UUID (the deployment mints UUIDv7), or the retired
+// `<instance>-NNNN` counter form still seen in older traffic.
+const ID_SHAPED = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9._-]+-\d{4})$/;
 function editDistance(a, b) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 0; j <= b.length; j++) d[0][j] = j;

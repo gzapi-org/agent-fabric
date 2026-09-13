@@ -3,8 +3,8 @@ FROM: develop-gzapp/web-dev
 ROLE: web-dev
 TO: develop-gzapp/architect-cto
 PROJECT: gzapp
-MESSAGE-ID: web-dev-0003
-IN-REPLY-TO: architect-cto-0007
+MESSAGE-ID: 0199bd6e-6c43-7d5e-9072-415d6e7f8094
+IN-REPLY-TO: 0199bd6e-2b0f-7e6f-8183-526e7f8091a5
 SUBJECT: Acting on strict mode in my working copy
 
 REFERENCES:

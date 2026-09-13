@@ -1,8 +1,8 @@
-# GZCoord for GZAPP
+# GZCoord
 
 GZCoord is a small, transport-agnostic, human-readable messaging protocol for autonomous software-development agents collaborating on the same Git/GitHub-governed project.
 
-This directory is intentionally embedded in the GZAPP repository under `tools/gzcoord/`. It is not a second repository and it is not a source of authority for project state.
+This directory is agent-fabric's communication subsystem (`communication/gzcoord/`): the protocol, its reference runtime and tests. It is not a source of authority for any project's state. Project-specific integration — how one managed repository hosts a relay, what its `CLAUDE.md` says, how it installs the hooks — lives with that project under `projects/<project-id>/integration/gzcoord/`.
 
 ## Boundary
 
@@ -35,7 +35,7 @@ Example:
 develop-gzapp/architect-cto
 ```
 
-The address is logical, but it is not arbitrary: `host` is the machine's short hostname and `instance` is the basename of the Git working copy the session started in and works in — one clone per session here, so the folder name *is* the session id (`protocol/SPEC.md` §3.1). The derivation runs one way. The address is still not a filesystem path, and no peer may reconstruct one from it or act outside its own working copy.
+The address is logical, but it is not arbitrary: `host` is the machine's short hostname and `instance` is the login of the operating-system account the session runs under — the agent, as agent-fabric's `runtime/identity.py` resolves it (`protocol/SPEC.md` §3.1). The working copy the session is in is context, never identity: rename it, move it, or open another project and the address stays. The derivation runs one way. The address is not a filesystem path or a home directory, and no peer may reconstruct one from it or act outside its own working copy.
 
 ## Discovery
 
@@ -91,17 +91,17 @@ Copy `config/instance.example.yaml` outside Git, e.g. to:
 
 Model/provider, subagent limits and transport credentials are local execution details. They are not part of GZCOORD/1.
 
-In a GZAPP deployment, `role.name`/`specialties` come from the role
-this working copy currently holds under `.roles/` (see
-`.roles/taxonomy.json`) — GZCoord keeps no separate role catalog; see
-`runtime/README.md` "Role sourcing".
+`role.name`/`specialties` come from the role the agent currently holds
+(its runtime binding; slugs from agent-fabric's
+`identities/roles/catalog.json`) — GZCoord keeps no separate role
+catalog; see `runtime/README.md` "Identity sourcing" and "Role sourcing".
 
 ## Integration
 
-1. Copy this directory to `gzapp/tools/gzcoord/`.
-2. Add/reference `integration/CLAUDE.snippet.md` in the root repository `CLAUDE.md`.
+1. Keep this directory where it is: agent-fabric is the control plane, and every managed repository uses the same copy.
+2. Add the project's snippet to its root `CLAUDE.md` — gzapp's is `projects/gzapp/integration/gzcoord/CLAUDE.snippet.md`.
 3. Configure the concrete instance outside Git.
-4. Configure the selected transport adapter.
-5. Validate messages with `node tools/gzcoord/scripts/gzmsg.mjs validate <file>`.
+4. Configure the selected transport adapter (gzapp's relay: `projects/gzapp/integration/gzcoord/BRIDGE-RELAY-SETUP.md`).
+5. Validate messages with `node communication/gzcoord/scripts/gzmsg.mjs validate <file>`.
 
-See `docs/PROJECT-TREE.md` for the intended layout and `protocol/SPEC.md` for the normative protocol.
+See `docs/PROJECT-TREE.md` for the layout and `protocol/SPEC.md` for the normative protocol.

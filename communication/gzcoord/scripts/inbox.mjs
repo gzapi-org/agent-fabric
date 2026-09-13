@@ -50,20 +50,33 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami } from './gzmsg.mjs';
+import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
 
+// Project integration: which relay, which channel, where the token and
+// the hosted relay's runtime live. The defaults are gzapp's
+// (projects/gzapp/integration/gzcoord/config.json is the committed copy);
+// another project overrides them by environment, or by its own
+// config.json found through the working copy's project (whoami().project).
+function integrationConfig(project) {
+  const defaults = { relay_url: 'http://127.0.0.1:8765', channel: 'gzapp:gzcoord',
+                     token_env_file: 'infra/local/.env.local', relay_runtime_dir: '.gzcoord' };
+  if (!project) return defaults;
+  const file = path.join(FABRIC_ROOT, 'projects', project, 'integration', 'gzcoord', 'config.json');
+  try { return { ...defaults, ...JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch { return defaults; }
+}
+// Module-level defaults for callers that import ensureRelay/api directly;
+// main() resolves the project's own values.
 const RELAY = process.env.CLAUDE_BRIDGE_URL ?? 'http://127.0.0.1:8765';
-const CHANNEL = process.env.GZCOORD_CHANNEL ?? 'gzapp:gzcoord';
 
 function repoRoot() {
   try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(); }
   catch { return process.cwd(); }
 }
 
-// The token, from wherever this clone keeps it; never printed, never logged.
-function token(root) {
+// The token, from wherever this working copy keeps it; never printed, never logged.
+function token(root, cfg = integrationConfig()) {
   if (process.env.CLAUDE_BRIDGE_AUTH_TOKEN) return process.env.CLAUDE_BRIDGE_AUTH_TOKEN;
-  const env = path.join(root, 'infra/local/.env.local');
+  const env = path.join(root, cfg.token_env_file);
   if (fs.existsSync(env))
     for (const line of fs.readFileSync(env, 'utf8').split('\n'))
       if (line.startsWith('CLAUDE_BRIDGE_AUTH_TOKEN=')) return line.slice('CLAUDE_BRIDGE_AUTH_TOKEN='.length).trim();
@@ -97,21 +110,23 @@ export function forMe(msg, me) {
   return false;
 }
 
-// The relay dies with its hosting session, and the hosting clone — the
-// one holding .gzcoord/venv and the token — is this role's. So the host's
-// session start IS the activation: if the relay is not answering, bring
-// it up before draining, exactly as the runbook says. Clones without the
-// venv return false and skip silently: they are clients, not hosts, and
-// nothing in a client session may try to host.
-export function ensureRelay(root, relayUrl = RELAY) {
-  const bin = path.join(root, '.gzcoord', 'venv', 'bin', 'claude-bridge');
+// The relay dies with its hosting session, and the hosting working copy —
+// the one holding the relay runtime (venv) and the token — is the
+// gzcoord-coordinator's (a project integration rule, not a protocol
+// one). So the host's session start IS the activation: if the relay is
+// not answering, bring it up before draining, exactly as the runbook
+// says. Working copies without the venv return false and skip silently:
+// they are clients, not hosts, and nothing in a client session may try
+// to host.
+export function ensureRelay(root, relayUrl = RELAY, runtimeDir = '.gzcoord') {
+  const bin = path.join(root, runtimeDir, 'venv', 'bin', 'claude-bridge');
   if (!fs.existsSync(bin)) return { hosted: false, started: false };
   try { execFileSync('curl', ['-sf', '-m', '2', `${relayUrl}/status`], { stdio: 'ignore' }); return { hosted: true, started: false }; }
   catch { /* down or unreachable: start it */ }
-  const tokenFile = path.join(root, '.gzcoord', 'bridge-token');
-  const db = path.join(root, '.gzcoord', 'claude-bridge.db');
-  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: 'no .gzcoord/bridge-token; cannot start' };
-  const out = fs.openSync(path.join(root, '.gzcoord', 'bridge.log'), 'a');
+  const tokenFile = path.join(root, runtimeDir, 'bridge-token');
+  const db = path.join(root, runtimeDir, 'claude-bridge.db');
+  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${runtimeDir}/bridge-token; cannot start` };
+  const out = fs.openSync(path.join(root, runtimeDir, 'bridge.log'), 'a');
   const child = spawn(bin, [
     '--host', '127.0.0.1', '--port', '8765',
     '--db', db, '--auth-token-file', tokenFile,
@@ -124,8 +139,8 @@ export function ensureRelay(root, relayUrl = RELAY) {
   return { hosted: true, started: false, note: 'relay did not answer within 8s; check .gzcoord/bridge.log' };
 }
 
-async function api(tok, pathAndQuery, init = {}) {
-  const r = await fetch(`${RELAY}${pathAndQuery}`, {
+async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
+  const r = await fetch(`${relayUrl}${pathAndQuery}`, {
     ...init,
     headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
@@ -215,27 +230,35 @@ export async function main(argv = process.argv.slice(2)) {
   // the budget.
   const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
   const root = repoRoot();
+  // Who this session is (the login) and which project it is working in
+  // (from the working copy's remote) — the second selects the project's
+  // integration: relay, channel, where the token and runtime live.
+  const who = whoami();
+  const cfg = integrationConfig(who.project);
+  const relayUrl = process.env.CLAUDE_BRIDGE_URL ?? cfg.relay_url;
+  const channel = process.env.GZCOORD_CHANNEL ?? cfg.channel;
   // Activate what this session owns before anything else: the hosting
-  // clone starts its relay here, so a session restart is also the relay's.
-  const up = ensureRelay(root);
+  // working copy starts its relay here, so a session restart is also the relay's.
+  const up = ensureRelay(root, relayUrl, cfg.relay_runtime_dir);
   if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
   else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
-  const tok = token(root);
-  if (!tok) { console.error('gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, infra/local/.env.local or .claude/settings.local.json — skipping'); return 0; }
+  const tok = token(root, cfg);
+  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file} or .claude/settings.local.json — skipping`); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
-  const me = identity(whoami(), taxonomy);
+  const me = identity(who, taxonomy);
 
   // Drain mode spends 1 s on the cursor page and lists everything; wait
   // mode chains slices until a message ADDRESSED TO THIS SESSION lands,
   // passing others' traffic through acknowledged and unprinted.
   let res;
+  const CHANNEL = channel;
   try {
-    const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }) });
-    const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`);
+    const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
+    const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
     res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address });
   } catch (e) {
-    console.error(`gzcoord inbox: relay unreachable at ${RELAY} (${e.message}) — skipping`);
+    console.error(`gzcoord inbox: relay unreachable at ${relayUrl} (${e.message}) — skipping`);
     return 0;
   }
   if (res.keywordHit && waitIdx >= 0) {

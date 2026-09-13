@@ -138,30 +138,30 @@ knows which sessions are running.
 
 ## Addressing
 
-`FROM` is derived as SPEC §3.1 says: `<hostname -s>/<basename of the
-working copy>`. On this host that is the clone directory name. Clone
-directories are usually named for the role they were launched as, which
-is a convenience for the person routing; the address does not claim the
-role (SPEC §4), and a clone named otherwise is a session like any other.
+`FROM` is derived as SPEC §3.1 says: `<hostname -s>/<login>` — the
+agent is the operating-system account the session runs under, resolved
+by agent-fabric's `runtime/identity.py`. Provisioned accounts are usually
+named for the role they were stood up as, which is a convenience for the
+person routing; the address does not claim the role (SPEC §4), and an
+account named otherwise (`user`) is an agent like any other. The
+working copy the session is in is not part of the address.
 
-`ROLE` MUST be the role's **slug** in `.roles/taxonomy.json` — its `id`:
-`gzcoord-coordinator`, `architect-cto`, `backend-dev` — never a title
-such as `Architect / CTO` or a free description such as `Application
-Architect` (`runtime/README.md`, "Role sourcing"). The person resolves
-`TO-ROLE` by equality against the last `HELLO` they saw, so any other
-spelling matches nothing; a slug is one token, safe in a metadata line
-and in a filter. The address is not bound to the role: clones are
-usually named for the role they were launched as (`architect-cto-01`,
-`gzapp-gzcoord-coordinator`), which is a convenience, not a claim — a
-role can change without the address changing (SPEC §4), and a clone
-named otherwise is still a session. A recipient tells a misdelivered
-`TO` from its own by comparing it to its own address, nothing more.
-Observed the first day: one role spelled three ways across a HELLO, a
-TO-ROLE and an address. The validator enforces the slug rules from
-anywhere inside the working copy, warns when an address names a role
-other than the one announced, and `hello` derives the slug when `--role`
-is omitted — from `.roles/.instance/state.json`, else from the address —
-so use that.
+`ROLE` MUST be the role's **slug** in agent-fabric's
+`identities/roles/catalog.json` — its `id`: `gzcoord-coordinator`,
+`architect-cto`, `backend-dev` — never a title such as `Architect / CTO`
+or a free description such as `Application Architect`
+(`runtime/README.md`, "Role sourcing"). The person resolves `TO-ROLE` by
+equality against the last `HELLO` they saw, so any other spelling
+matches nothing; a slug is one token, safe in a metadata line and in a
+filter. The address is not bound to the role: a role can change without
+the address changing (SPEC §4). A recipient tells a misdelivered `TO`
+from its own by comparing it to its own address, nothing more. Observed
+the first day: one role spelled three ways across a HELLO, a TO-ROLE and
+an address. The validator enforces the slug rules, warns when an address
+names a role other than the one announced, and `hello` derives the
+address, the project and the slug when they are omitted — from the
+login, the host and the agent's role binding, else from a slug the login
+carries — so use that.
 
 ## Limits, stated plainly
 

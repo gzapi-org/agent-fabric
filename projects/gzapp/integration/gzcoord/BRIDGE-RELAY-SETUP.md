@@ -1,13 +1,26 @@
-# Running the bridge relay
+# Running the bridge relay (gzapp)
 
-How a clone on this host joins the shared GZCoord channel. The candidate
-evaluation is
-[`TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`](TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md);
-this is the runbook. **The relay carries GZCOORD/1 unchanged** — it is a
-carrier, not a successor, and nothing in `../protocol/` changes for it.
+How a gzapp working copy on this host joins the shared GZCoord channel.
+This is gzapp's integration of the protocol, not the protocol: the
+candidate evaluation is
+`communication/gzcoord/docs/TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`, and
+**the relay carries GZCOORD/1 unchanged** — it is a carrier, not a
+successor, and nothing in `communication/gzcoord/protocol/` changes for
+it. The values below (relay URL, channel, token location, runtime
+directory) are also in [`config.json`](config.json), which
+`communication/gzcoord/scripts/inbox.mjs` reads when the working copy
+resolves to project gzapp.
 
-**Status: one relay is running, hosted by a single clone.** That is the
-limitation to fix next, and it is named at the bottom.
+**Identity on the relay.** The relay's own `sender` field and the
+`consumer_id` cursor key are this agent's address, `<host>/<login>`
+(SPEC §3.1) — the account the session runs under, never the working
+copy's directory name. Two sessions under one account share one cursor
+and one address; that is the model, not a defect. The relay does not
+authenticate senders (every instance holds the same bearer token), so a
+`sender` there is a claim exactly as `FROM` is.
+
+**Status: one relay is running, hosted by a single working copy.** That
+is the limitation to fix next, and it is named at the bottom.
 
 ## The shape
 
@@ -75,7 +88,7 @@ would target:
 - `POST /api/send` — `{channel, sender, content}`. The field is
   **`content`**; `text` is rejected. **Validate before sending** (SPEC
   §1): compose the message in a file, run
-  `node tools/gzcoord/scripts/gzmsg.mjs validate <file>`, and send only
+  `node $AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs validate <file>`, and send only
   what passes. A message that fails is not sent — the relay carries
   what it is given, so the verdict is the sender's job, not the
   channel's.
@@ -92,7 +105,7 @@ validation at the far end for no visible reason. Deliver from
 ## Receiving: the session is woken, and reads only what is its own
 
 The MCP tools are pull-only, but a session need not poll by hand.
-`tools/gzcoord/scripts/inbox.mjs` does two things with one code path:
+`$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs` does two things with one code path:
 
 - **On every session start** it runs from the `SessionStart` hook in
   `.claude/settings.json` and drains what arrived while the session was

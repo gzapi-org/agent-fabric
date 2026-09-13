@@ -1,0 +1,8 @@
+{
+  "description": "gzapp's GZCoord integration: the Claude-Bridge relay the gzcoord-coordinator hosts, the channel every gzapp agent joins, where a gzapp working copy keeps the relay token and the hosted relay's runtime. Read by communication/gzcoord/scripts/inbox.mjs when the working copy resolves to project gzapp; CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL in the environment override it. Paths are relative to the working copy.",
+  "relay_url": "http://127.0.0.1:8765",
+  "channel": "gzapp:gzcoord",
+  "token_env_file": "infra/local/.env.local",
+  "relay_runtime_dir": ".gzcoord",
+  "hosting_role": "gzcoord-coordinator"
+}

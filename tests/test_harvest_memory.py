@@ -269,7 +269,7 @@ def test_the_assembler_actually_consumes_the_drain(tmp: str) -> None:
         [sys.executable, assemble,
          "--claims", os.path.join(out, "claims"), "--drain", out,
          "--fabric", os.path.join(tmp, "assembled13"), "--project", "demo",
-         "--stamp", "2026-01-01"],
+         "--working-copy", os.path.join(tmp, "wc-demo"), "--stamp", "2026-01-01"],
         capture_output=True, text=True)
     assert r.returncode == 0, f"assemble failed: {r.stdout}\n{r.stderr}"
     # and the declared telemetry reached it, rather than printing "?"

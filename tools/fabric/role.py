@@ -321,11 +321,16 @@ def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str
     else:
         print("  (this role ships no skills or commands yet)")
     print("\nload now:")
+    if project and ctx.get("working_copy"):
+        layout.set_working_copy(project, ctx["working_copy"])
     for path in layout.tier1_paths(role, project):
         print(f"  {path}")
     if not project:
         print("  (no project context: only the charter loads; activate from inside a "
               "registered working copy, or pass --project, for its index and workflow)")
+    elif not layout.project_is_legacy(project) and not layout.working_copy_for(project):
+        print(f"  (project {project}: its memory lives in its repository under "
+              f"{layout.PROJECT_MEMORY_SUBDIR}/; activate from inside the working copy to load it)")
     print("\nEverything else loads on demand — consult INDEX.md when its cue matches.")
     return 0
 

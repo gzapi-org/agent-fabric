@@ -64,12 +64,21 @@ def build(tmp: str, claim_files: dict[str, dict]) -> tuple[str, str, str]:
 PROJECT = "demo"
 
 
+def working_copy(out: str) -> str:
+    """The demo project's checkout: project memory lives IN the project, under
+    <working copy>/.agent-fabric/memory/. Kept beside the throwaway fabric root."""
+    return os.path.join(out, "wc-" + PROJECT)
+
+
 def run_assemble(drain: str, claims_dir: str, out: str, *extra: str) -> subprocess.CompletedProcess:
-    """`out` is a throwaway agent-fabric root; slices land by class under
-    memory/domains/<role>/ and memory/projects/demo/<role>/."""
+    """`out` is a throwaway agent-fabric root; domain slices land under its
+    memory/domains/<role>/, project slices under the demo working copy's
+    .agent-fabric/memory/<role>/."""
+    os.makedirs(working_copy(out), exist_ok=True)
     return subprocess.run(
         [sys.executable, ASSEMBLE, "--claims", claims_dir, "--drain", drain,
-         "--fabric", out, "--project", PROJECT, "--stamp", "2026-01-01", *extra],
+         "--fabric", out, "--project", PROJECT, "--working-copy", working_copy(out),
+         "--stamp", "2026-01-01", *extra],
         capture_output=True, text=True,
     )
 
@@ -79,7 +88,7 @@ def dom(out: str, role: str, *rest: str) -> str:
 
 
 def proj(out: str, role: str, *rest: str) -> str:
-    return os.path.join(out, "memory", "projects", PROJECT, role, *rest)
+    return os.path.join(working_copy(out), ".agent-fabric", "memory", role, *rest)
 
 
 def ident(out: str, role: str, *rest: str) -> str:
@@ -94,7 +103,8 @@ def shared_path(out: str, filename: str) -> str:
 
 
 def report_path(out: str) -> str:
-    return os.path.join(out, "memory", "last-drain-report.json")
+    """The drain report lives with the project memory it describes."""
+    return os.path.join(working_copy(out), ".agent-fabric", "memory", "last-drain-report.json")
 
 
 def walk_role(out: str, role: str):
@@ -829,7 +839,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
     with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
     run_assemble(drain, claims_dir, out)          # re-index with the charter present
-    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 0, \
         f"lint rejected what the assembler wrote:\n{proc.stderr}"
 
@@ -915,7 +925,7 @@ def test_non_english_slice_is_flagged_by_lint(tmp: str) -> None:
     if os.path.isdir(SCHEMA_DIR):
         import shutil
         shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
-    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 1, "non-English prose must be reported"
     assert "non-English" in proc.stderr
 
@@ -931,7 +941,7 @@ def test_lint_detects_index_drift(tmp: str) -> None:
     with open(proj(out, "alpha", "solution.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: solution\ndescription: added by hand\n"
                  "tier: 2\ndistilled_at: 2026-01-01\nderived_from:\n  - h1\n---\n\nbody\n")
-    proc = subprocess.run([sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 1
     assert "drifted" in proc.stderr, proc.stderr
 
@@ -1034,7 +1044,7 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
         json.dump(doc, fh, ensure_ascii=False, indent=2, sort_keys=True)
 
     proc = subprocess.run(
-        [sys.executable, LINT, "--fabric", out], capture_output=True, text=True)
+        [sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "session-local temp path" in proc.stderr, proc.stderr
 

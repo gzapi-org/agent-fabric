@@ -4,19 +4,36 @@ Durable knowledge agents can retrieve, filed by **scope** and by **kind of
 truth**, with provenance that says who learned it, where, and when.
 
 ```text
-memory/
-├── domains/<domain>/          reusable knowledge about a field
-├── projects/<project>/        knowledge about one logical system
-│   ├── <role>/                filed per role: what that role learned there
-│   │   ├── INDEX.md           generated map of everything the role knows
-│   │   ├── crossref.json      artifact → where it was learned and landed
-│   │   ├── solution/ intersection/ rationale/ workflow/ threads/
-│   └── shared/                project knowledge two or more roles own
-├── agents/<login>/            knowledge genuinely tied to one agent (rare)
-├── shared/                    field knowledge two or more roles own
-├── RUBRIC.md                  what earns a place here, and what does not
-└── last-drain-report.json     the last assembly's telemetry and watermarks
+memory/                          (this repository — field knowledge)
+├── domains/<domain>/            reusable knowledge about a field
+├── agents/<login>/              knowledge genuinely tied to one agent (rare)
+├── shared/                      field knowledge two or more roles own
+├── RUBRIC.md                    what earns a place here, and what does not
+└── projects/<project>/          TRANSITION: a project whose memory has not
+                                 moved into its repository yet (gzapp)
+
+<working copy>/.agent-fabric/    (each managed project's own repository)
+├── authority.json               who may write this directory (fabric-coordinator's holders)
+└── memory/
+    ├── <role>/                  filed per role: what that role learned here
+    │   ├── INDEX.md             generated map of everything the role knows
+    │   ├── crossref.json        artifact → where it was learned and landed
+    │   ├── solution/ intersection/ rationale/ workflow/ threads/
+    ├── shared/                  project knowledge two or more roles own
+    └── last-drain-report.json   the last assembly's telemetry and watermarks
 ```
+
+**Project knowledge lives in the project's repository.** A `solution`
+slice describes the tree as of a date and loses to the tree; keeping it
+beside the tree is what lets a change that moves the architecture update
+the slice in the same commit series, and lets a checkout at any commit
+carry the knowledge that was true then. It also keeps a project's
+confidential knowledge under the project's own license and access.
+`.agent-fabric/` is **fabric-coordinator's to write** — the drain writes
+it, every other role reads it (`policies/AUTHORITY.md`,
+`policies/check_agent_fabric_dir_authority.sh`). Index links inside it are
+relative to the working copy; a fabric-side slice is linked as
+`../agent-fabric/<path>`, the sibling-checkout layout.
 
 The reusable definition of a role — its charter, its recall guide, its
 skills — is **not** memory. It lives under `identities/roles/<role>/`.
@@ -133,14 +150,20 @@ not derived knowledge.
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain --dry-run
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain
 tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \
-    --project gzapp --stamp $(date +%F)
-tools/fabric/lint.py
+    --project gzapp --working-copy ~/projects/gzapp --stamp $(date +%F)
+tools/fabric/lint.py --working-copy ~/projects/gzapp
 ```
 
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the
 project from the working copy's remote, and the working copy as a label.
 Each agent drains **its own** memories; nothing reads another account's
-home directory.
+home directory. `assemble.py` writes the project-scoped classes into the
+working copy's `.agent-fabric/memory/` (`--working-copy`; the agent's
+binding supplies it when omitted) and the domain classes into this
+repository — so a drain lands as a branch in the project's repository,
+opened by a fabric-coordinator holder under that project's contribution
+rules, plus a commit here. A project still under `memory/projects/<id>/`
+here is written there until it moves.
 
 **Merge mode is the default from cycle two onward.** New claims fold into
 existing slices; the existing file is the calibration anchor for what

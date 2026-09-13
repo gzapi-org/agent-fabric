@@ -12,8 +12,13 @@
 #   tools/fabric/query.sh roles             # what roles exist, per project, and how big they are
 #
 # The citation graph is small — thousands of edges — so it lives in the
-# committed JSON the assembler writes (memory/projects/<project>/<role>/
-# crossref.json), and jq answers everything in milliseconds. A database
+# committed JSON the assembler writes (<working copy>/.agent-fabric/memory/
+# <role>/crossref.json in each project's repository; memory/projects/
+# <project>/ here while a project has not moved), and jq answers everything
+# in milliseconds. Which working copies are searched: this checkout (for
+# agent-fabric itself), $AGENT_FABRIC_WORKING_COPY, the working copy the
+# agent's binding names, and every entry of $AGENT_FABRIC_WORKING_COPIES
+# (colon-separated). A database
 # would buy nothing here and would cost the one property that matters
 # most: the graph is reviewable in a pull request, because it is a diff
 # like everything else.
@@ -30,7 +35,24 @@ MEMORY="$ROOT/memory"
 
 die() { printf '%s\n' "$*" >&2; exit 2; }
 command -v jq >/dev/null || die "query: jq is required"
-[ -d "$MEMORY/projects" ] || die "query: no corpus at $MEMORY"
+[ -d "$MEMORY" ] || die "query: no corpus at $MEMORY"
+
+# The project-memory roots this run can see: legacy memory/projects/<id>/
+# here, and .agent-fabric/memory/ in every working copy we know of.
+project_roots() {
+  local wc state
+  [ -d "$MEMORY/projects" ] && find "$MEMORY/projects" -mindepth 1 -maxdepth 1 -type d
+  {
+    printf '%s\n' "$ROOT"
+    [ -n "${AGENT_FABRIC_WORKING_COPY:-}" ] && printf '%s\n' "$AGENT_FABRIC_WORKING_COPY"
+    [ -n "${AGENT_FABRIC_WORKING_COPIES:-}" ] && tr ':' '\n' <<<"$AGENT_FABRIC_WORKING_COPIES"
+    state="${AGENT_FABRIC_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-fabric/agents/$(id -un)}"
+    [ -f "$state/binding.json" ] && jq -r '.working_copy // empty' "$state/binding.json"
+  } | awk 'NF' | sort -u | while IFS= read -r wc; do
+    [ -d "$wc/.agent-fabric/memory" ] && printf '%s\n' "$wc/.agent-fabric/memory"
+  done
+  return 0
+}
 
 usage() {
   sed -n '/^# >>> help/,/^# <<< help/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^>>> help$/d; /^<<< help$/d'
@@ -50,9 +72,17 @@ kind_key() {
   esac
 }
 
-# memory/projects/<project>/<role>/crossref.json
-crossrefs() { find "$MEMORY/projects" -mindepth 3 -maxdepth 3 -name crossref.json | sort; }
-label_of() { local d; d="$(dirname "$1")"; printf '%s/%s' "$(basename "$(dirname "$d")")" "$(basename "$d")"; }
+# <project memory root>/<role>/crossref.json
+crossrefs() { project_roots | while IFS= read -r r; do find "$r" -mindepth 2 -maxdepth 2 -name crossref.json; done | sort -u; }
+# project/role: the legacy dir is named for the project; a working copy's
+# .agent-fabric/memory/ is labelled by the working copy's basename.
+label_of() {
+  local d p; d="$(dirname "$1")"; p="$(dirname "$d")"
+  case "$p" in
+    */.agent-fabric/memory) p="$(dirname "$(dirname "$p")")" ;;
+  esac
+  printf '%s/%s' "$(basename "$p")" "$(basename "$d")"
+}
 
 cmd_roles() {
   printf '%-28s %-8s %-8s %s\n' project/role project domain citations
@@ -106,7 +136,7 @@ cmd_obs() {
   done
   # Provenance runs the other way too: which slices were built from this row.
   local slices
-  slices="$(grep -rl "$hash" "$MEMORY" --include='*.md' 2>/dev/null | sed "s|^$ROOT/||" | sort || true)"
+  slices="$( { grep -rl "$hash" "$MEMORY" --include='*.md' 2>/dev/null; project_roots | while IFS= read -r r; do grep -rl "$hash" "$r" --include='*.md' 2>/dev/null; done; } | sed "s|^$ROOT/||" | sort -u || true)"
   if [ -n "$slices" ]; then
     found=1
     printf '\nevidence for:\n'

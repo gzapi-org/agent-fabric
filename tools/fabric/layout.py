@@ -6,10 +6,38 @@ query tool agree by construction:
 
     identities/roles/<role>/            charter.md, recall.md, skills/, commands/
     memory/domains/<domain>/            domain slices (reusable field knowledge)
-    memory/projects/<project>/<role>/   solution, intersection, rationale,
-                                        workflow, threads, crossref.json, INDEX.md
-    memory/shared/                      multi-owner slices
+    memory/shared/                      multi-owner field slices
     memory/agents/<login>/              knowledge genuinely tied to one agent
+
+    <working copy>/.agent-fabric/memory/<role>/
+                                        PROJECT knowledge: solution, intersection,
+                                        rationale, workflow, threads, crossref.json,
+                                        INDEX.md — and shared/ for multi-owner
+                                        project slices
+
+Project knowledge lives IN THE PROJECT'S REPOSITORY, not here. A `solution`
+slice describes the tree as of a date and loses to the tree; the only way it
+stays honest is to be versioned with the tree, so a change that moves the
+architecture can update the slice in the same commit series, and a checkout
+at any commit carries the knowledge that was true then. It also keeps a
+project's confidential knowledge under the project's own license and
+access, and leaves this repository plainly Apache-2.0.
+
+`.agent-fabric/` in a managed repository is fabric-coordinator's to write
+(policies/AUTHORITY.md): the drain writes it, every other role reads it.
+
+The working copy for a project comes from, in order: an explicit
+`set_working_copy()` (a tool's --working-copy), `$AGENT_FABRIC_WORKING_COPY`,
+the agent's runtime binding (the session-start hook records the working copy
+it started in), and — for agent-fabric as a managed project of its own —
+this checkout. Links written into a project's INDEX.md are relative to the
+working copy root; a fabric-side slice (charter, domain, memory/shared) is
+linked as `../agent-fabric/<path>`, the sibling-checkout layout every
+adapter already assumes.
+
+TRANSITION. A project whose memory has not moved yet still has it under
+`memory/projects/<project>/` here; that location is honoured while it
+exists and is listed in docs/migration/REMOVAL-PLAN.md.
 
 Domain ids currently equal role ids: the extracted corpus filed domain
 knowledge per role, and renaming domains was not part of the extraction.
@@ -17,10 +45,18 @@ A domain may be split or renamed later without touching this contract.
 """
 from __future__ import annotations
 
+import json
 import os
 
 FABRIC_ROOT = os.environ.get("AGENT_FABRIC_ROOT") or os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+# The project-side directory, and how a project's INDEX.md reaches back
+# into this repository.
+PROJECT_DIRNAME = ".agent-fabric"
+PROJECT_MEMORY_SUBDIR = os.path.join(PROJECT_DIRNAME, "memory")
+FABRIC_LINK_PREFIX = "../agent-fabric"
+FABRIC_PROJECT_ID = "agent-fabric"
 
 IDENTITY_CLASSES = ("charter", "recall")
 DOMAIN_CLASSES = ("domain",)
@@ -28,6 +64,8 @@ PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads
 # Tier-1 knowledge, in load order: the charter, the project index, the
 # project workflow slices. Everything else waits for a cue from the index.
 TIER1 = ("charter.md", "INDEX.md", "workflow")
+
+_WORKING_COPIES: dict[str, str] = {}
 
 
 def roles_dir() -> str:
@@ -54,20 +92,113 @@ def domain_dir(domain: str) -> str:
     return os.path.join(FABRIC_ROOT, "memory", "domains", domain)
 
 
-def projects_memory_dir() -> str:
-    return os.path.join(FABRIC_ROOT, "memory", "projects")
-
-
-def project_dir(project: str, role: str) -> str:
-    return os.path.join(projects_memory_dir(), project, role)
-
-
 def shared_dir() -> str:
     return os.path.join(FABRIC_ROOT, "memory", "shared")
 
 
 def agent_memory_dir(agent: str) -> str:
     return os.path.join(FABRIC_ROOT, "memory", "agents", agent)
+
+
+# --- project homes ----------------------------------------------------------
+
+def legacy_projects_memory_dir() -> str:
+    """Where project memory lived before it moved into the projects."""
+    return os.path.join(FABRIC_ROOT, "memory", "projects")
+
+
+def set_working_copy(project: str, path: str | None) -> None:
+    """Tell the layout where a project's working copy is for this run."""
+    if path:
+        _WORKING_COPIES[project] = os.path.abspath(path)
+    else:
+        _WORKING_COPIES.pop(project, None)
+
+
+def _binding_working_copy(project: str) -> str | None:
+    state = os.environ.get("AGENT_FABRIC_STATE_DIR")
+    if not state:
+        xdg = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+        try:
+            import pwd
+            login = pwd.getpwuid(os.getuid()).pw_name
+        except Exception:  # noqa: BLE001
+            login = os.environ.get("USER") or ""
+        state = os.path.join(xdg, "agent-fabric", "agents", login)
+    path = os.path.join(state, "binding.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            binding = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if binding.get("project") == project and binding.get("working_copy"):
+        return binding["working_copy"]
+    return None
+
+
+def working_copy_for(project: str) -> str | None:
+    """The checkout holding `project`'s .agent-fabric/, if this run knows one."""
+    if project in _WORKING_COPIES:
+        return _WORKING_COPIES[project]
+    env = os.environ.get("AGENT_FABRIC_WORKING_COPY")
+    if env and _project_of_env_working_copy(env) == project:
+        return os.path.abspath(env)
+    bound = _binding_working_copy(project)
+    if bound:
+        return bound
+    if project == FABRIC_PROJECT_ID:
+        return FABRIC_ROOT
+    return None
+
+
+def _project_of_env_working_copy(path: str) -> str | None:
+    """$AGENT_FABRIC_WORKING_COPY names a directory, not a project; resolve
+    it through the registry the same way the session-start hook does."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "fabric_workingcopy", os.path.join(FABRIC_ROOT, "tools", "fabric", "workingcopy.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod.resolve(path).get("project")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def project_is_legacy(project: str) -> bool:
+    """True while the project's memory still lives under memory/projects/ here."""
+    return os.path.isdir(os.path.join(legacy_projects_memory_dir(), project))
+
+
+def project_memory_root(project: str) -> str:
+    """The directory holding <role>/ subtrees for a project."""
+    if project_is_legacy(project):
+        return os.path.join(legacy_projects_memory_dir(), project)
+    wc = working_copy_for(project)
+    if not wc:
+        raise LookupError(
+            f"project {project!r}: no working copy known (its memory lives in the project's "
+            f"repository under {PROJECT_MEMORY_SUBDIR}/); pass --working-copy, set "
+            "AGENT_FABRIC_WORKING_COPY, or activate from inside the working copy")
+    return os.path.join(wc, PROJECT_MEMORY_SUBDIR)
+
+
+def project_link_root(project: str) -> str:
+    """The directory INDEX.md links for this project are relative to."""
+    if project_is_legacy(project):
+        return FABRIC_ROOT
+    return working_copy_for(project) or FABRIC_ROOT
+
+
+def project_dir(project: str, role: str) -> str:
+    return os.path.join(project_memory_root(project), role)
+
+
+def project_report_path(project: str) -> str:
+    """Where a drain leaves its report for this project."""
+    if project_is_legacy(project):
+        return os.path.join(FABRIC_ROOT, "memory", "last-drain-report.json")
+    return os.path.join(project_memory_root(project), "last-drain-report.json")
 
 
 def shared_home(klass: str, project: str | None = None) -> str:
@@ -77,19 +208,55 @@ def shared_home(klass: str, project: str | None = None) -> str:
         return shared_dir()
     if not project:
         raise ValueError(f"shared {klass!r} is project-scoped; no project given")
-    return os.path.join(projects_memory_dir(), project, "shared")
+    return os.path.join(project_memory_root(project), "shared")
+
+
+def link_rel(path: str, project: str | None = None) -> str:
+    """A path as an index writes it. Relative to the project's link root; a
+    fabric-side path seen from a project's repository is linked through the
+    sibling checkout (`../agent-fabric/...`)."""
+    path = os.path.abspath(path)
+    base = project_link_root(project) if project else FABRIC_ROOT
+    if os.path.commonpath([path, base]) == base:
+        return os.path.relpath(path, base)
+    if os.path.commonpath([path, FABRIC_ROOT]) == FABRIC_ROOT:
+        return os.path.join(FABRIC_LINK_PREFIX, os.path.relpath(path, FABRIC_ROOT))
+    return os.path.relpath(path, base)
+
+
+def resolve_link(link: str, project: str | None = None) -> str:
+    """The absolute path an index link denotes (the inverse of link_rel)."""
+    if link.startswith(FABRIC_LINK_PREFIX + "/"):
+        return os.path.join(FABRIC_ROOT, link[len(FABRIC_LINK_PREFIX) + 1:])
+    base = project_link_root(project) if project else FABRIC_ROOT
+    return os.path.join(base, link)
 
 
 def root_rel(path: str) -> str:
-    """A path as the corpus writes it into indexes: relative to the root."""
+    """A fabric-side path relative to this checkout (lint labels, provenance)."""
     return os.path.relpath(path, FABRIC_ROOT)
 
 
 def list_projects() -> list[str]:
-    base = projects_memory_dir()
-    if not os.path.isdir(base):
-        return []
-    return sorted(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)))
+    """Projects whose memory this run can see: the legacy subtrees here, and
+    every project with a known working copy that has a .agent-fabric/memory/."""
+    found: set[str] = set()
+    base = legacy_projects_memory_dir()
+    if os.path.isdir(base):
+        found.update(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)))
+    candidates = set(_WORKING_COPIES) | {FABRIC_PROJECT_ID}
+    env = os.environ.get("AGENT_FABRIC_WORKING_COPY")
+    if env:
+        pid = _project_of_env_working_copy(env)
+        if pid:
+            candidates.add(pid)
+    for pid in candidates:
+        if pid in found:
+            continue
+        wc = working_copy_for(pid)
+        if wc and os.path.isdir(os.path.join(wc, PROJECT_MEMORY_SUBDIR)):
+            found.add(pid)
+    return sorted(found)
 
 
 def class_home(klass: str, role: str, project: str | None = None) -> str:
@@ -127,7 +294,10 @@ def tier1_paths(role: str, project: str | None) -> list[str]:
     of a class, or no project context, simply yields fewer paths."""
     found = [os.path.join(role_dir(role), p) for p in slices_of(role_dir(role), "charter.md")]
     if project:
-        base = project_dir(project, role)
+        try:
+            base = project_dir(project, role)
+        except LookupError:
+            return found  # no working copy known: the project's memory is out of reach
         for name in TIER1[1:]:
             found += [os.path.join(base, p) for p in slices_of(base, name)]
     return found

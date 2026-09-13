@@ -95,9 +95,11 @@ tests/run.sh
 
 The control plane — roles, routing, runtime, communication, policies,
 tools, tests, docs, `memory/domains/`, `memory/shared/` — is
-**Apache-2.0** (`LICENSE`). A managed project's subtrees here —
-`memory/projects/<id>/` and `projects/<id>/` — are derived from that
-project and carry **that project's license**, named per project in
+**Apache-2.0** (`LICENSE`). A managed project's knowledge lives in the
+project's own repository (`<working copy>/.agent-fabric/memory/`), under
+that project's license. The project subtrees still here during the
+transition — `memory/projects/<id>/` and `projects/<id>/` — are derived
+from that project and carry **its license**, named per project in
 `projects/registry.json` and assigned per path in `REUSE.toml`
 (`LICENSES/` holds every text; `reuse lint` passes). gzapp's subtrees are
 proprietary and confidential, which is why this repository is private

@@ -30,8 +30,25 @@ explicitly names one.
 | `communication/gzcoord/protocol/*` | `fabric-coordinator` | no tripwire yet — its charter states it |
 | a managed project's architecture (gzapp: ADRs, contracts) | that project's roles (`architect-cto`) | the project's own guards, in its repository |
 | a commit message or PR description (no machine attribution) | every agent, by writing it right | `policies/ban_generated_by_attribution.sh` on the commits a branch adds |
-| a distilled slice under `memory/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |
+| a distilled slice under `memory/domains/`, `memory/shared/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |
+| `.agent-fabric/` in a managed repository — the project's distilled knowledge (`memory/<role>/`) and `authority.json` | `fabric-coordinator`: the drain writes it, every other role reads it | `policies/check_agent_fabric_dir_authority.sh`, runnable in the fabric and in any managed repository; `lint.py` demands provenance |
 | `recall.md` for a role | the role itself | authored, exempt from provenance; must stay under `identities/roles/` |
+
+## `.agent-fabric/` in a managed repository
+
+A project's knowledge lives in the project's own repository, under
+`.agent-fabric/memory/<role>/` — versioned with the tree it describes,
+under the project's license. Which role holds it is the same answer as
+for the control plane: `fabric-coordinator` owns the corpus, because a
+slice is a claim with provenance and the drain is the only thing that
+makes one. A `backend-dev` session working in gzapp reads
+`.agent-fabric/memory/backend-dev/` and may not edit it; what it learns
+goes to its own Claude memory, and the next drain — run by a
+`fabric-coordinator` holder — distils it in with its name on it. A
+finding that a slice is wrong is raised to `fabric-coordinator`, not
+fixed in place. The guard reads holders from `.agent-fabric/authority.json`
+in that repository (base side), or from this repository's
+`policies/authority.json` when the sibling checkout is reachable.
 
 ## What the tripwire can and cannot do
 

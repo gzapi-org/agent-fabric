@@ -23,6 +23,8 @@ fi
 if [[ "$what" == all || "$what" == bash ]]; then
     run "launcher" bash policies/run_suite.sh runtime/openrouter/test_launch.sh
     run "charter authority guard" bash policies/run_suite.sh policies/test_check_charter_authority.sh
+    run ".agent-fabric/ authority guard" bash policies/run_suite.sh policies/test_check_agent_fabric_dir_authority.sh
+    run ".agent-fabric/ authority (this branch)" env AGENT_FABRIC_CHARTER_BASE=origin/main bash policies/check_agent_fabric_dir_authority.sh
     run "no-model-pins guard" bash policies/run_suite.sh policies/test_check_repo_settings_carry_no_model_pins.sh
     run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh

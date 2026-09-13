@@ -49,7 +49,11 @@ from typing import Any
 _spec = importlib.util.spec_from_file_location(
     "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
 layout = importlib.util.module_from_spec(_spec)
+_wc_spec = importlib.util.spec_from_file_location(
+    "fabric_workingcopy", os.path.join(os.path.dirname(os.path.realpath(__file__)), "workingcopy.py"))
+workingcopy = importlib.util.module_from_spec(_wc_spec)
 _spec.loader.exec_module(layout)
+_wc_spec.loader.exec_module(workingcopy)
 
 BUDGET_TOKENS = 1800
 CHARS_PER_TOKEN = 4
@@ -413,8 +417,10 @@ CLASS_DIRS = ("domain", "solution", "intersection", "rationale", "workflow", "th
 
 def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | None,
                 findings: list[str], shared_owner_count: dict[str, set[str]],
-                descriptions: dict[str, str]) -> list[str]:
-    """Judge every slice under `base`; return their root-relative paths."""
+                descriptions: dict[str, str], project: str | None = None) -> list[str]:
+    """Judge every slice under `base`; return their paths as an index links
+    them (relative to the fabric root, or to the project's working copy
+    when `project` names one whose memory lives in its repository)."""
     slices: list[str] = []
     if not os.path.isdir(base):
         return slices
@@ -429,7 +435,7 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
             if not filename.endswith(".md") or filename in ("INDEX.md", "README.md"):
                 continue
             full = os.path.join(dirpath, filename)
-            rel = layout.root_rel(full)
+            rel = layout.link_rel(full, project)
             with open(full, encoding="utf-8") as fh:
                 text = fh.read()
             slices.append(rel)
@@ -480,6 +486,10 @@ def flat_and_dir_findings(base: str, label: str) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Lint the committed corpus.")
     ap.add_argument("--fabric", default=None, help="agent-fabric root (default: this checkout)")
+    ap.add_argument("--working-copy", action="append", default=[], metavar="[PROJECT=]DIR",
+                    help="a managed project's checkout whose .agent-fabric/memory/ is linted too "
+                         "(repeatable; the project is resolved from the checkout's remote unless "
+                         "named as PROJECT=DIR)")
     args = ap.parse_args()
     if args.fabric:
         layout.FABRIC_ROOT = os.path.abspath(args.fabric)
@@ -487,6 +497,15 @@ def main() -> int:
     if not os.path.isdir(os.path.join(root, "identities")):
         print(f"lint: no agent-fabric checkout at {root}", file=sys.stderr)
         return 2
+    for wc in args.working_copy:
+        pid, sep, path = wc.partition("=")
+        if not sep:
+            pid, path = workingcopy.resolve(wc).get("project"), wc
+        if not pid:
+            print(f"lint: {wc} is not a working copy of a registered project "
+                  "(name it as PROJECT=DIR)", file=sys.stderr)
+            return 2
+        layout.set_working_copy(pid, path)
 
     findings: list[str] = []
     schemas = os.path.join("identities", "schemas")
@@ -592,24 +611,34 @@ def main() -> int:
                                                 findings, shared_owner_count, descriptions)
 
     # --- project memory, and the indexes ------------------------------------
+    # A project's memory lives in ITS repository (<working copy>/.agent-fabric/
+    # memory/); this run sees the projects whose working copy it knows, plus
+    # any still under memory/projects/ here (transition). Index links are
+    # relative to the working copy; fabric-side slices reach back through
+    # ../agent-fabric/, which resolve_link maps onto this checkout.
     indexed_domains: set[str] = set()
     for pid in layout.list_projects():
-        pbase = os.path.join(layout.projects_memory_dir(), pid)
+        pbase = layout.project_memory_root(pid)
+        legacy = layout.project_is_legacy(pid)
+        plabel = f"memory/projects/{pid}" if legacy else f"{pid}:{layout.PROJECT_MEMORY_SUBDIR}"
         if project_ids and pid not in project_ids:
-            findings.append(f"memory/projects/{pid}: no projects/{pid}/taxonomy.json binds this project")
+            findings.append(f"{plabel}: no projects/{pid}/taxonomy.json binds this project")
         for role in sorted(os.listdir(pbase)):
             rbase = os.path.join(pbase, role)
             if not os.path.isdir(rbase):
                 continue
-            label = f"memory/projects/{pid}/{role}"
+            label = f"{plabel}/{role}"
             if role == "shared":
-                lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions)
+                lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions, pid)
                 continue
             if known_roles and role not in known_roles:
                 findings.append(f"{label}: not a role in identities/roles/catalog.json")
             findings += flat_and_dir_findings(rbase, label)
-            slices = lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions)
-            expected = list(slices) + domain_slices.get(role, []) + identity_slices.get(role, [])
+            slices = lint_slices(rbase, label, template_schema, findings, shared_owner_count, descriptions, pid)
+            # Fabric-side slices as THIS project's index links them.
+            fabric_side = {layout.link_rel(os.path.join(root, r), pid): r
+                           for r in domain_slices.get(role, []) + identity_slices.get(role, [])}
+            expected = list(slices) + list(fabric_side)
             indexed_domains.add(role)
 
             index_path = os.path.join(rbase, "INDEX.md")
@@ -624,7 +653,7 @@ def main() -> int:
                 if rel not in linked:
                     findings.append(f"{label}/INDEX.md: does not list {rel} — the index has drifted")
             for target in linked:
-                if not os.path.exists(os.path.join(root, target)):
+                if not os.path.exists(layout.resolve_link(target, pid)):
                     findings.append(f"{label}/INDEX.md: links {target}, which does not exist")
 
             # THE DESCRIPTION, NOT ONLY THE PATH. INDEX.md is generated from
@@ -641,7 +670,7 @@ def main() -> int:
                     index_described[m.group(2)] = m.group(3).strip()
             for rel in sorted(expected):
                 listed = index_described.get(rel)
-                described = descriptions.get(rel)
+                described = descriptions.get(fabric_side.get(rel, rel))
                 if listed is None or described is None:
                     continue
                 if listed != described.strip():
@@ -660,10 +689,19 @@ def main() -> int:
                         findings += validate_json(crossref_schema, crossref_doc, f"{label}/crossref.json")
                     findings += check_durable_references(label, crossref_doc)
 
+    # A domain's slices are listed by the project indexes of the role that
+    # owns them. That can only be judged for roles some VISIBLE project
+    # files knowledge for: once a project's memory lives in its repository,
+    # a lint run that cannot see that working copy sees no index for it —
+    # which is absence of evidence, not drift.
+    # So: judged whenever some managed project's memory (other than this
+    # repository's own) is visible to this run; silent otherwise.
+    projects_visible = any(pid != layout.FABRIC_PROJECT_ID for pid in layout.list_projects())
     for domain, slices in domain_slices.items():
-        if slices and domain not in indexed_domains:
+        if slices and domain not in indexed_domains and projects_visible:
             findings.append(f"memory/domains/{domain}: {len(slices)} slice(s) indexed by no project — "
-                            "no memory/projects/<project>/{domain}/INDEX.md lists them")
+                            f"no project's .agent-fabric/memory/{domain}/INDEX.md lists them "
+                            "(pass --working-copy for a project whose memory lives in its repository)")
 
     # --- shared ----------------------------------------------------------------
     shared_root = layout.shared_dir()

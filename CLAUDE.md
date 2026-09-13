@@ -54,12 +54,17 @@ directory, the repository, the branch or the session.
 - **Work in the project's working copy**, under that project's
   `CLAUDE.md`. From `projects/`, `cd` into the working copy first; the
   session-start hook records which one you are in.
-- **Knowledge** you retrieve is under `memory/`: `memory/domains/<domain>/`
-  for the field, `memory/projects/<project>/<role>/` for the system,
-  `memory/shared/` for what several roles own. `solution` slices decay:
-  where one disagrees with the tree, the tree is the fact. Durable new
-  knowledge goes to your own Claude memory with a `roles_class`; a drain
-  (`memory/README.md`) distils it into the corpus with your name on it.
+- **Knowledge** you retrieve: `memory/domains/<domain>/` here for the
+  field, `memory/shared/` for what several roles own, and — for the
+  system you are working on — `.agent-fabric/memory/<role>/` **in that
+  project's working copy** (gzapp's is still under `memory/projects/gzapp/`
+  here until it moves). `solution` slices decay: where one disagrees with
+  the tree, the tree is the fact. `.agent-fabric/` is fabric-coordinator's
+  to write; you read it. Durable new knowledge goes to your own Claude
+  memory with a `roles_class`; a drain (`memory/README.md`), run by a
+  fabric-coordinator holder, distils it into the corpus with your name on
+  it. A slice you believe is wrong is raised to fabric-coordinator, never
+  edited in place.
 - **Subagents** name a capability class, never a vendor model: `code-low`,
   `code-medium`, `code-high`, and the review class (`blind-reviewer`).
   What each resolves to is `routing/`; the dispatch guard refuses a
@@ -109,10 +114,11 @@ tests/          python suites; tests/run.sh runs everything
 docs/migration/ how this repository was extracted from gzapp, and what maps to what
 ```
 
-The control plane is Apache-2.0; a managed project's subtrees
+The control plane is Apache-2.0. A project's knowledge lives in the
+project's repository under its own license; the subtrees still here
 (`memory/projects/<id>/`, `projects/<id>/`) carry that project's license
 (`REUSE.toml`, `projects/registry.json`). Do not move project-derived
-material out of those subtrees.
+material out of those subtrees except into the project.
 
 Runtime state is never in this repository: your binding, role history and
 local overrides live under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`.

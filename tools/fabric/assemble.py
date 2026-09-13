@@ -8,9 +8,11 @@ Turn distiller claims into the knowledge corpus, filed by scope.
 
 Where a slice lands is decided by tools/fabric/layout.py from its class:
 domain knowledge under memory/domains/<role>/, everything learned about
-the project under memory/projects/<project>/<role>/, multi-owner slices
-under the matching shared/. The generated INDEX.md for each (project,
-role) lists all of it with root-relative paths, plus the role's authored
+the project under <working copy>/.agent-fabric/memory/<role>/ (the
+project's own repository; fabric-coordinator's to write), multi-owner
+slices under the matching shared/. The generated INDEX.md for each
+(project, role) lists all of it with paths relative to the working copy
+(fabric-side slices through ../agent-fabric/), plus the role's authored
 charter and recall from identities/roles/<role>/.
 
 Distillers judge; this assembles. A distiller emits claims and nothing
@@ -369,12 +371,22 @@ def main() -> int:
                     help="logical project id the project-scoped classes are filed under")
     ap.add_argument("--fabric", default=None,
                     help="agent-fabric root (default: this checkout, or $AGENT_FABRIC_ROOT)")
+    ap.add_argument("--working-copy", default=None,
+                    help="the project's checkout; its .agent-fabric/memory/ receives the "
+                         "project-scoped classes (default: the agent's binding, or this checkout "
+                         "for agent-fabric itself)")
     ap.add_argument("--stamp", required=True, help="distillation date (YYYY-MM-DD)")
     ap.add_argument("--budget", type=int, default=DEFAULT_SLICE_BUDGET_TOKENS)
     args = ap.parse_args()
     if args.fabric:
         layout.FABRIC_ROOT = os.path.abspath(args.fabric)
     project = args.project
+    if args.working_copy:
+        layout.set_working_copy(project, args.working_copy)
+    try:
+        layout.project_memory_root(project)
+    except LookupError as exc:
+        sys.exit(f"assemble: {exc}")
 
     def base_for(role: str, klass: str) -> str:
         """The directory a slice of `klass` for `role` lives in."""
@@ -666,7 +678,7 @@ def main() -> int:
             write_slice(shared_dir, filename, "shared", klass, group, description, owners)
             for owner in owners:
                 shared_index[owner].append(
-                    {"path": layout.root_rel(os.path.join(shared_dir, filename)),
+                    {"path": layout.link_rel(os.path.join(shared_dir, filename), project),
                      "description": description, "class": klass}
                 )
 
@@ -716,7 +728,7 @@ def main() -> int:
                     )
                     write_slice(directory, filename, role, klass, group, description)
                     index_entries[role].append(
-                        {"path": layout.root_rel(os.path.join(directory, filename)),
+                        {"path": layout.link_rel(os.path.join(directory, filename), project),
                          "description": description, "class": klass}
                     )
 
@@ -735,7 +747,7 @@ def main() -> int:
             if not os.path.exists(path):
                 continue
             index_entries[role].append(
-                {"path": layout.root_rel(path), "description": described(path, filename),
+                {"path": layout.link_rel(path, project), "description": described(path, filename),
                  "class": klass}
             )
 
@@ -756,7 +768,7 @@ def main() -> int:
             ) + ([os.path.join(base, f"{subdir}.md")]
                  if os.path.exists(os.path.join(base, f"{subdir}.md")) else [])
             for path in candidates:
-                rel = layout.root_rel(path)
+                rel = layout.link_rel(path, project)
                 if rel in listed:
                     continue
                 index_entries[role].append(
@@ -887,7 +899,7 @@ def main() -> int:
     # expected outcome — instead of going quiet while both sections sit there.
     collisions = scan_collisions([
         os.path.join(layout.FABRIC_ROOT, "memory", "domains"),
-        os.path.join(layout.projects_memory_dir(), project),
+        layout.project_memory_root(project),
         layout.shared_dir(),
     ])
 
@@ -939,7 +951,7 @@ def main() -> int:
         "harvest": harvest_meta,
         "watermarks": watermarks,
     }
-    report_path = os.path.join(layout.FABRIC_ROOT, "memory", "last-drain-report.json")
+    report_path = layout.project_report_path(project)
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)

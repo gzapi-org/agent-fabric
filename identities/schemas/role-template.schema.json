@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gzapp:roles:role-template",
-  "title": "Provenance frontmatter carried by every role knowledge file",
-  "description": "Written by the assembler, never by hand. It is what makes a claim auditable back to its sources — including which clone and host produced them, and including after the observation store has been archived and emptied.",
+  "$id": "urn:agent-fabric:role-template",
+  "title": "Provenance frontmatter carried by every knowledge slice",
+  "description": "Written by the assembler, never by hand. It is what makes a claim auditable back to its sources — including which agent, host, project and working copy produced them, and including after the observation store has been archived and emptied.",
   "type": "object",
   "required": [
     "role",
@@ -52,16 +52,25 @@
       "uniqueItems": true
     },
     "origin": {
-      "description": "Which clone and host the evidence came from, resolved through the append-only binding registry so a rename or a host move does not break the trail.",
+      "description": "Who produced the evidence and where: the agent (Linux login), the host, the logical project and the working-copy label, kept as separate facts. Records written by the retired clone-bound system carry `clone_id` instead of `agent` and are preserved verbatim as historical provenance (docs/migration/legacy-registry/agent-map.json resolves them).",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "agent": {
+            "type": "string"
+          },
           "clone_id": {
             "type": "string"
           },
           "host": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "working_copy": {
             "type": "string"
           }
         }

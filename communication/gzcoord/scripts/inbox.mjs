@@ -3,8 +3,8 @@
 // SPEC §17 says a recipient receives — body read only if addressed to it.
 //
 // Two modes, one tool:
-//   node tools/gzcoord/scripts/inbox.mjs            drain: return at once
-//   node tools/gzcoord/scripts/inbox.mjs --wait [S] block up to S seconds
+//   node communication/gzcoord/scripts/inbox.mjs            drain: return at once
+//   node communication/gzcoord/scripts/inbox.mjs --wait [S] block up to S seconds
 //                                                  TOTAL (default 1800 —
 //                                                  thirty minutes) and
 //                                                  return the moment
@@ -50,7 +50,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole } from './gzmsg.mjs';
+import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami } from './gzmsg.mjs';
 
 const RELAY = process.env.CLAUDE_BRIDGE_URL ?? 'http://127.0.0.1:8765';
 const CHANNEL = process.env.GZCOORD_CHANNEL ?? 'gzapp:gzcoord';
@@ -72,15 +72,18 @@ function token(root) {
   return undefined;
 }
 
-// Who this session is, by the same derivation hello uses: the address from
-// the working copy, the role from the active-role record, else from a slug
-// the basename carries.
-export function identity(root, taxonomy) {
-  const instance = path.basename(root);
-  const host = os.hostname().split('.')[0];
-  const recorded = taxonomy ? recordedRole(taxonomy) : { role: undefined };
+// Who this session is, by the same derivation hello uses: the instance
+// half of the address is the AGENT — the Linux login, from
+// runtime/identity.py via whoami() — never the working copy's basename;
+// the host is the short hostname; the role comes from the agent's runtime
+// binding, else from a slug the login happens to carry. The working copy
+// the session runs in is context (SPEC §3.1) and plays no part here.
+export function identity(me = whoami(), taxonomy) {
+  const instance = me.agent;
+  const host = me.host ?? os.hostname().split('.')[0];
+  const recorded = taxonomy ? recordedRole(taxonomy, me) : { role: undefined };
   const slug = recorded.role ?? (taxonomy ? slugOf(instance, taxonomy) : undefined);
-  return { address: `${host}/${instance}`, instance, slug };
+  return { address: `${host}/${instance}`, instance, slug, project: me.project };
 }
 
 // SPEC §7.1 addressing, SPEC §17 reading rule. HELLO and GOODBYE are
@@ -221,7 +224,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!tok) { console.error('gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, infra/local/.env.local or .claude/settings.local.json — skipping'); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
-  const me = identity(root, taxonomy);
+  const me = identity(whoami(), taxonomy);
 
   // Drain mode spends 1 s on the cursor page and lists everything; wait
   // mode chains slices until a message ADDRESSED TO THIS SESSION lands,

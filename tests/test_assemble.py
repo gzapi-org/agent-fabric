@@ -22,9 +22,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ASSEMBLE = os.path.join(HERE, "assemble.py")
-LINT = os.path.join(HERE, "lint.py")
-SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(HERE)), ".roles", "schema")
+ROOT = os.path.dirname(HERE)
+ASSEMBLE = os.path.join(ROOT, "tools", "fabric", "assemble.py")
+LINT = os.path.join(ROOT, "tools", "fabric", "lint.py")
+SCHEMA_DIR = os.path.join(ROOT, "identities", "schemas")
 
 OBSERVATIONS = [
     {"content_hash": "h1", "clone_id": "clone-aaa", "host": "hostA"},
@@ -149,7 +150,8 @@ def test_committed_indexes_carry_the_banner_the_assembler_emits(tmp: str) -> Non
     banner = body.split("\n## ", 1)[0].strip()
     assert banner, generated
 
-    roles_dir = os.path.join(os.path.dirname(os.path.dirname(HERE)), ".roles")
+    # The committed project indexes: memory/projects/<project>/<role>/INDEX.md.
+    roles_dir = os.path.join(ROOT, "memory", "projects", "gzapp")
     committed = sorted(
         os.path.join(roles_dir, d, "INDEX.md") for d in os.listdir(roles_dir)
         if os.path.isfile(os.path.join(roles_dir, d, "INDEX.md")))
@@ -173,7 +175,7 @@ def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
     with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
         json.dump({"host": "boxA", "database": "/home/someone/.claude-mem/claude-mem.db",
                    "since_watermark": 1000, "next_watermark": 2500,
-                   "counts": {"provisional_clone": 0, "in_scope": 7}}, fh)
+                   "counts": {"provisional_agent": 0, "in_scope": 7}}, fh)
     run_assemble(drain, claims_dir, out)
     report = json.loads(read(os.path.join(out, "last-drain-report.json")))
 
@@ -198,11 +200,11 @@ def test_drain_report_records_unattributable_rows(tmp: str) -> None:
     ])})
     with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
         json.dump({"host": "boxA", "since_watermark": 0, "next_watermark": 9,
-                   "counts": {"provisional_clone": 41, "in_scope": 41}}, fh)
+                   "counts": {"provisional_agent": 41, "in_scope": 41}}, fh)
     run_assemble(drain, claims_dir, out)
     report = json.loads(read(os.path.join(out, "last-drain-report.json")))
     harvest = report.get("harvest") or {}
-    assert harvest.get("provisional_clone") == 41, harvest
+    assert harvest.get("provisional_agent") == 41, harvest
     assert harvest.get("in_scope") == 41, harvest
 
 
@@ -230,14 +232,14 @@ def test_unattributable_rows_warn_loudly_but_do_not_fail_the_drain(tmp: str) -> 
     ])})
     with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
         json.dump({"host": "boxA", "since_watermark": 0, "next_watermark": 9,
-                   "counts": {"provisional_clone": 41, "in_scope": 60}}, fh)
+                   "counts": {"provisional_agent": 41, "in_scope": 60}}, fh)
     proc = run_assemble(drain, claims_dir, out)
 
     assert proc.returncode == 0, "an unattributable row is knowledge, not a failure"
     assert "PROVISIONAL BINDINGS" in proc.stderr, proc.stderr
     assert "41 of 60" in proc.stderr, proc.stderr
     # The remedy has to be in the message: it is not doable from here.
-    assert "/role" in proc.stderr, proc.stderr
+    assert "agent-map" in proc.stderr, proc.stderr
 
 
 def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:
@@ -248,7 +250,7 @@ def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:
     ])})
     with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
         json.dump({"host": "boxA", "since_watermark": 0, "next_watermark": 9,
-                   "counts": {"provisional_clone": 0, "in_scope": 60}}, fh)
+                   "counts": {"provisional_agent": 0, "in_scope": 60}}, fh)
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
     assert "PROVISIONAL" not in proc.stderr, proc.stderr

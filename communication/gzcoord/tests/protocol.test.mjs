@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey, whoami } from '../scripts/gzmsg.mjs';
 
-const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
+const taxonomy = loadTaxonomy(new URL('../../../identities/roles/catalog.json', import.meta.url).pathname);
 
 const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
@@ -453,34 +453,46 @@ test('slugOf finds the longest whole-token slug an instance carries', () => {
   assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
   assert.equal(slugOf('gzapp-claude2', taxonomy), undefined);
   assert.equal(slugOf('web-developer', taxonomy), undefined);   // token match, not substring
-  assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/.roles/taxonomy.json'));
+  assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/identities/roles/catalog.json'));
 });
 
-// A fixture root for the derivation tests: the catalogue copied into a
-// temp dir, with or without an .instance/state.json beside it. Passing
-// --taxonomy keeps the CLI off the developer's real record — the suite
-// used to read whatever /role had written in this clone, and passed only
-// where that file was absent.
+// A fixture for the derivation tests: a throwaway agent-fabric STATE
+// directory holding this agent's binding (or none, or a broken one), with
+// AGENT_FABRIC_STATE_DIR pointing at it for the duration so the CLI is
+// kept off the developer's real binding. The catalogue is a temp copy.
 // System temp, not the tests directory: a run interrupted between the
-// mkdtemp and the finally would otherwise leave an untracked copy of the
-// catalogue in a tree whose workflow blesses `git add -A`.
+// mkdtemp and the finally would otherwise leave an untracked file in a
+// tree whose workflow blesses `git add -A`.
+const login = os.userInfo().username;
 function fixtureRoot(state) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-fixture-'));
-  fs.mkdirSync(`${root}/.roles/.instance`, { recursive: true });
-  fs.copyFileSync(taxonomy.path, `${root}/.roles/taxonomy.json`);
-  if (state !== undefined) fs.writeFileSync(`${root}/.roles/.instance/state.json`, state);
+  fs.mkdirSync(`${root}/state/agents/${login}`, { recursive: true });
+  fs.copyFileSync(taxonomy.path, `${root}/catalog.json`);
+  if (state !== undefined) fs.writeFileSync(`${root}/state/agents/${login}/binding.json`, state);
   return root;
 }
 // Synchronous callbacks only: the finally fires when fn RETURNS, so an
 // async fn would have its fixture removed while still running.
 const withFixture = (state, fn) => {
   const root = fixtureRoot(state);
+  const saved = process.env.AGENT_FABRIC_STATE_DIR;
+  process.env.AGENT_FABRIC_STATE_DIR = `${root}/state`;
   try {
-    const r = fn(root, `${root}/.roles/taxonomy.json`);
+    const r = fn(root, `${root}/catalog.json`);
     if (r instanceof Promise) throw new TypeError('withFixture takes a synchronous callback');
     return r;
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    if (saved === undefined) delete process.env.AGENT_FABRIC_STATE_DIR; else process.env.AGENT_FABRIC_STATE_DIR = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 };
+const bound = (role) => JSON.stringify({ agent: login, host: 'h', role, updated_at: 'x' });
+
+test('whoami: the agent is the effective login, never the directory', () => {
+  const me = whoami();
+  assert.equal(me.agent, login);
+  assert.notEqual(me.agent, path.basename(process.cwd()) === login ? 'x' : path.basename(process.cwd()));
+});
 
 test('hello derives the slug from the address when no role is recorded, and refuses a title as ROLE', () => withFixture(undefined, (root, tax) => {
   const derived = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
@@ -499,7 +511,7 @@ test('hello derives the slug from the address when no role is recorded, and refu
 // the directory name; a malformed record warns and falls back; an
 // explicit --role wins and is warned about when it disagrees.
 test('hello prefers the recorded role, and refuses a recorded role outside the catalogue', () => {
-  withFixture(JSON.stringify({ role: 'backend-dev' }), (root, tax) => {
+  withFixture(bound('backend-dev'), (root, tax) => {
     const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^ROLE: backend-dev$/m);
@@ -507,13 +519,13 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     const explicit = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/backend-dev-02', '--role', 'db-admin', '--project', 'gzapp');
     assert.equal(explicit.status, 0, explicit.stderr);
     assert.match(explicit.stdout, /^ROLE: db-admin$/m);
-    assert.match(explicit.stderr, /^warning: --role db-admin disagrees with .*state\.json, which records backend-dev/m);
+    assert.match(explicit.stderr, /^warning: --role db-admin disagrees with .*binding\.json, which records backend-dev/m);
     assert.equal(recordedRole(loadTaxonomy(tax)).role, 'backend-dev');
   });
-  withFixture(JSON.stringify({ role: 'security-engineer' }), (root, tax) => {
+  withFixture(bound('security-engineer'), (root, tax) => {
     const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /state\.json records role "security-engineer", which is not in .*taxonomy\.json; pass --role explicitly/);
+    assert.match(r.stderr, /binding\.json records role "security-engineer", which is not in .*catalog\.json; pass --role explicitly/);
     assert.equal(r.stdout, '');
     const rec = recordedRole(loadTaxonomy(tax));
     assert.equal(rec.role, undefined); assert.match(rec.error, /security-engineer/);
@@ -521,7 +533,7 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
   // A record present but saying nothing usable warns, and the warning
   // names the consequence the caller actually took — never the address
   // when the address was not what was used.
-  for (const state of ['not json', JSON.stringify({ clone_id: 'x' })]) {
+  for (const state of ['not json', JSON.stringify({ agent: login, host: 'h', updated_at: 'x' })]) {
     withFixture(state, (root, tax) => {
       const cause = state === 'not json' ? /could not be read/ : /records no role/;
       const r = gzmsg('hello', '--taxonomy', tax, '--from', 'develop-qzapp/architect-cto-01', '--project', 'gzapp');
@@ -540,12 +552,14 @@ test('hello prefers the recorded role, and refuses a recorded role outside the c
     });
   }
   assert.throws(() => withFixture(undefined, async () => {}), /synchronous callback/);
-  // A --taxonomy whose basename is not taxonomy.json still finds the record beside it.
-  withFixture(JSON.stringify({ role: 'web-dev' }), (root, tax) => {
-    fs.copyFileSync(tax, `${root}/.roles/catalogue.json`);
-    const r = gzmsg('hello', '--taxonomy', `${root}/.roles/catalogue.json`, '--from', 'develop-qzapp/gzapp-claude2', '--project', 'gzapp');
+  // With a binding, hello needs neither --from nor --project: both come
+  // from the agent (login + host) and what it is bound to.
+  withFixture(JSON.stringify({ agent: login, host: 'h', role: 'web-dev', project: 'gzapp', updated_at: 'x' }), (root, tax) => {
+    const r = gzmsg('hello', '--taxonomy', tax);
     assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`^FROM: ${os.hostname().split('.')[0]}/${login}$`, 'm'));
     assert.match(r.stdout, /^ROLE: web-dev$/m);
+    assert.match(r.stdout, /^PROJECT: gzapp$/m);
   });
 });
 
@@ -688,21 +702,21 @@ test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', (
   assert.equal(forMe(mk('INFO', 'TO-ROLE: db-admin\n'), { ...me, slug: undefined }), false);
 });
 
-test('inbox identity: address from the working copy, slug from record then basename', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-inbox-'));
-  try {
-    const root = path.join(dir, 'architect-cto-01'); fs.mkdirSync(path.join(root, '.roles', '.instance'), { recursive: true });
-    fs.copyFileSync(taxonomy.path, path.join(root, '.roles', 'taxonomy.json'));
-    const tax = loadTaxonomy(path.join(root, '.roles', 'taxonomy.json'));
-    const host = os.hostname().split('.')[0];
-    // no record: the basename's slug
-    assert.deepEqual(identity(root, tax), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: 'architect-cto' });
-    // a record wins over the basename
-    fs.writeFileSync(path.join(root, '.roles', '.instance', 'state.json'), JSON.stringify({ role: 'backend-dev' }));
-    assert.equal(identity(root, tax).slug, 'backend-dev');
-    // no catalogue at all: address still derives, slug does not
-    assert.deepEqual(identity(root, undefined), { address: `${host}/architect-cto-01`, instance: 'architect-cto-01', slug: undefined });
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+test('inbox identity: address is <host>/<login>; the slug comes from the binding, then from the login', () => {
+  // The resolver's answer is what identity() consumes; the working copy
+  // the process runs in is not an input at all.
+  const host = 'box';
+  const noRole = { agent: 'architect-cto-01', host, role: undefined, binding: '/nonexistent/binding.json' };
+  assert.deepEqual(identity(noRole, taxonomy), { address: 'box/architect-cto-01', instance: 'architect-cto-01', slug: 'architect-cto', project: undefined });
+  // a binding wins over the login's slug
+  assert.equal(identity({ ...noRole, role: 'backend-dev', project: 'gzapp' }, taxonomy).slug, 'backend-dev');
+  assert.equal(identity({ ...noRole, role: 'backend-dev', project: 'gzapp' }, taxonomy).project, 'gzapp');
+  // a generic login carries no slug; the address still derives
+  assert.deepEqual(identity({ agent: 'user', host, binding: '/nonexistent' }, taxonomy), { address: 'box/user', instance: 'user', slug: undefined, project: undefined });
+  // no catalogue at all: address still derives, slug does not
+  assert.deepEqual(identity(noRole, undefined), { address: 'box/architect-cto-01', instance: 'architect-cto-01', slug: undefined, project: undefined });
+  // and the real resolver names this process's login
+  assert.equal(identity(whoami(), undefined).instance, login);
 });
 
 // The wait exits ONLY on a message addressed to this session: a slice

@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""tools/roles/harvest_memory.py
+"""tools/fabric/harvest_memory.py
 
-Drain THIS ACCOUNT's Claude memory into a claims directory the existing
-assembler can consume.
+Drain THIS AGENT's Claude memory into a claims directory the assembler
+can consume.
 
-    tools/roles/harvest_memory.py --role architect-cto --out /tmp/drain
-    tools/roles/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \\
-        --out .roles --stamp $(date +%F)
+    tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain
+    tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \\
+        --project gzapp --stamp $(date +%F)
+
+PROVENANCE. Every observation is stamped with the AGENT (the Linux login,
+from runtime/identity.py), the HOST, the PROJECT the working copy belongs
+to (projects/registry.json, by remote) and the WORKING COPY's basename as a
+label. The agent is never derived from the directory; the directory only
+says where the memory was written (`--working-copy`, default: cwd), which
+is how Claude Code names the memory directory being drained.
 
 The role payload lands in `<out>/claims/`, one directory below the drain
 metadata, because assemble.py reads EVERY .json under `--claims` as a
@@ -21,9 +28,10 @@ is already the shape a claim wants, so this needs no model pass, no
 transcript scraping, and no redaction layer -- the input is curated text
 rather than raw session bytes.
 
-SCOPE IS PER ACCOUNT, BY DESIGN. Each account distils its own memories
-into the shared `.roles/` corpus; nothing here reads another account's
-home directory. The account's role is the role its claims land under.
+SCOPE IS PER AGENT, BY DESIGN. Each agent distils its own memories into
+the shared corpus; nothing here reads another account's home directory.
+The role the claims land under is given explicitly (`--role`), defaulting
+to the agent's active role binding.
 
 ROLE KNOWLEDGE IS OPT-IN. A memory reaches this corpus only if it says so,
 by carrying `roles_class` in its `metadata:` block:
@@ -55,18 +63,26 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
-import socket
 import sys
 from typing import Any
 
-# realpath, not abspath: invoked through a symlink on PATH, abspath keeps
-# the link's directory and the schema is looked for beside the link.
-SCHEMA_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
-    ".roles", "schema", "claims.schema.json")
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def _load(name: str, path: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+layout = _load("fabric_layout", os.path.join(HERE, "layout.py"))
+identity = _load("fabric_identity", os.path.join(layout.FABRIC_ROOT, "runtime", "identity.py"))
+SCHEMA_PATH = os.path.join(layout.FABRIC_ROOT, "identities", "schemas", "claims.schema.json")
 
 
 def _schema_claim_classes():
@@ -105,9 +121,12 @@ FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 
-def default_memory_dir() -> str:
-    """This project's memory directory, derived the way Claude Code names it."""
-    slug = os.getcwd().replace("/", "-")
+def default_memory_dir(working_copy: str) -> str:
+    """The memory directory Claude Code keeps for a launch directory: the
+    absolute path with every `/` turned into `-`. A location, not an
+    identity — the same agent has one such directory per directory it has
+    launched from."""
+    slug = os.path.abspath(working_copy).replace("/", "-")
     return os.path.expanduser(f"~/.claude/projects/{slug}/memory")
 
 
@@ -163,18 +182,33 @@ def content_hash(name: str, body: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[2])
-    ap.add_argument("--role", required=True, help="role these claims belong to")
+    ap.add_argument("--role", default=None,
+                    help="role these claims belong to (default: the agent's active role)")
     ap.add_argument("--out", required=True, help="output directory")
-    ap.add_argument("--memory", default=None, help="memory dir (default: this project's)")
+    ap.add_argument("--memory", default=None,
+                    help="memory dir (default: the one Claude Code keeps for --working-copy)")
+    ap.add_argument("--working-copy", default=None,
+                    help="the checkout whose memory is drained (default: cwd); sets project and label")
+    ap.add_argument("--project", default=None,
+                    help="logical project id (default: resolved from the working copy's remote)")
     ap.add_argument("--host", default=None, help="host label (default: hostname -s)")
     ap.add_argument("--dry-run", action="store_true", help="report, write nothing")
     args = ap.parse_args()
 
-    memory_dir = args.memory or default_memory_dir()
+    working_copy = os.path.abspath(args.working_copy or os.getcwd())
+    ctx = identity.resolve_context(cwd=working_copy)
+    role = args.role or ctx.get("role")
+    if not role:
+        print("harvest_memory: no --role given and the agent has no active role binding",
+              file=sys.stderr)
+        return 2
+    memory_dir = args.memory or default_memory_dir(working_copy)
     if not os.path.isdir(memory_dir):
         print(f"harvest_memory: no memory directory at {memory_dir}", file=sys.stderr)
         return 2
-    host = args.host or socket.gethostname().split(".")[0]
+    host = args.host or ctx["host"]
+    project = args.project or ctx.get("project")
+    label = ctx.get("working_copy_id") or os.path.basename(working_copy)
 
     claims: list[dict[str, Any]] = []
     observations: list[dict[str, Any]] = []
@@ -209,9 +243,13 @@ def main() -> int:
         cid = content_hash(parsed["name"], parsed["body"])
         observations.append({
             "content_hash": cid,
-            "clone_id": os.path.basename(os.getcwd()),
+            # Who learned it, where, and what it applies to — separate
+            # facts. `agent` is the login; `working_copy` is a label.
+            "agent": ctx["agent"],
             "host": host,
-            "project": os.path.basename(os.getcwd()),
+            "project": project,
+            "working_copy": label,
+            "session": ctx.get("session"),
             "type": mtype,
             "title": parsed["name"],
             "text": parsed["body"],
@@ -242,7 +280,8 @@ def main() -> int:
         return 1
 
     report = {
-        "role": args.role, "host": host, "memory_dir": memory_dir,
+        "role": role, "agent": ctx["agent"], "host": host, "project": project,
+        "working_copy": label, "memory_dir": memory_dir,
         "claims": len(claims),
         # NAMED, not counted. A count tells you something was left out; the
         # names tell you whether it should have been.
@@ -257,11 +296,11 @@ def main() -> int:
     # sitting beside it aborts the run with KeyError: 'role'.
     claims_dir = os.path.join(args.out, "claims")
     os.makedirs(claims_dir, exist_ok=True)
-    with open(os.path.join(claims_dir, f"{args.role}.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(claims_dir, f"{role}.json"), "w", encoding="utf-8") as fh:
         # Only the keys the claims contract declares; it sets
         # additionalProperties: false, and the assembler reads these to
         # print the per-role admitted/rejected line.
-        json.dump({"role": args.role, "claims": claims,
+        json.dump({"role": role, "claims": claims,
                    # observations_in counts every memory READ, not every
                    # one admitted: an observation is appended in the same
                    # iteration as its claim, so len(observations) equalled

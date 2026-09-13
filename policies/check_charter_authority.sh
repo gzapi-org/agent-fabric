@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 #
-# tools/checks/check_charter_authority.sh
+# policies/check_charter_authority.sh
 #
-# A role's DEFINITION is architect-cto's to change: `.roles/*/charter.md`
-# and the `roles` block of `.roles/taxonomy.json`. This fails when one of
-# those changes on a branch that is not an architect-cto branch.
+# A role's DEFINITION is architect-cto's to change: `identities/roles/*/
+# charter.md`, the catalogue `identities/roles/catalog.json`, and the
+# per-project binding rules `projects/*/taxonomy.json`. This fails when one
+# of those changes on a branch that is not an architect-cto branch.
 #
-# WHY THIS EXISTS. Every other file under `.roles/` is generated -- the
+# AUTHORITY BELONGS TO THE ROLE, NOT TO THE ACCOUNT. The branch's second
+# segment names the agent (Linux login) that opened it; the check asks
+# whether that agent is an architect-cto INSTANCE by the provisioning
+# convention that accounts are named for the role they were stood up as.
+# An account currently HOLDING a role does not thereby own the role's
+# definition — that is exactly the widening this tripwire exists to catch.
+#
+# WHY THIS EXISTS. Every distilled slice is generated -- the
 # assembler writes it and lint.py rejects a hand-edit -- so a role's scope
 # cannot drift by accident. `charter` and `recall` are the two classes
 # lint.py exempts from `derived_from`, precisely because they are authored
@@ -28,8 +36,9 @@
 # passes -- the `pull_request` run is where it bites, and that run is
 # required before anything is queued.
 #
-# guards: .roles/**
-# guards: tools/checks/**
+# guards: identities/**
+# guards: projects/*/taxonomy.json
+# guards: policies/**
 #
 # Exit codes:
 #   0  no protected file changed, or the branch is architect-cto's, or the
@@ -42,7 +51,7 @@
 
 set -uo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || { echo "cannot cd to repo root" >&2; exit 2; }
 
 # RESOLVING THE BASE IS THE HARD PART IN CI, not locally. `actions/checkout`
@@ -52,7 +61,7 @@ cd "$ROOT" || { echo "cannot cd to repo root" >&2; exit 2; }
 # failed the build for an environment limitation rather than a violation.
 resolve_base() {
     local candidate
-    for candidate in "${GZAPP_CHARTER_BASE:-}" \
+    for candidate in "${AGENT_FABRIC_CHARTER_BASE:-${GZAPP_CHARTER_BASE:-}}" \
                      "origin/${GITHUB_BASE_REF:-}" "${GITHUB_BASE_REF:-}" \
                      origin/main main; do
         [[ -n "$candidate" && "$candidate" != "origin/" ]] || continue
@@ -81,11 +90,12 @@ BASE="$(resolve_base)" || {
 
 # GITHUB_HEAD_REF is set on pull_request and empty elsewhere; fall back to
 # the local branch so this is runnable by hand before pushing.
-BRANCH="${GZAPP_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}"
+BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GZAPP_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}}"
 [[ -n "$BRANCH" ]] || BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- \
-    '.roles/*/charter.md' '.roles/taxonomy.json' 2>/dev/null)
+    'identities/roles/*/charter.md' 'identities/roles/catalog.json' \
+    'projects/*/taxonomy.json' 2>/dev/null)
 
 if (( ${#changed[@]} == 0 )); then
     echo "check_charter_authority: OK — no role definition changed."
@@ -105,10 +115,10 @@ case "$BRANCH" in
         exit 0 ;;
 esac
 
-# `<host>/<clone>/<type>/<desc>`: the clone segment carries the account,
-# which is the only signal available.
-clone="$(cut -d/ -f2 <<<"$BRANCH")"
-if [[ "$BRANCH" != */*/* || -z "$clone" ]]; then
+# `<host>/<agent>/<type>/<desc>`: the second segment names the agent (the
+# Linux login) that opened the branch, which is the only signal available.
+agent="$(cut -d/ -f2 <<<"$BRANCH")"
+if [[ "$BRANCH" != */*/* || -z "$agent" ]]; then
     echo "check_charter_authority: role definition(s) changed, but the head"
     echo "branch is not knowable here (${BRANCH:-none}) — the pull_request"
     echo "run is where this is enforced."
@@ -116,18 +126,19 @@ if [[ "$BRANCH" != */*/* || -z "$clone" ]]; then
     exit 0
 fi
 
-if [[ "$clone" == architect-cto* ]]; then
+if [[ "$agent" == architect-cto* ]]; then
     echo "check_charter_authority: OK — ${#changed[@]} role definition(s)" \
          "changed on an architect-cto branch."
     exit 0
 fi
 
-echo "FAIL: a role's DEFINITION changed on a branch owned by '$clone'." >&2
+echo "FAIL: a role's DEFINITION changed on a branch owned by agent '$agent'." >&2
 printf '       %s\n' "${changed[@]}" >&2
 cat >&2 <<'MSG'
 
-`.roles/*/charter.md` and taxonomy.json's roles block say what a role is
-and is not. They are architect-cto's to change -- a role does not redefine
+`identities/roles/*/charter.md`, the role catalogue and a project's
+taxonomy say what a role is and is not, and where it applies. They are
+architect-cto's to change -- a role does not redefine
 itself, for the same reason gzcoord-coordinator owns the protocol spec it
 constrains others with.
 

@@ -18,13 +18,12 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOOL = os.path.join(HERE, "harvest_memory.py")
+ROOT = os.path.dirname(HERE)
+TOOL = os.path.join(ROOT, "tools", "fabric", "harvest_memory.py")
 # The claim classes come from the schema the assembler validates against,
 # never from a copy in this file: a copy is what drifted and let `index`
 # through.
-with open(os.path.join(os.path.dirname(os.path.dirname(HERE)), ".roles",
-                       "schema",
-                       "claims.schema.json"), encoding="utf-8") as _fh:
+with open(os.path.join(ROOT, "identities", "schemas", "claims.schema.json"), encoding="utf-8") as _fh:
     SCHEMA_CLASSES = tuple(
         json.load(_fh)["properties"]["claims"]["items"]["properties"]["class"]["enum"])
 
@@ -238,7 +237,11 @@ def test_assemble_gets_the_files_it_requires(tmp: str) -> None:
         assert os.path.exists(os.path.join(out, required)), required
     obs = [json.loads(l) for l in
            open(os.path.join(out, "observations.jsonl"), encoding="utf-8") if l.strip()]
-    assert obs and {"content_hash", "clone_id", "host"} <= set(obs[0]), obs[:1]
+    assert obs and {"content_hash", "agent", "host", "project", "working_copy"} <= set(obs[0]), obs[:1]
+    # Who learned it is the login, stamped by the resolver; where is a label.
+    login = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+    assert obs[0]["agent"] == login, obs[0]
+    assert "clone_id" not in obs[0]
     # The claim's evidence must point AT an observation, or the slice's
     # derived_from cites nothing that exists.
     assert claims_of(out)[0]["evidence"][0] == obs[0]["content_hash"]

@@ -45,8 +45,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINT = os.path.join(HERE, "lint.py")
-REAL_SCHEMA = os.path.join(HERE, os.pardir, os.pardir, ".roles", "schema")
+ROOT = os.path.dirname(HERE)
+LINT = os.path.join(ROOT, "tools", "fabric", "lint.py")
+REAL_SCHEMA = os.path.join(ROOT, "identities", "schemas")
 
 SKILL = """---
 name: webapp-testing

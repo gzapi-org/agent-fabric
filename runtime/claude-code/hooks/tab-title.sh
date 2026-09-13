@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Claude Code hook: set the terminal tab title to <clone-dir>/<branch>.
+# Claude Code hook: set the terminal tab title to <agent> <working-copy>/<branch>.
 #
-# WHY. Several sessions run in parallel, one clone each, and what tells them
-# apart is the <host>/<clone>/<task> attribution model (CLAUDE.md section
-# "Git discipline" -> "Concurrent contributors"). The status line already
-# shows clone and branch while you are looking at a pane; this puts them on
-# the TAB, which is what you read when you are looking at a different pane.
+# WHY. Several sessions run in parallel, one agent (Linux login) each, and
+# what tells them apart is the agent plus the working copy and branch it is
+# on. The status line already shows those while you are looking at a pane;
+# this puts them on the TAB, which is what you read when you are looking at
+# a different pane. The agent comes from agent-fabric's canonical resolver;
+# the working copy is the checkout's basename — context, never identity.
 #
 # WHY NOT /rename. That sets the session name, and the session name normally
 # drives the tab title -- but it cannot be automated. Hooks are shell
@@ -42,6 +43,8 @@
 set -uo pipefail
 
 input=$(cat)
+FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
+agent=$("$FABRIC_ROOT/bin/fabric-whoami" 2>/dev/null || id -un)
 
 # The hook payload carries the session's directory; $PWD is the fallback for
 # a manual run or a payload without it.
@@ -69,7 +72,7 @@ if [ -z "${common:-}" ]; then
 fi
 toplevel=$(cd "$(dirname "$common")" 2>/dev/null && pwd) || exit 0
 [ -n "$toplevel" ] || exit 0
-clone=$(basename "$toplevel")
+wc=$(basename "$toplevel")
 
 # Read the branch from that same main worktree, for the same reason.
 # Detached HEAD gets a short SHA rather than an empty half-title; if even
@@ -78,22 +81,22 @@ branch=$(git -C "$toplevel" branch --show-current 2>/dev/null)
 [ -n "$branch" ] || branch=$(git -C "$toplevel" rev-parse --short HEAD 2>/dev/null)
 [ -n "$branch" ] || exit 0
 
-# Branches here are named <host>/<clone>/<type>/<desc> (CLAUDE.md), so the
-# clone appears twice if the branch is used whole -- and the useful half, the
-# task, is then pushed off the end of a narrow tab. Strip the prefix when it
-# is this clone's own, leaving <clone>/<type>/<desc>. A branch that does not
-# carry the prefix (main, or another naming scheme) is left exactly as it is.
+# gzapp branches are named <host>/<agent>/<type>/<desc> (older ones carry
+# the working-copy name in the second segment), so the prefix is redundant
+# on a narrow tab. Strip it when it is this session's own — by agent or by
+# working copy — leaving <type>/<desc>. Any other branch is left as it is.
 host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
 if [ -n "${host:-}" ]; then
   case "$branch" in
-    "$host/$clone/"*) branch=${branch#"$host/$clone/"} ;;
+    "$host/$agent/"*) branch=${branch#"$host/$agent/"} ;;
+    "$host/$wc/"*) branch=${branch#"$host/$wc/"} ;;
   esac
 fi
 
 # Built inside jq rather than with printf: the ESC and BEL bytes stay inside
 # jq's own string literal, so nothing depends on the shell preserving control
 # characters through a command substitution.
-jq -nc --arg title "$clone/$branch" '{terminalSequence: "\u001b]0;\($title)\u0007"}' 2>/dev/null
+jq -nc --arg title "$agent $wc/$branch" '{terminalSequence: "\u001b]0;\($title)\u0007"}' 2>/dev/null
 
 # The last command's status is NOT the script's contract: a missing jq would
 # otherwise exit 127, and a non-zero hook exit surfaces an error notice on

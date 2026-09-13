@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "description": "The reusable roles agent-fabric knows: id (the slug that goes on the wire and names identities/roles/<id>/), title, and whether the role is still a candidate. Path and keyword rules that say WHERE a role applies inside a managed repository are not here — they belong to projects/<project-id>/taxonomy.json.",
+  "roles": [
+    {
+      "id": "flutter-dev",
+      "title": "Flutter developer"
+    },
+    {
+      "id": "backend-dev",
+      "title": ".NET backend developer"
+    },
+    {
+      "id": "db-admin",
+      "title": "Database administrator"
+    },
+    {
+      "id": "web-dev",
+      "title": "Web sub-app developer"
+    },
+    {
+      "id": "edge-hosting",
+      "title": "Domain, DNS, edge and hosting"
+    },
+    {
+      "id": "devex-tooling",
+      "title": "Developer experience and repo tooling"
+    },
+    {
+      "id": "architect-cto",
+      "title": "Architect / CTO"
+    },
+    {
+      "id": "product-i18n",
+      "title": "Product localization",
+      "candidate": true
+    },
+    {
+      "id": "domain-transit",
+      "title": "Transit domain",
+      "candidate": true
+    },
+    {
+      "id": "gzcoord-coordinator",
+      "title": "GZCoord protocol coordinator",
+      "candidate": true
+    }
+  ]
+}

@@ -3,6 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+// The agent-fabric checkout this runtime belongs to: communication/gzcoord/scripts -> root.
+export const FABRIC_ROOT = process.env.AGENT_FABRIC_ROOT ?? new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([
@@ -141,8 +145,31 @@ export function parse(text) {
   return { type, metadata, sections, malformed, duplicateKeys: [...duplicateKeys] };
 }
 
+// WHO AM I. The agent is the Linux login of the effective user, and the
+// one place that derivation lives is runtime/identity.py — this asks it
+// (`--json` also carries the role, project and working copy bound to the
+// agent). If python is unavailable the fallback computes the same thing
+// (effective uid -> login) and reads the same binding file by the same
+// path rule; it never looks at the working directory's name.
+function bindingFile(agent) {
+  const base = process.env.AGENT_FABRIC_STATE_DIR
+    ?? path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), '.local', 'state'), 'agent-fabric');
+  return path.join(base, 'agents', agent, 'binding.json');
+}
+export function whoami() {
+  const script = path.join(FABRIC_ROOT, 'runtime', 'identity.py');
+  const r = spawnSync('python3', [script, '--json'], { encoding: 'utf8' });
+  if (r.status === 0) { try { const me = JSON.parse(r.stdout); me.binding = bindingFile(me.agent); return me; } catch { /* fall through */ } }
+  const agent = os.userInfo().username;
+  let binding = {};
+  try { binding = JSON.parse(fs.readFileSync(bindingFile(agent), 'utf8')); } catch { /* none written */ }
+  return { agent, host: os.hostname().split('.')[0], role: binding.role, project: binding.project,
+           working_copy: binding.working_copy, binding: bindingFile(agent), fallback: true };
+}
+
 // A deployment's role catalogue (SPEC §4: the core protocol keeps no
-// enum; a deployment MAY publish one, and gzapp does — .roles/taxonomy.json).
+// enum; a deployment MAY publish one — agent-fabric's is
+// identities/roles/catalog.json).
 // Given one, the validator holds ROLE and TO-ROLE to its slugs — the `id`,
 // `backend-dev`, one token with no spaces or slashes, matched by equality
 // and safe in a metadata line and a filter. Live traffic announced one
@@ -165,29 +192,33 @@ export function loadTaxonomy(file) {
   if (roles.size === 0) throw new Error(`${file} holds no roles with id and title`);
   return { path: file, roles };
 }
-// The working copy's active-role record, written by /role beside the
-// catalogue (.roles/.instance/state.json, gitignored). Four outcomes, kept
-// distinct because a record that fails to name a usable role must never
-// pass as "no record" and fall through to a guess from the directory name:
-// no record at all; a record naming a catalogue role; a record present but
-// saying nothing usable — unreadable, or with no `role`, which the
-// instance-state schema makes required — which warns and leaves the caller
-// to decide; and a record naming a role the catalogue does not have, which
-// is an error, since the clone asserts a role the deployment does not
-// know. The warning states the cause only: what happens next is the
-// caller's, and it may not be the address.
-export function recordedRole(taxonomy) {
+// The AGENT's active-role record: the runtime binding written by
+// tools/fabric/role.py in the agent's state directory (never inside a
+// working copy). Four outcomes, kept distinct because a record that fails
+// to name a usable role must never pass as "no record" and fall through to
+// a guess from the address: no binding at all, or one with no role; a
+// binding naming a catalogue role; a binding present but unreadable, which
+// warns and leaves the caller to decide; and a binding naming a role the
+// catalogue does not have, which is an error, since the agent asserts a
+// role the deployment does not know. The warning states the cause only:
+// what happens next is the caller's, and it may not be the address.
+export function recordedRole(taxonomy, me = whoami()) {
   if (!taxonomy?.path) return { role: undefined };
-  const file = path.join(path.dirname(taxonomy.path), '.instance', 'state.json');
-  if (!fs.existsSync(file)) return { role: undefined };
-  let role;
-  try { role = JSON.parse(fs.readFileSync(file, 'utf8')).role; }
-  catch (e) { return { role: undefined, warning: `${file} could not be read (${e.message})` }; }
-  if (role === undefined) return { role: undefined, warning: `${file} records no role` };
-  if (!taxonomy.roles.has(role)) return { role: undefined, error: `${file} records role "${role}", which is not in ${taxonomy.path}; pass --role explicitly` };
-  return { role, file };
+  const file = me.binding ?? bindingFile(me.agent);
+  if (me.role === undefined || me.role === null) {
+    if (!fs.existsSync(file)) return { role: undefined };
+    try { JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch (e) { return { role: undefined, warning: `${file} could not be read (${e.message})` }; }
+    return { role: undefined, warning: `${file} records no role` };
+  }
+  if (!taxonomy.roles.has(me.role)) return { role: undefined, error: `${file} records role "${me.role}", which is not in ${taxonomy.path}; pass --role explicitly` };
+  return { role: me.role, file };
 }
+// The catalogue: agent-fabric's identities/roles/catalog.json, or a legacy
+// deployment's .roles/taxonomy.json found by walking up from `from`.
 export function findTaxonomy(from = process.cwd()) {
+  const fabric = path.join(FABRIC_ROOT, 'identities', 'roles', 'catalog.json');
+  if (fs.existsSync(fabric)) return fabric;
   let dir = from;
   for (;;) {
     const candidate = `${dir}/.roles/taxonomy.json`;
@@ -198,10 +229,11 @@ export function findTaxonomy(from = process.cwd()) {
   }
 }
 // The slug an instance name carries, as a whole run of hyphen-separated
-// tokens: `gzapp-gzcoord-coordinator` and `architect-cto-01` both name
-// their role; `gzapp-claude2` names none. The longest match wins. Used to
-// derive a default ROLE for `hello` and to warn on disagreement — never
-// to reject.
+// tokens. Under the login model the instance IS the login, and provisioned
+// accounts are named for the role they were stood up as (`architect-cto-01`,
+// `backend-dev-02`) while a generic account (`user`) names none. A
+// convenience for a default ROLE in `hello` and a disagreement warning —
+// never a source of identity, never a reason to reject.
 export function slugOf(instance, taxonomy) {
   const tokens = instance.split('-');
   let best;
@@ -432,14 +464,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log('valid GZCOORD/1 message');
   } else if (cmd === 'hello') {
-    const from = arg('from'), project = arg('project');
-    // With a catalogue the role can be derived: first from this working
-    // copy's active-role record (.roles/.instance/state.json, gitignored,
-    // written by /role), then from the slug the address carries. The
-    // record is authoritative where it exists; the address is a last
-    // resort, since a clone is named once and a role can change. A record
-    // the catalogue does not know is an error, never a silent fallback.
-    const recorded = recordedRole(taxonomy);
+    // FROM defaults to this agent's address: <host>/<login>, from the one
+    // canonical resolver. PROJECT defaults to the project bound to the
+    // agent (from the working copy it activated in), when known.
+    const me = whoami();
+    const from = arg('from') ?? `${me.host}/${me.agent}`;
+    const project = arg('project') ?? me.project ?? undefined;
+    // With a catalogue the role can be derived: first from the agent's
+    // runtime binding (written by tools/fabric/role.py), then from the slug
+    // the address carries. The binding is authoritative where it exists;
+    // the address is a last resort, since an account is named once and a
+    // role can change. A binding the catalogue does not know is an error,
+    // never a silent fallback.
+    const recorded = recordedRole(taxonomy, me);
     if (recorded.error && !arg('role')) { console.error(recorded.error); process.exit(1); }
     const derived = taxonomy && (recorded.role || (from && addressRe.test(from) && slugOf(from.split('/')[1], taxonomy)));
     const role = arg('role') ?? derived;
@@ -450,7 +487,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.error(`warning: ${recorded.warning}; ` + (arg('role') ? `using --role ${arg('role')}` : derived ? `deriving ${derived} from the address instead` : 'and the address names no role either'));
     if (arg('role') && recorded.role && arg('role') !== recorded.role)
       console.error(`warning: --role ${arg('role')} disagrees with ${recorded.file}, which records ${recorded.role}`);
-    if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the working copy records a role or the address names one');
+    if (!from || !role || !project) throw new Error('hello requires --project unless the agent is bound to one, and --role unless the agent binding records a role or the address names one');
     // MESSAGE-ID is required (§7.1), so hello mints one rather than
     // emitting a message its own validate would reject. A minted id is
     // unique by construction — no counter, no seed, nothing to collide.

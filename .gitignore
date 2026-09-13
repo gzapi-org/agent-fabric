@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Machine-local overlays and experiments, never committed
+*.local.json
+projects/*/taxonomy.local.json
+
+# Runtime state never lives in the repository; the canonical location is
+# ${XDG_STATE_HOME:-~/.local/state}/agent-fabric (runtime/identity.py).
+runtime/state/
+
+# GZCoord relay runtime (venv, token, database, log) when hosted from here
+.gzcoord/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

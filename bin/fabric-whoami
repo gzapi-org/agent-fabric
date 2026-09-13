@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The agent's name — the effective Linux login — and, with --json, the
+# runtime context bound to it. This is a thin exec of runtime/identity.py,
+# the single canonical resolver; nothing here derives anything itself.
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../runtime/identity.py" "$@"

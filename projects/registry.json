@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "description": "Logical projects agent-fabric manages. A working copy is matched to a project by its origin remote (or a .agent-fabric-project marker at its toplevel), never by its directory name. Paths here are repository-relative; machine-specific checkout locations live in each agent's runtime binding.",
+  "projects": {
+    "gzapp": {
+      "title": "GZAPP transit platform",
+      "remotes": [
+        "git@github.com:gzapi-org/gzapp.git",
+        "https://github.com/gzapi-org/gzapp"
+      ],
+      "default_branch": "main",
+      "taxonomy": "projects/gzapp/taxonomy.json",
+      "memory": "memory/projects/gzapp",
+      "integration": "projects/gzapp/integration"
+    }
+  }
+}

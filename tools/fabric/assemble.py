@@ -176,6 +176,38 @@ def yaml_scalar(value: Any) -> str:
     return text
 
 
+# An origin record says who produced the evidence and where. New records
+# name the AGENT (the Linux login) with host, project and working copy;
+# records written by the old clone-bound system name a `clone_id` and are
+# preserved verbatim as historical provenance. Rendered in this key order.
+ORIGIN_KEYS = ("agent", "clone_id", "host", "project", "working_copy")
+
+
+def origin_of_row(row: dict[str, Any]) -> dict[str, str]:
+    """The origin record for one observation row."""
+    if row.get("agent") or "clone_id" not in row:
+        origin = {"agent": row.get("agent") or "unresolved", "host": row.get("host") or "unknown"}
+        for key in ("project", "working_copy"):
+            if row.get(key):
+                origin[key] = str(row[key])
+        return origin
+    return {"clone_id": row.get("clone_id") or "unresolved", "host": row.get("host") or "unknown"}
+
+
+def origin_key(origin: dict[str, Any]) -> tuple:
+    return tuple(sorted((k, str(v)) for k, v in origin.items() if v is not None))
+
+
+def render_origin(item: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for key in ORIGIN_KEYS:
+        if item.get(key) is None:
+            continue
+        prefix = "  - " if not lines else "    "
+        lines.append(f"{prefix}{key}: {yaml_scalar(str(item[key]))}")
+    return lines
+
+
 def render_frontmatter(meta: dict[str, Any]) -> str:
     lines = ["---"]
     for key in ("role", "class", "description", "tier", "knowledge_scope",
@@ -190,10 +222,7 @@ def render_frontmatter(meta: dict[str, Any]) -> str:
             if key == "origin":
                 lines.append(f"{key}:")
                 for item in value:
-                    lines.append(
-                        f"  - clone_id: {yaml_scalar(item.get('clone_id') or 'unresolved')}"
-                    )
-                    lines.append(f"    host: {yaml_scalar(item.get('host') or 'unknown')}")
+                    lines.extend(render_origin(item))
             else:
                 lines.append(f"{key}:")
                 for item in value:
@@ -280,18 +309,19 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
             stripped = line.strip()
             if line.startswith("  - ") and current:
                 item = line[4:].strip()
-                # `origin` is a list of two-line records. Keeping it is what
-                # makes a carried claim still say which clone and host produced
-                # it — the audit trail has to survive the drain that inherits
-                # the section, not just the one that wrote it.
-                if item.startswith("clone_id:"):
-                    meta.setdefault("origin", []).append(
-                        {"clone_id": decode_scalar(item.split(":", 1)[1])}
-                    )
+                # `origin` is a list of small mappings (agent or clone_id,
+                # host, project, working_copy). Keeping it is what makes a
+                # carried claim still say who produced it and where — the
+                # audit trail has to survive the drain that inherits the
+                # section, not just the one that wrote it.
+                if current == "origin" and ":" in item:
+                    k, _, v = item.partition(":")
+                    meta.setdefault("origin", []).append({k.strip(): decode_scalar(v)})
                 else:
                     meta.setdefault(current, []).append(decode_scalar(item))
-            elif stripped.startswith("host:") and current == "origin" and meta.get("origin"):
-                meta["origin"][-1]["host"] = decode_scalar(stripped.split(":", 1)[1])
+            elif current == "origin" and line.startswith("    ") and ":" in stripped and meta.get("origin"):
+                k, _, v = stripped.partition(":")
+                meta["origin"][-1][k.strip()] = decode_scalar(v)
             elif ":" in line and not line.startswith(" "):
                 key, _, value = line.partition(":")
                 current = key.strip()
@@ -337,10 +367,7 @@ def main() -> int:
         for line in fh:
             if line.strip():
                 row = json.loads(line)
-                origins[row["content_hash"]] = {
-                    "clone_id": row.get("clone_id") or "unresolved",
-                    "host": row.get("host") or "unknown",
-                }
+                origins[row["content_hash"]] = origin_of_row(row)
 
     claim_files = sorted(
         f for f in os.listdir(args.claims) if f.endswith(".json") and not f.startswith(".")
@@ -418,7 +445,7 @@ def main() -> int:
         os.makedirs(directory, exist_ok=True)
         evidence = sorted({h for c in claims for h in c.get("evidence", [])})
         origin_set = {
-            (origins.get(h, {}).get("clone_id", "unresolved"), origins.get(h, {}).get("host", "unknown"))
+            origin_key(origins.get(h) or {"agent": "unresolved", "host": "unknown"})
             for h in evidence
         }
         scope = "domain-only" if all(
@@ -431,7 +458,7 @@ def main() -> int:
             "tier": 1 if klass in TIER1 else 2,
             "knowledge_scope": scope,
             "distilled_at": args.stamp,
-            "origin": [{"clone_id": c, "host": h} for c, h in sorted(origin_set)],
+            "origin": [dict(k) for k in sorted(origin_set)],
             "derived_from": evidence,
         }
         if shared_with:
@@ -516,13 +543,9 @@ def main() -> int:
         # otherwise a preserved hash lists no clone or host and the trail it
         # exists to provide is broken exactly when the store has been cleared.
         prior_origin = {
-            (o.get("clone_id", "unresolved"), o.get("host", "unknown"))
-            for o in previous_meta.get("origin", []) or []
-            if isinstance(o, dict)
+            origin_key(o) for o in previous_meta.get("origin", []) or [] if isinstance(o, dict)
         }
-        meta["origin"] = [
-            {"clone_id": c, "host": h} for c, h in sorted(origin_set | prior_origin)
-        ]
+        meta["origin"] = [dict(k) for k in sorted(origin_set | prior_origin)]
         # An unresolved collision is recorded in the slice that has it, so the
         # warning is a fact the file states rather than a shape inferred from
         # its headings — an authored document may legitimately carry "X" and
@@ -861,12 +884,14 @@ def main() -> int:
     if os.path.exists(harvest_report):
         with open(harvest_report, encoding="utf-8") as fh:
             hr = json.load(fh)
+        counts = hr.get("counts") or {}
         harvest_meta = {
             "host": hr.get("host"),
             "since_watermark": hr.get("since_watermark"),
             "next_watermark": hr.get("next_watermark"),
-            "provisional_clone": (hr.get("counts") or {}).get("provisional_clone"),
-            "in_scope": (hr.get("counts") or {}).get("in_scope"),
+            # `provisional_clone` is the key the clone-bound harvester wrote.
+            "provisional_agent": counts.get("provisional_agent", counts.get("provisional_clone")),
+            "in_scope": counts.get("in_scope"),
         }
         # Keyed by host: the store is per machine, so "the" watermark is a
         # per-host fact. One drain contributes one key; a future multi-store
@@ -907,19 +932,18 @@ def main() -> int:
     # clone that had never registered — every row provisional — landed
     # looking exactly like a clean one. Loud here, and never a gate: gating
     # would refuse valid knowledge for a registry gap it cannot itself fix.
-    provisional = (harvest_meta or {}).get("provisional_clone") or 0
+    provisional = (harvest_meta or {}).get("provisional_agent") or 0
     if provisional:
         in_scope = (harvest_meta or {}).get("in_scope") or 0
         share = f" of {in_scope}" if in_scope else ""
         print(
             f"\nPROVISIONAL BINDINGS: {provisional}{share} observation(s) resolved "
-            f"to no clone.\n"
-            "  Their knowledge is kept; only the clone attribution is missing.\n"
-            "  A clone mints its own id the first time it runs `/role <name>`, so a\n"
-            "  working copy that never switched has nothing for (host, label, time)\n"
-            "  to resolve against. Run `/role` THERE — ids cannot be minted on its\n"
-            "  behalf from here — and the next drain's materialize_bindings step\n"
-            "  commits the binding window.",
+            f"to no agent.\n"
+            "  Their knowledge is kept; only the agent attribution is missing.\n"
+            "  A row from a legacy store is attributed by (host, working-copy label,\n"
+            "  time) through docs/migration/legacy-registry/agent-map.json; a label\n"
+            "  absent there stays provisional rather than guessed. Add the mapping,\n"
+            "  or drain through harvest_memory.py, which stamps the agent at source.",
             file=sys.stderr,
         )
     if problems:

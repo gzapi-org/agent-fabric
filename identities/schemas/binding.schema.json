@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-fabric:binding",
+  "title": "Runtime binding of one agent",
+  "description": "Machine-local, gitignored state at $AGENT_FABRIC_STATE_DIR/agents/<login>/binding.json. The agent is the Linux login of the effective user, stamped by runtime/identity.py; everything else is an attribute bound to that agent for now. Renaming or moving a working copy, opening another project, or changing role never changes `agent`.",
+  "type": "object",
+  "required": ["agent", "host", "updated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "agent": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]*$", "description": "Linux login. Written by identity.py from the effective uid, never by the caller."},
+    "host": {"type": "string", "description": "Short hostname of the machine the binding was written on."},
+    "role": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]*$", "description": "The role currently activated, an id from identities/roles/catalog.json."},
+    "project": {"type": ["string", "null"], "description": "Logical project id from projects/registry.json the role was activated for."},
+    "working_copy": {"type": ["string", "null"], "description": "Absolute path of the checkout in use when the binding was written. Context, not identity; machine-local by nature."},
+    "workspace": {"type": ["string", "null"], "description": "The directory whose .claude/ received the role's skills and commands."},
+    "session": {"type": ["string", "null"], "description": "Harness session identifier, when known."},
+    "updated_at": {"type": "string"},
+    "installed": {
+      "type": "array",
+      "description": "What the role activator copied into the workspace, so it can remove exactly that and nothing else.",
+      "items": {
+        "type": "object",
+        "required": ["path", "source", "kind", "digest"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"},
+          "source": {"type": "string"},
+          "kind": {"enum": ["skill", "command"]},
+          "digest": {"type": "string"}
+        }
+      }
+    }
+  }
+}

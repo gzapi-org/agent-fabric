@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tools/checks/test_check_charter_authority.sh
+# policies/test_check_charter_authority.sh
 #
 # Self-test for check_charter_authority.sh.
 #
@@ -37,11 +37,13 @@ command_not_found_handle() {
 new_repo() {
   [[ -n "$SANDBOX" && -d "$SANDBOX" ]] && rm -rf "$SANDBOX"
   SANDBOX="$(mktemp -d)"
-  mkdir -p "$SANDBOX/tools/checks" "$SANDBOX/.roles/flutter-dev" "$SANDBOX/.roles/architect-cto"
-  cp "$UNDER_TEST" "$SANDBOX/tools/checks/"
-  printf 'scope\n' > "$SANDBOX/.roles/flutter-dev/charter.md"
-  printf '{"roles":{}}\n' > "$SANDBOX/.roles/taxonomy.json"
-  printf 'other\n' > "$SANDBOX/.roles/flutter-dev/workflow.md"
+  mkdir -p "$SANDBOX/policies" "$SANDBOX/identities/roles/flutter-dev" "$SANDBOX/projects/demo" \
+           "$SANDBOX/memory/projects/demo/flutter-dev"
+  cp "$UNDER_TEST" "$SANDBOX/policies/"
+  printf 'scope\n' > "$SANDBOX/identities/roles/flutter-dev/charter.md"
+  printf '{"roles":[]}\n' > "$SANDBOX/identities/roles/catalog.json"
+  printf '{"roles":[]}\n' > "$SANDBOX/projects/demo/taxonomy.json"
+  printf 'other\n' > "$SANDBOX/memory/projects/demo/flutter-dev/workflow.md"
   git -C "$SANDBOX" init -q
   git -C "$SANDBOX" config user.email t@e; git -C "$SANDBOX" config user.name t
   git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm base
@@ -58,14 +60,14 @@ commit_change() {  # $1 = path, relative
 }
 
 check() {  # $1 = branch label; echoes output, returns the guard's code
-  ( cd "$SANDBOX" && GZAPP_CHARTER_BASE=base-ref GZAPP_CHARTER_BRANCH="$1" \
-      bash tools/checks/check_charter_authority.sh 2>&1 )
+  ( cd "$SANDBOX" && AGENT_FABRIC_CHARTER_BASE=base-ref AGENT_FABRIC_CHARTER_BRANCH="$1" \
+      bash policies/check_charter_authority.sh 2>&1 )
 }
-rc_of() { ( cd "$SANDBOX" && GZAPP_CHARTER_BASE=base-ref GZAPP_CHARTER_BRANCH="$1" \
-      bash tools/checks/check_charter_authority.sh >/dev/null 2>&1 ); echo $?; }
+rc_of() { ( cd "$SANDBOX" && AGENT_FABRIC_CHARTER_BASE=base-ref AGENT_FABRIC_CHARTER_BRANCH="$1" \
+      bash policies/check_charter_authority.sh >/dev/null 2>&1 ); echo $?; }
 
 echo "a charter change by another role"
-new_repo; commit_change ".roles/flutter-dev/charter.md"
+new_repo; commit_change "identities/roles/flutter-dev/charter.md"
 rc="$(rc_of develop-qzapp/flutter-dev-01/feat/thing)"
 [[ "$rc" == 1 ]] && pass "refused (exit 1)" || fail "refused (exit 1)" "exit $rc"
 out="$(check develop-qzapp/flutter-dev-01/feat/thing)"
@@ -77,15 +79,27 @@ echo "the same change by architect-cto"
 rc="$(rc_of develop-qzapp/architect-cto-01/feat/x)"
 [[ "$rc" == 0 ]] && pass "allowed (exit 0)" || fail "allowed (exit 0)" "exit $rc"
 
-echo "taxonomy.json is protected too"
-new_repo; commit_change ".roles/taxonomy.json"
+echo "the catalogue is protected too"
+new_repo; commit_change "identities/roles/catalog.json"
 rc="$(rc_of develop-qzapp/web-dev-01/feat/x)"
 [[ "$rc" == 1 ]] && pass "refused" || fail "refused" "exit $rc"
+
+echo "a project's taxonomy (where roles apply) is protected too"
+new_repo; commit_change "projects/demo/taxonomy.json"
+rc="$(rc_of develop-qzapp/web-dev-01/feat/x)"
+[[ "$rc" == 1 ]] && pass "refused" || fail "refused" "exit $rc"
+
+echo "an agent HOLDING a role does not own its definition"
+# The account is named for the role it was stood up as; holding flutter-dev
+# and editing flutter-dev's charter is still not architect-cto's authority.
+new_repo; commit_change "identities/roles/flutter-dev/charter.md"
+rc="$(rc_of develop-qzapp/flutter-dev-02/feat/widen-my-remit)"
+[[ "$rc" == 1 ]] && pass "refused for the role's own instance" || fail "refused for the role's own instance" "exit $rc"
 
 echo "an ordinary slice is NOT protected"
 # The control that keeps this from being a blanket ban on touching .roles/:
 # every other file there is generated, and the drain rewrites them.
-new_repo; commit_change ".roles/flutter-dev/workflow.md"
+new_repo; commit_change "memory/projects/demo/flutter-dev/workflow.md"
 rc="$(rc_of develop-qzapp/flutter-dev-01/feat/x)"
 [[ "$rc" == 0 ]] && pass "a distilled slice may change on any branch" \
     || fail "a distilled slice may change on any branch" "exit $rc"
@@ -98,7 +112,7 @@ rc="$(rc_of develop-qzapp/flutter-dev-01/feat/x)"
 echo "the merge queue's synthetic ref"
 # It HAS three segments, so segment-counting reads its second as the base
 # branch and fails every charter change at the gate. Matched by name.
-new_repo; commit_change ".roles/flutter-dev/charter.md"
+new_repo; commit_change "identities/roles/flutter-dev/charter.md"
 rc="$(rc_of gh-readonly-queue/main/pr-999-abc)"
 [[ "$rc" == 0 ]] && pass "not enforced in the queue" || fail "not enforced in the queue" "exit $rc"
 out="$(check gh-readonly-queue/main/pr-999-abc)"
@@ -110,15 +124,15 @@ echo "no base ref is resolvable"
 # it a diff is not a violation, and exiting non-zero would block every PR
 # rather than the one changing a charter -- which is exactly what the
 # first version did in CI, where actions/checkout leaves no origin/main.
-new_repo; commit_change ".roles/flutter-dev/charter.md"
-rc="$( ( cd "$SANDBOX" && GZAPP_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
-    GZAPP_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
-    bash tools/checks/check_charter_authority.sh >/dev/null 2>&1 ); echo $? )"
+new_repo; commit_change "identities/roles/flutter-dev/charter.md"
+rc="$( ( cd "$SANDBOX" && AGENT_FABRIC_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
+    AGENT_FABRIC_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
+    bash policies/check_charter_authority.sh >/dev/null 2>&1 ); echo $? )"
 [[ "$rc" == 0 ]] && pass "passes rather than blocking every PR" \
     || fail "passes rather than blocking every PR" "exit $rc"
-out="$( cd "$SANDBOX" && GZAPP_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
-    GZAPP_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
-    bash tools/checks/check_charter_authority.sh 2>&1 )"
+out="$( cd "$SANDBOX" && AGENT_FABRIC_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= \
+    AGENT_FABRIC_CHARTER_BRANCH=develop-qzapp/flutter-dev-01/feat/x \
+    bash policies/check_charter_authority.sh 2>&1 )"
 [[ "$out" == *"NOT ENFORCED"* ]] && pass "says it did not enforce" \
     || fail "says it did not enforce" "$out"
 

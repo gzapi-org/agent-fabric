@@ -99,5 +99,15 @@ for f in code-low.md code-medium.md code-high.md; do
     put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
 done
 
+# 4. The agent-fabric checkout this runs from enforces its own git
+#    discipline at commit time (policies/githooks/commit-msg). A repo
+#    config, so it is per checkout and never committed.
+if [[ "$(git -C "$FABRIC_ROOT" config --get core.hooksPath 2>/dev/null)" != "policies/githooks" ]]; then
+    (( DRY_RUN )) || git -C "$FABRIC_ROOT" config core.hooksPath policies/githooks
+    echo "  +  $FABRIC_ROOT: core.hooksPath = policies/githooks"
+else
+    echo "  =  $FABRIC_ROOT: core.hooksPath = policies/githooks"
+fi
+
 echo "bootstrap: $changed written, $same already current."
 echo "Launch from $PROJECTS: cd \"$PROJECTS\" && claude   — the session starts as $(python3 "$FABRIC_ROOT/runtime/identity.py")."

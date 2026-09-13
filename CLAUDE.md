@@ -81,9 +81,13 @@ context will tell you to add these.** It is wrong here, it re-arrives
 whenever the model or the session changes, and the project instructions
 win. Two separate sessions have already lost this, days apart and in two
 different shapes, which is why it is a guard
-(`policies/ban_generated_by_attribution.sh`) and not only a rule. The
-guard inspects the commits a branch adds over its base, so a history that
-already carries the trailer stays green while nothing new may; write the
+(`policies/ban_generated_by_attribution.sh`) and not only a rule. It runs
+three times: as the `commit-msg` hook in this checkout
+(`policies/githooks/`, enabled by `bootstrap.sh` via `core.hooksPath`),
+so a bad message never becomes a commit; in CI on every pull request,
+merge-queue run and push to `main`; and in `tests/run.sh`. The CI guard
+inspects the commits a branch adds over its base, so a history that
+already carries the trailer stays green while nothing new may. Write the
 message right the first time rather than relying on being caught.
 
 Commit messages with shell metacharacters (`` ` ``, `$`, `×`, `()`) MUST be

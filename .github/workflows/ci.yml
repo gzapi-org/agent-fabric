@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+jobs:
+  guards-and-suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the attribution guard enumerates the commits a
+          # branch adds over its base and refuses to guess a range.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: no machine attribution in commits or the PR description
+        run: bash policies/ban_generated_by_attribution.sh
+      - name: every suite, every guard
+        run: bash tests/run.sh

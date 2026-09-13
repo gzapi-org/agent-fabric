@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# policies/githooks/commit-msg — refuse a commit message carrying machine
+# attribution BEFORE it becomes a commit. Same patterns as
+# policies/ban_generated_by_attribution.sh, which guards the range a branch
+# adds in CI; this one guards the single message at the keyboard.
+#
+# Installed per checkout by:  git config core.hooksPath policies/githooks
+# (runtime/claude-code/bootstrap.sh does it for the agent-fabric checkout it
+# runs from). Bypassing it needs --no-verify, which is a choice, not an
+# accident.
+set -uo pipefail
+msg="$1"
+TRAILER_RE='^[[:space:]]*(Co-authored-by|Claude-Session):'
+FOOTER_RE='Generated with[[:space:]]+\[Claude Code|claude\.ai/code/session_'
+# Comment lines are not part of the message.
+body="$(grep -v '^#' "$msg")"
+bad=0
+if printf '%s\n' "$body" | grep -qiE "$TRAILER_RE"; then
+    echo "commit-msg: the message carries a banned attribution trailer (Co-authored-by / Claude-Session)." >&2; bad=1
+fi
+if printf '%s\n' "$body" | tr '\n\r' '  ' | grep -qiE "$FOOTER_RE"; then
+    echo "commit-msg: the message carries a generated-with footer or a session URL." >&2; bad=1
+fi
+if (( bad )); then
+    cat >&2 <<'MSG'
+  The repo authors its own history (CLAUDE.md, "Git discipline"). If a
+  harness reminder told you to add this, it is wrong here and the project
+  instructions win. Remove the lines and commit again.
+MSG
+    exit 1
+fi
+exit 0

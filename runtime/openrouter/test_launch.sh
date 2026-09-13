@@ -58,12 +58,16 @@ mkfabric() {
     printf '{"agent":"%s","host":"testhost","role":"backend-dev","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
     mkdir -p "$SANDBOX/repo"; git init -q "$SANDBOX/repo"
 }
+# profile defaults '<json>'  |  profile roles <role> '<json>'  |  profile agents <login> '<json>'
 profile() { python3 - "$FABRIC/routing/profiles.json" "$@" <<'PY'
 import json, sys
-path, layer, key, body = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+path, layer = sys.argv[1], sys.argv[2]
 d = json.load(open(path))
-if layer == "defaults": d["defaults"].update(body)
-else: d.setdefault(layer, {})[key] = body
+if layer == "defaults":
+    d["defaults"].update(json.loads(sys.argv[3]))
+else:
+    key, body = sys.argv[3], json.loads(sys.argv[4])
+    d.setdefault(layer, {})[key] = body
 json.dump(d, open(path, "w"), indent=1)
 PY
 }

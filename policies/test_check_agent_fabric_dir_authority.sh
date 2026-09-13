@@ -69,14 +69,20 @@ commit_change src/a.txt "$DECLARED"
 [[ "$(rc_of)" == 1 ]] && pass "an undeclared commit in the middle is caught" || fail "middle commit missed"
 out="$(run_guard)"; [[ "$(grep -c '\[Fabric-Role: none\]' <<<"$out")" == 1 ]] && pass "exactly the offending commit is listed" || fail "listing" "$out"
 
-echo "the role name comes from authority.json when the repo has one"
+echo "in agent-fabric itself (policies/authority.json present) EVERY commit must declare the role"
 new_repo; mkdir -p "$SANDBOX/policies"
 printf '{"role_definitions":{"role":"corpus-keeper","holders":[]}}\n' > "$SANDBOX/policies/authority.json"
 git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm "policy"; git -C "$SANDBOX" branch -f base-ref
+commit_change src/a.txt
+[[ "$(rc_of)" == 1 ]] && pass "a code change with no trailer is refused in the fabric" || fail "fabric code change admitted"
+grep -q "agent-fabric itself changed" <<<"$(run_guard)" && pass "…and the refusal says the whole repository is guarded" || fail "scope wording" "$(run_guard)"
+new_repo; mkdir -p "$SANDBOX/policies"
+printf '{"role_definitions":{"role":"corpus-keeper","holders":[]}}\n' > "$SANDBOX/policies/authority.json"
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm "policy"; git -C "$SANDBOX" branch -f base-ref
+commit_change src/a.txt $'code\n\nFabric-Role: corpus-keeper'
+[[ "$(rc_of)" == 0 ]] && pass "a code change declaring the owning role passes" || fail "declared fabric change refused" "$(run_guard)"
 commit_change .agent-fabric/memory/backend-dev/workflow.md "$DECLARED"
-[[ "$(rc_of)" == 1 ]] && pass "fabric-coordinator is refused where the owning role is corpus-keeper" || fail "role name not read"
-commit_change .agent-fabric/memory/backend-dev/workflow.md $'drain\n\nFabric-Role: corpus-keeper'
-[[ "$(rc_of)" == 1 ]] && pass "…and the earlier undeclared commit still fails the branch" || fail "history forgiven"
+[[ "$(rc_of)" == 1 ]] && pass "fabric-coordinator is refused where the owning role is corpus-keeper (role name read from authority.json)" || fail "role name not read"
 
 echo "unresolvable base: not enforced, not a failure"
 new_repo; commit_change .agent-fabric/memory/backend-dev/workflow.md

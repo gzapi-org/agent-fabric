@@ -51,6 +51,20 @@ echo "the declaration is the fact the fence checked, never a paste"
 bind backend-dev; new_repo
 [[ "$(try_commit .agent-fabric/memory/backend-dev/workflow.md $'x\n\nFabric-Role: fabric-coordinator')" == 1 ]] && pass "a typed trailer does not substitute for the binding" || fail "pasted trailer admitted"
 
+echo "in agent-fabric itself, every commit needs the role"
+bind backend-dev; new_repo
+mkdir -p "$TMP/repo/policies"; printf '{"role_definitions":{"role":"fabric-coordinator","holders":[]}}\n' > "$TMP/repo/policies/authority.json"
+# The hooks recognise the fabric by their own location: point them at a copy living inside this repo.
+mkdir -p "$TMP/repo/policies/githooks" "$TMP/repo/runtime"; cp "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$TMP/repo/policies/githooks/"
+cp "$HOOKS/../../runtime/identity.py" "$TMP/repo/runtime/"   # the hooks read the binding through their own fabric's resolver
+git -C "$TMP/repo" config core.hooksPath "$TMP/repo/policies/githooks"
+git -C "$TMP/repo" add -A; git -C "$TMP/repo" -c core.hooksPath=/dev/null commit -qm "hooks in place"
+[[ "$(try_commit src/a.txt 'code')" == 1 ]] && pass "backend-dev bound: a code change in the fabric is refused" || fail "fabric code change committed" "$(cat "$TMP/err")"
+grep -q "agent-fabric itself" "$TMP/err" && pass "the refusal names the whole repository" || fail "wording" "$(cat "$TMP/err")"
+bind fabric-coordinator
+[[ "$(try_commit src/a.txt 'code')" == 0 ]] && pass "fabric-coordinator bound: allowed" || fail "coordinator refused in fabric" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: fabric-coordinator$' && pass "…and every fabric commit declares the role" || fail "no trailer on a fabric commit"
+
 echo "the attribution ban still holds on the same hook"
 bind fabric-coordinator; new_repo
 [[ "$(try_commit src/a.txt $'x\n\nCo-authored-by: Someone <s@e>')" == 1 ]] && pass "Co-authored-by is still refused" || fail "ban lost"

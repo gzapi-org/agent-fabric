@@ -18,6 +18,16 @@ irrelevant to the question. Authority attaches to roles and to policy
 files, never to Linux logins and never to directories, unless a policy
 explicitly names one.
 
+## The repository is read-only for every role but `fabric-coordinator`
+
+Every file here — and `.agent-fabric/` in every managed repository — is
+written only by a session whose binding holds `fabric-coordinator`.
+Other roles read; a change they need is proposed to that role. The
+table below says which role *owns* what, for the questions of review
+and consent; who may *commit* is answered once, here, and enforced by
+the fence and tripwire described under `.agent-fabric/` below, which
+apply to this whole repository.
+
 ## The rules
 
 | what | who may change it | how it is made visible |
@@ -52,15 +62,17 @@ agent's name on it. A finding that a slice is wrong is raised to
 
 This is the one rule with a **fence** rather than only a tripwire,
 because the binding is readable where the commit is made: the git hooks
-`bootstrap.sh` installs in every registered working copy
-(`policies/githooks/`) refuse a commit that stages `.agent-fabric/`
+`bootstrap.sh` installs — in this checkout and in every registered
+working copy (`policies/githooks/`) — refuse a commit that stages
+`.agent-fabric/` in a project, or *anything* in agent-fabric itself,
 unless the live binding holds the role, and write the role they
 verified into the message as `Fabric-Role: fabric-coordinator`. CI
 cannot read a binding, so `check_agent_fabric_dir_authority.sh` reads
-the trailer on every commit a branch adds under `.agent-fabric/**` — a
-tripwire with the usual limits: text anyone can type, `--no-verify`
-skips the hooks. It stops the accident and makes the deliberate change
-visible. The login in the branch name plays no part.
+the trailer on every commit a branch adds — under `.agent-fabric/**` in
+a project, everywhere in this repository — a tripwire with the usual
+limits: text anyone can type, `--no-verify` skips the hooks. It stops
+the accident and makes the deliberate change visible. The login in the
+branch name plays no part.
 
 ## What the tripwire can and cannot do
 

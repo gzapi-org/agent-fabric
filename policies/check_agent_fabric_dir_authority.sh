@@ -28,13 +28,17 @@
 # branch name. Merge commits are not examined (they carry no change of
 # their own).
 #
-# RUNS IN ANY REPOSITORY: agent-fabric's own `.agent-fabric/`, or a
-# managed project's, from the sibling checkout or a CI copy. The role
-# name comes from policies/authority.json when this repository has one,
-# else from $AGENT_FABRIC_ROOT/policies/authority.json, else it is
+# RUNS IN ANY REPOSITORY. In agent-fabric ITSELF — recognised by
+# policies/authority.json at the toplevel — EVERY commit the branch adds
+# must declare the role: the control plane is read-only for every other
+# role (CLAUDE.md, policies/AUTHORITY.md). In a managed project only the
+# commits touching `.agent-fabric/**` must. The role name comes from
+# policies/authority.json when this repository has one, else from
+# $AGENT_FABRIC_ROOT/policies/authority.json, else it is
 # fabric-coordinator.
 #
 # guards: .agent-fabric/**
+# guards: ** (in agent-fabric itself)
 #
 # Exit codes:
 #   0  nothing under .agent-fabric/ changed, or every such commit declares
@@ -80,9 +84,15 @@ except Exception: print("")' "$f" 2>/dev/null)"
 done
 [[ -n "$owner_role" ]] || owner_role="fabric-coordinator"
 
-mapfile -t commits < <(git rev-list --no-merges "$BASE"..HEAD -- '.agent-fabric/**' 2>/dev/null)
+if [[ -f policies/authority.json ]]; then
+    scope="agent-fabric itself"
+    mapfile -t commits < <(git rev-list --no-merges "$BASE"..HEAD 2>/dev/null)
+else
+    scope=".agent-fabric/"
+    mapfile -t commits < <(git rev-list --no-merges "$BASE"..HEAD -- '.agent-fabric/**' 2>/dev/null)
+fi
 if (( ${#commits[@]} == 0 )); then
-    echo "check_agent_fabric_dir_authority: OK — nothing under .agent-fabric/ changed."
+    echo "check_agent_fabric_dir_authority: OK — no commit changes $scope."
     exit 0
 fi
 
@@ -96,18 +106,18 @@ for c in "${commits[@]}"; do
 done
 
 if (( ${#bad[@]} == 0 )); then
-    echo "check_agent_fabric_dir_authority: OK — ${#commits[@]} commit(s) change .agent-fabric/," \
+    echo "check_agent_fabric_dir_authority: OK — ${#commits[@]} commit(s) change $scope," \
          "each declaring Fabric-Role: $owner_role."
     exit 0
 fi
 
-echo "FAIL: .agent-fabric/ changed in ${#bad[@]} commit(s) that do not declare Fabric-Role: $owner_role." >&2
+echo "FAIL: $scope changed in ${#bad[@]} commit(s) that do not declare Fabric-Role: $owner_role." >&2
 printf '       %s\n' "${bad[@]}" >&2
 cat >&2 <<MSG
 
-.agent-fabric/ is the project's distilled knowledge; the $owner_role ROLE
-writes it — the drain does, every other role reads it. A commit that
-changes it is made with that role bound (/role $owner_role) and the
+agent-fabric is read-only for every role but $owner_role; in a managed
+project, .agent-fabric/ (the project's distilled knowledge) is. A commit
+there is made with that role bound (/role $owner_role) and the
 agent-fabric git hooks installed (bootstrap.sh sets core.hooksPath): the
 pre-commit hook checks the binding, the commit-msg hook records it as
 the Fabric-Role trailer this check reads. The login that committed is

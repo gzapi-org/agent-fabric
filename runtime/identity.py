@@ -170,11 +170,16 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Resolve the current agent identity and its runtime context.")
     ap.add_argument("--json", action="store_true", help="print the full context as JSON")
     ap.add_argument("--host", action="store_true", help="print the host label only")
+    ap.add_argument("--role", action="store_true",
+                    help="print the role this agent's binding holds (empty when none) — the binding alone, no working-copy resolution")
     ap.add_argument("--cwd", default=None, help="resolve working copy and project as seen from this directory")
     ap.add_argument("--session", default=None, help="session identifier to record in the context")
     args = ap.parse_args(argv)
     if args.host:
         print(current_host())
+        return 0
+    if args.role:
+        print((read_binding() or {}).get("role") or "")
         return 0
     if args.json:
         print(json.dumps(resolve_context(args.cwd, args.session), ensure_ascii=False, indent=2, sort_keys=True))

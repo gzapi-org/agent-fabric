@@ -36,16 +36,19 @@ fi
 # binding; it reads this trailer (policies/check_agent_fabric_dir_authority.sh)
 # and refuses a change under .agent-fabric/ without it. Self-declared there,
 # real here: that is the fence/tripwire split policies/AUTHORITY.md states.
-if git diff --cached --name-only --diff-filter=ACDMRT -- '.agent-fabric/' 2>/dev/null | grep -q .; then
-    role="$(python3 "$FABRIC_ROOT/runtime/identity.py" --json 2>/dev/null \
-        | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("role") or "")
-except Exception: print("")')"
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [[ "$(readlink -f "$toplevel")" == "$(readlink -f "$FABRIC_ROOT")" ]]; then
+    guarded_change=1   # agent-fabric itself: every commit
+else
+    guarded_change=$(git diff --cached --name-only --diff-filter=ACDMRT -- '.agent-fabric/' 2>/dev/null | grep -qc . && echo 1 || echo 0)
+fi
+if (( guarded_change )); then
+    role="$(python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || echo "")"
     owner_role="$(python3 -c 'import json,sys
 try: print(json.load(open(sys.argv[1]))["role_definitions"]["role"])
 except Exception: print("fabric-coordinator")' "$FABRIC_ROOT/policies/authority.json" 2>/dev/null || echo fabric-coordinator)"
     if [[ "$role" != "$owner_role" ]]; then
-        echo "commit-msg: .agent-fabric/ changes, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
+        echo "commit-msg: a guarded change, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
         exit 1
     fi
     if ! grep -qiE '^[[:space:]]*Fabric-Role:' "$msg"; then

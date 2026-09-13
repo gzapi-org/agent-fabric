@@ -13,6 +13,21 @@ Linux login identifies the agent.
 Filesystem location identifies context, never identity.
 ```
 
+## Read-only, unless you are fabric-coordinator
+
+**This repository is read-only for every role except `fabric-coordinator`.**
+Every other role reads it — its charter, the routing, the policies, the
+field knowledge — and changes nothing here; what such a session needs
+changed, it proposes to `fabric-coordinator` (a pull request it does not
+merge, or a GZCoord message). The same holds for `.agent-fabric/` inside
+every managed project. This is a fence, not only a rule: the git hooks
+`bootstrap.sh` installs refuse a commit here unless the session's binding
+holds the role, and record the role they verified as a `Fabric-Role:`
+trailer that CI checks on every commit a branch adds
+(`policies/AUTHORITY.md`). The login is irrelevant — a session becomes
+`fabric-coordinator` by binding it (`/role fabric-coordinator`), and
+holding any other role, whatever account it runs as, is what is refused.
+
 Your name is the account this session runs under. Ask it, never guess it:
 
 ```sh
@@ -49,8 +64,7 @@ directory, the repository, the branch or the session.
   the project's index and workflow for that role. Everything else loads
   when its index line matches what you are doing. `/role status` says what
   you are; `/role deactivate` clears it. Holding a role never entitles you
-  to change its charter; role definitions and this repository's policies
-  are `fabric-coordinator`'s (`policies/AUTHORITY.md`).
+  to change its charter, or anything else here (above).
 - **Work in the project's working copy**, under that project's
   `CLAUDE.md`. From `projects/`, `cd` into the working copy first; the
   session-start hook records which one you are in.

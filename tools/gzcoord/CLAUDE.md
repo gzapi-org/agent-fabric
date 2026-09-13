@@ -12,9 +12,9 @@ session's prompt. That is the whole transport, and it is the current one:
 [`docs/HUMAN-RELAY-TRANSPORT.md`](docs/HUMAN-RELAY-TRANSPORT.md). Concretely:
 
 - **Do** emit one `HELLO` at session start, validate every message with
-  `scripts/gzmsg.mjs`, print it in a fenced text block, and number it —
-  every number from `gzmsg.mjs next-id`, because the sequence belongs to
-  the address and outlives the session. Announce the role's **slug** from
+  `scripts/gzmsg.mjs`, print it in a fenced text block, and give every
+  message a `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique
+  by construction, no counter to seed or continue. Announce the role's **slug** from
   [`.roles/taxonomy.json`](../../.roles/taxonomy.json) — `backend-dev`, never `.NET backend developer`
   — or omit `--role` and let `hello` derive it, from this working copy's
   `.roles/.instance/state.json` at the repository root (what `/role`
@@ -59,7 +59,7 @@ The protocol is the contract; the relay is only how it travels:
 - `protocol/SPEC.md`, `MESSAGE-FORMAT.md`, `SEMANTICS.md` and `CONFORMANCE.md`
   remain the wire contract, and remain valid.
 - `scripts/gzmsg.mjs` — parser, validator, `hello` generator, paste
-  `normalize` and the `next-id` sequence counter — still works and is still
+  `normalize` and the `new-id` UUIDv7 minter — still works and is still
   tested. Its suite runs in CI on every change under `tools/gzcoord/**`, so
   the implementation stays honest. What the validator rejects and what it
   merely warns about is the protocol's business, not this file's:

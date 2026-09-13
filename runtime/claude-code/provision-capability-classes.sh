@@ -58,12 +58,21 @@ done
 targets=0 copied=0 identical=0
 for home in /home/*/; do
   home="${home%/}"
-  owner="$(stat -c '%U' "$home")"
-  group="$(stat -c '%G' "$home")"
-  if ! getent passwd "$owner" >/dev/null; then
-    echo "skip   $home (owner '$owner' is not an account)"
+  # A home is an account's when the directory NAME is a login whose passwd
+  # home is this directory. Keying on the directory's owner instead let an
+  # orphaned pre-rename home (gzapp-architect-cto, owned by architect-cto-01)
+  # be provisioned as if it were an account, 2026-09-13.
+  name="$(basename "$home")"
+  if ! getent passwd "$name" >/dev/null; then
+    echo "skip   $home ('$name' is not an account)"
     continue
   fi
+  if [ "$(getent passwd "$name" | cut -d: -f6)" != "$home" ]; then
+    echo "skip   $home (account '$name' lives elsewhere)"
+    continue
+  fi
+  owner="$(stat -c '%U' "$home")"
+  group="$(stat -c '%G' "$home")"
   targets=$((targets+1))
   dest="$home/.claude/agents"
   if [ "$DRY_RUN" -eq 1 ]; then

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -348,47 +349,29 @@ export function normalize(text) {
 // restarted at 0001 repeated four numbers a peer had already seen, and a
 // repeat defeats gap detection the same way a gap does. The counter lives
 // beside the working copy in a gitignored file, one per instance.
-function seqFile(instance, stateDir) {
-  if (!/^[a-z0-9._-]+$/.test(instance)) throw new Error('instance must be the <instance> half of an address');
-  return `${stateDir}/${instance}.seq`;
-}
-function readSeq(file) {
-  const last = fs.existsSync(file) ? Number.parseInt(fs.readFileSync(file, 'utf8'), 10) : 0;
-  if (!Number.isInteger(last) || last < 0) throw new Error(`${file} does not hold a sequence number`);
-  return last;
-}
-export const formatId = (instance, n) => `${instance}-${String(n).padStart(4, '0')}`;
-
-export function nextId(instance, stateDir = '.gzcoord') {
-  const file = seqFile(instance, stateDir);
-  fs.mkdirSync(stateDir, { recursive: true });
-  const next = readSeq(file) + 1;
-  fs.writeFileSync(file, `${next}\n`);
-  return formatId(instance, next);
-}
-
-// What nextId WOULD return, without taking it. Reported by an instance
-// that burned a number simply looking at its counter — "no message was
-// ever composed under it" — which is the one failure mode the sequence
-// cannot absorb, since a gap and a repeat are equally unreadable.
-export function peekId(instance, stateDir = '.gzcoord') {
-  return formatId(instance, readSeq(seqFile(instance, stateDir)) + 1);
-}
-
-// Set the counter so the NEXT id is n+1. The counter is per-clone and
-// starts empty, so an address that numbered its messages by hand before
-// adopting this tool re-issues every one of them — two of the two
-// instances that used the human relay hit exactly that, which makes it
-// the default case on adoption rather than an edge one. Lowering is a
-// legitimate repair and is allowed, but it is announced: it puts ids
-// back into circulation that peers may already hold.
-export function seedSeq(instance, n, stateDir = '.gzcoord') {
-  if (!Number.isInteger(n) || n < 0) throw new Error('seed must be a non-negative integer');
-  const file = seqFile(instance, stateDir);
-  fs.mkdirSync(stateDir, { recursive: true });
-  const was = readSeq(file);
-  fs.writeFileSync(file, `${n}\n`);
-  return { was, now: n, next: formatId(instance, n + 1), lowered: n < was };
+// MESSAGE-ID minting: UUIDv7 (RFC 9562) — 48-bit millisecond timestamp,
+// version 7, RFC variant. Time-ordered, unique without any coordination,
+// no shared counter state. The sequential <instance>-NNNN counter this
+// replaces existed for loss visibility on the lossy human relay; the
+// durable carrier has no gap to detect, and the counter was the
+// subsystem's largest defect source (restart-reuse, seeding, a number
+// burned by peeking, a hand-written collision — five incidents). SPEC
+// §7.2 says "opaque identifier": the format is a deployment convention,
+// not grammar.
+export function mintId() {
+  // Native when the runtime has it (Node >= 22.13); hand-rolled otherwise.
+  try {
+    const u = crypto.randomUUID({ version: 'v7' });
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab]/.test(u)) return u;
+  } catch { /* fall through to the hand-rolled form */ }
+  const ms = Date.now();
+  const b = crypto.randomBytes(16);
+  b[0] = (ms / 2 ** 40) & 0xff; b[1] = (ms / 2 ** 32) & 0xff;
+  b[2] = (ms >> 24) & 0xff; b[3] = (ms >> 16) & 0xff; b[4] = (ms >> 8) & 0xff; b[5] = ms & 0xff;
+  b[6] = (b[6] & 0x0f) | 0x70;                       // version 7
+  b[8] = (b[8] & 0x3f) | 0x80;                       // RFC variant
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // Every flag a command accepts, declared, so an unrecognised one is an
@@ -400,7 +383,11 @@ const FLAGS = {
   validate:  { valued: ['taxonomy'], boolean: ['no-taxonomy'], positional: 1 },
   normalize: { valued: [], boolean: [], positional: 1 },
   hello:     { valued: ['from', 'role', 'project', 'message-id', 'specialties', 'capabilities', 'state-dir', 'taxonomy'], boolean: ['no-taxonomy'], positional: 0 },
+  // next-id keeps its old flag list so --peek/--seed reach the explicit
+  // "the counter is gone" message rather than a bare unknown-flag error;
+  // new-id takes nothing.
   'next-id': { valued: ['instance', 'state-dir', 'seed'], boolean: ['peek'], positional: 0 },
+  'new-id':  { valued: [], boolean: [], positional: 0 },
 };
 export function parseArgs(argv, spec) {
   const flags = {}; const positional = [];
@@ -464,15 +451,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (arg('role') && recorded.role && arg('role') !== recorded.role)
       console.error(`warning: --role ${arg('role')} disagrees with ${recorded.file}, which records ${recorded.role}`);
     if (!from || !role || !project) throw new Error('hello requires --from --project, and --role unless the working copy records a role or the address names one');
-    // MESSAGE-ID is required (§7.1), so hello takes the next one rather
-    // than emitting a message its own validate would reject. An instance
-    // that announced itself unnumbered is the failure this closes; the
-    // id comes from the address's instance half unless one is given.
-    // A malformed --from cannot be numbered, and must still fail on the
-    // address rather than on the id: validate() below reports both, and
-    // the address is the fault worth naming first.
-    const id = arg('message-id')
-      ?? (addressRe.test(from ?? '') ? nextId(from.split('/')[1], arg('state-dir') ?? '.gzcoord') : undefined);
+    // MESSAGE-ID is required (§7.1), so hello mints one rather than
+    // emitting a message its own validate would reject. A minted id is
+    // unique by construction — no counter, no seed, nothing to collide.
+    const id = arg('message-id') ?? mintId();
     const lines = [`[GZCOORD/1] HELLO`,`FROM: ${from}`,`ROLE: ${role}`,`PROJECT: ${project}`];
     if (id) lines.push(`MESSAGE-ID: ${id}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
@@ -489,25 +471,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!file) throw new Error('usage: gzmsg.mjs normalize <file>');
     // Prints the normalised message; validate the output, not the paste.
     process.stdout.write(normalize(fs.readFileSync(file, 'utf8')));
-  } else if (cmd === 'next-id') {
-    const instance = arg('instance');
-    if (!instance) throw new Error('next-id requires --instance');
-    const dir = arg('state-dir') ?? '.gzcoord';
-    const seed = arg('seed');
-    if (seed !== undefined) {
-      const n = Number.parseInt(seed, 10);
-      if (!/^\d+$/.test(seed)) throw new Error('--seed takes a non-negative integer');
-      const r = seedSeq(instance, n, dir);
-      if (r.lowered) console.error(`warning: lowered from ${r.was} to ${r.now}; ids ${formatId(instance, r.now + 1)}..${formatId(instance, r.was)} go back into circulation and peers may already hold them`);
-      console.error(`counter for ${instance}: ${r.was} -> ${r.now}`);
-      console.log(r.next);
-    } else if (ARGS.flags.peek) {
-      console.log(peekId(instance, dir));
-    } else {
-      console.log(nextId(instance, dir));
+  } else if (cmd === 'new-id' || cmd === 'next-id') {
+    // new-id mints a fresh UUIDv7. next-id is the old name, kept so
+    // existing invocations keep working — there is no counter anymore,
+    // and "next" implies a sequence that no longer exists.
+    if (ARGS.flags.peek || ARGS.flags.seed !== undefined) {
+      console.error('gzmsg next-id: the sequence counter is gone: ids are minted UUIDv7, unique by construction — nothing to peek or seed');
+      process.exit(2);
     }
+    console.log(mintId());
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | next-id --instance <instance> [--peek | --seed N] [--state-dir <dir>]   (--taxonomy <path> | --no-taxonomy)');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | new-id   (--taxonomy <path> | --no-taxonomy)   [next-id is the retired name for new-id]');
     process.exit(2);
   }
 }

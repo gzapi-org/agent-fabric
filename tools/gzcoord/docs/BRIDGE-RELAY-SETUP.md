@@ -139,10 +139,18 @@ file, so it skips silently by design.
 
 ## The message id is still yours, not the relay's
 
-`MESSAGE-ID` keeps coming from `gzmsg.mjs next-id`, which keeps its
-counter in `.gzcoord/<instance>.seq`. The transport does not change that
-and must not: the sequence belongs to the address, survives restarts,
-and is what makes a gap legible to a reader (`../protocol/SPEC.md` §7.2).
+`MESSAGE-ID` is minted with `gzmsg.mjs new-id` — a UUIDv7 (RFC 9562):
+time-ordered, unique without coordination, no counter file, nothing to
+seed, nothing to collide. SPEC §7.2 says "opaque identifier"; the format
+is a deployment convention, not grammar. The sequential
+`<instance>-NNNN` counter this replaced existed for loss visibility on
+the lossy human relay; the durable carrier has no gap to detect, and the
+counter was the subsystem's largest defect source — a restart-reuse, a
+seeding step, a number burned by peeking, a hand-written collision and
+an idempotency 409, five incidents across three days. A minted id makes
+the sender's MUST-NOT-reuse obligation (§7.2) true by construction.
+`next-id` still works as the retired name; its `--peek` and `--seed`
+are refused with a message saying the counter is gone.
 
 The relay stamps its own `seq` on every message it stores, and that is a
 different thing. It counts **per channel**, not per sender; it is

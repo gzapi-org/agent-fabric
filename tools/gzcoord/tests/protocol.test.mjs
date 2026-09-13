@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { parse, validate, columns, nextId, peekId, seedSeq, formatId, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey } from '../scripts/gzmsg.mjs';
+import { parse, validate, columns, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey } from '../scripts/gzmsg.mjs';
 
 const taxonomy = loadTaxonomy(new URL('../../../.roles/taxonomy.json', import.meta.url).pathname);
 
@@ -342,21 +342,9 @@ test('columns() approximates terminal width where String.length does not', () =>
 
 // The address outlives a session; the counter has to. A session that
 // restarted at 0001 repeated four numbers a peer had already seen.
-test('next-id continues the address sequence across calls and processes', () => {
-  const dir = new URL('./seq.tmp/', import.meta.url).pathname;
-  fs.rmSync(dir, { recursive: true, force: true });
-  try {
-    assert.equal(nextId('gzapp', dir), 'gzapp-0001');
-    assert.equal(nextId('gzapp', dir), 'gzapp-0002');
-    const cli = gzmsg('next-id', '--instance', 'gzapp', '--state-dir', dir);
-    assert.equal(cli.status, 0);
-    assert.equal(cli.stdout.trim(), 'gzapp-0003');
-    assert.equal(nextId('web', dir), 'web-0001');       // one counter per instance
-    assert.throws(() => nextId('bad/instance', dir));   // the instance half only
-    fs.writeFileSync(`${dir}/gzapp.seq`, 'garbage\n');
-    assert.throws(() => nextId('gzapp', dir), /does not hold a sequence number/);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-});
+// Superseded by the mint tests: the sequential counter this test pinned is
+// gone (ids are UUIDv7, minted unique by construction — no counter file,
+// nothing to continue across processes).
 
 // The relay indents on paste — every line by two, the first by one, a
 // single marker by a third — observed twice on the first day. normalize()
@@ -599,60 +587,43 @@ test('unknown fields that are real extensions stay silent — §6 preserves them
     assert.equal(nearestKnownKey(key), undefined, key);
 });
 
-// Both reported from live traffic once the relay carried real instances.
-// One root cause: nextId was the only accessor, so a session could neither
-// look at its counter without burning a number nor correct one that
-// started empty in a clone whose address had already numbered by hand.
-test('peek does not consume, and seed repairs a counter that started empty', () => {
-  const dir = new URL('./seq2.tmp/', import.meta.url).pathname;
-  fs.rmSync(dir, { recursive: true, force: true });
-  try {
-    // peek on an untouched counter, twice, then the take it predicted
-    assert.equal(peekId('web', dir), 'web-0001');
-    assert.equal(peekId('web', dir), 'web-0001');
-    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'peek must not create the file');
-    assert.equal(nextId('web', dir), 'web-0001');
-    assert.equal(peekId('web', dir), 'web-0002');
-    assert.equal(fs.readFileSync(`${dir}/web.seq`, 'utf8').trim(), '1', 'peek must not advance it');
-
-    // an address that hand-numbered 0001-0006 before adopting the tool
-    const r = seedSeq('gzapp', 6, dir);
-    assert.deepEqual(r, { was: 0, now: 6, next: 'gzapp-0007', lowered: false });
-    assert.equal(nextId('gzapp', dir), 'gzapp-0007', 'the number after the hand-numbered ones');
-
-    // lowering is allowed but reported, since it re-circulates issued ids
-    assert.equal(seedSeq('gzapp', 2, dir).lowered, true);
-    assert.equal(peekId('gzapp', dir), 'gzapp-0003');
-
-    assert.throws(() => seedSeq('gzapp', -1, dir), /non-negative/);
-    assert.throws(() => seedSeq('gzapp', 1.5, dir), /non-negative/);
-    assert.throws(() => peekId('bad/instance', dir), /half of an address/);
-    assert.equal(formatId('web', 42), 'web-0042');
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+// MESSAGE-ID is minted UUIDv7 (RFC 9562): time-ordered, unique without
+// coordination, no shared counter state. The sequential counter this
+// replaces existed for loss visibility on the lossy human relay; the
+// durable carrier has no gap to detect, and the counter was the
+// subsystem's largest defect source — five incidents. SPEC §7.2 says
+// "opaque identifier": the format is a deployment convention.
+test('mintId: RFC 9562 v7 shape, unique across calls, time-ordered', async () => {
+  const { mintId } = await import('../scripts/gzmsg.mjs');
+  const ids = Array.from({ length: 5 }, () => mintId());
+  for (const id of ids) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, id);
+  assert.equal(new Set(ids).size, ids.length, 'distinct');
+  // The 48-bit ms timestamp is the ordering guarantee: non-decreasing
+  // across mints. Within one millisecond the random part is random, so
+  // full lexicographic order is NOT a v7 property and is not asserted.
+  const ts = ids.map(id => parseInt(id.slice(0, 12).replace('-', ''), 16));
+  for (let i = 1; i < ts.length; i++) assert.ok(ts[i] >= ts[i-1], `timestamp regressed: ${ids[i-1]} then ${ids[i]}`);
 });
 
-test('next-id CLI: --peek prints without taking, --seed reports the move', () => {
-  const dir = new URL('./seq3.tmp/', import.meta.url).pathname;
-  fs.rmSync(dir, { recursive: true, force: true });
-  try {
-    const peek = gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir);
-    assert.equal(peek.status, 0, peek.stderr);
-    assert.equal(peek.stdout.trim(), 'web-0001');
-    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
-
-    const seed = gzmsg('next-id', '--instance', 'web', '--seed', '6', '--state-dir', dir);
-    assert.equal(seed.status, 0, seed.stderr);
-    assert.equal(seed.stdout.trim(), 'web-0007', 'stdout is the id to use next');
-    assert.match(seed.stderr, /counter for web: 0 -> 6/);
-    assert.doesNotMatch(seed.stderr, /warning/, 'raising is not a warning');
-    assert.equal(gzmsg('next-id', '--instance', 'web', '--state-dir', dir).stdout.trim(), 'web-0007');
-
-    const lower = gzmsg('next-id', '--instance', 'web', '--seed', '1', '--state-dir', dir);
-    assert.match(lower.stderr, /warning: lowered from 7 to 1; ids web-0002\.\.web-0007 go back into circulation/);
-
-    const bad = gzmsg('next-id', '--instance', 'web', '--seed', 'seven', '--state-dir', dir);
-    assert.notEqual(bad.status, 0);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+test('new-id CLI mints; next-id is the retired alias; --peek/--seed are refused with guidance', () => {
+  const a = gzmsg('new-id');
+  assert.equal(a.status, 0, a.stderr);
+  assert.match(a.stdout.trim(), /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const b = gzmsg('next-id');
+  assert.equal(b.status, 0, b.stderr);
+  assert.match(b.stdout.trim(), /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab]/, 'the retired name still works');
+  for (const bad of [['next-id', '--instance', 'x', '--seed', '5'], ['next-id', '--instance', 'x', '--peek']]) {
+    const r = gzmsg(...bad);
+    assert.equal(r.status, 2, bad.join(' '));
+    assert.match(r.stderr, /the sequence counter is gone/, bad.join(' '));
+  }
+  // new-id declares no flags at all, so the generic unknown-flag refusal
+  // fires before the retired-flag message is reachable.
+  {
+    const r = gzmsg('new-id', '--seed', '9');
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /unknown flag --seed/);
+  }
 });
 
 // A checkout that predated --peek accepted `next-id --peek` in silence and
@@ -672,28 +643,29 @@ test('parseArgs: unknown, valueless, repeated and surplus arguments are refused'
   assert.throws(() => parseArgs(['--nope'], one), /this command takes no flags/);
 });
 
-test('CLI: an unknown flag on a counter-mutating command takes nothing', () => {
+test('CLI: an unknown flag is refused before any side effect', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-flags-'));
   try {
-    const typo = gzmsg('next-id', '--instance', 'web', '--seeed', '9', '--state-dir', dir);
+    const typo = gzmsg('new-id', '--seeed', '9');
     assert.equal(typo.status, 2);
     assert.match(typo.stderr, /unknown flag --seeed/);
     assert.equal(typo.stdout, '');
-    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'no number was taken');
-    const peekTypo = gzmsg('next-id', '--instance', 'web', '--peek', '--typo', '--state-dir', dir);
+    assert.equal(typo.stdout, '');
+    const peekTypo = gzmsg('next-id', '--instance', 'web', '--peek', '--typo');
     assert.equal(peekTypo.status, 2);
-    assert.equal(fs.existsSync(`${dir}/web.seq`), false);
-    const hello = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/web', '--role', 'R', '--project', 'p', '--bogus', '--state-dir', dir);
+    assert.equal(peekTypo.status, 2);
+    assert.equal(peekTypo.stdout, '');
+    const hello = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/web', '--role', 'R', '--project', 'p', '--bogus');
     assert.equal(hello.status, 2);
     assert.match(hello.stderr, /unknown flag --bogus/);
-    assert.equal(fs.existsSync(`${dir}/web.seq`), false, 'hello took no number either');
+    assert.equal(hello.stdout, '');
     const file = path.join(dir, 'm.txt'); fs.writeFileSync(file, '[GZCOORD/1] HELLO\nFROM: a/b\nROLE: R\nPROJECT: p\nMESSAGE-ID: b-0001\n');
     const v = gzmsg('validate', file, '--nope');
     assert.equal(v.status, 2);
     assert.match(v.stderr, /unknown flag --nope/);
     // and the declared paths are untouched
     assert.equal(gzmsg('validate', file, '--no-taxonomy').status, 0);
-    assert.equal(gzmsg('next-id', '--instance', 'web', '--peek', '--state-dir', dir).stdout.trim(), 'web-0001');
+    assert.match(gzmsg('new-id').stdout.trim(), /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab]/, 'the declared path mints');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

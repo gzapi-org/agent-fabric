@@ -46,62 +46,29 @@ the talking.
    wide scripts take two. Terminal wrapping can re-break a long line on
    copy, and a re-broken metadata line is no longer metadata. The
    validator warns, naming the line.
-4. Number every message you send: `MESSAGE-ID: <instance>-NNNN`, one
-   sequence per sender across all recipients. The relay is lossy — one
-   message in three failed to arrive on its first day — and it reorders:
-   two messages crossed in flight the same day, and the numbers are what
-   made that legible. A gap at one recipient is not by itself evidence of
-   loss: a directed message's number skips past ones addressed to other
-   peers, and only the sender knows which.
-   **The sequence belongs to the address, not to the session.** The
-   address is derived from the working copy and outlives any one session
-   of it, so a session that starts counting at 0001 repeats numbers a
-   peer has already seen — observed the first day, four of them — and a
-   repeat defeats gap detection exactly as a gap does, while making
-   `IN-REPLY-TO` ambiguous. Take every number from
-   `node tools/gzcoord/scripts/gzmsg.mjs next-id --instance <instance>`,
-   which keeps the counter in the gitignored `.gzcoord/` beside the
-   working copy. A `HELLO` never resets it.
-
-   **The counter starts empty in a clone, so an address that numbered by
-   hand before adopting the tool must seed it first**, or it re-issues
-   every number it already sent — both instances that had used the relay
-   hit exactly that, which makes it the adoption case rather than an edge
-   one. `next-id --instance <instance> --seed N` sets the last-used
-   number to N and prints the one to use next. To look without taking,
-   `--peek`: reading the counter any other way consumes a number, and one
-   instance lost `0011` that way with nothing ever composed under it.
-
-   That a counter exists on disk is a **choice**, recorded here so it is
-   not undone as clutter: **every session owns a counter.** A session
-   owns exactly one working copy, the address is derived from that
-   working copy (SPEC §3.1), and the counter is the file in it — so the
-   session owns the counter through the clone it owns, no registry and
-   nothing shared between sessions of different clones. A later session
-   in the same clone is the same address, and continues the count: that
-   is the case observed. The relay was designed with no adapter state
-   ("Against the adapter contract", above), and this is not adapter
-   state: it is the sender's, the one thing a sender must remember
-   between sessions for its numbers to mean anything. Two alternatives
-   were weighed and rejected. Letting a `HELLO` reset the sequence, with
-   receivers tracking an epoch per peer, moves the bookkeeping to every
-   receiver and still leaves two messages with one id. Putting a session
-   epoch in the id (`<instance>-<session>-NNNN`) keeps ids unique but
-   makes a gap invisible across the boundary, which is the case a
-   restart most needs to expose. A file holding one integer is the
-   smallest thing that preserves both properties. Deleting the clone
-   deletes the address and its counter together, so nothing else has to
-   know.
+4. Give every message a `MESSAGE-ID` minted by
+   `node tools/gzcoord/scripts/gzmsg.mjs new-id` — a UUIDv7, unique by
+   construction. This transport's original scheme was sequential
+   `<instance>-NNNN`, adopted when the relay's lossiness made gap
+   detection the point: one message in three failed on its first day,
+   and the numbers made that legible. It is retired, and the record of
+   why stays here: the counter was the subsystem's largest defect
+   source — a session restarting at 0001 and re-issuing four numbers a
+   peer held, the seeding step every hand-numbered clone needed, a
+   number burned by a peek that consumed it, a hand-written collision —
+   and the durable carrier that replaced this relay has no gap to
+   detect. A minted id keeps §7.2's MUST-NOT-reuse true by construction:
+   there is no counter, nothing to seed, nothing to peek, nothing to
+   collide. `next-id` still works as the retired name; its `--peek` and
+   `--seed` are refused with a message saying the counter is gone.
 5. A printed message is not a delivered one. Expect no reply, block on
    nothing (`../protocol/SEMANTICS.md`), and when you act on something,
    say where by reference (`../protocol/MESSAGE-FORMAT.md`, "Acknowledging
    by reference").
 
 Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
-<host>/<instance> --role ... --project gzapp --message-id "$(gzmsg.mjs
-next-id --instance <instance>)"` — so the person knows what this session
-declares. It is the next number in the address's sequence: 0001 only in
-the working copy's first session. Do not re-announce on seeing a peer's
+<host>/<instance> --role ... --project gzapp` — so the person knows what
+this session declares; the id is minted for you. Do not re-announce on seeing a peer's
 `HELLO`; there is no peer cache to refresh and no storm to guard against.
 Do re-announce
 when your role changes (SPEC §4) — a `/role` switch mid-session changes
@@ -152,13 +119,12 @@ knows which sessions are running.
   the line, the recipient decides. The same padding before the first
   marker reads as an empty-valued key (`NOTES: ` is metadata), and the
   validator warns about that too, beside the errors it causes.
-- Check the sender's `MESSAGE-ID` sequence. A gap means a message with
-  that number did not reach you — which may be normal (addressed to
-  someone else) rather than lost. Mention it under `NOT-VERIFIED` or
-  `NOTES` and let the sender say which; never report a gap as a dropped
-  message. A repeated number is a fault at the sender — a session that
-  restarted its count — and is worth an `OBSERVATION`, since every later
-  `IN-REPLY-TO` against that sender is ambiguous until it is fixed.
+- Loss over this relay is a question for the sender, not a verdict you
+  can derive: ids are minted UUIDv7 now, so there is no per-sender
+  sequence whose gap you could read. If you suspect a message never
+  arrived, say so under `NOT-VERIFIED` or `NOTES` and let the sender
+  confirm or retransmit under its original id (§7.2: a retransmission is
+  the same message, and a recipient holding both discards one).
 - **Check the addressee before the body.** Normalise, validate, and read
   `TO`, `TO-ROLE` and `BROADCAST` — nothing else — then decide: it is for
   you if `TO` is your address, `TO-ROLE` is your role's slug, or it is a

@@ -7,6 +7,15 @@ This directory is intentionally embedded in the GZAPP repository under `tools/gz
 ## Boundary
 
 - **Git/GitHub** are authoritative for source, branches, commits, PRs, reviews, merges, conflicts, ADRs and history.
+- **A message is never committed.** The channel is coordination, not
+  record: a `MESSAGE-ID` may be *cited* in a commit or PR body, but the
+  messages themselves stay out of the repository — the durable,
+  ordered record is the relay, and committing chatter would make every
+  message a blocking artifact while 14 sessions collide on one file.
+  What a message *decides* is not decided until it lands in the
+  artifact it concerns — the PR body, the commit body, the contract's
+  `change_summary`, the ADR — citing the id. A decision that lives only
+  on the channel is a decision nobody can hold.
 - **Repository `CLAUDE.md`** governs how agents operate on the repository.
 - **GZCoord** defines identity, role announcement, discovery, addressing and human-readable message semantics.
 - **Transport adapters** deliver messages. **The current transport is a human relay** — a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). It carries real traffic until a purpose-built agent-to-agent transport replaces it; the first automated attempt is retired (`history/telegram-transport/`). The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.

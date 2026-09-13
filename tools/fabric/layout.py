@@ -116,20 +116,16 @@ def set_working_copy(project: str, path: str | None) -> None:
 
 
 def _binding_working_copy(project: str) -> str | None:
-    state = os.environ.get("AGENT_FABRIC_STATE_DIR")
-    if not state:
-        xdg = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-        try:
-            import pwd
-            login = pwd.getpwuid(os.getuid()).pw_name
-        except Exception:  # noqa: BLE001
-            login = os.environ.get("USER") or ""
-        state = os.path.join(xdg, "agent-fabric", "agents", login)
-    path = os.path.join(state, "binding.json")
+    """The working copy this agent's runtime binding names, if it is for
+    `project` (runtime/identity.py owns where the binding lives)."""
     try:
-        with open(path, encoding="utf-8") as fh:
-            binding = json.load(fh)
-    except (OSError, ValueError):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "fabric_identity", os.path.join(FABRIC_ROOT, "runtime", "identity.py"))
+        identity = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(identity)  # type: ignore[union-attr]
+        binding = identity.read_binding() or {}
+    except Exception:  # noqa: BLE001
         return None
     if binding.get("project") == project and binding.get("working_copy"):
         return binding["working_copy"]

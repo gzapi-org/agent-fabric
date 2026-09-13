@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# policies/githooks/pre-commit — `.agent-fabric/` is written by the
+# fabric-coordinator ROLE. This refuses a commit that stages anything under
+# it unless the agent's runtime binding holds that role right now.
+#
+# The role, not the login: an account is whoever is logged in, and a
+# session becomes fabric-coordinator by binding the role (`/role
+# fabric-coordinator`). That binding is machine-local state
+# (runtime/identity.py), so this is the one place the question "is the
+# committer the coordinator" can be answered for real — CI sees only what
+# the commit declares (the Fabric-Role trailer commit-msg adds, checked by
+# policies/check_agent_fabric_dir_authority.sh as a tripwire).
+#
+# Installed per checkout by `git config core.hooksPath <agent-fabric>/
+# policies/githooks` — bootstrap.sh does it for the agent-fabric checkout
+# and for every registered working copy beside it. --no-verify bypasses
+# it, which is a choice, not an accident.
+set -uo pipefail
+FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+GUARDED='.agent-fabric/'
+
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACDMRT -- "$GUARDED" 2>/dev/null)
+(( ${#staged[@]} )) || exit 0
+
+owner_role="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["role_definitions"]["role"])
+except Exception: print("fabric-coordinator")' "$FABRIC_ROOT/policies/authority.json" 2>/dev/null || echo fabric-coordinator)"
+held="$(python3 "$FABRIC_ROOT/runtime/identity.py" --json 2>/dev/null \
+    | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("role") or "")
+except Exception: print("")')"
+
+if [[ "$held" == "$owner_role" ]]; then
+    exit 0
+fi
+cat >&2 <<MSG
+pre-commit: this commit changes .agent-fabric/, which the $owner_role role writes.
+  staged: $(printf '%s ' "${staged[@]}")
+  this agent's binding holds: ${held:-(no role bound)}
+
+.agent-fabric/ is the project's distilled knowledge and who may write it.
+The drain writes it; every other role reads it. If this IS a drain, bind
+the role first (/role $owner_role) as a holder of it. If a slice is wrong,
+raise it with $owner_role — a correction enters through a drain with
+provenance, never as a hand edit. See agent-fabric policies/AUTHORITY.md.
+MSG
+exit 1

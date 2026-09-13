@@ -123,5 +123,27 @@ else
     echo "  =  $FABRIC_ROOT: core.hooksPath = policies/githooks"
 fi
 
+# 5. The same hooks in every registered working copy beside this checkout:
+#    they carry the attribution ban and the .agent-fabric/ fence (only a
+#    session holding fabric-coordinator commits under .agent-fabric/, and
+#    the commit records the role). A repo config per working copy, never
+#    committed; a directory that is not a registered project is left alone.
+HOOKS_ABS="$FABRIC_ROOT/policies/githooks"
+for wc in "$PROJECTS"/*/; do
+    wc="${wc%/}"
+    [[ "$wc" != "$FABRIC_ROOT" && -d "$wc/.git" ]] || continue
+    pid="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/workingcopy.py" "$wc" 2>/dev/null \
+        | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("project") or "")
+except Exception: print("")')"
+    [[ -n "$pid" ]] || continue
+    if [[ "$(git -C "$wc" config --get core.hooksPath 2>/dev/null)" != "$HOOKS_ABS" ]]; then
+        (( DRY_RUN )) || git -C "$wc" config core.hooksPath "$HOOKS_ABS"
+        echo "  +  $wc ($pid): core.hooksPath = $HOOKS_ABS"; changed=$((changed+1))
+    else
+        echo "  =  $wc ($pid): core.hooksPath"; same=$((same+1))
+    fi
+done
+
 echo "bootstrap: $changed written, $same already current."
 echo "Launch from $PROJECTS: cd \"$PROJECTS\" && claude   — the session starts as $(python3 "$FABRIC_ROOT/runtime/identity.py")."

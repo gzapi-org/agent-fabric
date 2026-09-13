@@ -10,6 +10,7 @@
 # accident.
 set -uo pipefail
 msg="$1"
+FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 TRAILER_RE='^[[:space:]]*(Co-authored-by|Claude-Session):'
 FOOTER_RE='Generated with[[:space:]]+\[Claude Code|claude\.ai/code/session_'
 # Comment lines are not part of the message.
@@ -28,5 +29,27 @@ if (( bad )); then
   instructions win. Remove the lines and commit again.
 MSG
     exit 1
+fi
+
+# A commit that changes .agent-fabric/ DECLARES the role that wrote it, from
+# the live binding — the same fact pre-commit checked. CI cannot read a
+# binding; it reads this trailer (policies/check_agent_fabric_dir_authority.sh)
+# and refuses a change under .agent-fabric/ without it. Self-declared there,
+# real here: that is the fence/tripwire split policies/AUTHORITY.md states.
+if git diff --cached --name-only --diff-filter=ACDMRT -- '.agent-fabric/' 2>/dev/null | grep -q .; then
+    role="$(python3 "$FABRIC_ROOT/runtime/identity.py" --json 2>/dev/null \
+        | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("role") or "")
+except Exception: print("")')"
+    owner_role="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["role_definitions"]["role"])
+except Exception: print("fabric-coordinator")' "$FABRIC_ROOT/policies/authority.json" 2>/dev/null || echo fabric-coordinator)"
+    if [[ "$role" != "$owner_role" ]]; then
+        echo "commit-msg: .agent-fabric/ changes, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
+        exit 1
+    fi
+    if ! grep -qiE '^[[:space:]]*Fabric-Role:' "$msg"; then
+        git interpret-trailers --in-place --if-exists addIfDifferent --trailer "Fabric-Role: $role" "$msg"
+    fi
 fi
 exit 0

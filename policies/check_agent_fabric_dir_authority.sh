@@ -2,41 +2,44 @@
 #
 # policies/check_agent_fabric_dir_authority.sh
 #
-# `.agent-fabric/` in a repository is fabric-coordinator's to write. It
-# holds the project's distilled knowledge (`memory/<role>/`, written by the
-# drain) and the file naming who may write it (`authority.json`). Every
-# other role READS it: a `backend-dev` session that edits a slice by hand
-# is asserting something about the system with no evidence behind it and
-# outside the role that owns the corpus. This fails when anything under
-# `.agent-fabric/` changes on a branch that is not a fabric-coordinator
-# branch.
+# `.agent-fabric/` in a repository is written by the fabric-coordinator
+# ROLE. It holds the project's distilled knowledge (`memory/<role>/`,
+# written by the drain) and nothing another role may edit by hand: a
+# `backend-dev` session that changes a slice is asserting something about
+# the system with no evidence behind it, outside the role that owns the
+# corpus. This fails when a commit that changes `.agent-fabric/` does not
+# declare that role.
 #
-# RUNS IN ANY REPOSITORY. In agent-fabric it guards the control plane's own
-# `.agent-fabric/`; a managed project runs it from the sibling checkout
-# (`$CLAUDE_PROJECT_DIR/../agent-fabric/policies/…`) or a copy in its CI.
-# Holders come from, in order, read from the BASE side of the diff so a
-# branch cannot appoint itself:
-#   1. `.agent-fabric/authority.json` in this repository
-#   2. `policies/authority.json` in this repository (agent-fabric itself)
-#   3. the sibling agent-fabric checkout's policies/authority.json
-#      ($AGENT_FABRIC_ROOT, or ../agent-fabric beside the repo) — a
-#      provisioned host, where no copy inside the project is needed
-# and, always, an account NAMED for the role (fabric-coordinator,
-# fabric-coordinator-02, …) is recognised without an entry.
+# THE ROLE, NOT THE LOGIN. Which account committed is irrelevant; what
+# matters is whether the session had the role BOUND when it committed.
+# That binding is machine-local (runtime/identity.py), and the one place
+# it can be checked for real is the keyboard: policies/githooks/pre-commit
+# refuses the commit unless the binding holds the role, and commit-msg
+# then writes what it verified into the message as a trailer:
 #
-# AUTHORITY BELONGS TO THE ROLE, NOT TO THE ACCOUNT, and this is a
-# TRIPWIRE, not a fence — see check_charter_authority.sh, whose reasoning
-# and limits this shares: the branch name is self-declared, every session
-# pushes as one GitHub account, and a session that means to route around
-# it can. It stops the accident and makes a deliberate change visible.
+#     Fabric-Role: fabric-coordinator
+#
+# This check reads that trailer on every commit the branch adds that
+# touches `.agent-fabric/**`. In CI it is a TRIPWIRE: the trailer is
+# text anyone can type, so it stops the accident — a session that never
+# bound the role and never ran the hooks — and makes a deliberate change
+# visible in review; it does not stop a session that means to route
+# around it. The same limit check_charter_authority.sh states for the
+# branch name. Merge commits are not examined (they carry no change of
+# their own).
+#
+# RUNS IN ANY REPOSITORY: agent-fabric's own `.agent-fabric/`, or a
+# managed project's, from the sibling checkout or a CI copy. The role
+# name comes from policies/authority.json when this repository has one,
+# else from $AGENT_FABRIC_ROOT/policies/authority.json, else it is
+# fabric-coordinator.
 #
 # guards: .agent-fabric/**
 #
 # Exit codes:
-#   0  nothing under .agent-fabric/ changed, or the branch is
-#      fabric-coordinator's, or the head branch is not knowable here
-#   1  .agent-fabric/ changed on another role's branch
-#   0  also when no base ref is resolvable (not a violation)
+#   0  nothing under .agent-fabric/ changed, or every such commit declares
+#      the role, or no base ref is resolvable (not a violation)
+#   1  a commit changed .agent-fabric/ without declaring the role
 #   2  invocation problem (cannot reach the repo root)
 set -uo pipefail
 
@@ -67,81 +70,49 @@ BASE="$(resolve_base)" || {
     exit 0
 }
 
-BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}"
-[[ -n "$BRANCH" ]] || BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+owner_role=""
+for f in policies/authority.json "${AGENT_FABRIC_ROOT:-$(pwd)/../agent-fabric}/policies/authority.json"; do
+    [[ -f "$f" ]] || continue
+    owner_role="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["role_definitions"]["role"])
+except Exception: print("")' "$f" 2>/dev/null)"
+    [[ -n "$owner_role" ]] && break
+done
+[[ -n "$owner_role" ]] || owner_role="fabric-coordinator"
 
-mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- '.agent-fabric/**' 2>/dev/null)
-
-if (( ${#changed[@]} == 0 )); then
+mapfile -t commits < <(git rev-list --no-merges "$BASE"..HEAD -- '.agent-fabric/**' 2>/dev/null)
+if (( ${#commits[@]} == 0 )); then
     echo "check_agent_fabric_dir_authority: OK — nothing under .agent-fabric/ changed."
     exit 0
 fi
 
-case "$BRANCH" in
-    gh-readonly-queue/*|HEAD|"")
-        echo "check_agent_fabric_dir_authority: .agent-fabric/ changed; not"
-        echo "enforced on '${BRANCH:-detached HEAD}' — the pull_request run"
-        echo "is where this is enforced, and it gates entry to the queue."
-        printf '  %s\n' "${changed[@]}"
-        exit 0 ;;
-esac
-
-agent="$(cut -d/ -f2 <<<"$BRANCH")"
-if [[ "$BRANCH" != */*/* || -z "$agent" ]]; then
-    echo "check_agent_fabric_dir_authority: .agent-fabric/ changed, but the head"
-    echo "branch is not knowable here (${BRANCH:-none}) — the pull_request"
-    echo "run is where this is enforced."
-    printf '  %s\n' "${changed[@]}"
-    exit 0
-fi
-
-# The holders file, first found wins; the committed base side for anything
-# in this repository, the working tree for the sibling checkout.
-read_holders() {  # stdin: authority.json -> "role holder holder…"
-    python3 -c 'import json,sys
-try: d=json.load(sys.stdin)
-except Exception: d={}
-r=(d.get("role_definitions") or {})
-print(r.get("role") or "fabric-coordinator", *(r.get("holders") or []))' 2>/dev/null
-}
-holders_line=""
-source_label=""
-for rel in .agent-fabric/authority.json policies/authority.json; do
-    if git cat-file -e "$BASE:$rel" 2>/dev/null; then
-        holders_line="$(git show "$BASE:$rel" | read_holders)"; source_label="$rel at $BASE"; break
+bad=()
+for c in "${commits[@]}"; do
+    declared="$(git log -1 --format=%B "$c" | git interpret-trailers --parse 2>/dev/null \
+        | awk -F': *' 'tolower($1)=="fabric-role" {print $2}' | tail -1)"
+    if [[ "$declared" != "$owner_role" ]]; then
+        bad+=("$(git log -1 --format='%h %s' "$c")  [Fabric-Role: ${declared:-none}]")
     fi
 done
-if [[ -z "$holders_line" ]]; then
-    sibling="${AGENT_FABRIC_ROOT:-$(pwd)/../agent-fabric}/policies/authority.json"
-    if [[ -f "$sibling" ]]; then
-        holders_line="$(read_holders < "$sibling")"; source_label="$sibling"
-    fi
-fi
-[[ -n "$holders_line" ]] || { holders_line="fabric-coordinator"; source_label="no holders file; name convention only"; }
-owner_role="${holders_line%% *}"
-holders="${holders_line#"$owner_role"}"
 
-is_holder=0
-for h in $holders; do [[ "$agent" == "$h" ]] && is_holder=1; done
-[[ "$agent" == "$owner_role"* ]] && is_holder=1
-if (( is_holder )); then
-    echo "check_agent_fabric_dir_authority: OK — ${#changed[@]} path(s) under .agent-fabric/" \
-         "changed on a $owner_role branch ($agent; holders from $source_label)."
+if (( ${#bad[@]} == 0 )); then
+    echo "check_agent_fabric_dir_authority: OK — ${#commits[@]} commit(s) change .agent-fabric/," \
+         "each declaring Fabric-Role: $owner_role."
     exit 0
 fi
 
-echo "FAIL: .agent-fabric/ changed on a branch owned by agent '$agent'." >&2
-printf '       %s\n' "${changed[@]}" >&2
+echo "FAIL: .agent-fabric/ changed in ${#bad[@]} commit(s) that do not declare Fabric-Role: $owner_role." >&2
+printf '       %s\n' "${bad[@]}" >&2
 cat >&2 <<MSG
 
-.agent-fabric/ is the project's distilled knowledge and the file naming
-who may write it. It is $owner_role's: the drain writes it
-(agent-fabric memory/README.md), every other role reads it. Holders were
-read from $source_label.
-
-If this is a drain, run it as a $owner_role holder. If a slice is
-wrong, say so to $owner_role — a correction enters the corpus through a
-drain with provenance, never as a hand edit on another role's branch.
+.agent-fabric/ is the project's distilled knowledge; the $owner_role ROLE
+writes it — the drain does, every other role reads it. A commit that
+changes it is made with that role bound (/role $owner_role) and the
+agent-fabric git hooks installed (bootstrap.sh sets core.hooksPath): the
+pre-commit hook checks the binding, the commit-msg hook records it as
+the Fabric-Role trailer this check reads. The login that committed is
+irrelevant. If a slice is wrong, raise it with $owner_role — a
+correction enters through a drain with provenance, never as a hand edit.
 See agent-fabric policies/AUTHORITY.md.
 MSG
 exit 1

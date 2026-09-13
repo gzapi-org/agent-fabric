@@ -13,7 +13,6 @@ memory/                          (this repository — field knowledge)
                                  moved into its repository yet (gzapp)
 
 <working copy>/.agent-fabric/    (each managed project's own repository)
-├── authority.json               who may write this directory (fabric-coordinator's holders)
 └── memory/
     ├── <role>/                  filed per role: what that role learned here
     │   ├── INDEX.md             generated map of everything the role knows
@@ -29,9 +28,10 @@ beside the tree is what lets a change that moves the architecture update
 the slice in the same commit series, and lets a checkout at any commit
 carry the knowledge that was true then. It also keeps a project's
 confidential knowledge under the project's own license and access.
-`.agent-fabric/` is **fabric-coordinator's to write** — the drain writes
-it, every other role reads it (`policies/AUTHORITY.md`,
-`policies/check_agent_fabric_dir_authority.sh`). Index links inside it are
+`.agent-fabric/` is written by the **fabric-coordinator role** — the
+drain writes it, every other role reads it; the git hooks refuse a
+commit under it unless the session's binding holds the role, and CI
+checks the `Fabric-Role:` trailer they write (`policies/AUTHORITY.md`). Index links inside it are
 relative to the working copy; a fabric-side slice is linked as
 `../agent-fabric/<path>`, the sibling-checkout layout.
 

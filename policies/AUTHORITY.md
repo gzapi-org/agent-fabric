@@ -31,24 +31,36 @@ explicitly names one.
 | a managed project's architecture (gzapp: ADRs, contracts) | that project's roles (`architect-cto`) | the project's own guards, in its repository |
 | a commit message or PR description (no machine attribution) | every agent, by writing it right | `policies/ban_generated_by_attribution.sh` on the commits a branch adds |
 | a distilled slice under `memory/domains/`, `memory/shared/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |
-| `.agent-fabric/` in a managed repository — the project's distilled knowledge (`memory/<role>/`) and `authority.json` | `fabric-coordinator`: the drain writes it, every other role reads it | `policies/check_agent_fabric_dir_authority.sh`, runnable in the fabric and in any managed repository; `lint.py` demands provenance |
+| `.agent-fabric/` in a managed repository — the project's distilled knowledge (`memory/<role>/`) | the `fabric-coordinator` ROLE, whoever holds it: the drain writes it, every other role reads it | a fence at the keyboard — `policies/githooks/pre-commit` refuses the commit unless the binding holds the role, `commit-msg` records it as `Fabric-Role:` — and a tripwire in CI, `policies/check_agent_fabric_dir_authority.sh`, which reads that trailer; `lint.py` demands provenance |
 | `recall.md` for a role | the role itself | authored, exempt from provenance; must stay under `identities/roles/` |
 
 ## `.agent-fabric/` in a managed repository
 
 A project's knowledge lives in the project's own repository, under
 `.agent-fabric/memory/<role>/` — versioned with the tree it describes,
-under the project's license. Which role holds it is the same answer as
-for the control plane: `fabric-coordinator` owns the corpus, because a
-slice is a claim with provenance and the drain is the only thing that
-makes one. A `backend-dev` session working in gzapp reads
-`.agent-fabric/memory/backend-dev/` and may not edit it; what it learns
-goes to its own Claude memory, and the next drain — run by a
-`fabric-coordinator` holder — distils it in with its name on it. A
-finding that a slice is wrong is raised to `fabric-coordinator`, not
-fixed in place. The guard reads holders from `.agent-fabric/authority.json`
-in that repository (base side), or from this repository's
-`policies/authority.json` when the sibling checkout is reachable.
+under the project's license. Who may write it is the **role**, not the
+account: a session that has bound `fabric-coordinator` (`/role
+fabric-coordinator`) may commit under `.agent-fabric/`; any other
+session, whatever login it runs as, may not. The reason is the same as
+for the corpus here: a slice is a claim with provenance, and the drain
+is the only thing that makes one. A `backend-dev` session working in
+gzapp reads `.agent-fabric/memory/backend-dev/` and may not edit it;
+what it learns goes to its own Claude memory, and the next drain — run
+by a session holding `fabric-coordinator` — distils it in with the
+agent's name on it. A finding that a slice is wrong is raised to
+`fabric-coordinator`, not fixed in place.
+
+This is the one rule with a **fence** rather than only a tripwire,
+because the binding is readable where the commit is made: the git hooks
+`bootstrap.sh` installs in every registered working copy
+(`policies/githooks/`) refuse a commit that stages `.agent-fabric/`
+unless the live binding holds the role, and write the role they
+verified into the message as `Fabric-Role: fabric-coordinator`. CI
+cannot read a binding, so `check_agent_fabric_dir_authority.sh` reads
+the trailer on every commit a branch adds under `.agent-fabric/**` — a
+tripwire with the usual limits: text anyone can type, `--no-verify`
+skips the hooks. It stops the accident and makes the deliberate change
+visible. The login in the branch name plays no part.
 
 ## What the tripwire can and cannot do
 

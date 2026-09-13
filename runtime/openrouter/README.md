@@ -71,7 +71,7 @@ checks the label still reads this login.
 - `test_launch.sh` — the behavioural suite for the launcher and the audit
   (`bash policies/run_suite.sh runtime/openrouter/test_launch.sh`).
 
-## Why the review class rides `fable` (verified live 2026-09-13)
+## Why the review class rides `fable` (verified live 2026-09-13; read-backs in `docs/live-checks/2026-09-13-openrouter-routing.md`)
 
 The Agent tool's `model` field accepts **only the four tier aliases**
 (`haiku`, `sonnet`, `opus`, `fable`); a full id such as `claude-opus-5[1m]`

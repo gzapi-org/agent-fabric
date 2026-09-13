@@ -11,6 +11,7 @@
 set -euo pipefail
 
 PROJECTS_SUBDIR="projects"
+CONTROL_PLANE_DIR="agent-fabric"
 MOVETO_ENTER="/usr/local/share/moveto/enter"
 print_only=0
 
@@ -71,10 +72,14 @@ list_clones() {
     if ! run_as "$acct" test -e "$projects" 2>/dev/null; then
         CLONES_STATE="no-projects-dir"; return 0
     fi
+    # A clone is a DIRECTORY, and not the control plane: ~/projects also
+    # holds the workspace CLAUDE.md that bootstrap.sh writes and the
+    # agent-fabric checkout beside the clones, and neither is a place to
+    # work a project from.
     while IFS= read -r -d '' entry; do
         CLONES+=("${entry##*/}")
-    done < <(run_as "$acct" find "$projects" -mindepth 1 -maxdepth 1 ! -name '.*' -print0 2>/dev/null \
-             | sort -z)
+    done < <(run_as "$acct" find "$projects" -mindepth 1 -maxdepth 1 -type d ! -name '.*' \
+             ! -name "$CONTROL_PLANE_DIR" -print0 2>/dev/null | sort -z)
     [[ ${#CLONES[@]} -eq 0 ]] && CLONES_STATE="empty"
     return 0
 }

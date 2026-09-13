@@ -44,6 +44,10 @@ SUDO_LOG="$SANDBOX/sudo.log"
 #   spaced  one clone whose name contains a space
 #   esc     one clone whose name contains ESC and BEL
 mkdir -p "$SANDBOX/home/solo/projects/solo"
+# Beside the clone: the workspace CLAUDE.md and the control-plane checkout
+# that bootstrap.sh puts in every ~/projects. Neither is a clone.
+printf 'workspace\n' > "$SANDBOX/home/solo/projects/CLAUDE.md"
+mkdir -p "$SANDBOX/home/solo/projects/agent-fabric"
 mkdir -p "$SANDBOX/home/odd/projects/weird-name"
 mkdir -p "$SANDBOX/home/many/projects/"{alpha,beta,gamma}
 mkdir -p "$SANDBOX/home/empty/projects"
@@ -105,6 +109,9 @@ out=$("$UNDER_TEST" solo --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "resolves ~/projects/<account>" "/home/solo/projects/solo" "$out"
 check "title is the account" "title: solo" "$out"
+listed=$("$UNDER_TEST" solo --list 2>&1)
+check_absent "the workspace CLAUDE.md is not a clone" "CLAUDE.md" "$listed"
+check_absent "the agent-fabric checkout is not a clone" "agent-fabric" "$listed"
 
 echo "1b. single clone named differently: still titled by ACCOUNT"
 out=$("$UNDER_TEST" odd --print 2>&1); st=$?

@@ -224,10 +224,16 @@ for bin in gh jq; do
         echo "pr-sessions: $bin is required but not installed." >&2; exit 2; }
 done
 
-# This clone's session, derived the same way the branch prefix is built.
-ME=""
+# This session: the AGENT (the Linux login, as agent-fabric resolves it)
+# on this host, which is what newer branch prefixes carry. Older branches
+# carry the working-copy name in the second segment; ME_LEGACY lets the
+# default "mine" filter still find them while they last.
+ME=""; ME_LEGACY=""
+FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
 if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    ME="$(hostname -s)/$(basename "$root")"
+    AGENT="$(python3 "$FABRIC_ROOT/runtime/identity.py" 2>/dev/null || id -un)"
+    ME="$(hostname -s)/$AGENT"
+    ME_LEGACY="$(hostname -s)/$(basename "$root")"
 fi
 
 # Inside a clone with no explicit scope: show that clone's PRs. If ME
@@ -337,9 +343,12 @@ fi
 # this they appear in nobody's sweep: not the successor's (different
 # name), not /unattributed (the branch parses).
 #
-# THE RECORD IS .roles/registry/bindings.jsonl -- tracked, lint-governed,
-# and written by the roles pipeline, so it is maintained by something
-# other than memory. A clone is retired when every window for it is
+# THE RECORD IS agent-fabric's docs/migration/legacy-registry/bindings.jsonl
+# -- the working copies that existed under the directory-bound identity
+# model, kept as migration data. New sessions are agents (logins), which
+# are not registered and do not retire when a directory does; this
+# succession logic applies to the legacy prefixes only.
+# A clone is retired when every window for it is
 # closed. A retired clone WITH a successor is OWNED by the successor --
 # scoped into its default sweep, marked as its own -- while still
 # DISPLAYING the retired name, because that is where the work lives. One
@@ -371,7 +380,7 @@ fi
 # the right one. Ambiguous now means unowned: the rows surface under
 # /unattributed, where a person can see them, instead of being quietly
 # misassigned. Record a rename (which keeps the clone_id) to make it exact.
-CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
+CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$FABRIC_ROOT/docs/migration/legacy-registry/bindings.jsonl}"
 INHERIT_JSON='{}'; ORPHANS_JSON='[]'
 if [[ -r "$CLONE_BINDINGS" ]]; then
     registry="$(jq -s '
@@ -404,7 +413,7 @@ if [[ -r "$CLONE_BINDINGS" ]]; then
     fi
 fi
 
-envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
+envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" \
         --argjson inherit "$INHERIT_JSON" --argjson orphans "$ORPHANS_JSON" '
@@ -456,7 +465,10 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
   def work:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[2:] | join("/")) else .headRefName end;
-  def mark: if (. == $me) then "*" else " " end;
+  # Mine: the prefix of this agent, host/login, or -- while older
+  # branches last -- the prefix that named this working copy.
+  def mine: (. == $me) or ($melegacy != "" and . == $melegacy);
+  def mark: if mine then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def st:
     if .isDraft then "DRAFT"
@@ -484,7 +496,7 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg filter "$FILTER" \
          else ([$pool[] | select(._s == "(unconventional)" or ._orphan)] | length) end),
       rows:
         ($pool
-         | ( if $filter == "__MINE__" then map(select(._o == $me))
+         | ( if $filter == "__MINE__" then map(select(._o | mine))
              elif $filter == "__UNATTRIBUTED__" then
                     map(select(._s == "(unconventional)" or ._orphan))
              elif $filter != "" then
@@ -612,10 +624,13 @@ if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREAD_JSON" == "null" ]]; then
     exit 2
 fi
 
-out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPED" \
+out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --arg melegacy "$ME_LEGACY" --argjson grouped "$GROUPED" \
         --argjson th "$THREAD_JSON" --argjson want "$THREADS" \
         --argjson unres "$UNRESOLVED_ONLY" --argjson limit "$LIMIT" '
-  def mark: if (. == $me) then "*" else " " end;
+  # Mine: the prefix of this agent, host/login, or -- while older
+  # branches last -- the prefix that named this working copy.
+  def mine: (. == $me) or ($melegacy != "" and . == $melegacy);
+  def mark: if mine then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def lpad($n): (" " * ($n - length)) + .;
   def st:
@@ -647,7 +662,7 @@ out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --argjson grouped "$GROUPE
           # heading: a group of rows this clone inherited must be labelled
           # as its own, or the one ownership cue in grouped mode is absent
           # exactly where it is least obvious.
-          "\n\(.[0]._s)\(if .[0]._o == $me then "   <- this clone" else "" end)"
+          "\n\(.[0]._s)\(if (.[0]._o | mine) then "   <- this clone" else "" end)"
           , ( sort_by(-.number)[]
               | "  #\(.number)  \(st | pad(6))  \(threads | lpad(3))  \(.updatedAt[0:10])  \(._w)" )
         ) | flatten | .[] )

@@ -176,8 +176,15 @@ LOCATION="$(printf '%s' "$THREAD_JSON" | jq -r '"\(.path):\(.line // "?")"')"
 # skips straight past — posting to any thread handed to it. Not knowing
 # whose PR this is has to mean stop, not proceed.
 root="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "not inside a git worktree, so this clone's identity is unknown — refusing to reply (run it from the clone that owns the PR)."
-ME="$(hostname -s)/$(basename "$root")"
+    || die "not inside a git worktree, so the session's working-copy identity is unknown — refusing to reply (run it from the working copy that owns the PR)."
+# The session is the AGENT — the Linux login, as agent-fabric resolves it —
+# on this host. Branches are named <host>/<agent>/<type>/<desc>; older
+# branches carry the working-copy name in the second segment, so that is
+# accepted as the session too while they last (see AGENT_FABRIC_BRANCH_ALIASES).
+FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
+AGENT="$(python3 "$FABRIC_ROOT/runtime/identity.py" 2>/dev/null || id -un)"
+ME="$(hostname -s)/$AGENT"
+ME_LEGACY="$(hostname -s)/$(basename "$root")"
 OWNER="$(printf '%s' "$PR_BRANCH" | cut -d/ -f1,2)"
 
 # Does the branch name a SESSION at all? Same structural test
@@ -267,7 +274,12 @@ branch_names_a_session() {
 # bounded by leave_open_unless_explicit, which makes resolving opt-in on
 # every unowned path. Replying to a thread nobody owns is recoverable;
 # resolving it, or sending the owner away, is not.
-CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$(dirname "${BASH_SOURCE[0]}")/../../.roles/registry/bindings.jsonl}"
+# The retired-clone registry is now migration data in agent-fabric
+# (docs/migration/legacy-registry/bindings.jsonl): it records the
+# working copies that existed under the directory-bound identity model
+# and which succeeded which. New sessions are agents (logins) and are not
+# registered anywhere — an agent does not retire when a directory does.
+CLONE_BINDINGS="${GZAPP_CLONE_BINDINGS:-$FABRIC_ROOT/docs/migration/legacy-registry/bindings.jsonl}"
 if [[ -n "${GZAPP_CLONE_BINDINGS:-}" ]]; then
     # An ownership input that can be pointed anywhere deserves to be
     # visible in the transcript: this is the one variable that can turn a
@@ -336,11 +348,16 @@ if ! branch_names_a_session "$PR_BRANCH"; then
     # the finding may belong to a surface whose role has verified
     # nothing. So the default inverts here and --resolve is the opt-in.
     leave_open_unless_explicit
+elif [[ "$OWNER" == "$ME_LEGACY" && "$OWNER" != "$ME" ]]; then
+    # The branch carries this WORKING COPY's name where newer branches
+    # carry the agent's login. It is this agent's own branch under the
+    # older convention; treat it as owned, and say so once.
+    echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH', named for this working copy; this agent ($ME) owns it." >&2
 elif [[ "$OWNER" != "$ME" ]] && [[ "$(clone_status "$OWNER")" != "LIVE" ]]; then
     # The registry says this prefix names a retired clone. Two outcomes,
     # by whether it records an heir.
     STATUS="$(clone_status "$OWNER")"
-    if [[ "$STATUS" == "HEIR $ME" ]]; then
+    if [[ "$STATUS" == "HEIR $ME" || "$STATUS" == "HEIR $ME_LEGACY" ]]; then
         # Inherited: this clone is the recorded successor, so the PR is its
         # own -- no warning, resolve stays the default. Deliberately does
         # NOT say "whose role this clone now holds": the succession may

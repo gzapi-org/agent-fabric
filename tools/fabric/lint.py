@@ -370,7 +370,8 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
         if dirpath == base and where_prefix.startswith("identities/"):
             dirnames[:] = [d for d in dirnames if d not in PAYLOAD_DIRS]
         for filename in sorted(filenames):
-            if not filename.endswith(".md") or filename == "INDEX.md":
+            # README.md is documentation of a directory, never a slice.
+            if not filename.endswith(".md") or filename in ("INDEX.md", "README.md"):
                 continue
             full = os.path.join(dirpath, filename)
             rel = layout.root_rel(full)

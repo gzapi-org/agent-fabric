@@ -49,15 +49,20 @@ One role escapes the premium ban without a per-dispatch ask: a
 automated review claim) or when `pr-review-status.sh` reports a
 DECLINE and no automated review is coming at all.
 
-**`opus` is a tier alias, and the target is the launch profile's job.**
-The Agent tool's `model` field accepts only the four harness aliases —
-a provider-qualified id is rejected by the schema itself, so a dispatch
-literally cannot name a vendor model. The mapping lives in the LAUNCH
-PROFILE, not settings: `tools/launch/ori` resolves this role instance's
-row in `.roles/registry/model-profiles.json`, refuses an opus tier
-outside `review_grade`, and exports
-`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL` before
-`exec ori claude` — process env, which every subagent inherits.
+**`opus` is a tier alias, and the target is agent-fabric's routing.**
+The Agent tool's `model` field accepts the harness aliases (or a full
+Claude model id), never a provider-qualified vendor model, so a dispatch
+literally cannot name one. The mapping lives in agent-fabric, not in
+settings: `routing/capabilities.json` binds each capability class
+(`code-low`, `code-medium`, `code-high`, `review`) to a concrete model
+per provider, `routing/shims.json` binds a model family to its
+compatibility shim, and `runtime/openrouter/launch` resolves this
+agent's layers in `routing/profiles.json` (by role, by login), refuses a
+review model outside `routing/policies/review-grade.json`, and exports
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` before `exec ori claude` —
+process env, which every subagent inherits. The review class declares
+its model by full id (`claude-opus-5[1m]`) rather than an alias, so it
+never shares code-high's export.
 `modelOverrides` is NOT used: it is taken as the whole map from the
 highest-precedence scope that sets it, so any scope both launch paths
 share binds both, and it would beat the env pins anyway. The vanilla

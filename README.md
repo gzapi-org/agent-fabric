@@ -28,7 +28,7 @@ agent-fabric contains agent infrastructure
 | **MODEL ROUTING** | Which concrete model satisfies that capability now? | `routing/capabilities.json` providers, layered by `routing/profiles.json` (per role, per login) |
 | **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm2claude-shim` |
 | **COMMUNICATION** | How do independent agents exchange work and knowledge? | `communication/gzcoord/` — GZCOORD/1; the address is `<host>/<login>` |
-| **PROJECT BINDING** | Which roles, domains and path rules apply to each managed repository? | `projects/<project>/taxonomy.json`, `projects/<project>/integration/` |
+| **PROJECT BINDING** | Which roles, domains and path rules apply to each managed repository? | `<working copy>/.agent-fabric/taxonomy.json` in the project itself (`projects/registry.json` names the project); the fabric's own is `.agent-fabric/taxonomy.json` here |
 | **RUNTIME ADAPTER** | How does all of this become Claude Code / OpenRouter / another harness's configuration? | `runtime/claude-code/` (hooks, `/role`, agent files, bootstrap), `runtime/openrouter/launch`, `runtime/provisioning/` |
 
 Never collapse them. An agent keeps its name across roles, projects,

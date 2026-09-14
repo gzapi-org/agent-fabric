@@ -34,7 +34,7 @@ apply to this whole repository.
 |---|---|---|
 | `identities/roles/<role>/charter.md` (any role) | `fabric-coordinator` | `policies/check_charter_authority.sh` |
 | `identities/roles/catalog.json` | `fabric-coordinator` | same |
-| `projects/<project>/taxonomy.json` (where roles apply in a repository) | `fabric-coordinator` | same |
+| a project's taxonomy — where roles apply in its repository: `<working copy>/.agent-fabric/taxonomy.json` | `fabric-coordinator` | the `.agent-fabric/` fence and tripwire |
 | `routing/policies/review-grade.json`, the review class's model | `fabric-coordinator` | same; `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |
 | `policies/authority.json`, who holds `fabric-coordinator` | `fabric-coordinator` | same, read from the base side of the diff so a branch cannot appoint itself |
 | `communication/gzcoord/protocol/*` | `fabric-coordinator` | no tripwire yet — its charter states it |

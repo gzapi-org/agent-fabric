@@ -36,7 +36,7 @@ relative to the working copy; a fabric-side slice is linked as
 The reusable definition of a role — its charter, its recall guide, its
 skills — is **not** memory. It lives under `identities/roles/<role>/`.
 Where a role applies inside a repository is a project binding under
-`projects/<project>/taxonomy.json`. This directory holds only what was
+the project's `.agent-fabric/taxonomy.json`. This directory holds only what was
 learned.
 
 ## Why this exists

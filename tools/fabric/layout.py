@@ -200,6 +200,20 @@ def project_remit_path(project: str, role: str) -> str | None:
     return os.path.join(wc, PROJECT_ROLES_SUBDIR, f"{role}.md") if wc else None
 
 
+def project_taxonomy_path(project: str) -> str | None:
+    """A project's binding rules (which roles apply to which paths and
+    keywords): <working copy>/.agent-fabric/taxonomy.json when the working
+    copy is known, else projects/<id>/taxonomy.json here (the fabric's own,
+    or a project not yet moved). None when neither exists."""
+    wc = working_copy_for(project)
+    if wc:
+        candidate = os.path.join(wc, PROJECT_DIRNAME, "taxonomy.json")
+        if os.path.isfile(candidate):
+            return candidate
+    here = os.path.join(FABRIC_ROOT, "projects", project, "taxonomy.json")
+    return here if os.path.isfile(here) else None
+
+
 def project_hygiene_path(project: str) -> str | None:
     """A project's own banned-pattern list, in its working copy: what must
     never appear in a slice because it names the deployment, a sibling

@@ -1,8 +1,9 @@
 # projects/gzapp/integration/
 
 How the gzapp repository is wired to agent-fabric. Everything here is
-gzapp-specific by design and, with `projects/gzapp/taxonomy.json`, the only
-place gzapp is named in this repository. gzapp's own knowledge lives in
+gzapp-specific by design and the only place gzapp is named in this
+repository (its taxonomy, memory, remits and hygiene list are in gzapp,
+under `.agent-fabric/`). gzapp's own knowledge lives in
 gzapp (`.agent-fabric/memory/`), never here.
 
 - `gzcoord/` — gzapp's use of the GZCoord protocol: the relay it hosts

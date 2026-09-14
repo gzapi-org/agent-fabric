@@ -4,7 +4,8 @@
 #
 # A role's DEFINITION is fabric-coordinator's to change: `identities/roles/*/
 # charter.md`, the catalogue `identities/roles/catalog.json`, the
-# per-project binding rules `projects/*/taxonomy.json`, the routing policy
+# per-project binding rules `.agent-fabric/taxonomy.json` (this repository's own; a
+# managed project's is under the .agent-fabric/ guard), the routing policy
 # `routing/policies/*` and `policies/authority.json` itself. This fails
 # when one of those changes on a branch that is not a fabric-coordinator
 # branch.
@@ -40,7 +41,7 @@
 # required before anything is queued.
 #
 # guards: identities/**
-# guards: projects/*/taxonomy.json
+# guards: .agent-fabric/taxonomy.json
 # guards: routing/policies/**
 # guards: policies/**
 #
@@ -99,7 +100,7 @@ BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GZAPP_CHARTER_BRANCH:-${GITHUB_HEAD_REF
 
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- \
     'identities/roles/*/charter.md' 'identities/roles/catalog.json' \
-    'projects/*/taxonomy.json' 'routing/policies/*' 'policies/authority.json' 2>/dev/null)
+    '.agent-fabric/taxonomy.json' 'projects/*/taxonomy.json' 'routing/policies/*' 'policies/authority.json' 2>/dev/null)
 
 if (( ${#changed[@]} == 0 )); then
     echo "check_charter_authority: OK — no role definition changed."

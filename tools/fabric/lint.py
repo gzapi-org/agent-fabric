@@ -507,16 +507,29 @@ def main() -> int:
         findings.append("identities/roles/catalog.json: missing")
 
     # --- project bindings --------------------------------------------------
+    # A project's taxonomy lives in its working copy (.agent-fabric/
+    # taxonomy.json) — the fabric's own included — or, for a project not
+    # yet moved, under projects/<id>/ here. Judged for every project whose
+    # taxonomy this run can reach.
     taxonomy_schema = load_schema(root, os.path.join("projects", "schemas"), "taxonomy")
     projects_root = os.path.join(root, "projects")
     project_ids: list[str] = []
-    if os.path.isdir(projects_root):
-        for pid in sorted(os.listdir(projects_root)):
-            tax_path = os.path.join(projects_root, pid, "taxonomy.json")
-            if not os.path.isfile(tax_path):
+    registry_ids: list[str] = []
+    try:
+        registry_ids = sorted((json.load(open(os.path.join(projects_root, "registry.json"), encoding="utf-8"))
+                               .get("projects") or {}).keys())
+    except (OSError, ValueError):
+        pass
+    legacy_ids = [d for d in (sorted(os.listdir(projects_root)) if os.path.isdir(projects_root) else [])
+                  if os.path.isfile(os.path.join(projects_root, d, "taxonomy.json"))]
+    for pid in sorted(set(registry_ids) | set(legacy_ids) | set(layout.explicit_working_copies())):
+        if True:
+            tax_path = layout.project_taxonomy_path(pid)
+            if not tax_path:
                 continue
             project_ids.append(pid)
-            where = f"projects/{pid}/taxonomy.json"
+            where = (f"projects/{pid}/taxonomy.json" if tax_path.startswith(root)
+                     else f"{pid}:{layout.PROJECT_DIRNAME}/taxonomy.json")
             tax = load_json(tax_path, where, findings)
             if tax is None:
                 continue

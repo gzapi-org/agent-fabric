@@ -280,7 +280,7 @@ branch_names_a_session() {
 # and which succeeded which. New sessions are agents (logins) and are not
 # registered anywhere — an agent does not retire when a directory does.
 # The legacy clone record is a PROJECT fact (projects/registry.json,
-# `legacy_clone_bindings`), resolved through the working copy this runs in;
+# `legacy_clone_bindings`, a path inside the project's working copy);
 # a project that never had directory-bound clones simply has none, and every
 # older-prefix branch then reads as live. AGENT_FABRIC_CLONE_BINDINGS (or the
 # older GZAPP_CLONE_BINDINGS) overrides it — visibly, below.
@@ -293,7 +293,7 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 pid = m.resolve(wc).get("project")
 reg = json.load(open(os.path.join(fabric, "projects", "registry.json")))
 rel = ((reg.get("projects") or {}).get(pid) or {}).get("legacy_clone_bindings") or ""
-print(os.path.join(fabric, rel) if rel else "")
+print(os.path.join(wc, rel) if rel else "")   # the project's data, in the project's working copy
 PY
 }
 CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-$(_legacy_bindings)}}"

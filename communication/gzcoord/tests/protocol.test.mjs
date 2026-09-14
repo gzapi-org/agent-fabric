@@ -968,3 +968,28 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
   assert.ok(hits.every(u => u === '/status' || (u.startsWith('/api/messages?') && !u.includes('consumer_id'))), hits);
   assert.ok(!hits.some(u => u.includes('/api/ack') || u.includes('/api/wait')), hits);
 });
+
+// The environment is a snapshot; the synced file is current. A refused
+// token is retried once with the file's value, and that is what recovers
+// a watch re-armed from a pre-rotation shell.
+test('inbox retries a refused token with the synced file value, once', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-'));
+  fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), "# x\nexport CLAUDE_BRIDGE_AUTH_TOKEN='fresh-token'\n");
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push(req.headers.authorization); res.setHeader('connection', 'close'); res.setHeader('content-type', 'application/json');
+    if (req.url === '/status') { res.end('{}'); return; }
+    if (req.headers.authorization !== 'Bearer fresh-token') { res.statusCode = 401; res.end('{}'); return; }
+    res.end(JSON.stringify({ messages: [], next_cursor: null }));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
+  const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
+  server.closeAllConnections(); server.close();
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.err, /retrying with the synced value/);
+  assert.ok(seen.includes('Bearer dead') && seen.includes('Bearer fresh-token'), seen);
+  assert.match(r.out + r.err, /nothing for you/);
+});

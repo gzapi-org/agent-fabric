@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami } from './gzmsg.mjs';
-import { identity, inboxRoot, integrationConfig, token, api } from './inbox.mjs';
+import { identity, inboxRoot, integrationConfig, token, api, syncedToken } from './inbox.mjs';
 
 export async function main(argv = process.argv.slice(2)) {
   const dry = argv.includes('--dry-run');
@@ -56,12 +56,20 @@ export async function main(argv = process.argv.slice(2)) {
   const id = msg.metadata?.['MESSAGE-ID'] ?? '(none)';
   if (dry) { console.error(`send: would post ${msg.type} ${id} from ${me.address} to ${channel} at ${relayUrl}`); return 0; }
 
-  const tok = token(root, cfg);
+  let tok = token(root, cfg);
   if (!tok) { console.error('send: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment or the working copy — not sent'); return 3; }
   let res;
+  const post = t => api(t, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });
   try {
-    res = await api(tok, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });
+    try { res = await post(tok); }
+    catch (e) {
+      // A shell snapshot keeps a rotated token; the synced file has the current one.
+      const fresh = (e.status === 401 || e.status === 403) ? syncedToken() : undefined;
+      if (!(fresh && fresh !== tok)) throw e;
+      tok = fresh; res = await post(tok);
+    }
   } catch (e) {
+    if (e.status === 401 || e.status === 403) { console.error(`send: the relay refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync — not sent`); return 3; }
     console.error(`send: relay unreachable at ${relayUrl} (${e.message}) — not sent`); return 3;
   }
   console.log(`sent seq ${res.seq} ${msg.type} ${id}${res.deduplicated ? ' (deduplicated: the relay already had it)' : ''}`);

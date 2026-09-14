@@ -105,14 +105,18 @@ notification is the whole message or it is a lost message.
 ## 4. After a token rotation
 
 The relay's token is rotated by the coordinator now and then (a value
-seen where it should not be). A session started before the rotation
-holds the dead value in its environment; the inbox then says
-`the relay … refused this token (HTTP 401) — it was rotated` and exits
-4, and a watch loop should stop on that rather than repeat it. The fix:
-`bin/fabric-secrets sync`, then a login shell (`bash -l`) or a new
-session so the environment carries the new value, then re-arm the watch.
-Do not paste a token into a file to get going again: the environment is
-the one source, and a copy in a file is the thing that gets printed.
+seen where it should not be). Your environment is a snapshot — in Claude
+Code every Bash call runs from the shell the session started with — so
+after a rotation it carries the dead value for the life of the session,
+however many times `fabric-secrets sync` runs. The inbox and `send.mjs`
+know that: on a refused token they re-read
+`~/.config/agent-fabric/secrets.env` (what `sync` writes) and retry once,
+so the recovery is `bin/fabric-secrets sync`, then re-arm the watch — no
+login shell, no `source`, nothing pasted into a file. Only when the synced
+file still holds the refused value does the inbox report
+`refused this token … it was rotated` and exit 4, and the watch loop
+stops on that rather than repeat it: sync had not run yet, or the account
+is not enrolled.
 
 ## 5. What the inbox tells you
 

@@ -184,6 +184,26 @@ export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {})
   return r.json();
 }
 
+// The synced token file, read fresh. The environment is a copy of it
+// taken when the shell started — and in Claude Code every Bash call runs
+// from a snapshot of the session's first shell, so after a rotation the
+// environment keeps the dead value for the life of the session however
+// many times fabric-secrets sync runs (web-dev-01, 2026-09-14). On a 401
+// the inbox re-reads this file and retries once; only when the file
+// agrees with the refused value is the rotation reported.
+export function syncedToken(home = os.homedir()) {
+  try {
+    for (const line of fs.readFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), 'utf8').split('\n')) {
+      const m = /^export CLAUDE_BRIDGE_AUTH_TOKEN=(.*)$/.exec(line);
+      if (!m) continue;
+      let v = m[1].trim();
+      if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) v = v.slice(1, -1);
+      return v || undefined;
+    }
+  } catch { /* not enrolled, or no sync yet */ }
+  return undefined;
+}
+
 // A 401 is not "unreachable": the relay answered and refused the token.
 // After a rotation every session started before it holds the dead value
 // in its environment, and the fix is a re-sync, not a retry — say so, and
@@ -191,7 +211,7 @@ export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {})
 // the rest of the session (web-dev-01, 2026-09-14).
 function explainRelayError(e, relayUrl) {
   if (e.status === 401 || e.status === 403)
-    return { line: `gzcoord inbox: the relay at ${relayUrl} refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync, open a login shell and re-arm the watch`, code: 4 };
+    return { line: `gzcoord inbox: the relay at ${relayUrl} refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync and re-arm the watch (the inbox reads the synced file itself)`, code: 4 };
   return { line: `gzcoord inbox: relay unreachable at ${relayUrl} (${e.message}) — skipping`, code: 0 };
 }
 
@@ -321,13 +341,23 @@ export async function main(argv = process.argv.slice(2)) {
   const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
   if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
   else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
-  const tok = token(root, cfg);
+  let tok = token(root, cfg);
   if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
+  // Once: a refused token is retried with the synced file's value when
+  // that differs from what the environment carried.
+  const withFreshToken = async fn => {
+    try { return await fn(tok); }
+    catch (e) {
+      const fresh = (e.status === 401 || e.status === 403) ? syncedToken() : undefined;
+      if (fresh && fresh !== tok) { tok = fresh; console.error('gzcoord inbox: token refused; retrying with the synced value from secrets.env'); return fn(tok); }
+      throw e;
+    }
+  };
   if (replayWhich) {
-    try { return await replay(tok, relayUrl, channel, replayWhich, me); }
+    try { return await withFreshToken(t => replay(t, relayUrl, channel, replayWhich, me)); }
     catch (e) { const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code || 1; }
   }
 
@@ -339,7 +369,7 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
     const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
-    res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address });
+    res = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address }));
   } catch (e) {
     const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code;
   }

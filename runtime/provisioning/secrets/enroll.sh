@@ -128,7 +128,7 @@ ensure_config() {
 record_config() {  # tell the account which config is its own
   local login="$1" config="$2"
   if (( DRY )); then say "would: record enclave.config=$config for $login"; return 0; fi
-  as_login "$login" bash -c 'mkdir -p -m 700 ~/.doppler; doppler configure set enclave.project "$1" enclave.config "$2" --scope / --silent' -- "$PROJECT" "$config" \
+  as_login "$login" bash -c 'mkdir -p -m 700 ~/.doppler; doppler configure set "enclave.project=$1" "enclave.config=$2" --scope / --silent' -- "$PROJECT" "$config" \
     || die "$login: could not record the config name"
 }
 
@@ -197,10 +197,16 @@ except ValueError: pass' || true)"
   # Names already in Doppler stay unless --remigrate: once enrolled, Doppler is the record.
   local upload="$TMP/$login.upload.json"
   ( umask 077; : > "$upload" )
-  python3 - "$gathered" "$upload" "$have" "$REMIGRATE" <<'PY'
+  # The GZCoord token is one shared secret: an account that never held a
+  # copy (no clone yet) gets the relay host's, read here as the coordinator.
+  local shared_bridge="${AGENT_FABRIC_RELAY_TOKEN_FILE:-$(dirname "$ROOT")/.gzcoord/bridge-token}"
+  python3 - "$gathered" "$upload" "$have" "$REMIGRATE" "$shared_bridge" <<'PY'
 import json, sys
-src, dst, have, force = sys.argv[1], sys.argv[2], set(sys.argv[3].split()), sys.argv[4] == "1"
+src, dst, have, force, bridge = sys.argv[1], sys.argv[2], set(sys.argv[3].split()), sys.argv[4] == "1", sys.argv[5]
 vals = json.load(open(src))
+if "CLAUDE_BRIDGE_AUTH_TOKEN" not in vals:
+    try: vals["CLAUDE_BRIDGE_AUTH_TOKEN"] = open(bridge).read().strip()
+    except OSError: pass
 keep = {k: v for k, v in vals.items() if force or k not in have}
 json.dump(keep, open(dst, "w"))
 print("gathered: " + ", ".join(sorted(vals)))

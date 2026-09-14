@@ -148,8 +148,8 @@ not derived knowledge.
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain --dry-run
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain
 tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \
-    --project gzapp --working-copy ~/projects/gzapp --stamp $(date +%F)
-tools/fabric/lint.py --working-copy ~/projects/gzapp
+    --project <project> --working-copy ~/projects/<working-copy> --stamp $(date +%F)
+tools/fabric/lint.py --working-copy ~/projects/<working-copy>
 ```
 
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the

@@ -139,6 +139,11 @@ def _binding_working_copy(project: str) -> str | None:
     return None
 
 
+def explicit_working_copies() -> dict[str, str]:
+    """The working copies this run was told about (set_working_copy)."""
+    return dict(_WORKING_COPIES)
+
+
 def working_copy_for(project: str) -> str | None:
     """The checkout holding `project`'s .agent-fabric/, if this run knows one."""
     if project in _WORKING_COPIES:
@@ -193,6 +198,44 @@ def project_remit_path(project: str, role: str) -> str | None:
         return None
     wc = working_copy_for(project)
     return os.path.join(wc, PROJECT_ROLES_SUBDIR, f"{role}.md") if wc else None
+
+
+def project_hygiene_path(project: str) -> str | None:
+    """A project's own banned-pattern list, in its working copy: what must
+    never appear in a slice because it names the deployment, a sibling
+    project, or anything else that is that project's to keep. The fabric
+    carries only the generic patterns (credentials, language)."""
+    wc = working_copy_for(project)
+    return os.path.join(wc, PROJECT_DIRNAME, "hygiene.json") if wc else None
+
+
+def load_hygiene_patterns(projects: list[str] | None = None) -> list[tuple]:
+    """Compiled (pattern, label) pairs: the generic ones, plus every listed
+    project's own (from <working copy>/.agent-fabric/hygiene.json, when that
+    working copy is known). Entries: {"pattern": <regex>, "label": <what it
+    is>, "flags": "i"?}."""
+    import re
+    out: list[tuple] = [
+        (re.compile(r"\bghp_[A-Za-z0-9]{10,}"), "credential"),
+        (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "credential"),
+        (re.compile(r"\bsk-[A-Za-z0-9-]{20,}"), "credential"),
+        (re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"), "credential"),
+    ]
+    for pid in projects or []:
+        path = project_hygiene_path(pid)
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            doc = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for entry in doc.get("patterns") or []:
+            flags = re.I if "i" in (entry.get("flags") or "") else 0
+            try:
+                out.append((re.compile(entry["pattern"], flags), entry.get("label") or f"{pid} hygiene"))
+            except (re.error, KeyError):
+                continue
+    return out
 
 
 def project_link_root(project: str) -> str:

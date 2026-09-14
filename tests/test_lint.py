@@ -158,9 +158,20 @@ def index_for(*entries: str) -> str:
     return "# Index\n\n" + CHARTER_LINE + "".join(entries)
 
 
-def run_lint(fabric: str) -> tuple[int, str]:
-    proc = subprocess.run([sys.executable, LINT, "--fabric", fabric], capture_output=True, text=True)
+def run_lint(fabric: str, *extra: str) -> tuple[int, str]:
+    proc = subprocess.run([sys.executable, LINT, "--fabric", fabric, *extra], capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr
+
+
+HYGIENE = {"patterns": [{"pattern": "\\bSpringfield\\b", "flags": "i", "label": "city name"}]}
+
+
+def with_project_hygiene(root: str) -> str:
+    """A working copy for the demo project carrying its own hygiene list —
+    the deployment's names are the project's to ban, not the fabric's."""
+    wc = os.path.join(root, "wc-demo")
+    write(os.path.join(wc, ".agent-fabric", "hygiene.json"), json.dumps(HYGIENE))
+    return f"{PROJECT}={wc}"
 
 
 def case_clean_base_passes() -> None:
@@ -188,7 +199,10 @@ def case_hygiene_still_runs_over_payload() -> None:
         code, out = run_lint(fabric)
         assert code == 1, f"a credential in payload passed CI:\n{out}"
         assert "credential" in out, f"the token went unreported:\n{out}"
-        assert "city name" in out, f"the banned place name went unreported:\n{out}"
+        assert "city name" not in out, f"a deployment name was banned with no project list in sight:\n{out}"
+        # The city is banned by the PROJECT's list, through its working copy.
+        code, out = run_lint(fabric, "--working-copy", with_project_hygiene(root))
+        assert code == 1 and "city name" in out, f"the banned place name went unreported:\n{out}"
 
 
 def case_slices_are_still_linted() -> None:

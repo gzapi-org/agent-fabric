@@ -59,17 +59,10 @@ BUDGET_TOKENS = 1800
 CHARS_PER_TOKEN = 4
 TIER1_BUDGET_TOKENS = 3000
 
-BANNED_PATTERNS = [
-    (re.compile(r"\bSpringfield\b", re.I), "city name"),
-    (re.compile(r"\bgeorgia\b", re.I), "country name"),
-    (re.compile(r"(?<![a-z0-9-])dcs(?![a-z0-9-])", re.I), "external project name"),
-    (re.compile(r"\bsibling-alpha\b", re.I), "external project name"),
-    (re.compile(r"\bsibling-epsilon\b", re.I), "external project name"),
-    (re.compile(r"\bsibling-delta\b", re.I), "external project name"),
-    (re.compile(r"\bSiblingBeta\b", re.I), "external project name"),
-    (re.compile(r"\bghp_[A-Za-z0-9]{10,}"), "credential"),
-    (re.compile(r"\bsk-[A-Za-z0-9]{20,}"), "credential"),
-]
+# The generic patterns plus every visible project's own list (its working
+# copy's .agent-fabric/hygiene.json), loaded in main() once the working
+# copies are known: layout.load_hygiene_patterns.
+BANNED_PATTERNS: list = []
 
 ITALIAN_MARKERS = re.compile(
     r"(?<![a-z])(perch[eé]|per[oò]|quindi|anche|questo|questa|quello|quella|"
@@ -495,6 +488,10 @@ def main() -> int:
 
     findings: list[str] = []
     schemas = os.path.join("identities", "schemas")
+    # Every project whose working copy this run knows contributes its
+    # hygiene list — whether or not that working copy holds memory yet.
+    BANNED_PATTERNS[:] = layout.load_hygiene_patterns(
+        sorted(set(layout.list_projects()) | set(layout.explicit_working_copies())))
 
     # --- the role catalogue ------------------------------------------------
     known_roles: set[str] = set()

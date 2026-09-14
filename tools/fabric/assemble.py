@@ -75,18 +75,11 @@ CLASS_FILES = {
     "threads": "threads",
 }
 
-# Hygiene: these must never reach a committed role file.
-BANNED_PATTERNS = [
-    (re.compile(r"\bSpringfield\b", re.I), "city name"),
-    (re.compile(r"\bgeorgia\b", re.I), "country name"),
-    (re.compile(r"\bdcs\b"), "external project name"),
-    (re.compile(r"\bsibling-alpha\b", re.I), "external project name"),
-    (re.compile(r"\bsibling-epsilon\b", re.I), "external project name"),
-    (re.compile(r"\bsibling-delta\b", re.I), "external project name"),
-    (re.compile(r"\bSiblingBeta\b", re.I), "external project name"),
-    (re.compile(r"\bghp_[A-Za-z0-9]{10,}"), "credential"),
-    (re.compile(r"\bsk-[A-Za-z0-9]{20,}"), "credential"),
-]
+# Hygiene: the generic patterns live in layout.load_hygiene_patterns; a
+# project's own (deployment names, sibling projects — that project's to
+# keep) come from its working copy's .agent-fabric/hygiene.json, loaded
+# once the project is known (main()).
+BANNED_PATTERNS: list = []
 
 # Italian function words that would not appear in ordinary English prose.
 ITALIAN_MARKERS = re.compile(
@@ -387,6 +380,7 @@ def main() -> int:
         layout.project_memory_root(project)
     except LookupError as exc:
         sys.exit(f"assemble: {exc}")
+    BANNED_PATTERNS[:] = layout.load_hygiene_patterns([project])
 
     def base_for(role: str, klass: str) -> str:
         """The directory a slice of `klass` for `role` lives in."""

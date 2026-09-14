@@ -70,11 +70,19 @@ def working_copy(out: str) -> str:
     return os.path.join(out, "wc-" + PROJECT)
 
 
+HYGIENE = {"patterns": [{"pattern": "\\bSpringfield\\b", "flags": "i", "label": "city name"}]}
+
+
 def run_assemble(drain: str, claims_dir: str, out: str, *extra: str) -> subprocess.CompletedProcess:
     """`out` is a throwaway agent-fabric root; domain slices land under its
     memory/domains/<role>/, project slices under the demo working copy's
-    .agent-fabric/memory/<role>/."""
-    os.makedirs(working_copy(out), exist_ok=True)
+    .agent-fabric/memory/<role>/. The working copy carries the project's
+    hygiene list (a city name), as a real one does."""
+    os.makedirs(os.path.join(working_copy(out), ".agent-fabric"), exist_ok=True)
+    hyg = os.path.join(working_copy(out), ".agent-fabric", "hygiene.json")
+    if not os.path.exists(hyg):
+        with open(hyg, "w", encoding="utf-8") as fh:
+            json.dump(HYGIENE, fh)
     return subprocess.run(
         [sys.executable, ASSEMBLE, "--claims", claims_dir, "--drain", drain,
          "--fabric", out, "--project", PROJECT, "--working-copy", working_copy(out),

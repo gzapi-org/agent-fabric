@@ -163,7 +163,7 @@ def run_lint(fabric: str, *extra: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-HYGIENE = {"patterns": [{"pattern": "\\bSpringfield\\b", "flags": "i", "label": "city name"}]}
+HYGIENE = {"patterns": [{"pattern": "\\bspringfield\\b", "flags": "i", "label": "city name"}]}
 
 
 def with_project_hygiene(root: str) -> str:

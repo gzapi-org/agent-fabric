@@ -70,7 +70,7 @@ def working_copy(out: str) -> str:
     return os.path.join(out, "wc-" + PROJECT)
 
 
-HYGIENE = {"patterns": [{"pattern": "\\bSpringfield\\b", "flags": "i", "label": "city name"}]}
+HYGIENE = {"patterns": [{"pattern": "\\bspringfield\\b", "flags": "i", "label": "city name"}]}
 
 
 def run_assemble(drain: str, claims_dir: str, out: str, *extra: str) -> subprocess.CompletedProcess:

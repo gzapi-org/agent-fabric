@@ -1,7 +1,7 @@
 # Repository settings — what lives on GitHub, not in git
 
-Recorded 2026-09-14 from `gzapi-org/agent-fabric` before it was recreated
-as a public repository with rewritten history. Everything the CI needs is
+Recorded 2026-09-14, when `gzapi-org/agent-fabric` was recreated as a public
+repository with rewritten history. Everything the CI needs is
 in the tree (`.github/workflows/ci.yml`, `tests/run.sh`, `policies/`); this
 file is the rest, and `tools/fabric/github-repo-settings.sh` reapplies it.
 
@@ -10,7 +10,7 @@ file is the rest, and `tools/fabric/github-repo-settings.sh` reapplies it.
 | setting | value |
 |---|---|
 | name | `agent-fabric` (org `gzapi-org`) |
-| visibility | **public** (was private until the rewrite) |
+| visibility | **public** |
 | description | Control plane for the agents working on sibling repositories: identities, roles, memory, model routing, GZCoord |
 | default branch | `main` |
 | features | issues on, projects on, wiki on, discussions off |
@@ -44,12 +44,10 @@ One collaborator, the owner. No teams, no webhooks.
 
 ## Elsewhere, about this repository
 
-- gzapp's CI checks this repository out to run the `.agent-fabric/`
-  guard and lint (`.github/workflows/_ban-checks.yml`), using
-  `AGENT_FABRIC_READ_TOKEN` in gzapp's Actions and Dependabot secret
-  stores. That token was a fine-grained PAT bound to the *old* repository
-  id. With this repository public, the checkout needs no token at all;
-  gzapp's workflow should stop requiring it (a PR there).
+- A managed project's CI checks this repository out to run the
+  `.agent-fabric/` guard and lint against its tree
+  (`.github/workflows/_ban-checks.yml` in gzapp). The repository is
+  public, so that checkout needs no credential.
 - Every account on the developer host holds a clone at
   `~/projects/agent-fabric` with `core.hooksPath` set by `bootstrap.sh`;
   after a history rewrite each is reset onto the new `main`.

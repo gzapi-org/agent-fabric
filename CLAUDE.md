@@ -95,6 +95,20 @@ directory, the repository, the branch or the session.
 
 ## Git discipline
 
+After each logical unit of work:
+
+- create a git commit
+
+Pushing is NOT part of that loop. Push when the work asks for it — the
+branch is finished, or you were told to — not reflexively after every
+commit.
+
+If push cannot be completed because of credentials, remote access, branch
+protection, or environment limits:
+
+- say so explicitly
+- do not claim the push succeeded
+
 Commit messages must be short, specific, and scoped to the actual change.
 Do not leave completed logical units of work uncommitted.
 

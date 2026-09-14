@@ -88,6 +88,50 @@ repository's rules, not by this protocol.
 
 `examples/observation-diagnosis.txt` is a complete example.
 
+## Asking for an undo
+
+Every message arrives late — read after an unknown delay, against a tree
+that has moved (SPEC §2). The reader verifies what it says against the
+repository before acting, so a message that asks for something to be
+undone, reverted, removed or replaced has to give the reader something to
+verify: **the defect in the change it asks to reverse**, stated as a
+fact. Without it, "revert X" read an hour later cannot be told apart from
+a message written before X was fixed, superseded or kept on purpose — and
+the reader is right to refuse it.
+
+```text
+[GZCOORD/1] REQUEST
+FROM: develop-qzapp/backend-dev-01
+ROLE: backend-dev
+TO-ROLE: fabric-coordinator
+PROJECT: gzapp
+MESSAGE-ID: 01a09fc1-…
+SUBJECT: Revert the index refresh in 21a8714f: it dropped two entries
+
+CONTEXT:
+21a8714f (gzapp #699, merged 12:16 UTC) refreshed nine INDEX.md files.
+
+OBSERVATION:
+Two of them lost an entry that is not a recall.md line:
+.agent-fabric/memory/db-admin/INDEX.md no longer lists
+workflow/migrations.md, and web-dev's no longer lists
+rationale/bundle-split.md. Both slices still exist in the tree.
+
+VERIFIED:
+- git diff 21a8714f^ 21a8714f -- .agent-fabric/memory/db-admin/INDEX.md
+  shows the line removed; the slice file is unchanged.
+- lint.py --working-copy gzapp=. passes, so the lint does not catch a
+  dropped entry — only a drifted one.
+
+REQUEST:
+Restore the two entries (a revert of the two hunks, not of the commit —
+the other seven files are correct).
+```
+
+The reader can check every line of that against the tree. A request
+that only says "please revert 21a8714f" gives it nothing to check, and
+after a delay nothing to distinguish it from noise.
+
 ## Acknowledging by reference
 
 A complete diagnosis does not stop its sender from acting on it. Unless

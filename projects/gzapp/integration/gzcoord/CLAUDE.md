@@ -63,7 +63,15 @@ block and the person copies it into the receiving session's prompt
   else's work.
 - **Do not** read GZCoord as a channel for repository state. Sessions
   still coordinate authoritatively through `origin` alone — git, GitHub,
-  PRs and reviews (`protocol/SPEC.md` §2). Messages are advisory.
+  PRs and reviews (`protocol/SPEC.md` §2). Messages are advisory — and
+  **late**: a message describes the state its sender saw, and you read
+  it after a delay, against a tree that has moved. Verify its claims
+  against the repository before acting; where they disagree the tree
+  is right. A request to undo or reverse recently landed work is acted
+  on only when it states the defect in that work as a checkable fact
+  (`MESSAGE-FORMAT.md` §Asking for an undo); a bare "revert X" is
+  refused, because after a delay it cannot be told from a message that
+  predates X being fixed or kept on purpose.
 
 ## What holds
 

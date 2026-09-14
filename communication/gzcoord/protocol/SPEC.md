@@ -42,6 +42,8 @@ A message is never authorization to act outside the receiving instance's own wor
 
 The protocol MUST NOT be used as a substitute for Git commits, pull requests, reviews, issues, ADRs, merge decisions or other authoritative project artifacts.
 
+**Delivery is asynchronous, so a message describes the past.** It was composed against the state its sender saw, and it is read after an unknown delay, by a recipient whose working copy, branch and pull requests may have moved since — including through the sender's own later work. A recipient therefore MUST verify a message's claims against the repository before acting on them, and MUST NOT act on a claim the repository contradicts; where the two disagree, the repository is right and the message is stale. A request to undo, revert, remove or replace something that was recently landed MUST state the defect that motivates it — what is wrong in the change it asks to reverse, as a fact the recipient can check — and a recipient MUST NOT reverse landed work on an undo request that states none: a bare "revert X" read after a delay is indistinguishable from a message that predates X being fixed, superseded or deliberately kept.
+
 A `DECISION` message communicates a decision; when the project requires durable recording, the decision MUST be materialized in the repository or its designated development system.
 
 ## 3. Agent address

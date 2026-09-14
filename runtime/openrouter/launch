@@ -69,7 +69,10 @@
 # meaning anything.
 #
 # CREDENTIAL: an OpenRouter API key per agent account, as
-# OPENROUTER_API_KEY in that account's ~/.bashrc — never in the repo.
+# OPENROUTER_API_KEY in that account's environment — exported by
+# ~/.config/agent-fabric/secrets.env, which `fabric-secrets sync` writes
+# from the account's own Doppler config (runtime/provisioning/README.md,
+# "Secrets") — never in the repo.
 set -uo pipefail
 
 FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)}"
@@ -232,7 +235,7 @@ src = data.get("source") if isinstance(data.get("source"), dict) else {}
 sys.exit(0 if data.get("authenticated") is True and src.get("kind") == "environment" else 1)
 PY
 then
-    die "ori is not authenticated from the environment (ori auth exit $AUTH_RC). This account needs OPENROUTER_API_KEY in ~/.bashrc — a stored \`ori login\` credential is deliberately not accepted, because per-agent spend follows the key (ori auth --json to inspect)."
+    die "ori is not authenticated from the environment (ori auth exit $AUTH_RC). This account needs OPENROUTER_API_KEY in its environment (~/.config/agent-fabric/secrets.env via fabric-secrets sync) — a stored \`ori login\` credential is deliberately not accepted, because per-agent spend follows the key (ori auth --json to inspect)."
 fi
 
 LABEL="$ROLE/$AGENT"

@@ -111,6 +111,17 @@ plane's (`test_check_charter_authority.sh`).
 - The dispatch guard still denies a subagent with no model or no worktree
   isolation and asks on a premium model.
 
+## An identity's secrets
+
+The Doppler project `agent-fabric` — one config per Linux login, holding
+that login's credentials — is `fabric-coordinator`'s: creating a config,
+migrating or rotating a value, issuing or revoking a service token
+(`runtime/provisioning/secrets/enroll.sh`). An account holds a read-only
+token for its own config and can see nothing else; `fabric-secrets sync`
+refuses a config whose `AGENT_LOGIN` is not the login running it. No
+value from that project ever enters this tree or a managed repository;
+the guards that keep credentials out of commits apply unchanged.
+
 ## Proposing a change
 
 Open a pull request touching only the file in question, say what the

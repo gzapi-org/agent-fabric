@@ -232,6 +232,7 @@ Still open:
   outlives a session — a user service, or a container — is the next
   decision, and it belongs to the runtime surface rather than to the
   protocol role.
-- **The token has to reach the other clones**, and every way of doing
-  that either writes outside the hosting workspace or commits a secret.
-  It is a deliberate open question, not an oversight.
+- ~~The token has to reach the other clones~~ — closed 2026-09-14: it
+  reaches every account as `CLAUDE_BRIDGE_AUTH_TOKEN` in the environment,
+  from the account's own Doppler config (`bin/fabric-secrets sync`); the
+  coordinator sets it once per config (`runtime/provisioning/secrets/enroll.sh`).

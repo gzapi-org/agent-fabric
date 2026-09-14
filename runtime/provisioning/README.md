@@ -36,14 +36,44 @@ directory it stands in identifies context, never identity.
    (`tools/fabric/role.py`). The binding lives under
    `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`;
    the broker launcher refuses to run without one.
-4. **For the broker path**, `OPENROUTER_API_KEY` in the account's shell
-   environment (never in a file this repository tracks) and the `ori` CLI
-   on its `PATH`; then `runtime/openrouter/launch` from the working copy
+4. **Enrol the identity's secrets** (fabric-coordinator, as root):
+   `runtime/provisioning/secrets/enroll.sh <login>` — see "Secrets" below.
+   After it, `OPENROUTER_API_KEY`, `GH_TOKEN` and the GZCoord token are in
+   the account's environment from `~/.config/agent-fabric/secrets.env`,
+   git identity and signing are set, and `runtime/openrouter/launch`
+   (with the `ori` CLI on `PATH`) runs from the working copy
    (`runtime/openrouter/README.md`).
 
 `runtime/claude-code/provision-capability-classes.sh` does step 2's
 agent-file part for every account at once, as root, when the class files
 change. `moveto/` opens a shell as another account in its working copy.
+
+## Secrets
+
+An identity's secrets are recorded in **Doppler**, project `agent-fabric`,
+**one config per Linux login** (config name == `id -un`; environment slug
+the same). Each account holds exactly one bootstrap secret — a read-only
+service token for its own config, in `~/.doppler/.doppler.yaml` — and
+everything else is derived from it:
+
+| name | consumed as |
+|---|---|
+| `AGENT_LOGIN`, `AGENT_HOST` | `fabric-secrets sync` refuses a config whose `AGENT_LOGIN` is not the login running it — the invariant, enforced at the secret boundary |
+| `OPENROUTER_API_KEY`, `GH_TOKEN`, `CLAUDE_BRIDGE_AUTH_TOKEN` | exported from `~/.config/agent-fabric/secrets.env` (0600), sourced by `~/.bashrc` |
+| `GIT_USER_NAME`, `GIT_USER_EMAIL`, `GIT_SIGNING_KEY`, `GIT_GPG_PROGRAM` | `git config --global` (strings; the signing key material stays in the keyring) |
+| `SSH_PRIVATE_KEY`, `SSH_PUBLIC_KEY` | `~/.ssh/id_ed25519(.pub)`, written only when absent (`--force` replaces) |
+
+- `bin/fabric-secrets sync` (as the account) pulls and applies; `status`
+  reports presence, modes and ages — neither prints a value.
+- `secrets/enroll.sh <login>|--all` (coordinator) creates the config,
+  migrates what the account holds today, issues the token, runs the first
+  sync and, once verified, retires the old sources (the `.bashrc` export,
+  the clone's `settings.local.json` entry, the `gh` stored login).
+- Rotation: change the value in the Doppler dashboard, then
+  `secrets/enroll.sh sync-all`. Revoking an agent is revoking one token.
+- The coordinator's own Doppler CLI token (workplace admin) is the only
+  credential that can write the project; it lives in the coordinator's
+  home and nowhere in this tree.
 
 ## What does not transfer between accounts
 

@@ -29,9 +29,12 @@ Do not create a nested Git repository, and do not vendor the subsystem.
    agent-fabric's `identities/roles/catalog.json`.
 4. Relay hosting: [`BRIDGE-RELAY-SETUP.md`](BRIDGE-RELAY-SETUP.md). The
    relay's runtime — venv, token, database, log — lives in the hosting
-   workspace's `projects/.gzcoord/`, outside every repository; each
-   working copy carries the token only in its gitignored
-   `.claude/settings.local.json` or `infra/local/.env.local`.
+   workspace's `projects/.gzcoord/`, outside every repository. Every
+   account gets the token as `CLAUDE_BRIDGE_AUTH_TOKEN` in its environment
+   from its own Doppler config (`bin/fabric-secrets sync`,
+   `runtime/provisioning/README.md` "Secrets"); the gitignored
+   `.claude/settings.local.json` `env` entry and `infra/local/.env.local`
+   remain accepted for a clone provisioned by hand.
 
 The agent's address is `<host>/<login>` (SPEC §3.1): the account the
 session runs under, not the working-copy directory. `gzapp-claude2` and

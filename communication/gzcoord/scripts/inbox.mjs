@@ -98,6 +98,9 @@ export function inboxRoot(who) {
 }
 
 // The token, from wherever this working copy keeps it; never printed, never logged.
+// The environment comes first: fabric-secrets sync exports the token
+// there from the account's Doppler config, which is how an enrolled
+// account gets it. The file lookups serve a clone provisioned by hand.
 function token(root, cfg = integrationConfig()) {
   if (process.env.CLAUDE_BRIDGE_AUTH_TOKEN) return process.env.CLAUDE_BRIDGE_AUTH_TOKEN;
   const env = path.join(root, cfg.token_env_file);

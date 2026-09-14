@@ -76,6 +76,12 @@ everything else is derived from it:
   the clone's `settings.local.json` entry, the `gh` stored login).
 - Rotation: change the value in the Doppler dashboard, then
   `secrets/enroll.sh sync-all`. Revoking an agent is revoking one token.
+- A login enrolled with names missing (an account that never had a key)
+  is completed with `secrets/enroll.sh fill-from <login> [targets…]`:
+  copies into each target only the names it lacks and the source has,
+  never the identity names, then syncs the targets. Copied values are
+  shared values — spend and provenance on them follow the source's key
+  until the target gets its own.
 - The coordinator's own Doppler CLI token (workplace admin) is the only
   credential that can write the project; it lives in the coordinator's
   home and nowhere in this tree.

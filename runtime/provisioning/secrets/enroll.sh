@@ -8,6 +8,12 @@
 #   enroll.sh --all           every account with a ~/projects/agent-fabric
 #   enroll.sh sync-all        `fabric-secrets sync` as every enrolled account
 #                             (after a rotation in the dashboard)
+#   enroll.sh fill-from <login> [<target>...]
+#                             copy into each target config (default: every
+#                             enrolled login) the names it lacks and <login>'s
+#                             config has — never a name already present;
+#                             then sync the targets. Values stay inside
+#                             doppler calls, never on a terminal.
 #   enroll.sh --dry-run ...   say what would happen; touch nothing
 #
 # Per login, in order — each step idempotent, none prints a value:
@@ -54,6 +60,7 @@ for a in "$@"; do
     --remigrate) REMIGRATE=1 ;;
     --all) MODE=all ;;
     sync-all) MODE=sync-all ;;
+    fill-from) MODE=fill-from ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     -*) echo "enroll: unknown flag $a" >&2; exit 2 ;;
     *) LOGINS+=("$a") ;;
@@ -319,12 +326,57 @@ enrol() {
   fi
 }
 
+# ---- fill-from: complete configs from another login's ---------------------
+config_of() {  # the config holding this login (recorded by enrol), or empty
+  existing_config "$1"
+}
+fill_from() {
+  local source="$1"; shift
+  local src_cfg; src_cfg="$(config_of "$source")"
+  [[ -n "$src_cfg" ]] || die "no config for $source"
+  local targets=("$@")
+  (( ${#targets[@]} )) || mapfile -t targets < <(all_logins | grep -vx "$source")
+  local login tgt_cfg have missing
+  for login in "${targets[@]}"; do
+    [[ "$login" == "$source" ]] && continue
+    tgt_cfg="$(config_of "$login")"
+    [[ -n "$tgt_cfg" ]] || { say "$login: not enrolled, skipped"; continue; }
+    have="$(doppler secrets --only-names --json --project "$PROJECT" --config "$tgt_cfg" 2>/dev/null | python3 -c '
+import json, sys
+try: print(" ".join(json.load(sys.stdin).keys()))
+except ValueError: pass')"
+    # Names the source has and the target lacks; identity names are never copied.
+    missing="$(doppler secrets --only-names --json --project "$PROJECT" --config "$src_cfg" 2>/dev/null | python3 -c '
+import json, sys
+have = set(sys.argv[1].split())
+skip = {"AGENT_LOGIN", "AGENT_HOST"}
+try: names = [n for n in json.load(sys.stdin) if not n.startswith("DOPPLER_") and n not in skip and n not in have]
+except ValueError: names = []
+print(" ".join(sorted(names)))' "$have")"
+    if [[ -z "$missing" ]]; then say "$login: nothing missing"; continue; fi
+    if (( DRY )); then say "would: copy $missing from $src_cfg into $tgt_cfg"; continue; fi
+    local upload="$TMP/$login.fill.json"; ( umask 077; : > "$upload" )
+    doppler secrets download --no-file --format json --project "$PROJECT" --config "$src_cfg" 2>/dev/null | python3 -c '
+import json, sys
+names = sys.argv[1].split(); out = sys.argv[2]
+vals = json.load(sys.stdin)
+json.dump({n: vals[n] for n in names if n in vals}, open(out, "w"))' "$missing" "$upload" || die "$login: could not read $src_cfg"
+    doppler secrets upload "$upload" --project "$PROJECT" --config "$tgt_cfg" --silent >/dev/null || die "$login: upload failed"
+    shred -u "$upload" 2>/dev/null || rm -f "$upload"
+    say "$login: copied $missing from $source"
+    as_login "$login" "$(fabric_secrets_of "$login")" sync --quiet || true
+  done
+}
+
 TMP="$(mktemp -d)"; chmod 700 "$TMP"
 trap 'rm -rf "$TMP"' EXIT
 command -v doppler >/dev/null || die "doppler CLI not on PATH"
 doppler projects get "$PROJECT" --json >/dev/null 2>&1 || die "Doppler project $PROJECT not reachable with this token"
 
 case "$MODE" in
+  fill-from)
+    (( ${#LOGINS[@]} )) || die "fill-from needs the source login"
+    fill_from "${LOGINS[@]}" ;;
   sync-all)
     for login in $(all_logins); do
       say "== $login"; as_login "$login" "$(fabric_secrets_of "$login")" sync || true

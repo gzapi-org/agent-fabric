@@ -332,6 +332,8 @@ def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str
         print(f"  (project {project}: its memory lives in its repository under "
               f"{layout.PROJECT_MEMORY_SUBDIR}/; activate from inside the working copy to load it)")
     print("\nEverything else loads on demand — consult INDEX.md when its cue matches.")
+    print("The charter is the role's function; the project's .agent-fabric/roles/<role>.md,")
+    print("when listed above, is what that function covers in this project.")
     return 0
 
 

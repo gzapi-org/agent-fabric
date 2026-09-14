@@ -14,6 +14,12 @@ query tool agree by construction:
                                         rationale, workflow, threads, crossref.json,
                                         INDEX.md — and shared/ for multi-owner
                                         project slices
+    <working copy>/.agent-fabric/roles/<role>.md
+                                        the role's REMIT in that project: which
+                                        surfaces, stack and rules the function
+                                        covers there. The charter here is the
+                                        function; the remit is the project's,
+                                        authored, and loads at activation with it.
 
 Project knowledge lives IN THE PROJECT'S REPOSITORY, not here. A `solution`
 slice describes the tree as of a date and loses to the tree; the only way it
@@ -55,6 +61,7 @@ FABRIC_ROOT = os.environ.get("AGENT_FABRIC_ROOT") or os.path.dirname(
 # into this repository.
 PROJECT_DIRNAME = ".agent-fabric"
 PROJECT_MEMORY_SUBDIR = os.path.join(PROJECT_DIRNAME, "memory")
+PROJECT_ROLES_SUBDIR = os.path.join(PROJECT_DIRNAME, "roles")
 FABRIC_LINK_PREFIX = "../agent-fabric"
 FABRIC_PROJECT_ID = "agent-fabric"
 
@@ -179,6 +186,15 @@ def project_memory_root(project: str) -> str:
     return os.path.join(wc, PROJECT_MEMORY_SUBDIR)
 
 
+def project_remit_path(project: str, role: str) -> str | None:
+    """The role's authored remit in the project's working copy, if the
+    working copy is known (None otherwise; a project need not have one)."""
+    if project_is_legacy(project):
+        return None
+    wc = working_copy_for(project)
+    return os.path.join(wc, PROJECT_ROLES_SUBDIR, f"{role}.md") if wc else None
+
+
 def project_link_root(project: str) -> str:
     """The directory INDEX.md links for this project are relative to."""
     if project_is_legacy(project):
@@ -295,6 +311,9 @@ def tier1_paths(role: str, project: str | None) -> list[str]:
     of a class, or no project context, simply yields fewer paths."""
     found = [os.path.join(role_dir(role), p) for p in slices_of(role_dir(role), "charter.md")]
     if project:
+        remit = project_remit_path(project, role)
+        if remit and os.path.isfile(remit):
+            found.append(remit)
         try:
             base = project_dir(project, role)
         except LookupError:

@@ -9,8 +9,10 @@
 # history by the clone's ABSOLUTE PATH. Renaming the directory alone
 # strands all of it under the old key; this applies the same rename to
 # every place that holds the path, as the account:
-#   ~/projects/<old>                      -> ~/projects/<new>   (mv; a tree on a
-#                                            branch with changes is refused)
+#   ~/projects/<old>                      -> ~/projects/<new>   (mv; a tree with
+#                                            uncommitted changes to tracked
+#                                            paths is refused — untracked
+#                                            files and the branch move along)
 #   ~/.claude/projects/-home-<login>-projects-<old>/
 #                                         -> …-<new>/  (transcripts, memory),
 #                                            and the "cwd" field of every
@@ -42,11 +44,16 @@ if ! sudo test -d "$oldp"; then
 fi
 
 if sudo test -d "$oldp"; then
-  dirty="$(as git -C "$oldp" status --porcelain | wc -l)"
+  # A rename loses nothing that is on disk — untracked files and the
+  # checked-out branch move with the directory — so only uncommitted
+  # changes to TRACKED paths are a reason to stop: they are work in a
+  # state the account expects to find exactly where it left it.
+  dirty="$(as git -C "$oldp" status --porcelain --untracked-files=no | wc -l)"
   branch="$(as git -C "$oldp" branch --show-current)"
-  if (( dirty )) || [[ "$branch" != "main" ]]; then
-    say "$login: $oldp is on '$branch' with $dirty changed path(s); refusing to move a tree mid-work"; exit 1
+  if (( dirty )); then
+    say "$login: $oldp ('$branch') has $dirty uncommitted change(s) to tracked paths; refusing to move a tree mid-work"; exit 1
   fi
+  [[ "$branch" == "main" ]] || say "$login: on '$branch' (committed); moving it as is"
   if (( dry )); then say "would: mv $oldp $newp"; else as mv "$oldp" "$newp" && as git -C "$newp" worktree prune && say "$login: moved to $newp"; fi
 fi
 

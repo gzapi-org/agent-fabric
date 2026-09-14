@@ -24,6 +24,11 @@
 #                             OPENROUTER_PROVISIONING_KEY (dashboard →
 #                             Settings → Provisioning Keys). Key values
 #                             go API → doppler, never through a terminal.
+#   enroll.sh set-shared <NAME> <file>
+#                             set NAME in EVERY enrolled config to the value
+#                             read from <file> (a rotation of a shared
+#                             secret such as CLAUDE_BRIDGE_AUTH_TOKEN), then
+#                             sync every account. The file is shredded.
 #   enroll.sh --dry-run ...   say what would happen; touch nothing
 #
 # Per login, in order — each step idempotent, none prints a value:
@@ -71,6 +76,7 @@ for a in "$@"; do
     --all) MODE=all ;;
     sync-all) MODE=sync-all ;;
     fill-from) MODE=fill-from ;;
+    set-shared) MODE=set-shared ;;
     issue-openrouter-keys) MODE=issue-openrouter-keys ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     -*) echo "enroll: unknown flag $a" >&2; exit 2 ;;
@@ -379,6 +385,25 @@ json.dump({n: vals[n] for n in names if n in vals}, open(out, "w"))' "$missing" 
   done
 }
 
+# ---- set-shared: one value into every config (a rotation) ----------------
+set_shared() {
+  local name="$1" file="$2"
+  [[ "$name" =~ ^[A-Z][A-Z0-9_]*$ ]] || die "not a secret name: $name"
+  [[ -r "$file" ]] || die "cannot read $file"
+  local upload="$TMP/shared.json"; ( umask 077; : > "$upload" )
+  python3 -c 'import json,sys; v=open(sys.argv[2]).read().strip(); assert v, "empty value"; json.dump({sys.argv[1]: v}, open(sys.argv[3], "w"))' "$name" "$file" "$upload" || die "could not read the value"
+  local login cfg n=0
+  for login in $(all_logins); do
+    cfg="$(config_of "$login")"; [[ -n "$cfg" ]] || { say "$login: not enrolled, skipped"; continue; }
+    if (( DRY )); then say "would: set $name in $cfg"; continue; fi
+    doppler secrets upload "$upload" --project "$PROJECT" --config "$cfg" --silent >/dev/null || die "$login: upload failed"
+    n=$((n+1))
+  done
+  shred -u "$upload" "$file" 2>/dev/null || rm -f "$upload" "$file"
+  say "$name set in $n config(s); syncing every account"
+  (( DRY )) || for login in $(all_logins); do as_login "$login" "$(fabric_secrets_of "$login")" sync --quiet || say "$login: sync reported a problem"; done
+}
+
 # ---- issue-openrouter-keys: one key per agent -----------------------------
 # Per-agent spend follows the key (runtime/openrouter/launch): an account
 # that runs on a copied key spends on someone else's. The provisioning key
@@ -432,6 +457,9 @@ case "$MODE" in
   issue-openrouter-keys)
     (( ${#LOGINS[@]} )) || die "issue-openrouter-keys needs the logins"
     issue_openrouter_keys "${LOGINS[@]}" ;;
+  set-shared)
+    (( ${#LOGINS[@]} == 2 )) || die "set-shared needs <NAME> <file>"
+    set_shared "${LOGINS[0]}" "${LOGINS[1]}" ;;
   sync-all)
     for login in $(all_logins); do
       say "== $login"; as_login "$login" "$(fabric_secrets_of "$login")" sync || true

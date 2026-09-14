@@ -12,11 +12,13 @@
 #
 # Per login, in order — each step idempotent, none prints a value:
 #   1. install the doppler CLI system-wide (once)
-#   2. environment + root config `<login>` in project agent-fabric (fallback:
-#      branch config agents_<login> when the plan refuses custom environments)
+#   2. branch config `agents_<login>` under environment `agents` in project
+#      agent-fabric (the Developer plan caps a project at four environments,
+#      so the login is the branch config, never the environment)
 #   3. MIGRATE what the account holds today into that config, gathered as
 #      the account into a 0600 temp file that is uploaded and shredded:
-#        OPENROUTER_API_KEY        `export` line in ~/.bashrc
+#        OPENROUTER_API_KEY        `export` line in ~/.bashrc, or the
+#                                  secrets.env of an earlier sync
 #        GH_TOKEN                  `gh auth token`
 #        CLAUDE_BRIDGE_AUTH_TOKEN  env.* in <clone>/.claude/settings.local.json;
 #                                  for the relay host, the runtime dir's bridge-token
@@ -37,7 +39,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
 PROJECT="${AGENT_FABRIC_SECRETS_PROJECT:-agent-fabric}"
 HOST="${AGENT_FABRIC_HOST:-$(hostname -s)}"
-FABRIC_SECRETS="$ROOT/runtime/provisioning/secrets/fabric-secrets"
+ENVIRONMENT="${AGENT_FABRIC_SECRETS_ENVIRONMENT:-agents}"
 DOPPLER_BIN="${DOPPLER_BIN:-/usr/local/bin/doppler}"
 TEMPLATE="${AGENT_FABRIC_SECRETS_TEMPLATE:-$HOME/.config/agent-fabric/identity-template.env}"
 SUDO="${SUDO:-sudo}"
@@ -55,22 +57,33 @@ for a in "$@"; do
   esac
 done
 
-say() { printf 'enroll: %s\n' "$*"; }
+# Progress goes to stderr: several steps run inside $(...) captures.
+say() { printf 'enroll: %s\n' "$*" >&2; }
 die() { printf 'enroll: %s\n' "$*" >&2; exit 1; }
 run() { if (( DRY )); then say "would: $*"; else "$@"; fi; }
-# As the account. The coordinator's own login runs directly — its gh
-# credential sits in the session keyring, which a sudo'd shell cannot open.
+# As the account, from its home (the coordinator's cwd is not readable to
+# it, and git stats the cwd even for --global). The coordinator's own
+# login runs directly — its gh credential sits in the session keyring,
+# which a sudo'd shell cannot open.
 as_login() {
   local login="$1"; shift
   if [[ "$login" == "$(id -un)" ]]; then "$@"; return; fi
-  $SUDO -u "$login" -H env -i HOME="$(home_of "$login")" PATH="/usr/local/bin:/usr/bin:/bin" "$@"
+  $SUDO -u "$login" -H env -i HOME="$(home_of "$login")" PATH="/usr/local/bin:/usr/bin:/bin" \
+    bash -c 'cd "$HOME" && exec "$@"' -- "$@"
 }
 home_of() { getent passwd "$1" | cut -d: -f6; }
+# The account's own checkout of the fabric: the coordinator's is not
+# readable to it.
+fabric_secrets_of() {
+  if [[ "$1" == "$(id -un)" ]]; then echo "$ROOT/runtime/provisioning/secrets/fabric-secrets"
+  else echo "$(home_of "$1")/projects/agent-fabric/runtime/provisioning/secrets/fabric-secrets"; fi
+}
 
 all_logins() {
   local h
+  # Homes are not readable across accounts; ask root.
   for h in /home/*; do
-    [[ -d "$h/projects/agent-fabric" ]] && basename "$h"
+    $SUDO test -d "$h/projects/agent-fabric" && basename "$h"
   done
 }
 
@@ -86,17 +99,13 @@ install_cli() {
 # ---- 2. the config -------------------------------------------------------
 config_exists() { doppler configs get "$1" --project "$PROJECT" --json >/dev/null 2>&1; }
 ensure_config() {
-  local login="$1"
-  if config_exists "$login"; then echo "$login"; return 0; fi
-  if (( DRY )); then say "would: create environment $login in $PROJECT"; echo "$login"; return 0; fi
-  if doppler environments create "$login" "$login" --project "$PROJECT" >/dev/null 2>"$TMP/env.err"; then
-    say "created environment $login"; echo "$login"; return 0
-  fi
-  say "environment create refused ($(tail -1 "$TMP/env.err")); falling back to a branch config"
-  doppler environments get agents --project "$PROJECT" >/dev/null 2>&1 \
-    || doppler environments create agents agents --project "$PROJECT" >/dev/null || die "cannot create environment agents"
-  local name="agents_$login"
-  config_exists "$name" || doppler configs create --name "$name" --environment agents --project "$PROJECT" >/dev/null || die "cannot create config $name"
+  local login="$1" name="${ENVIRONMENT}_$login"
+  if config_exists "$name"; then echo "$name"; return 0; fi
+  if (( DRY )); then say "would: create branch config $name in $PROJECT"; echo "$name"; return 0; fi
+  doppler environments get "$ENVIRONMENT" --project "$PROJECT" >/dev/null 2>&1 \
+    || doppler environments create "$ENVIRONMENT" "$ENVIRONMENT" --project "$PROJECT" >/dev/null \
+    || die "cannot create environment $ENVIRONMENT"
+  doppler configs create --name "$name" --environment "$ENVIRONMENT" --project "$PROJECT" >/dev/null || die "cannot create config $name"
   say "created branch config $name"; echo "$name"
 }
 
@@ -105,18 +114,26 @@ ensure_config() {
 # root). Values never pass through this shell's stdout.
 gather() {
   local login="$1" out="$2" home; home="$(home_of "$login")"
-  local clone; clone="$(ls -d "$home"/projects/*/ 2>/dev/null | grep -v '/agent-fabric/$' | head -1)"
   local relay_dir="$home/projects/.gzcoord"
-  as_login "$login" python3 - "$home" "${clone:-}" "$relay_dir" "$login" "$HOST" "$TEMPLATE" > "$out" <<'PY'
-import json, os, re, subprocess, sys
-home, clone, relay_dir, login, host, template = sys.argv[1:7]
+  # The template (git identity strings) is the coordinator's file; its
+  # lines travel to the account's python as arguments, never as a path.
+  local -a tpl=()
+  [[ -r "$TEMPLATE" ]] && mapfile -t tpl < <(grep -E '^[A-Z_]+=' "$TEMPLATE")
+  as_login "$login" python3 - "$home" "$relay_dir" "$login" "$HOST" "${tpl[@]}" > "$out" <<'PY'
+import glob, json, os, re, shlex, subprocess, sys
+home, relay_dir, login, host = sys.argv[1:5]
+tpl = dict(a.split("=", 1) for a in sys.argv[5:])
 vals = {"AGENT_LOGIN": login, "AGENT_HOST": host}
-# OPENROUTER_API_KEY from the .bashrc export line
-try:
-    for line in open(os.path.join(home, ".bashrc"), encoding="utf-8"):
-        m = re.match(r'^\s*export\s+OPENROUTER_API_KEY=(["\']?)(.*?)\1\s*$', line)
-        if m: vals["OPENROUTER_API_KEY"] = m.group(2)
-except FileNotFoundError: pass
+# OPENROUTER_API_KEY: the .bashrc export line, else the secrets.env of an earlier sync
+for f in (os.path.join(home, ".bashrc"), os.path.join(home, ".config", "agent-fabric", "secrets.env")):
+    try:
+        for line in open(f, encoding="utf-8"):
+            m = re.match(r'^\s*export\s+OPENROUTER_API_KEY=(.*?)\s*$', line)
+            if m and "OPENROUTER_API_KEY" not in vals:
+                vals["OPENROUTER_API_KEY"] = shlex.split(m.group(1))[0]
+    except (FileNotFoundError, IndexError, ValueError): pass
+clones = [d for d in glob.glob(os.path.join(home, "projects", "*", "")) if not d.rstrip("/").endswith("/agent-fabric")]
+clone = clones[0] if clones else ""
 # GH_TOKEN from gh
 r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
 if r.returncode == 0 and r.stdout.strip(): vals["GH_TOKEN"] = r.stdout.strip()
@@ -131,12 +148,6 @@ if not tok:
 if tok: vals["CLAUDE_BRIDGE_AUTH_TOKEN"] = tok
 # git identity + signing: strings; the template fills what the account lacks
 git = {"GIT_USER_NAME": "user.name", "GIT_USER_EMAIL": "user.email", "GIT_SIGNING_KEY": "user.signingkey", "GIT_GPG_PROGRAM": "gpg.program"}
-tpl = {}
-try:
-    for line in open(template, encoding="utf-8"):
-        if "=" in line and not line.startswith("#"):
-            k, v = line.rstrip("\n").split("=", 1); tpl[k] = v
-except OSError: pass
 for name, key in git.items():
     r = subprocess.run(["git", "config", "--global", "--get", key], capture_output=True, text=True)
     v = r.stdout.strip() if r.returncode == 0 else ""
@@ -156,7 +167,10 @@ migrate() {
   ( umask 077; : > "$gathered" )
   gather "$login" "$gathered" || die "$login: gathering failed"
   local have=""
-  have="$(doppler secrets --only-names --json --project "$PROJECT" --config "$config" 2>/dev/null | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin).keys()))' || true)"
+  have="$(doppler secrets --only-names --json --project "$PROJECT" --config "$config" 2>/dev/null | python3 -c '
+import json, sys
+try: print(" ".join(json.load(sys.stdin).keys()))
+except ValueError: pass' || true)"
   # Names already in Doppler stay unless --remigrate: once enrolled, Doppler is the record.
   local upload="$TMP/$login.upload.json"
   ( umask 077; : > "$upload" )
@@ -180,7 +194,14 @@ PY
 issue_token() {
   local login="$1" config="$2" home; home="$(home_of "$login")"
   local name="$HOST/$login"
-  if doppler configs tokens --project "$PROJECT" --config "$config" --json 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if any(t.get("name")==sys.argv[1] for t in json.load(sys.stdin)) else 1)' "$name"; then
+  # The coordinator's own login reads its config with the CLI token it
+  # already holds (workplace admin); a service token at scope / would
+  # replace that credential and lock the coordinator out of the project.
+  if [[ "$login" == "$(id -un)" ]]; then say "$login: coordinator keeps its CLI token; no service token"; return 0; fi
+  if doppler configs tokens --project "$PROJECT" --config "$config" --json 2>/dev/null | python3 -c '
+import json, sys
+try: sys.exit(0 if any(t.get("name") == sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)
+except ValueError: sys.exit(1)' "$name"; then
     say "$login: service token $name already issued; keeping the account's copy"
     return 0
   fi
@@ -196,7 +217,7 @@ issue_token() {
 sync_and_verify() {
   local login="$1"
   if (( DRY )); then say "would: fabric-secrets sync as $login and verify"; return 0; fi
-  as_login "$login" "$FABRIC_SECRETS" sync || say "$login: sync reported missing names (see above)"
+  as_login "$login" "$(fabric_secrets_of "$login")" sync || say "$login: sync reported missing names (see above)"
   local ok=1
   if as_login "$login" bash -lc 'ori auth --json' 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); sys.exit(0 if d.get("authenticated") is True and (d.get("source") or {}).get("kind")=="environment" else 1)'; then
     say "$login: ori authenticated from the environment"
@@ -234,6 +255,9 @@ for f in glob.glob(os.path.join(home, "projects", "*", ".claude", "settings.loca
         print(f"retired: CLAUDE_BRIDGE_AUTH_TOKEN in {os.path.relpath(f, home)}")
 PY
   # gh: with GH_TOKEN in the environment the stored login is a second credential; drop it.
+  # Not for the coordinator's own login: its keyring login is the session's
+  # live credential, and the exported token only reaches new shells.
+  [[ "$login" == "$(id -un)" ]] && return 0
   if as_login "$login" bash -c 'gh auth status --hostname github.com 2>&1 | grep -q hosts.yml'; then
     as_login "$login" bash -c 'gh auth logout --hostname github.com >/dev/null 2>&1' && say "$login: retired gh hosts.yml login"
   fi
@@ -242,7 +266,7 @@ PY
 enrol() {
   local login="$1"
   getent passwd "$login" >/dev/null || die "no such login: $login"
-  [[ -d "$(home_of "$login")/projects/agent-fabric" ]] || die "$login has no ~/projects/agent-fabric (bootstrap first)"
+  $SUDO test -d "$(home_of "$login")/projects/agent-fabric" || die "$login has no ~/projects/agent-fabric (bootstrap first)"
   say "== $login"
   local config; config="$(ensure_config "$login")" || exit 1
   migrate "$login" "$config"
@@ -262,7 +286,7 @@ doppler projects get "$PROJECT" --json >/dev/null 2>&1 || die "Doppler project $
 case "$MODE" in
   sync-all)
     for login in $(all_logins); do
-      say "== $login"; as_login "$login" "$FABRIC_SECRETS" sync || true
+      say "== $login"; as_login "$login" "$(fabric_secrets_of "$login")" sync || true
     done ;;
   all)
     install_cli

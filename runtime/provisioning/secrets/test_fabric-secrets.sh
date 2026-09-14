@@ -87,7 +87,7 @@ assert_eq "ssh public key written" "$(cat "$HOME/.ssh/id_ed25519.pub")" "ssh-ed2
 assert_lacks "sync output prints no value" "$out" "sk-or-FIXTURE"
 assert_lacks "sync output prints no token" "$out" "ghp_FIXTUREGH"
 assert_contains "doppler was called with the project" "$(cat "$DOPPLER_LOG")" "--project fixture-project"
-assert_contains "doppler was called with this login's config" "$(cat "$DOPPLER_LOG")" "--config $ME"
+assert_contains "doppler was called with this login's branch config" "$(cat "$DOPPLER_LOG")" "--config agents_$ME"
 
 echo "== idempotent"
 "$UNDER_TEST" sync >/dev/null 2>&1

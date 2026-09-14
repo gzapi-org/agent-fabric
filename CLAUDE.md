@@ -157,5 +157,5 @@ license as information about that project.
 Runtime state is never in this repository: your binding, role history and
 local overrides live under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`.
 Credentials never enter any committed file: an identity's secrets are in
-Doppler (project `agent-fabric`, one config per login), and
+Doppler (project `agent-fabric`, config `agents_<login>`), and
 `bin/fabric-secrets sync` puts them where the tools read them.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Logical projects agent-fabric manages. A working copy is matched to a project by its origin remote (or a .agent-fabric-project marker at its toplevel), never by its directory name. Paths here are repository-relative; machine-specific checkout locations live in each agent's runtime binding. `memory` is where the project's distilled knowledge lives INSIDE the project's working copy (fabric-coordinator's to write; every role reads it). `license` is the SPDX identifier the project's own tree carries; a project's subtree still here (projects/<id>/) carries it too, assigned in REUSE.toml, and lint refuses a disagreement.",
+  "description": "Logical projects agent-fabric manages. A working copy is matched to a project by its origin remote (or a .agent-fabric-project marker at its toplevel), never by its directory name. Paths here are repository-relative; machine-specific checkout locations live in each agent's runtime binding. `memory` is where the project's distilled knowledge lives INSIDE the project's working copy (fabric-coordinator's to write; every role reads it). `license` is the SPDX identifier the project's OWN tree carries — information about the project, not about anything here: this repository is Apache-2.0 throughout, projects/<id>/ included.",
   "projects": {
     "gzapp": {
       "title": "GZAPP transit platform",

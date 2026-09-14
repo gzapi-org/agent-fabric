@@ -341,14 +341,12 @@ def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]
 
 
 def license_findings(root: str) -> list[str]:
-    """Every project in projects/registry.json names its license, and every
-    project subtree in this repository — memory/projects/<id>/, projects/<id>/
-    — is assigned exactly that license in REUSE.toml. The fabric is
-    Apache-2.0; a project's subtrees are derived from the project and carry
-    the project's terms, so a subtree the REUSE file does not assign would
-    silently read as Apache-2.0, and an assignment that disagrees with the
-    registry is a misstatement either way. The license text itself must be
-    present under LICENSES/ for every identifier used."""
+    """This repository is one license, Apache-2.0, throughout — REUSE.toml
+    assigns nothing else, and every identifier it does use has its text
+    under LICENSES/. projects/registry.json names each project's OWN
+    license as information about that project's tree; it is required (a
+    project with no stated license cannot be reasoned about) but binds
+    nothing here. A project's knowledge never lives here at all."""
     findings: list[str] = []
     reg_path = os.path.join(root, "projects", "registry.json")
     reuse_path = os.path.join(root, "REUSE.toml")
@@ -358,40 +356,28 @@ def license_findings(root: str) -> list[str]:
         registry = json.load(open(reg_path, encoding="utf-8"))
     except (OSError, ValueError):
         return findings  # the registry's own parse is reported elsewhere
-    projects = registry.get("projects") or {}
+    for pid, entry in sorted((registry.get("projects") or {}).items()):
+        lic = entry.get("license")
+        if not isinstance(lic, str) or not lic:
+            findings.append(f"projects/registry.json: project {pid!r} names no license")
+        if os.path.isdir(os.path.join(root, "memory", "projects", pid)):
+            findings.append(f"memory/projects/{pid}/: a project's knowledge lives in the project's repository "
+                            "(<working copy>/.agent-fabric/memory/), not here")
     if not os.path.exists(reuse_path):
-        findings.append("REUSE.toml: missing; every project subtree needs a license assignment")
+        findings.append("REUSE.toml: missing; the repository states its license there")
         return findings
     try:
         import tomllib
         reuse = tomllib.load(open(reuse_path, "rb"))
     except Exception as exc:  # noqa: BLE001 - any parse failure is the finding
         return [f"REUSE.toml: does not parse ({exc})"]
-    assigned: dict[str, str] = {}
-    for ann in reuse.get("annotations") or []:
-        for glob in ann.get("path") or []:
-            assigned[glob] = ann.get("SPDX-License-Identifier", "")
     licenses_dir = os.path.join(root, "LICENSES")
-    for pid, entry in sorted(projects.items()):
-        lic = entry.get("license")
-        if not isinstance(lic, str) or not lic:
-            findings.append(f"projects/registry.json: project {pid!r} names no license")
-            continue
-        if not os.path.exists(os.path.join(licenses_dir, lic + ".txt")):
-            findings.append(f"projects/registry.json: project {pid!r} license {lic!r} has no LICENSES/{lic}.txt")
-        for sub in (f"memory/projects/{pid}", f"projects/{pid}"):
-            if not os.path.isdir(os.path.join(root, sub)):
-                continue
-            got = assigned.get(sub + "/**")
-            fabric_lic = (projects.get("agent-fabric") or {}).get("license")
-            if got is None:
-                # A project that IS the fabric needs no override: the catch-all is its license.
-                if pid == "agent-fabric" and assigned.get("**") == fabric_lic:
-                    continue
-                findings.append(f"REUSE.toml: {sub}/ is not assigned a license (registry says {lic!r}); "
-                                "it would read as the catch-all")
-            elif got != lic:
-                findings.append(f"REUSE.toml: {sub}/** is {got!r} but projects/registry.json says project {pid!r} is {lic!r}")
+    for ann in reuse.get("annotations") or []:
+        lic = ann.get("SPDX-License-Identifier", "")
+        if lic != "Apache-2.0":
+            findings.append(f"REUSE.toml: assigns {lic!r} to {ann.get('path')}; this repository is Apache-2.0 throughout")
+        if lic and not os.path.exists(os.path.join(licenses_dir, lic + ".txt")):
+            findings.append(f"REUSE.toml: {lic!r} has no LICENSES/{lic}.txt")
     return findings
 
 

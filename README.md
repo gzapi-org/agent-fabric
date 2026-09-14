@@ -93,18 +93,12 @@ tests/run.sh
 
 ## License
 
-The control plane — roles, routing, runtime, communication, policies,
-tools, tests, docs, `memory/domains/`, `memory/shared/` — is
-**Apache-2.0** (`LICENSE`). A managed project's knowledge lives in the
-project's own repository (`<working copy>/.agent-fabric/memory/`), under
-that project's license. A project's `projects/<id>/` here (its taxonomy
-and integration scripts) is derived from that project and carries **its
-license**, named per project in
-`projects/registry.json` and assigned per path in `REUSE.toml`
-(`LICENSES/` holds every text; `reuse lint` passes). gzapp's subtrees are
-proprietary and confidential, which is why this repository is private
-while they are in it. `tools/fabric/lint.py` refuses a project subtree
-with no assignment, or one that disagrees with the registry.
-
-gzapp's knowledge moved into gzapp on 2026-09-13; nothing project-derived
-remains here except `projects/gzapp/`.
+**Apache-2.0**, throughout (`LICENSE`; `REUSE.toml` assigns nothing else,
+and `reuse lint` passes). A managed project's knowledge lives in the
+project's own repository (`<working copy>/.agent-fabric/memory/`) under
+that project's license and is never here; `projects/<id>/` holds a
+project's binding and integration material, which is this repository's.
+`projects/registry.json` records each project's own license as
+information. `tools/fabric/lint.py` refuses a second license in
+`REUSE.toml`, a project with no stated license, and any project
+knowledge under `memory/projects/`.

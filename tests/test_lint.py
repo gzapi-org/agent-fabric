@@ -388,7 +388,7 @@ def case_model_profiles_schema_is_enforced() -> None:
         assert "routing/profiles.json" in out, f"the file went unnamed:\n{out}"
 
 
-def _write_license_layout(fabric: str, registry: dict, reuse_toml: str, licenses: tuple = ("Apache-2.0", "LicenseRef-demo-Proprietary")) -> None:
+def _write_license_layout(fabric: str, registry: dict, reuse_toml: str, licenses: tuple = ("Apache-2.0",)) -> None:
     os.makedirs(os.path.join(fabric, "projects"), exist_ok=True)
     with open(os.path.join(fabric, "projects", "registry.json"), "w", encoding="utf-8") as fh:
         json.dump(registry, fh)
@@ -407,18 +407,13 @@ path = ["**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "t"
 SPDX-License-Identifier = "Apache-2.0"
-[[annotations]]
-path = ["memory/projects/demo/**", "projects/demo/**"]
-precedence = "override"
-SPDX-FileCopyrightText = "t"
-SPDX-License-Identifier = "LicenseRef-demo-Proprietary"
 """
 
 
-def case_project_subtrees_carry_the_project_license() -> None:
-    """A project's memory/ and projects/ subtrees must be assigned the
-    license the registry names for it; the fabric's own catch-all is
-    Apache-2.0 and never silently covers a project subtree."""
+def case_the_repository_is_one_license() -> None:
+    """Apache-2.0 throughout: REUSE.toml may assign nothing else, every
+    identifier it uses has its text, every project names ITS OWN license
+    as information, and no project knowledge lives here."""
     registry = {"projects": {
         "agent-fabric": {"license": "Apache-2.0"},
         PROJECT: {"license": "LicenseRef-demo-Proprietary"},
@@ -427,23 +422,24 @@ def case_project_subtrees_carry_the_project_license() -> None:
         fabric = make_base(root)
         _write_license_layout(fabric, registry, REUSE_OK)
         code, out = run_lint(fabric)
-        assert code == 0, f"a consistent license layout was refused:\n{out}"
-        # no assignment for the subtree -> it would read as the catch-all
-        _write_license_layout(fabric, registry, REUSE_OK.split("[[annotations]]\npath = [\"memory")[0])
+        assert code == 0, f"a single-license layout was refused:\n{out}"
+        # a second license assigned in REUSE.toml
+        _write_license_layout(fabric, registry, REUSE_OK + '[[annotations]]\npath = ["projects/demo/**"]\nprecedence = "override"\nSPDX-FileCopyrightText = "t"\nSPDX-License-Identifier = "LicenseRef-demo-Proprietary"\n', licenses=("Apache-2.0", "LicenseRef-demo-Proprietary"))
         code, out = run_lint(fabric)
-        assert code == 1 and "projects/demo/ is not assigned" in out, f"unassigned subtree passed:\n{out}"
-        # assigned, but not what the registry says
-        _write_license_layout(fabric, registry, REUSE_OK.replace('"LicenseRef-demo-Proprietary"', '"Apache-2.0"'))
+        assert code == 1 and "Apache-2.0 throughout" in out, f"a second license passed:\n{out}"
+        # the one license has no text
+        _write_license_layout(fabric, registry, REUSE_OK, licenses=())
         code, out = run_lint(fabric)
-        assert code == 1 and "registry.json says project 'demo'" in out, f"disagreeing assignment passed:\n{out}"
-        # registry names no license at all
+        assert code == 1 and "no LICENSES/Apache-2.0.txt" in out, f"missing license text passed:\n{out}"
+        # a project naming no license at all
         _write_license_layout(fabric, {"projects": {"agent-fabric": {"license": "Apache-2.0"}, PROJECT: {}}}, REUSE_OK)
         code, out = run_lint(fabric)
         assert code == 1 and "project 'demo' names no license" in out, f"licenseless project passed:\n{out}"
-        # the identifier has no text under LICENSES/
-        _write_license_layout(fabric, registry, REUSE_OK, licenses=("Apache-2.0",))
+        # project knowledge in the fabric
+        _write_license_layout(fabric, registry, REUSE_OK)
+        os.makedirs(os.path.join(fabric, "memory", "projects", PROJECT), exist_ok=True)
         code, out = run_lint(fabric)
-        assert code == 1 and "no LICENSES/LicenseRef-demo-Proprietary.txt" in out, f"missing license text passed:\n{out}"
+        assert code == 1 and "lives in the project's repository" in out, f"project knowledge here passed:\n{out}"
 
 
 def main() -> int:
@@ -466,7 +462,7 @@ def main() -> int:
         case_model_profiles_agents_are_logins,
         case_model_profiles_unknown_role_is_refused,
         case_model_profiles_schema_is_enforced,
-        case_project_subtrees_carry_the_project_license,
+        case_the_repository_is_one_license,
     ]
     failures = 0
     for case in cases:

@@ -1,20 +1,10 @@
-# REUSE (https://reuse.software, spec 3.3) — which license each part of
-# this repository carries. One repository, two kinds of content:
-#
-#   the control plane — roles, routing, runtime, communication, policies,
-#   tools, tests, docs, memory/domains, memory/shared — is Apache-2.0;
-#
-#   a managed PROJECT's knowledge lives in the project's own repository
-#   (<working copy>/.agent-fabric/memory/) under that project's license, and
-#   is not here. What IS still here per project is projects/<id>/ — its
-#   taxonomy and integration scripts, extracted from its history — which
-#   carries THAT project's license: derived from the project, not the
-#   fabric's to relicense. projects/registry.json names the license per
-#   project; tools/fabric/lint.py refuses a project subtree this file does
-#   not assign, and an assignment that disagrees with the registry.
-#
-# Later annotations take precedence over earlier ones for the paths they
-# match, so the project subtrees are listed after the catch-all.
+# REUSE (https://reuse.software, spec 3.3) — one license for the whole
+# repository: Apache-2.0. A managed project's knowledge lives in the
+# project's own repository under its own license (<working copy>/
+# .agent-fabric/memory/), never here; projects/<id>/ here holds a project's
+# binding and integration material, which the license holder placed under
+# this repository's license on 2026-09-14. projects/registry.json records
+# each project's OWN license as information about that project's tree.
 version = 1
 SPDX-PackageName = "agent-fabric"
 SPDX-PackageSupplier = "Andrea Benetton"
@@ -25,11 +15,3 @@ path = ["**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Andrea Benetton"
 SPDX-License-Identifier = "Apache-2.0"
-
-# gzapp — proprietary and confidential (LICENSES/LicenseRef-gzapp-Proprietary.txt).
-# While these subtrees are here, the repository stays private.
-[[annotations]]
-path = ["projects/gzapp/**"]
-precedence = "override"
-SPDX-FileCopyrightText = "2026 Andrea Benetton"
-SPDX-License-Identifier = "LicenseRef-gzapp-Proprietary"

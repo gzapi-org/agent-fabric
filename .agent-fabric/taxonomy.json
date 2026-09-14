@@ -40,7 +40,7 @@
         "communication/",
         "tools/fabric/",
         "tests/",
-        "docs/migration/"
+        "docs/"
       ],
       "keywords": [
         "control plane",

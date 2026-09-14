@@ -107,7 +107,7 @@ plane's (`test_check_charter_authority.sh`).
   fences the same scopes at launch and additionally refuses
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
 - GZCoord's separation of identity claims from authentication is
-  unchanged (`docs/migration/gzcoord-addressing.md`).
+  unchanged (the extraction record, kept in the project it was extracted from).
 - The dispatch guard still denies a subagent with no model or no worktree
   isolation and asks on a premium model.
 

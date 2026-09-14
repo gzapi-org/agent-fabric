@@ -145,7 +145,7 @@ projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
 tools/fabric/   role.py, assemble.py, lint.py, routing.py, harvest*, query.sh
 tests/          python suites; tests/run.sh runs everything
-docs/migration/ how this repository was extracted from gzapp, and what maps to what
+docs/live-checks/ what was verified live, with the read-backs behind design decisions
 ```
 
 This repository is Apache-2.0 throughout (`LICENSE`, `REUSE.toml`),

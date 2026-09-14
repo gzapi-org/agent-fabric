@@ -44,7 +44,9 @@ block and the person copies it into the receiving session's prompt
   `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800`
   and turns each return into a notification — a quiet expiry ends a
   waiter as surely as a delivery, so the loop re-arms, the session does
-  not. `AGENT_FABRIC_ROOT` is real in the session's shell: the fabric
+  not. A **resume** does not restore a persistent watch (the harness
+  brings it back as a timed task that expires; 2026-09-14): re-arm it as
+  the first action after any `--resume` or post-compaction continue. `AGENT_FABRIC_ROOT` is real in the session's shell: the fabric
   `SessionStart` hook exports it through `$CLAUDE_ENV_FILE`, so the line
   above runs as written (before 2026-09-14 it did not, and a resolved
   `"$(git rev-parse --show-toplevel)/../agent-fabric"` was the

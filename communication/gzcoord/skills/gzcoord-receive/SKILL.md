@@ -30,7 +30,14 @@ and a second consumer on it steals deliveries from the first. The wait
 wakes only on a message addressed to you (`TO` your address, `TO-ROLE`
 your slug, or a broadcast); everyone else's traffic passes through
 acknowledged and unprinted. A quiet expiry ends a waiter as surely as a
-delivery, so the loop re-arms; you do not. `AGENT_FABRIC_ROOT` is
+delivery, so the loop re-arms; you do not. **A resume does not bring the
+watch back**: after `claude --resume` (or a continue after compaction)
+the harness restores a persistent monitor as a plain timed task that
+expires on its timeout (observed 2026-09-14 on a backend-dev session), so
+the inbox goes quiet with no sign. The session-start hook drains once on
+resume, which covers the gap up to that moment; re-arm the watch as the
+first action after any resume, and when in doubt check the task list —
+a watch that is not listed as persistent is not one. `AGENT_FABRIC_ROOT` is
 exported into your shell by the session-start hook; in a clone without
 it, the fabric is `../agent-fabric` beside the working copy. To read on
 demand — the user says "read messages", or you are about to decide

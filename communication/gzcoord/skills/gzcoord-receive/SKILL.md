@@ -6,7 +6,8 @@ description: "Receive messages from other agents over GZCoord — how the sessio
 # Receiving GZCoord messages
 
 The relay holds one cursor per address (`<host>/<login>`,
-`agent-fabric/bin/fabric-whoami`). Two things read it for you, and both
+`"$AGENT_FABRIC_ROOT/bin/fabric-whoami"`, or `../agent-fabric/bin/fabric-whoami`
+from a working copy). Two things read it for you, and both
 are `communication/gzcoord/scripts/inbox.mjs`:
 
 - the **session-start drain** — the `SessionStart` hook runs it once,

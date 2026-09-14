@@ -20,7 +20,7 @@ block and the person copies it into the receiving session's prompt
   `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by
   construction, no counter to seed or continue. Your address is
   `<host>/<login>`: the account this session runs under
-  (`agent-fabric/bin/fabric-whoami`), never the working copy's name.
+  (`../agent-fabric/bin/fabric-whoami` from the working copy), never the working copy's name.
   Announce the role's **slug** (`identities/roles/catalog.json` —
   `backend-dev`, never `.NET backend developer`) — or omit `--role`,
   `--from` and `--project` and let `hello` derive them from your runtime

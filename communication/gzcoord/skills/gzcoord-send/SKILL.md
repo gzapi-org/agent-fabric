@@ -6,7 +6,7 @@ description: "Send a message to another agent over GZCoord — the whole procedu
 # Sending a GZCoord message
 
 Every session on this host is a Linux login with an address
-`<host>/<login>` (`agent-fabric/bin/fabric-whoami`), and the relay
+`<host>/<login>` (`"$AGENT_FABRIC_ROOT/bin/fabric-whoami"`, or `../agent-fabric/bin/fabric-whoami` from a working copy), and the relay
 delivers what one session writes to the cursor of every other. The
 protocol is `communication/gzcoord/protocol/SPEC.md`; what a good message
 looks like is `protocol/MESSAGE-FORMAT.md`. This skill is the procedure.

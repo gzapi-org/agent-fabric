@@ -11,6 +11,15 @@
 cd "$1" || exit 1
 export MOVETO_TITLE="$2"
 
+# Entering an account is the refresh point for its secrets: pull this
+# login's Doppler config into ~/.config/agent-fabric/secrets.env before the
+# shell sources it. Best effort — offline or unenrolled, the previous file
+# stands and the shell still opens; only a problem is worth one line.
+fs="$HOME/projects/agent-fabric/bin/fabric-secrets"
+if [ -x "$fs" ]; then
+    timeout 20 "$fs" sync --quiet || true
+fi
+
 # Set the title NOW, before the first prompt. PROMPT_COMMAND alone leaves the
 # terminal showing whatever it had while this was starting up.
 # OSC 1 = icon/tab name, OSC 2 = window title. Explicit beats OSC 0, which

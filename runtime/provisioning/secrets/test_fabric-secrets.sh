@@ -140,6 +140,16 @@ out="$("$UNDER_TEST" status 2>&1)"; rc=$?
 assert_eq "status exits 1 when a name is missing in Doppler" "$rc" "1"
 assert_contains "and names it" "$out" "missing: GH_TOKEN"
 
+echo "== --quiet"
+fixture "$ME"
+out="$("$UNDER_TEST" sync --quiet 2>&1)"; rc=$?
+assert_eq "quiet sync with everything present prints nothing" "$out" ""
+assert_eq "and exits 0" "$rc" "0"
+fixture "$ME" GH_TOKEN
+out="$("$UNDER_TEST" sync --quiet 2>&1)"; rc=$?
+assert_eq "quiet sync with a missing name says so in one line" "$out" "fabric-secrets: missing in Doppler: GH_TOKEN"
+assert_eq "and exits 2" "$rc" "2"
+
 echo "== doppler unavailable"
 rm "$BIN/doppler"
 out="$("$UNDER_TEST" sync 2>&1)"; rc=$?

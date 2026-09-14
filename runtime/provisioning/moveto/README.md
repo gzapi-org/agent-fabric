@@ -13,6 +13,12 @@ moveto <account> --print       # resolve only — print path and title, spawn no
 
 `exit` returns to the shell you came from.
 
+Entering refreshes the account's secrets: `enter` runs
+`~/projects/agent-fabric/bin/fabric-secrets sync --quiet` (best effort, 20 s
+cap) before the shell sources `~/.config/agent-fabric/secrets.env`, so a value
+rotated in Doppler reaches the account at its next `moveto`. Offline or
+unenrolled, the previous file stands and only a problem prints a line.
+
 This is **host tooling, not part of the product.** It is installed to
 `/usr/local` and is not delivered by a `git clone`; this directory is the
 source, and `install.sh` is how it gets there.

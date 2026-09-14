@@ -1,11 +1,12 @@
 # `moveto`
 
-Open a shell as another role account, in that account's working clone, with the
-window title set to the session.
+Open a shell as another role account, in that account's **workspace** —
+`~/projects`, the directory a session is launched from — with the window
+title set to the session.
 
 ```
-moveto architect-cto-01        # shell as that account, in its clone
-moveto user legacy-clone-2     # name the clone when an account holds several
+moveto architect-cto-01        # shell as that account, in ~/projects
+moveto architect-cto-01 gzapp  # …in a named clone under it instead
 moveto --list                  # accounts that have at least one clone
 moveto <account> --list        # that account's clones
 moveto <account> --print       # resolve only — print path and title, spawn nothing
@@ -35,12 +36,14 @@ directory and nothing detects it — re-run the installer after any change here.
 
 ## What it assumes
 
-**The layout is `~/projects/<account>`.** Resolution order: a clone named
-explicitly on the command line, else `~/projects/<account>`, else the only
-entry in `~/projects` if there is exactly one, else it lists them and stops. An
-account whose `~/projects` is empty is reported as not provisioned rather than
-dropping you in `$HOME`, because landing somewhere unexpected is worse than
-being told.
+**The destination is the workspace, not a clone.** `~/projects` is where
+`bootstrap.sh` writes the account's `CLAUDE.md` and hooks and where `claude`
+is started; the session-start hook records whichever clone the session then
+enters. Since 2026-09-14 every account's clone is `~/projects/gzapp`, so a
+clone named on the command line is the only way into one. An account with no
+`~/projects` at all is reported as not provisioned rather than dropping you
+in `$HOME`, because landing somewhere unexpected is worse than being told;
+an empty `~/projects` is enterable (bootstrap may still have to run there).
 
 **It goes one way.** `sudo` on this host is granted through the `qubes` group,
 and the role accounts are not in it — so an account that has sudo can become a

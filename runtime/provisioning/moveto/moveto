@@ -1,5 +1,6 @@
 #!/bin/bash
-# moveto — open a shell as another role account, in its working clone.
+# moveto — open a shell as another role account, in its workspace
+# (~/projects — where a session is launched from), or in a named clone.
 #
 # Sudo on this host is granted through the `qubes` group, which the role
 # accounts are NOT in. So this works FROM an account with sudo (`user`)
@@ -19,10 +20,9 @@ die() { printf 'moveto: %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<'USAGE'
-usage: moveto <account> [clone]     open a shell as <account>, in its clone
-
-The layout is `~/projects/<account>` — architect-cto-01 is the template. Name
-a clone explicitly when an account holds more than one.
+usage: moveto <account>             open a shell as <account>, in its workspace
+                                   (~/projects: the place a session launches from)
+       moveto <account> <clone>     …in that clone (~/projects/<clone>) instead
        moveto <account> --print     print the resolved path, spawn nothing
        moveto --list                accounts that have at least one clone
        moveto <account> --list      that account's clones
@@ -85,11 +85,12 @@ list_clones() {
 }
 
 # The window title is the ROLE INSTANCE — the account — because that is what
-# names a session here. An account holding several clones is the exception:
-# its own name cannot tell two of them apart, so the clone name is used.
+# names a session here. Entering a named clone in an account that holds
+# several is the exception: its own name cannot tell two of them apart, so
+# the clone name is used.
 title_for() {
     local dir="$1" acct="$2"
-    if [[ ${#CLONES[@]} -gt 1 ]]; then
+    if [[ "$dir" != "$projects" && ${#CLONES[@]} -gt 1 ]]; then
         display_safe "${dir##*/}"
     else
         display_safe "$acct"
@@ -142,29 +143,18 @@ home=$(home_of "$account")
 projects="$home/$PROJECTS_SUBDIR"
 list_clones "$account"
 
-# Exact comparison over elements. A substring test against "${CLONES[*]}" —
-# which joins with spaces — matches a single entry like "acct backup" as though
-# a clone named "acct" existed, then dies pointing at a path nobody created.
-template_clone=""
-for c in "${CLONES[@]}"; do
-    [[ "$c" == "$account" ]] && { template_clone="$c"; break; }
-done
-
+# The destination is the WORKSPACE, ~/projects: the directory a session is
+# launched from (bootstrap writes its CLAUDE.md and hooks there; the
+# session-start hook records whichever clone the session then enters), so a
+# shell lands where `claude` would be started, not inside one clone. A named
+# clone is the explicit exception. An account with no projects/ at all is
+# not provisioned, and that is a different answer from an empty one.
+[[ "$CLONES_STATE" != "no-projects-dir" ]] \
+    || die "$account has no $PROJECTS_SUBDIR directory — not provisioned yet. See the deployment's provisioning runbook."
 if [[ -n "$target" ]]; then
     dir="$projects/$target"
-elif [[ -n "$template_clone" ]]; then
-    dir="$projects/$template_clone"
-elif [[ ${#CLONES[@]} -eq 1 ]]; then
-    dir="$projects/${CLONES[0]}"
-elif [[ ${#CLONES[@]} -eq 0 ]]; then
-    case "$CLONES_STATE" in
-        no-projects-dir) die "$account has no $PROJECTS_SUBDIR directory — not provisioned yet. See .roles/PROVISIONING.md." ;;
-        *)               die "$account has no clone yet: $projects is empty. The layout is \`~/projects/<account>\`, as on architect-cto-01." ;;
-    esac
 else
-    printf 'moveto: %s has %d clones; name one:\n' "$account" "${#CLONES[@]}" >&2
-    for c in "${CLONES[@]}"; do printf '  %s\n' "$(display_safe "$c")" >&2; done
-    exit 1
+    dir="$projects"
 fi
 
 # Verify as the target user: root can stat what the target may not, and the

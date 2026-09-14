@@ -104,41 +104,48 @@ check_status() { # <label> <expected> <actual>
     else printf '  FAIL %s: expected exit %s, got %s\n' "$1" "$2" "$3"; failures=$((failures+1)); fi
 }
 
-echo "1. template layout resolves, title is the role instance"
+echo "1. the destination is the workspace, titled by the role instance"
 out=$("$UNDER_TEST" solo --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
-check "resolves ~/projects/<account>" "/home/solo/projects/solo" "$out"
+check "resolves ~/projects — the place a session launches from" "/home/solo/projects
+" "$out"
+check_absent "not the clone" "/home/solo/projects/solo" "$out"
 check "title is the account" "title: solo" "$out"
 listed=$("$UNDER_TEST" solo --list 2>&1)
 check_absent "the workspace CLAUDE.md is not a clone" "CLAUDE.md" "$listed"
 check_absent "the agent-fabric checkout is not a clone" "agent-fabric" "$listed"
 
-echo "1b. single clone named differently: still titled by ACCOUNT"
+echo "1b. a clone named differently changes nothing: still the workspace"
 out=$("$UNDER_TEST" odd --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
-check "falls back to the only clone" "/home/odd/projects/weird-name" "$out"
-check "title is the account, NOT the clone name" "title: odd" "$out"
+check "resolves the workspace" "/home/odd/projects
+" "$out"
+check "title is the account" "title: odd" "$out"
 
-echo "2. several clones: refuses to guess"
+echo "2. several clones: the workspace, no guessing needed"
 out=$("$UNDER_TEST" many --print 2>&1); st=$?
-check_status "exits 1" 1 "$st"
-check "says how many" "many has 3 clones" "$out"
-check "lists them" "beta" "$out"
+check_status "exits 0" 0 "$st"
+check "resolves the workspace" "/home/many/projects
+" "$out"
+check "title is the account" "title: many" "$out"
 
-echo "3. several clones, one named: resolves and titles by clone"
+echo "3. several clones, one named: enters it and titles by clone"
 out=$("$UNDER_TEST" many beta --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "resolves the named clone" "/home/many/projects/beta" "$out"
 check "title is the clone" "title: beta" "$out"
+out=$("$UNDER_TEST" solo solo --print 2>&1); st=$?
+check "a single clone named explicitly is entered" "/home/solo/projects/solo" "$out"
+check "…titled by the account" "title: solo" "$out"
 
-echo "4. empty projects/ and missing projects/ are DIFFERENT answers"
+echo "4. empty projects/ is enterable; missing projects/ is not provisioned"
 out=$("$UNDER_TEST" empty --print 2>&1); st=$?
-check_status "empty exits 1" 1 "$st"
-check "empty says no clone yet" "has no clone yet" "$out"
+check_status "empty exits 0" 0 "$st"
+check "empty resolves the workspace (bootstrap may still run there)" "/home/empty/projects
+" "$out"
 out=$("$UNDER_TEST" nodir --print 2>&1); st=$?
 check_status "missing exits 1" 1 "$st"
 check "missing says not provisioned" "not provisioned yet" "$out"
-check_absent "missing does NOT claim the directory is empty" "is empty" "$out"
 
 echo "5. unknown account and unknown clone fail loudly"
 out=$("$UNDER_TEST" nosuchuser --print 2>&1); st=$?
@@ -157,18 +164,16 @@ check_absent "omits an account whose projects/ is empty" "empty" "$out"
 check_absent "omits an account with no projects/ at all" "nodir" "$out"
 
 echo "7. a clone name containing a space is usable, not a wrong path"
-out=$("$UNDER_TEST" spaced --print 2>&1); st=$?
+out=$("$UNDER_TEST" spaced "spaced backup" --print 2>&1); st=$?
 check_status "exits 0" 0 "$st"
 check "resolves the spaced clone" "/home/spaced/projects/spaced backup" "$out"
-check_absent "does not invent a path named after the account" "projects/spaced
-" "$out"
 
 echo "8. control characters in a clone name never reach the terminal"
 out=$("$UNDER_TEST" --list 2>&1)
 check "the printable part still shows" "good" "$out"
 check_absent "no ESC" "$(printf '\033')" "$out"
 check_absent "no BEL" "$(printf '\007')" "$out"
-out=$("$UNDER_TEST" esc --print 2>&1)
+out=$("$UNDER_TEST" esc "$(printf 'good\033]0;INJECTED\007tail')" --print 2>&1)
 check_absent "title carries no ESC either" "$(printf '\033')" "$out"
 
 echo "9. the named clone must be a single segment"

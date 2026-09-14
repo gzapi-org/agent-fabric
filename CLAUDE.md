@@ -126,7 +126,7 @@ identities/     roles (charter, recall, skills), the role catalogue, schemas
 memory/         domains/ agents/<login>/ shared/ — field knowledge; project knowledge is in each project
 routing/        capability classes -> models; model families -> shims; review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
-runtime/        identity.py (the resolver), claude-code/ openrouter/ provisioning/ adapters
+runtime/        identity.py (the resolver), claude-code/ openrouter/ github/ provisioning/ adapters
 projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
 tools/fabric/   role.py, assemble.py, lint.py, routing.py, harvest*, query.sh

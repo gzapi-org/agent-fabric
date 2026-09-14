@@ -1,18 +1,19 @@
 # projects/gzapp/integration/
 
 How the gzapp repository is wired to agent-fabric. Everything here is
-gzapp-specific by design and is the only place gzapp may be named outside
-`memory/projects/gzapp/` and `projects/gzapp/taxonomy.json`.
+gzapp-specific by design and, with `projects/gzapp/taxonomy.json`, the only
+place gzapp is named in this repository. gzapp's own knowledge lives in
+gzapp (`.agent-fabric/memory/`), never here.
 
 - `gzcoord/` — gzapp's use of the GZCoord protocol: the relay it hosts
   (`BRIDGE-RELAY-SETUP.md`), the channel and token locations
   (`config.json`), the subsystem context its sessions read (`CLAUDE.md`)
   and the snippet its root `CLAUDE.md` carries (`CLAUDE.snippet.md`).
-- `gh/` — the pull-request tooling gzapp's workflow uses (`pr-reply.sh`,
-  `pr-sessions.sh`). It reads the branch convention
-  `<host>/<agent>/<type>/<desc>` and the legacy working-copy registry
-  under `docs/migration/legacy-registry/` to attribute branches that
-  predate the login identity model.
-
-What gzapp itself still has to carry after the embedded copies are
-removed is listed in `docs/migration/REMOVAL-PLAN.md`.
+- `gh/` — two compatibility forwarders only. The pull-request tooling
+  (`pr-reply.sh`, `pr-sessions.sh`) is general and lives in
+  `runtime/github/`: the repository comes from the working copy it runs
+  in, the session from the login, and a project's record of the
+  directory-bound clones it once had — used to tell an heir from an
+  orphan on older branch prefixes — from `legacy_clone_bindings` in
+  `projects/registry.json`. gzapp's `tools/gh/` shims still name this
+  path; once they are repointed, `gh/` goes.

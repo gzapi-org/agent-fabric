@@ -33,8 +33,8 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
-    run "gzapp pr-reply" bash projects/gzapp/integration/gh/test_pr-reply.sh
-    run "gzapp pr-sessions" bash projects/gzapp/integration/gh/test_pr-sessions.sh
+    run "github pr-reply" bash runtime/github/test_pr-reply.sh
+    run "github pr-sessions" bash runtime/github/test_pr-sessions.sh
 fi
 
 echo

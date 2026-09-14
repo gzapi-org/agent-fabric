@@ -400,7 +400,7 @@ write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
   {number: 42, state: "OPEN",   headRefName: ($me     + "/feat/mine"),
    title: "mine",      updatedAt: $t, isDraft: false, mergedAt: null}
 ]')"
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
 assert_rc           "default scope exits 0" 0
 assert_contains     "inherited PR is in the successor's default sweep" "#40"
 assert_contains     "inherited row still shows the retired name" "gzapp-old"
@@ -414,19 +414,19 @@ else
     fail "inherited row is not marked" "$RUN_OUT"
 fi
 
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
 assert_rc           "/unattributed exits 0" 0
 assert_contains     "orphan PR is listed under /unattributed" "#41"
 assert_not_contains "inherited PR is not an orphan" "#40"
 
 # --session by MY OWN name must reach the rows I inherited, or the filter
 # is narrower than the default scope it is meant to reproduce.
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --session "$CLONE_NAME" --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --session "$CLONE_NAME" --no-threads
 assert_contains "--session finds the inherited row too" "#40"
 assert_contains "--session still finds my own row"      "#42"
 
 # CONTROL: no registry -> the old behaviour, so the registry is what changed it.
-run_env "GZAPP_CLONE_BINDINGS=$SANDBOX/fixtures/no-such.jsonl" -- --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/fixtures/no-such.jsonl" -- --no-threads
 assert_not_contains "control: without the registry the inherited PR is invisible" "#40"
 default_pr_list
 
@@ -446,10 +446,10 @@ write_pr_list "$(jq -n --arg old "$HOST/gzapp-renamed-away"     --arg t "$(ago '
   {number: 50, state: "MERGED", headRefName: ($old + "/fix/renamed"),
    title: "renamed", updatedAt: $t, isDraft: false, mergedAt: $t}
 ]')"
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
 assert_rc       "clone_id chain exits 0" 0
 assert_contains "a roleless retired row still resolves via clone_id" "#50"
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
 assert_not_contains "the chained row is NOT an orphan" "#50"
 default_pr_list
 
@@ -471,10 +471,10 @@ write_pr_list "$(jq -n --arg old "$HOST/gzapp-ambiguous"     --arg t "$(ago '1 h
   {number: 51, state: "MERGED", headRefName: ($old + "/fix/ambiguous"),
    title: "ambiguous", updatedAt: $t, isDraft: false, mergedAt: $t}
 ]')"
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
 assert_rc           "ambiguous succession exits 0" 0
 assert_not_contains "two heirs: NOT silently claimed by this clone" "#51"
-run_env "GZAPP_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
+run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
 assert_contains     "two heirs: surfaces under /unattributed instead" "#51"
 default_pr_list
 

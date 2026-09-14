@@ -353,7 +353,7 @@ mk_bindings() {
         host:$h, role:"product-i18n", valid_to:null}' >> "$BINDINGS"
 }
 mk_bindings
-MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$BINDINGS")
+MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS")
 
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
@@ -435,13 +435,13 @@ fi
 
 # CONTROLS. The registry is what changes the verdict, and everything the
 # registry does not positively call retired must FAIL CLOSED.
-MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$SANDBOX/state/no-such-registry.jsonl")
+MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/state/no-such-registry.jsonl")
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc "control: with no registry, the retired prefix is refused" 2
 
 printf 'not json at all\n' > "$SANDBOX/state/broken.jsonl"
-MOCK_ENV=(env "GZAPP_CLONE_BINDINGS=$SANDBOX/state/broken.jsonl")
+MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/state/broken.jsonl")
 thread_fixture "$HOST/gzapp-old/fix/inherited" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
 assert_rc "control: an unparseable registry fails CLOSED, not open" 2

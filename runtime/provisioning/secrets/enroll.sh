@@ -12,9 +12,12 @@
 #
 # Per login, in order — each step idempotent, none prints a value:
 #   1. install the doppler CLI system-wide (once)
-#   2. branch config `agents_<login>` under environment `agents` in project
-#      agent-fabric (the Developer plan caps a project at four environments,
-#      so the login is the branch config, never the environment)
+#   2. branch config `<env>_<login>` under environment `agents` in project
+#      agent-fabric — `agents2`, `agents3`, `agents4` once one holds its ten
+#      configs (the Developer plan: four environments of ten configs, so
+#      the login is the branch config, never the environment); the name is
+#      recorded in the account's doppler config at scope / (enclave.config)
+#      so fabric-secrets knows which config is its own
 #   3. MIGRATE what the account holds today into that config, gathered as
 #      the account into a 0600 temp file that is uploaded and shredded:
 #        OPENROUTER_API_KEY        `export` line in ~/.bashrc, or the
@@ -97,16 +100,36 @@ install_cli() {
 }
 
 # ---- 2. the config -------------------------------------------------------
-config_exists() { doppler configs get "$1" --project "$PROJECT" --json >/dev/null 2>&1; }
+existing_config() {  # the config already holding this login, if any
+  doppler configs --project "$PROJECT" --json 2>/dev/null | python3 -c '
+import json, sys
+login = sys.argv[1]
+for c in (json.load(sys.stdin) or []):
+    if c.get("name", "").endswith("_" + login) and not c.get("root"): print(c["name"]); break' "$1"
+}
 ensure_config() {
-  local login="$1" name="${ENVIRONMENT}_$login"
-  if config_exists "$name"; then echo "$name"; return 0; fi
-  if (( DRY )); then say "would: create branch config $name in $PROJECT"; echo "$name"; return 0; fi
-  doppler environments get "$ENVIRONMENT" --project "$PROJECT" >/dev/null 2>&1 \
-    || doppler environments create "$ENVIRONMENT" "$ENVIRONMENT" --project "$PROJECT" >/dev/null \
-    || die "cannot create environment $ENVIRONMENT"
-  doppler configs create --name "$name" --environment "$ENVIRONMENT" --project "$PROJECT" >/dev/null || die "cannot create config $name"
-  say "created branch config $name"; echo "$name"
+  local login="$1" name; name="$(existing_config "$login")"
+  if [[ -n "$name" ]]; then echo "$name"; return 0; fi
+  if (( DRY )); then say "would: create branch config ${ENVIRONMENT}_$login (or the next environment's) in $PROJECT"; echo "${ENVIRONMENT}_$login"; return 0; fi
+  local env
+  for env in "$ENVIRONMENT" "${ENVIRONMENT}2" "${ENVIRONMENT}3" "${ENVIRONMENT}4"; do
+    doppler environments get "$env" --project "$PROJECT" >/dev/null 2>&1 \
+      || doppler environments create "$env" "$env" --project "$PROJECT" >/dev/null 2>"$TMP/env.err" \
+      || die "cannot create environment $env: $(tail -1 "$TMP/env.err")"
+    name="${env}_$login"
+    if doppler configs create --name "$name" --environment "$env" --project "$PROJECT" >/dev/null 2>"$TMP/cfg.err"; then
+      say "created branch config $name"; echo "$name"; return 0
+    fi
+    grep -q "limit of .* configs" "$TMP/cfg.err" || die "cannot create config $name: $(tail -1 "$TMP/cfg.err")"
+    say "environment $env is full; trying the next"
+  done
+  die "every environment is full; the plan allows four of ten configs"
+}
+record_config() {  # tell the account which config is its own
+  local login="$1" config="$2"
+  if (( DRY )); then say "would: record enclave.config=$config for $login"; return 0; fi
+  as_login "$login" bash -c 'mkdir -p -m 700 ~/.doppler; doppler configure set enclave.project "$1" enclave.config "$2" --scope / --silent' -- "$PROJECT" "$config" \
+    || die "$login: could not record the config name"
 }
 
 # ---- 3. migrate ----------------------------------------------------------
@@ -219,7 +242,12 @@ sync_and_verify() {
   if (( DRY )); then say "would: fabric-secrets sync as $login and verify"; return 0; fi
   as_login "$login" "$(fabric_secrets_of "$login")" sync || say "$login: sync reported missing names (see above)"
   local ok=1
-  if as_login "$login" bash -lc 'ori auth --json' 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); sys.exit(0 if d.get("authenticated") is True and (d.get("source") or {}).get("kind")=="environment" else 1)'; then
+  if as_login "$login" bash -lc 'ori auth --json' 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin); d = d.get("data", d)
+    sys.exit(0 if d.get("authenticated") is True and (d.get("source") or {}).get("kind") == "environment" else 1)
+except (ValueError, AttributeError): sys.exit(1)'; then
     say "$login: ori authenticated from the environment"
   else
     say "$login: ori NOT authenticated from the environment (no OPENROUTER_API_KEY in Doppler?)"; ok=0
@@ -268,9 +296,16 @@ enrol() {
   getent passwd "$login" >/dev/null || die "no such login: $login"
   $SUDO test -d "$(home_of "$login")/projects/agent-fabric" || die "$login has no ~/projects/agent-fabric (bootstrap first)"
   say "== $login"
+  local home; home="$(home_of "$login")"
+  # Provisioning left ~/.config root-owned on some accounts; the account
+  # must own what fabric-secrets writes under it.
+  if $SUDO test -d "$home/.config" && [[ "$($SUDO stat -c %U "$home/.config")" != "$login" ]]; then
+    run $SUDO chown "$login:" "$home/.config"; say "$login: ~/.config handed to the account"
+  fi
   local config; config="$(ensure_config "$login")" || exit 1
   migrate "$login" "$config"
   issue_token "$login" "$config"
+  record_config "$login" "$config"
   if sync_and_verify "$login"; then
     retire_old_sources "$login"
   else

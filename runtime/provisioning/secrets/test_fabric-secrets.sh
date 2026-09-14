@@ -37,6 +37,7 @@ case "\$*" in
   "secrets download --no-file --format json "*) cat "$FIXTURE" ;;
   "secrets --only-names --json "*) python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k:{} for k in d}))' "$FIXTURE" ;;
   "configure get token --plain") echo "dp.st.stub-token-value" ;;
+  "configure get enclave.config --plain --scope /") printf '%s' "\${STUB_CONFIG:-}" ;;
   *) echo "stub: unexpected: \$*" >&2; exit 9 ;;
 esac
 STUB
@@ -90,6 +91,12 @@ assert_lacks "sync output prints no value" "$out" "sk-or-FIXTURE"
 assert_lacks "sync output prints no token" "$out" "ghp_FIXTUREGH"
 assert_contains "doppler was called with the project" "$(cat "$DOPPLER_LOG")" "--project fixture-project"
 assert_contains "doppler was called with this login's branch config" "$(cat "$DOPPLER_LOG")" "--config agents_$ME"
+
+echo "== the recorded config wins over the default name"
+: > "$DOPPLER_LOG"
+STUB_CONFIG="agents2_$ME" "$UNDER_TEST" sync >/dev/null 2>&1
+assert_contains "doppler was called with the recorded config" "$(cat "$DOPPLER_LOG")" "--config agents2_$ME"
+assert_lacks "and not the default" "$(grep download "$DOPPLER_LOG")" "--config agents_$ME"
 
 echo "== idempotent"
 "$UNDER_TEST" sync >/dev/null 2>&1

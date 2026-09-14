@@ -51,9 +51,12 @@ change. `moveto/` opens a shell as another account in its working copy.
 ## Secrets
 
 An identity's secrets are recorded in **Doppler**, project `agent-fabric`,
-**one config per Linux login**: the branch config `agents_<login>` under
-the environment `agents` (a Developer-plan project holds four environments
-at most, so the login is the branch, never the environment). Each account
+**one config per Linux login**: the branch config `<env>_<login>` under
+the environment `agents` — `agents2`, `agents3`, `agents4` once one holds
+its ten configs (a Developer-plan project: four environments of ten
+configs, so the login is the branch, never the environment; `enroll.sh`
+records the name in the account's doppler config, `enclave.config` at
+scope `/`, which is how `fabric-secrets` knows its own). Each account
 holds exactly one bootstrap secret — a read-only
 service token for its own config, in `~/.doppler/.doppler.yaml` — and
 everything else is derived from it:

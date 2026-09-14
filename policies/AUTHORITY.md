@@ -114,7 +114,7 @@ plane's (`test_check_charter_authority.sh`).
 ## An identity's secrets
 
 The Doppler project `agent-fabric` — one config per Linux login
-(`agents_<login>`), holding
+(`<env>_<login>` under `agents`, `agents2`, …), holding
 that login's credentials — is `fabric-coordinator`'s: creating a config,
 migrating or rotating a value, issuing or revoking a service token
 (`runtime/provisioning/secrets/enroll.sh`). An account holds a read-only

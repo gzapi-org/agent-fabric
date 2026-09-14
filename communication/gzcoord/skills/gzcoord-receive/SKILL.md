@@ -33,7 +33,8 @@ acknowledged and unprinted. A quiet expiry ends a waiter as surely as a
 delivery, so the loop re-arms; you do not. **A resume does not bring the
 watch back**: after `claude --resume` (or a continue after compaction)
 the harness restores a persistent monitor as a plain timed task that
-expires on its timeout (observed 2026-09-14 on a backend-dev session), so
+expires on its timeout (observed 2026-09-14 on architect-cto-01, resumed
+after its clone was renamed), so
 the inbox goes quiet with no sign. The session-start hook drains once on
 resume, which covers the gap up to that moment; re-arm the watch as the
 first action after any resume, and when in doubt check the task list —

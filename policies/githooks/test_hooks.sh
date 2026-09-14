@@ -55,7 +55,7 @@ echo "in agent-fabric itself, every commit needs the role"
 bind backend-dev; new_repo
 mkdir -p "$TMP/repo/policies"; printf '{"role_definitions":{"role":"fabric-coordinator","holders":[]}}\n' > "$TMP/repo/policies/authority.json"
 # The hooks recognise the fabric by their own location: point them at a copy living inside this repo.
-mkdir -p "$TMP/repo/policies/githooks" "$TMP/repo/runtime"; cp "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$TMP/repo/policies/githooks/"
+mkdir -p "$TMP/repo/policies/githooks" "$TMP/repo/runtime"; cp "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$HOOKS"/guarded-change.sh "$TMP/repo/policies/githooks/"
 cp "$HOOKS/../../runtime/identity.py" "$TMP/repo/runtime/"   # the hooks read the binding through their own fabric's resolver
 git -C "$TMP/repo" config core.hooksPath "$TMP/repo/policies/githooks"
 git -C "$TMP/repo" add -A; git -C "$TMP/repo" -c core.hooksPath=/dev/null commit -qm "hooks in place"
@@ -64,6 +64,26 @@ grep -q "agent-fabric itself" "$TMP/err" && pass "the refusal names the whole re
 bind fabric-coordinator
 [[ "$(try_commit src/a.txt 'code')" == 0 ]] && pass "fabric-coordinator bound: allowed" || fail "coordinator refused in fabric" "$(cat "$TMP/err")"
 git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: fabric-coordinator$' && pass "…and every fabric commit declares the role" || fail "no trailer on a fabric commit"
+
+echo "a merge that only folds main's .agent-fabric/ changes is no change of its own"
+# main gets a drain (coordinator); a backend-dev branch then folds main.
+bind fabric-coordinator; new_repo
+git -C "$TMP/repo" checkout -q -b feature; printf 'feature\n' >> "$TMP/repo/src/a.txt"; git -C "$TMP/repo" add -A
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -qm feature )
+git -C "$TMP/repo" checkout -q master 2>/dev/null || git -C "$TMP/repo" checkout -q main
+[[ "$(try_commit .agent-fabric/memory/backend-dev/workflow.md 'drain on main')" == 0 ]] || fail "setup: drain on main" "$(cat "$TMP/err")"
+git -C "$TMP/repo" checkout -q feature; bind backend-dev
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git merge -q --no-ff --no-edit "$(git rev-parse --abbrev-ref @{-1})" >/dev/null 2>"$TMP/err" ); rc=$?
+[[ $rc == 0 ]] && pass "backend-dev bound: the fold commits" || fail "the fold was refused" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -q 'Fabric-Role' && fail "a fold got a Fabric-Role trailer" || pass "…and declares no role (it changed nothing under guard)"
+[[ -z "$(git -C "$TMP/repo" diff HEAD^2 HEAD -- .agent-fabric/)" ]] && pass "…and .agent-fabric/ equals main's" || fail "fold altered .agent-fabric/"
+
+echo "a merge that also hand-edits a slice is refused"
+git -C "$TMP/repo" reset -q --hard HEAD^ ; bind backend-dev
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git merge -q --no-ff --no-commit "$(git rev-parse --abbrev-ref @{-1})" >/dev/null 2>&1; printf 'by hand\n' >> .agent-fabric/memory/backend-dev/workflow.md; git add -A; AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -qm 'fold plus edit' >/dev/null 2>"$TMP/err" ); rc=$?
+[[ $rc == 1 ]] && pass "backend-dev bound: refused" || fail "a merge carrying a hand edit was admitted"
+grep -q "this agent's binding holds: backend-dev" "$TMP/err" && pass "…by the fence" || fail "wording" "$(cat "$TMP/err")"
+( cd "$TMP/repo" && git merge --abort 2>/dev/null; git reset -q --hard )
 
 echo "the attribution ban still holds on the same hook"
 bind fabric-coordinator; new_repo

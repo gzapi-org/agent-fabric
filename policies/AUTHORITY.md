@@ -74,6 +74,13 @@ limits: text anyone can type, `--no-verify` skips the hooks. It stops
 the accident and makes the deliberate change visible. The login in the
 branch name plays no part.
 
+A merge commit that only folds a parent's `.agent-fabric/` — the routine
+"update from main" after a drain — changes nothing of its own: the hooks
+compare the staged guarded tree with each parent's and let it through
+without a trailer, exactly as the CI tripwire skips merge commits. A merge
+that also edits a slice by hand differs from both parents and is refused
+like any other change (`policies/githooks/guarded-change.sh`).
+
 ## What the tripwire can and cannot do
 
 `check_charter_authority.sh` reads the agent segment of the branch name

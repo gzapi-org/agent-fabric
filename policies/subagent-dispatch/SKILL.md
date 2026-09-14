@@ -233,10 +233,23 @@ script's agents are created by `agent(prompt, opts)` inside the script,
 and never reach it. Both fields are optional in that API and both
 default the wrong way — `model` inherits the session, `isolation` runs
 in the session's clone — and a workflow can be dozens of agents in one
-call, so the 2026-08-05 failure recurs multiplied. A hook cannot close
-this: `Workflow`'s tool input is the script *text*, so any guard would be
-string-matching rather than a structural check. The rule in the root
-file is the only place it exists.
+call, so the 2026-08-05 failure recurs multiplied. No hook can close
+this at dispatch: `Workflow`'s tool input is the script *text*, so any
+guard there would be string-matching rather than a structural check.
+The rule in the root file is the only place it exists.
+
+What can be closed is the write itself. `subagent-clone-guard.sh`
+(`runtime/claude-code/hooks/`, matched on `Write|Edit|MultiEdit|
+NotebookEdit|Bash`) denies a class subagent — the three classes, the
+reviewer, and the harness built-ins a class-less call names — whose
+`cwd` is the session clone rather than a path under
+`.claude/worktrees/`, and gives its Bash the review fence. A dispatch
+the guard above never saw still cannot edit the tree it should not be
+in; it can only report. The main session, a fork and an unknown type
+are untouched; whether a Workflow-spawned agent's tool calls carry the
+`agent_id` / `agent_type` / `cwd` fields the guard reads has not been
+observed live, and absent fields allow — it fails open there, not
+closed. Tested by `test_subagent-clone-guard.sh`.
 
 ## Isolation — what an agent actually sees
 

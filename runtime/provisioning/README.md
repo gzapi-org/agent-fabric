@@ -47,6 +47,12 @@ directory it stands in identifies context, never identity.
 `runtime/claude-code/provision-capability-classes.sh` does step 2's
 agent-file part for every account at once, as root, when the class files
 change. `moveto/` opens a shell as another account in its working copy.
+`rename-working-copy.sh <login> <old> <new>` moves a working copy and
+carries the account's Claude Code history with it — transcripts, memory,
+`~/.claude.json` project entry, prompt history, the binding — since all of
+it is keyed by the clone's absolute path (2026-09-14: every clone renamed
+from `~/projects/<login>` to `~/projects/gzapp`; a live session, or a
+tree mid-work, is refused).
 
 ## Secrets
 

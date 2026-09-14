@@ -5,6 +5,10 @@
 // Two modes, one tool:
 //   node communication/gzcoord/scripts/inbox.mjs            drain: return at once
 //   node communication/gzcoord/scripts/inbox.mjs --wait [S] block up to S seconds
+//   node communication/gzcoord/scripts/inbox.mjs --replay <seq|message-id>
+//                                        re-read ONE message already past the cursor
+//                                        (the cursor does not move; a body not
+//                                        addressed to this session is not shown)
 //                                                  TOTAL (default 1800 —
 //                                                  thirty minutes) and
 //                                                  return the moment
@@ -50,7 +54,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
 
 // Project integration: which relay, which channel, where the token and
 // the hosted relay's runtime live. The defaults are gzapp's
@@ -176,8 +180,45 @@ export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {})
     ...init,
     headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
-  if (!r.ok) throw new Error(`${pathAndQuery} -> HTTP ${r.status}`);
+  if (!r.ok) { const e = new Error(`${pathAndQuery} -> HTTP ${r.status}`); e.status = r.status; throw e; }
   return r.json();
+}
+
+// A 401 is not "unreachable": the relay answered and refused the token.
+// After a rotation every session started before it holds the dead value
+// in its environment, and the fix is a re-sync, not a retry — say so, and
+// exit 4 so a watch loop can stop instead of printing the same line for
+// the rest of the session (web-dev-01, 2026-09-14).
+function explainRelayError(e, relayUrl) {
+  if (e.status === 401 || e.status === 403)
+    return { line: `gzcoord inbox: the relay at ${relayUrl} refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync, open a login shell and re-arm the watch`, code: 4 };
+  return { line: `gzcoord inbox: relay unreachable at ${relayUrl} (${e.message}) — skipping`, code: 0 };
+}
+
+// Re-read one message that is already past this session's cursor — the
+// case where a read was piped through something that dropped the body.
+// Reads the channel's recent history (no consumer id, so no cursor moves),
+// and shows the body only when the message is addressed to this session:
+// SPEC §17 does not stop applying because the read is a replay.
+async function replay(tok, relayUrl, channel, which, me) {
+  const page = await api(tok, `/api/messages?${new URLSearchParams({ channel, limit: '500', full: '1' })}`, { relayUrl });
+  const list = page.messages ?? page;
+  // By relay seq, or by the GZCoord MESSAGE-ID inside the body (the
+  // relay's own id is a transport detail nobody quotes).
+  const midOf = r => { try { return parse(normalize(r.content)).metadata?.['MESSAGE-ID']; } catch { return undefined; } };
+  const rec = list.find(r => String(r.seq) === String(which) || r.id === which || midOf(r) === which);
+  if (!rec) { console.error(`gzcoord inbox: no message ${which} in the last ${list.length} on ${channel}`); return 1; }
+  const text = normalize(rec.content);
+  const when = rec.timestamp ?? rec.ts ?? '';
+  let msg = null; try { msg = parse(text); } catch { /* shown as metadata only */ }
+  if (!msg || !forMe(msg, me)) {
+    console.log(`relay seq ${rec.seq}, from ${rec.sender}, ${when} — not addressed to ${me.address}; body not shown (SPEC §17)`);
+    if (msg) console.log(`  ${oneLine(msg, text)}`);
+    return 2;
+  }
+  console.log(`--- relay seq ${rec.seq}, from ${rec.sender}, ${when} (replay; cursor unchanged)`);
+  console.log('```text'); console.log(text.replace(/\n$/, '')); console.log('```');
+  return 0;
 }
 
 function oneLine(msg, raw) {
@@ -256,6 +297,9 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
 
 export async function main(argv = process.argv.slice(2)) {
   const waitIdx = argv.indexOf('--wait');
+  const replayIdx = argv.indexOf('--replay');
+  const replayWhich = replayIdx >= 0 ? argv[replayIdx + 1] : null;
+  if (replayIdx >= 0 && !replayWhich) { console.error('usage: inbox.mjs --replay <seq|message-id>'); return 1; }
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
   // --keyword K, repeatable, validated BEFORE the arm starts: a bad
   // keyword refused at arm time costs nothing, refused mid-wait wastes
@@ -282,6 +326,10 @@ export async function main(argv = process.argv.slice(2)) {
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
+  if (replayWhich) {
+    try { return await replay(tok, relayUrl, channel, replayWhich, me); }
+    catch (e) { const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code || 1; }
+  }
 
   // Drain mode spends 1 s on the cursor page and lists everything; wait
   // mode chains slices until a message ADDRESSED TO THIS SESSION lands,
@@ -293,8 +341,7 @@ export async function main(argv = process.argv.slice(2)) {
     const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
     res = await waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address });
   } catch (e) {
-    console.error(`gzcoord inbox: relay unreachable at ${relayUrl} (${e.message}) — skipping`);
-    return 0;
+    const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code;
   }
   if (res.keywordHit && waitIdx >= 0) {
     const m = res.classified.find(c => c.rec.id === res.keywordHit.id);

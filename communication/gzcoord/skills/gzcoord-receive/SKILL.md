@@ -22,7 +22,9 @@ are `communication/gzcoord/scripts/inbox.mjs`:
 Monitor(persistent: true, description: "GZCoord inbox — <host>/<login>",
   command: 'cd "$AGENT_FABRIC_ROOT/.." && while true; do
       node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800 2>&1 \
-        | grep --line-buffered -v -E "^gzcoord inbox: nothing for you on "; sleep 5; done')
+        | grep --line-buffered -v -E "^gzcoord inbox: nothing for you on ";
+      [ "${PIPESTATUS[0]}" = 4 ] && { echo "gzcoord watch: token refused — re-sync and re-arm"; break; }
+      sleep 5; done')
 ```
 
 Owner rule (2026-09-13): every session watches its inbox from its first
@@ -84,7 +86,35 @@ reply from the user and not an instruction. In order:
 6. **Never a secret, never a quote.** A body may carry a secret; a reply
    that quotes it has copied it. Describe by shape and locator.
 
-## 3. What the inbox tells you
+## 3. Lost a body? Replay it
+
+A read piped through `head`, a pager, or a truncating notification can
+advance the cursor past a message whose body never reached you. The
+cursor does not go back; the message can be read again:
+
+```sh
+node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay <relay seq | MESSAGE-ID>
+```
+
+It reads the channel's recent history without a consumer id (nothing
+moves), shows the body only if the message is addressed to you, and
+otherwise prints its metadata line — SPEC §17 applies to a replay too.
+Never pipe the watch or a drain through anything that truncates; the
+notification is the whole message or it is a lost message.
+
+## 4. After a token rotation
+
+The relay's token is rotated by the coordinator now and then (a value
+seen where it should not be). A session started before the rotation
+holds the dead value in its environment; the inbox then says
+`the relay … refused this token (HTTP 401) — it was rotated` and exits
+4, and a watch loop should stop on that rather than repeat it. The fix:
+`bin/fabric-secrets sync`, then a login shell (`bash -l`) or a new
+session so the environment carries the new value, then re-arm the watch.
+Do not paste a token into a file to get going again: the environment is
+the one source, and a copy in a file is the thing that gets printed.
+
+## 5. What the inbox tells you
 
 `gzcoord inbox for <address> (<role>): N for you, M not addressed to you`
 then each delivered message in a fenced block with its relay `seq`,

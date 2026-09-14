@@ -928,3 +928,43 @@ test('send normalizes a pasted, indented message before validating', async () =>
     assert.equal(r.code, 0, r.err); assert.equal(posts[0].body.content, valid);
   });
 });
+
+// A refused token is not "unreachable": the relay answered. The inbox
+// says the token was rotated and exits 4, so a watch loop can stop.
+test('inbox reports a refused token as a rotation, exit 4', async () => {
+  const server = http.createServer((req, res) => { res.statusCode = 401; res.setHeader('connection', 'close'); res.end('{}'); });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
+  const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, err: String(err) })));
+  server.closeAllConnections(); server.close();
+  assert.equal(r.code, 4, r.err);
+  assert.match(r.err, /refused this token \(HTTP 401\) — it was rotated; run bin\/fabric-secrets sync/);
+});
+
+// --replay re-reads one message without a consumer id (the cursor does
+// not move) and shows a body only when the message is addressed to me.
+test('inbox --replay shows a broadcast, withholds a body not for me, moves no cursor', async () => {
+  const mine = `[GZCOORD/1] INFO\nFROM: x/y\nROLE: backend-dev\nPROJECT: fixture\nBROADCAST: true\nMESSAGE-ID: 01a09fc1-0000-7000-8000-00000000000a\nSUBJECT: for all\n\nNOTES:\nBODY-FOR-ALL\n`;
+  const theirs = `[GZCOORD/1] REPLY\nFROM: x/y\nROLE: backend-dev\nPROJECT: fixture\nTO: other-host/someone\nMESSAGE-ID: 01a09fc1-0000-7000-8000-00000000000b\nSUBJECT: private\n\nNOTES:\nBODY-PRIVATE\n`;
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    hits.push(req.url); res.setHeader('content-type', 'application/json'); res.setHeader('connection', 'close');
+    res.end(JSON.stringify({ channel: 'fixture:chan', messages: [
+      { seq: 7, id: 'r7', ts: 'T7', sender: 'x/y', content: mine }, { seq: 8, id: 'r8', ts: 'T8', sender: 'x/y', content: theirs }] }));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const run = args => new Promise(resolve => execFile('node', [INBOX, ...args], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
+  const a = await run(['--replay', '7']);
+  const b = await run(['--replay', '01a09fc1-0000-7000-8000-00000000000b']);
+  const c = await run(['--replay', '99']);
+  server.closeAllConnections(); server.close();
+  assert.equal(a.code, 0, a.err); assert.match(a.out, /BODY-FOR-ALL/); assert.match(a.out, /cursor unchanged/);
+  assert.equal(b.code, 2); assert.doesNotMatch(b.out, /BODY-PRIVATE/); assert.match(b.out, /not addressed to/);
+  assert.equal(c.code, 1); assert.match(c.err, /no message 99/);
+  // /status is ensureRelay's liveness probe; nothing names a consumer and nothing acks.
+  assert.ok(hits.every(u => u === '/status' || (u.startsWith('/api/messages?') && !u.includes('consumer_id'))), hits);
+  assert.ok(!hits.some(u => u.includes('/api/ack') || u.includes('/api/wait')), hits);
+});

@@ -77,11 +77,11 @@ def sub(v):
 tpl = sub(tpl)
 # Merge over an existing workspace settings file: keep everything it has,
 # add or refresh only the entries agent-fabric owns. Ownership is by the
-# hook path SHAPE (…/runtime/claude-code/hooks/…), not by the current
-# root: an entry written by an earlier bootstrap from another checkout
-# (a shared path, before an account got its own clone) must be replaced,
-# not kept beside the new one.
-OWNED = "/runtime/claude-code/hooks/"
+# hook path SHAPE (…/runtime/claude-code/hooks/…, and the GZCoord inbox
+# under communication/), not by the current root: an entry written by an
+# earlier bootstrap from another checkout (a shared path, before an
+# account got its own clone) must be replaced, not kept beside the new one.
+OWNED = ("/runtime/claude-code/hooks/", "/communication/gzcoord/scripts/inbox.mjs")
 doc = {}
 if os.path.exists(existing_path):
     try: doc = json.load(open(existing_path)) or {}
@@ -89,7 +89,7 @@ if os.path.exists(existing_path):
 doc["statusLine"] = tpl["statusLine"]
 hooks = doc.setdefault("hooks", {})
 for event, groups in tpl["hooks"].items():
-    kept = [g for g in hooks.get(event, []) if OWNED not in json.dumps(g)]
+    kept = [g for g in hooks.get(event, []) if not any(o in json.dumps(g) for o in OWNED)]
     hooks[event] = kept + groups
 json.dump(doc, open(out, "w"), indent=2)
 open(out, "a").write("\n")

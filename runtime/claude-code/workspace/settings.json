@@ -1,5 +1,5 @@
 {
-  "_comment": "Template for <projects>/.claude/settings.json, written by runtime/claude-code/bootstrap.sh with $AGENT_FABRIC_ROOT substituted. Hooks resolve the agent from the OS and show the working copy as context; nothing here names an agent or a project.",
+  "_comment": "Template for <projects>/.claude/settings.json, written by runtime/claude-code/bootstrap.sh with $AGENT_FABRIC_ROOT substituted. Hooks resolve the agent from the OS and show the working copy as context; nothing here names an agent or a project. The GZCoord inbox drains here too: started in the workspace, a session is outside any checkout, and the inbox reads the project and its token from the binding.",
   "statusLine": {
     "type": "command",
     "command": "bash \"$AGENT_FABRIC_ROOT/runtime/claude-code/hooks/statusline.sh\""
@@ -17,6 +17,15 @@
             "type": "command",
             "command": "bash \"$AGENT_FABRIC_ROOT/runtime/claude-code/hooks/tab-title.sh\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs\"; [ -f \"$f\" ] && node \"$f\"; true",
+            "timeout": 60
           }
         ]
       }

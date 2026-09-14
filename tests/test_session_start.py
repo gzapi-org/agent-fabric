@@ -85,6 +85,7 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     settings = json.load(open(os.path.join(projects, ".claude", "settings.json"), encoding="utf-8"))
     hooks = json.dumps(settings["hooks"])
     assert "session-start.sh" in hooks and "agent-dispatch-guard.sh" in hooks and ROOT in hooks
+    assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert os.path.isfile(os.path.join(home, ".claude", "commands", "role.md"))
     for f in ("code-low.md", "code-medium.md", "code-high.md"):

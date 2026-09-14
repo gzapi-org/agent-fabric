@@ -690,7 +690,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -822,4 +822,24 @@ test('waitLoop --keyword: a passing non-addressed message ends the arm with code
     fetchPage: async () => ({ messages: [rec('m9', 'INFO', 'TO: develop-qzapp/web-dev-01\n')] }),
     ack: async () => {}, waitTotal: 4, forMeFn: msg => forMe(msg, me), keywords: checkKeywords(['663']), ownAddress: me.address });
   assert.equal(r3.keywordHit, null); assert.equal(r3.delivered, false); assert.equal(r3.waited, 4);
+});
+
+// The inbox reads its token and integration from the project's working
+// copy. A session started in the workspace (projects/, no git toplevel)
+// still has one: the binding names the checkout the role was activated
+// in. Found live on architect-cto-01, 2026-09-14: the workspace launch
+// drained nothing because the root fell back to the cwd.
+test('inboxRoot uses the binding working copy outside a checkout', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'inbox-root-'));
+  const wc = path.join(tmp, 'clone'); fs.mkdirSync(wc);
+  const binding = path.join(tmp, 'binding.json');
+  fs.writeFileSync(binding, JSON.stringify({ working_copy: wc }));
+  const cwd = process.cwd();
+  try {
+    process.chdir(tmp);                       // tmp is outside any repository
+    assert.equal(inboxRoot({ working_copy: null, binding }), wc);
+    assert.equal(inboxRoot({ working_copy: wc, binding: '/nonexistent' }), wc);
+    fs.rmSync(wc, { recursive: true });
+    assert.equal(inboxRoot({ working_copy: null, binding }), tmp, 'a vanished working copy falls back to the cwd');
+  } finally { process.chdir(cwd); fs.rmSync(tmp, { recursive: true, force: true }); }
 });

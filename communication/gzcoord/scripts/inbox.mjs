@@ -68,9 +68,24 @@ function integrationConfig(project) {
 // main() resolves the project's own values.
 const RELAY = process.env.CLAUDE_BRIDGE_URL ?? 'http://127.0.0.1:8765';
 
-function repoRoot() {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(); }
-  catch { return process.cwd(); }
+function gitToplevel() {
+  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+  catch { return null; }
+}
+// The working copy the inbox reads its token and integration from. Inside
+// a checkout that is the checkout. Outside one — a session started in the
+// workspace (projects/) — identity.py reports the project from the binding
+// but no working copy, so the binding's own working_copy (the checkout the
+// role was activated in) is the root; the cwd is only the last resort.
+export function inboxRoot(who) {
+  const top = gitToplevel();
+  if (top) return top;
+  if (who.working_copy) return who.working_copy;
+  try {
+    const b = JSON.parse(fs.readFileSync(who.binding, 'utf8'));
+    if (b.working_copy && fs.existsSync(b.working_copy)) return b.working_copy;
+  } catch { /* no binding */ }
+  return process.cwd();
 }
 
 // The token, from wherever this working copy keeps it; never printed, never logged.
@@ -229,11 +244,14 @@ export async function main(argv = process.argv.slice(2)) {
   // keyword refused at arm time costs nothing, refused mid-wait wastes
   // the budget.
   const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
-  const root = repoRoot();
   // Who this session is (the login) and which project it is working in
-  // (from the working copy's remote) — the second selects the project's
-  // integration: relay, channel, where the token and runtime live.
+  // (from the working copy's remote, or the binding) — the second selects
+  // the project's integration: relay, channel, where the token and runtime
+  // live. Those live in the project's WORKING COPY: when the session was
+  // started outside one (the workspace, projects/), the working copy the
+  // binding names is the root, not the current directory.
   const who = whoami();
+  const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
   const relayUrl = process.env.CLAUDE_BRIDGE_URL ?? cfg.relay_url;
   const channel = process.env.GZCOORD_CHANNEL ?? cfg.channel;

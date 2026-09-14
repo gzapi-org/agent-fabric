@@ -14,6 +14,16 @@
 #                             config has — never a name already present;
 #                             then sync the targets. Values stay inside
 #                             doppler calls, never on a terminal.
+#   enroll.sh issue-openrouter-keys <login>...
+#                             give each login an OpenRouter API key of its
+#                             own (named after the login, as the existing
+#                             keys are) and set it in its
+#                             config, replacing a shared one; needs the
+#                             coordinator's OpenRouter PROVISIONING key in
+#                             the coordinator's own Doppler config as
+#                             OPENROUTER_PROVISIONING_KEY (dashboard →
+#                             Settings → Provisioning Keys). Key values
+#                             go API → doppler, never through a terminal.
 #   enroll.sh --dry-run ...   say what would happen; touch nothing
 #
 # Per login, in order — each step idempotent, none prints a value:
@@ -61,6 +71,7 @@ for a in "$@"; do
     --all) MODE=all ;;
     sync-all) MODE=sync-all ;;
     fill-from) MODE=fill-from ;;
+    issue-openrouter-keys) MODE=issue-openrouter-keys ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     -*) echo "enroll: unknown flag $a" >&2; exit 2 ;;
     *) LOGINS+=("$a") ;;
@@ -368,6 +379,47 @@ json.dump({n: vals[n] for n in names if n in vals}, open(out, "w"))' "$missing" 
   done
 }
 
+# ---- issue-openrouter-keys: one key per agent -----------------------------
+# Per-agent spend follows the key (runtime/openrouter/launch): an account
+# that runs on a copied key spends on someone else's. The provisioning key
+# is read from the coordinator's config inside python and used there only.
+issue_openrouter_keys() {
+  local me_cfg; me_cfg="$(config_of "$(id -un)")"
+  [[ -n "$me_cfg" ]] || die "no config for $(id -un)"
+  local login tgt_cfg
+  for login in "$@"; do
+    tgt_cfg="$(config_of "$login")"
+    [[ -n "$tgt_cfg" ]] || { say "$login: not enrolled, skipped"; continue; }
+    if (( DRY )); then say "would: create OpenRouter key $login and set OPENROUTER_API_KEY in $tgt_cfg"; continue; fi
+    local upload="$TMP/$login.orkey.json"; ( umask 077; : > "$upload" )
+    python3 - "$PROJECT" "$me_cfg" "$login" "$upload" <<'PY' || die "$login: key creation failed"
+import json, subprocess, sys, urllib.request
+project, me_cfg, name, out = sys.argv[1:5]
+r = subprocess.run(["doppler", "secrets", "get", "OPENROUTER_PROVISIONING_KEY", "--plain",
+                    "--project", project, "--config", me_cfg], capture_output=True, text=True)
+prov = r.stdout.strip()
+if r.returncode != 0 or not prov:
+    print("enroll: OPENROUTER_PROVISIONING_KEY is not in the coordinator's config", file=sys.stderr); sys.exit(1)
+req = urllib.request.Request("https://openrouter.ai/api/v1/keys",
+                             data=json.dumps({"name": name}).encode(),
+                             headers={"Authorization": f"Bearer {prov}", "Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(req) as resp: body = json.load(resp)
+except urllib.error.HTTPError as e:
+    print(f"enroll: OpenRouter refused ({e.code}): {e.read()[:200].decode(errors='replace')}", file=sys.stderr); sys.exit(1)
+key = body.get("key") or (body.get("data") or {}).get("key")
+if not key:
+    print("enroll: OpenRouter returned no key", file=sys.stderr); sys.exit(1)
+json.dump({"OPENROUTER_API_KEY": key}, open(out, "w"))
+print(f"enroll: created OpenRouter key {name} (hash {(body.get('data') or {}).get('hash', '?')[:12]}…)", file=sys.stderr)
+PY
+    doppler secrets upload "$upload" --project "$PROJECT" --config "$tgt_cfg" --silent >/dev/null || die "$login: upload failed"
+    shred -u "$upload" 2>/dev/null || rm -f "$upload"
+    say "$login: OPENROUTER_API_KEY set in $tgt_cfg"
+    as_login "$login" "$(fabric_secrets_of "$login")" sync --quiet || true
+  done
+}
+
 TMP="$(mktemp -d)"; chmod 700 "$TMP"
 trap 'rm -rf "$TMP"' EXIT
 command -v doppler >/dev/null || die "doppler CLI not on PATH"
@@ -377,6 +429,9 @@ case "$MODE" in
   fill-from)
     (( ${#LOGINS[@]} )) || die "fill-from needs the source login"
     fill_from "${LOGINS[@]}" ;;
+  issue-openrouter-keys)
+    (( ${#LOGINS[@]} )) || die "issue-openrouter-keys needs the logins"
+    issue_openrouter_keys "${LOGINS[@]}" ;;
   sync-all)
     for login in $(all_logins); do
       say "== $login"; as_login "$login" "$(fabric_secrets_of "$login")" sync || true

@@ -57,8 +57,8 @@ Co-authored-by: Someone <someone@example.invalid>"
 # footer turned three fixture assertions red, naming the description rather
 # than the fixture. A self-test must not read the ambient event.
 ISOLATE=(env -u GITHUB_EVENT_PATH -u GITHUB_BASE_REF -u GITHUB_HEAD_REF)
-run_guard() { ( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main bash "$UNDER_TEST" 2>&1 ); }
-guard_rc()  { ( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main bash "$UNDER_TEST" >/dev/null 2>&1; echo $? ); }
+run_guard() { ( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main bash "$UNDER_TEST" 2>&1 ); }
+guard_rc()  { ( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main bash "$UNDER_TEST" >/dev/null 2>&1; echo $? ); }
 
 expect_rc() {
     local label="$1" want="$2" got
@@ -172,7 +172,7 @@ new_repo
 setup git -C "$repo" commit -q --allow-empty -m "feat: clean commit"
 ev="$SANDBOX/event.json"
 printf '{"pull_request":{"body":"Some description.\\n\\nGenerated with [Claude Code](https://example.invalid)\\n"}}' > "$ev"
-rc="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
+rc="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
 if [[ "$rc" == "1" ]]; then
     pass "a PR description carrying the footer fails"
 else
@@ -180,7 +180,7 @@ else
 fi
 
 printf '{"pull_request":{"body":"An ordinary description with no attribution.\\n"}}' > "$ev"
-rc="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
+rc="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
 if [[ "$rc" == "0" ]]; then
     pass "an ordinary PR description passes"
 else
@@ -189,7 +189,7 @@ fi
 
 # A merge_group payload has no pull_request key; that must not be an error.
 printf '{"merge_group":{"head_sha":"deadbeef"}}' > "$ev"
-rc="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
+rc="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" >/dev/null 2>&1; echo $? )"
 if [[ "$rc" == "0" ]]; then
     pass "a payload with no PR body is not an error"
 else
@@ -203,7 +203,7 @@ new_repo
 setup git -C "$repo" commit -q --allow-empty -m "feat: work
 
 Co-authored-by: Claude <noreply@anthropic.invalid>"
-out="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=refs/nope bash "$UNDER_TEST" 2>&1 )"
+out="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=refs/nope bash "$UNDER_TEST" 2>&1 )"
 rc=$?
 if [[ "$rc" == "1" ]] && grep -q "FAIL" <<<"$out"; then
     pass "a bad override is not used unverified — the chain falls through"
@@ -225,7 +225,7 @@ setup git -C "$orphan" config commit.gpgsign false
 setup git -C "$orphan" commit -q --allow-empty -m "work
 
 Co-authored-by: Claude <noreply@anthropic.invalid>"
-out="$( cd "$orphan" && "${ISOLATE[@]}" env -u GZAPP_ATTRIBUTION_BASE bash "$UNDER_TEST" 2>&1 )"
+out="$( cd "$orphan" && "${ISOLATE[@]}" env -u AGENT_FABRIC_ATTRIBUTION_BASE bash "$UNDER_TEST" 2>&1 )"
 rc=$?
 if [[ "$rc" == "0" ]] && grep -q "NOT ENFORCED" <<<"$out" && ! grep -q "OK —" <<<"$out"; then
     pass "no resolvable range: exits 0, says NOT ENFORCED, never says OK"
@@ -236,7 +236,7 @@ fi
 # Same rule for the description half: a payload it cannot read is not a pass.
 new_repo
 setup git -C "$repo" commit -q --allow-empty -m "feat: clean commit"
-out="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main \
+out="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main \
         GITHUB_EVENT_PATH="$SANDBOX/not-a-file.json" bash "$UNDER_TEST" 2>&1 )"
 rc=$?
 if [[ "$rc" == "0" ]] && grep -q "NOT ENFORCED" <<<"$out"; then
@@ -246,7 +246,7 @@ else
 fi
 
 printf 'this is not json{' > "$ev"
-out="$( cd "$repo" && "${ISOLATE[@]}" GZAPP_ATTRIBUTION_BASE=main \
+out="$( cd "$repo" && "${ISOLATE[@]}" AGENT_FABRIC_ATTRIBUTION_BASE=main \
         GITHUB_EVENT_PATH="$ev" bash "$UNDER_TEST" 2>&1 )"
 rc=$?
 if [[ "$rc" == "0" ]] && grep -q "NOT ENFORCED" <<<"$out"; then

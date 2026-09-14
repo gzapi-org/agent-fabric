@@ -319,7 +319,7 @@ def test_unattributable_rows_warn_loudly_but_do_not_fail_the_drain(tmp: str) -> 
     assert "PROVISIONAL BINDINGS" in proc.stderr, proc.stderr
     assert "41 of 60" in proc.stderr, proc.stderr
     # The remedy has to be in the message: it is not doable from here.
-    assert "agent map" in proc.stderr, proc.stderr
+    assert "harvest_memory.py" in proc.stderr, proc.stderr
 
 
 def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:

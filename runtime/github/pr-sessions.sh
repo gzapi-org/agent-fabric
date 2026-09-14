@@ -338,90 +338,15 @@ fi
 # one-item pool and had therefore not been omitted by anything. Sharing
 # the pipeline is what keeps the two answers about the same set by
 # construction, rather than by two pipelines happening to agree.
-# RETIRED CLONES. A prefix that parses as a session may name one that was
-# retired and replaced. Its PRs keep the old prefix forever, so without
-# this they appear in nobody's sweep: not the successor's (different
-# name), not /unattributed (the branch parses).
-#
-# THE RECORD, when a deployment keeps one, is the file AGENT_FABRIC_CLONE_BINDINGS names
-# -- the working copies that existed under the directory-bound identity
-# model, kept as migration data. New sessions are agents (logins), which
-# are not registered and do not retire when a directory does; this
-# succession logic applies to the legacy prefixes only.
-# A clone is retired when every window for it is
-# closed. A retired clone WITH a successor is OWNED by the successor --
-# scoped into its default sweep, marked as its own -- while still
-# DISPLAYING the retired name, because that is where the work lives. One
-# with no successor is nobody's and joins the /unattributed rows. Anything
-# the registry does not positively record as retired stays LIVE, which is
-# the pre-existing behaviour.
-#
-# SUCCESSION IS RESOLVED TWICE, most reliable first.
-#
-#   1. clone_id CONTINUITY. A working copy that is renamed keeps its
-#      clone_id, so the row that closed and the row now open are the same
-#      clone under two names. That is exact, and it is how
-#      a pre-rename clone name -> its successor account resolves. Nothing about the
-#      directory NAME is consulted: names carry no scheme to key on --
-#      some clones are numbered (backend-dev-01, backend-dev-02) and some
-#      are not (db-admin, devex-tooling) -- so any rule reading the name
-#      would be guessing.
-#
-#   2. A UNIQUE live holder of the same role on the same host. The
-#      fallback for a genuinely new working copy that took over a retired
-#      one's work, where no clone_id links them.
-#
-# THE FALLBACK REQUIRES EXACTLY ONE HEIR, and that is the point rather
-# than an edge case. A role is a slug (`backend-dev`), while a clone is a
-# working copy, and one role can be held by two live clones at once --
-# backend-dev-01 and backend-dev-02 both do. The first version took
-# $heirs[0], so with two holders it silently handed a retired clone's PRs
-# to whichever sorted first, letting the WRONG session reply and refusing
-# the right one. Ambiguous now means unowned: the rows surface under
-# /unattributed, where a person can see them, instead of being quietly
-# misassigned. Record a rename (which keeps the clone_id) to make it exact.
-# A record of directory-bound clones — which working copy succeeded which
-# under the retired identity model — is optional and, today, absent: with
-# none, every older-prefix branch reads as live (nobody inherits it, nobody
-# is refused). AGENT_FABRIC_CLONE_BINDINGS (or the older GZAPP_CLONE_BINDINGS)
-# names one when a deployment keeps such a record — visibly, below.
-CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}"
-INHERIT_JSON='{}'; ORPHANS_JSON='[]'
-if [[ -r "$CLONE_BINDINGS" ]]; then
-    registry="$(jq -s '
-        def open: (.valid_to == null or .valid_to == "");
-        . as $all
-        | ( [ $all[] | {h: .host, d: .dir_basename} ] | unique ) as $clones
-        | reduce $clones[] as $c ({inherit: {}, orphans: []};
-            ( [ $all[] | select(.host == $c.h and .dir_basename == $c.d) ] ) as $mine
-            | if ($mine | map(select(open)) | length) > 0 then .
-              else
-                ( $mine | sort_by(.valid_to_epoch // .valid_to) | last ) as $lastrow
-                | ( $lastrow | .role ) as $role
-                | ( [ $all[] | select(open
-                                      and $lastrow.clone_id != null
-                                      and .clone_id == $lastrow.clone_id
-                                      and (.host != $c.h or .dir_basename != $c.d)) ] ) as $chain
-                | ( [ $all[] | select(open and .host == $c.h
-                                      and $role != null and .role == $role
-                                      and .dir_basename != $c.d) ] ) as $heirs
-                | ($c.h + "/" + $c.d) as $key
-                | if ($chain | length) == 1
-                  then .inherit[$key] = ($chain[0] | .host + "/" + .dir_basename)
-                  elif ($heirs | length) == 1 and ($chain | length) == 0
-                  then .inherit[$key] = ($heirs[0] | .host + "/" + .dir_basename)
-                  else .orphans += [$key] end
-              end)' "$CLONE_BINDINGS" 2>/dev/null)" || registry=""
-    if [[ -n "$registry" ]]; then
-        INHERIT_JSON="$(printf '%s' "$registry" | jq -c '.inherit')"
-        ORPHANS_JSON="$(printf '%s' "$registry" | jq -c '.orphans')"
-    fi
-fi
+# OLDER BRANCHES. Before the login identity model, prefixes carried the
+# working-copy directory name; a prefix naming THIS working copy is this
+# agent's own (ME_LEGACY). Any other older prefix is simply that session's:
+# no record of retired clones is kept, so nothing is inherited and
+# nothing is orphaned.
 
 envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
-        --argjson lastitem "${LAST_ITEM:-0}" \
-        --argjson inherit "$INHERIT_JSON" --argjson orphans "$ORPHANS_JSON" '
+        --argjson lastitem "${LAST_ITEM:-0}" '
   # Automation vendors, whose branch names also have four or more
   # segments. A DENY-list is right here and an allow-list was wrong: the
   # asymmetry is the point. The set of bots that open PRs on a
@@ -458,15 +383,9 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" 
   def session:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
-  # OWNER answers for the row TODAY: a retired clone with a recorded
-  # successor is owned by that successor. NO APOSTROPHES in this block --
-  # it is a single-quoted jq program. Scope and the `*` mark use owner; the
-  # SESSION column keeps the retired name, so the row is honest about
-  # where the branch actually is.
-  def owner:
-    session as $s | if (($inherit[$s] // "") != "") then $inherit[$s] else $s end;
-  def orphan:
-    session as $s | (($orphans | index($s)) != null);
+  # OWNER is the session the prefix names. NO APOSTROPHES in this block --
+  # it is a single-quoted jq program.
+  def owner: session;
   def work:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[2:] | join("/")) else .headRefName end;
@@ -481,7 +400,7 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" 
     elif .state == "MERGED" then "MERGED"
     else "CLOSED" end;
 
-  [ .[] | . + {_s: session, _o: owner, _orphan: orphan, _w: work} ]
+  [ .[] | . + {_s: session, _o: owner, _w: work} ]
   | sort_by(-.number)
   # POOL FIRST: /lastDate then /lastItem, before scope or anything else.
   | ( if $cutoff != "" then map(select(.updatedAt >= $cutoff)) else . end )
@@ -498,19 +417,14 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" 
       # the one scope where the omission it warns of cannot happen.
       unattributed:
         (if $filter == "" or $filter == "__UNATTRIBUTED__" then 0
-         else ([$pool[] | select(._s == "(unconventional)" or ._orphan)] | length) end),
+         else ([$pool[] | select(._s == "(unconventional)")] | length) end),
       rows:
         ($pool
          | ( if $filter == "__MINE__" then map(select(._o | mine))
              elif $filter == "__UNATTRIBUTED__" then
-                    map(select(._s == "(unconventional)" or ._orphan))
+                    map(select(._s == "(unconventional)"))
              elif $filter != "" then
-                    # BOTH names: the successor filtering by its own clone
-                    # must see the rows it inherited, which still DISPLAY
-                    # the retired name. Matching only the display name made
-                    # --session narrower than the default scope.
-                    map(select((._s | test($filter; "i"))
-                               or (._o | test($filter; "i"))))
+                    map(select(._s | test($filter; "i")))
              else . end )
          | sort_by(-.number) | .[:$limit]) }
 ')" || {
@@ -536,7 +450,7 @@ UNATTRIBUTED="$(printf '%s' "$envelope" | jq '.unattributed')"
 unattributed_note() {
     [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
     echo "  NOTE: $UNATTRIBUTED PR(s) name no live session — the branch does not" >&2
-    echo "  parse as <host>/<clone>/<type>/<short-desc>, or names a retired clone" >&2
+    echo "  parse as <host>/<agent>/<type>/<short-desc>" >&2
     echo "  with no recorded successor, or one with SEVERAL possible" >&2
     echo "  successors — so they cannot be scoped to a" >&2
     echo "  session and are not listed. Pass /unattributed to list exactly" >&2
@@ -663,9 +577,7 @@ out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --arg melegacy "$ME_LEGACY
   | if $grouped == 1 then
     ( group_by(._s) | sort_by(-(map(.number) | max))
       | map(
-          # OWNER decides the marker, the retired name is still the
-          # heading: a group of rows this clone inherited must be labelled
-          # as its own, or the one ownership cue in grouped mode is absent
+          # OWNER decides the marker; the heading is the session name
           # exactly where it is least obvious.
           "\n\(.[0]._s)\(if (.[0]._o | mine) then "   <- this clone" else "" end)"
           , ( sort_by(-.number)[]

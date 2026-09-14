@@ -215,19 +215,10 @@ export function recordedRole(taxonomy, me = whoami()) {
   if (!taxonomy.roles.has(me.role)) return { role: undefined, error: `${file} records role "${me.role}", which is not in ${taxonomy.path}; pass --role explicitly` };
   return { role: me.role, file };
 }
-// The catalogue: agent-fabric's identities/roles/catalog.json, or a legacy
-// deployment's .roles/taxonomy.json found by walking up from `from`.
-export function findTaxonomy(from = process.cwd()) {
+// The catalogue: agent-fabric's identities/roles/catalog.json.
+export function findTaxonomy(_from = process.cwd()) {
   const fabric = path.join(FABRIC_ROOT, 'identities', 'roles', 'catalog.json');
-  if (fs.existsSync(fabric)) return fabric;
-  let dir = from;
-  for (;;) {
-    const candidate = `${dir}/.roles/taxonomy.json`;
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = dir.replace(/\/[^/]*$/, '');
-    if (!parent || parent === dir) return undefined;
-    dir = parent;
-  }
+  return fs.existsSync(fabric) ? fabric : undefined;
 }
 // The slug an instance name carries, as a whole run of hyphen-separated
 // tokens. Under the login model the instance IS the login, and provisioned

@@ -377,105 +377,23 @@ assert_contains "keeps the pr rather than dropping it" "#28"
 
 default_graphql
 
-echo "pr-sessions: a retired clone is scoped to its successor, or to nobody"
-# A retired clone's prefix parses, so its PRs matched no scope: not the
-# successor's (different name), not /unattributed (it parses). The registry
-# decides -- a clone whose every window is closed is retired, and the clone
-# holding an open window for the same role inherits it.
-HOST="$(hostname -s)"
-BINDINGS="$SANDBOX/fixtures/bindings.jsonl"
-: > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"legacy-old", host:$h,
-    role:"architect-cto", valid_to:"2026-09-05T00:00:00Z"}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c2", dir_basename:$d,
-    host:$h, role:"architect-cto", valid_to:null}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"legacy-orphan", host:$h,
-    role:"domain-transit", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/legacy-old" \
-    --arg orphan "$HOST/legacy-orphan" --arg t "$(ago '1 hour')" '[
-  {number: 40, state: "MERGED", headRefName: ($old    + "/fix/inherited"),
-   title: "inherited", updatedAt: $t, isDraft: false, mergedAt: $t},
-  {number: 41, state: "MERGED", headRefName: ($orphan + "/fix/nobody"),
-   title: "nobody",    updatedAt: $t, isDraft: false, mergedAt: $t},
-  {number: 42, state: "OPEN",   headRefName: ($me     + "/feat/mine"),
-   title: "mine",      updatedAt: $t, isDraft: false, mergedAt: null}
+echo "pr-sessions: an older branch named for this working copy is this agent's own"
+write_pr_list "$(jq -n --arg old "$HOST/$CLONE_NAME" --arg t "$(ago '1 hour')" '[
+  {number: 731, state: "OPEN", isDraft: false, headRefName: ($old + "/fix/mine-under-the-old-name"), updatedAt: $t}
 ]')"
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
-assert_rc           "default scope exits 0" 0
-assert_contains     "inherited PR is in the successor's default sweep" "#40"
-assert_contains     "inherited row still shows the retired name" "legacy-old"
-assert_contains     "own PR still listed" "#42"
-assert_not_contains "orphan PR is NOT in the default sweep" "#41"
-assert_contains     "the NOTE counts the orphan" "1 PR(s) name no live session"
-# The `*` is the only per-row ownership cue; an inherited row must carry it.
-if grep -qE '^\* +#40' <<<"$RUN_OUT"; then
-    pass "inherited row is marked as this clone's"
-else
-    fail "inherited row is not marked" "$RUN_OUT"
-fi
-
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
-assert_rc           "/unattributed exits 0" 0
-assert_contains     "orphan PR is listed under /unattributed" "#41"
-assert_not_contains "inherited PR is not an orphan" "#40"
-
-# --session by MY OWN name must reach the rows I inherited, or the filter
-# is narrower than the default scope it is meant to reproduce.
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --session "$CLONE_NAME" --no-threads
-assert_contains "--session finds the inherited row too" "#40"
-assert_contains "--session still finds my own row"      "#42"
-
-# CONTROL: no registry -> the old behaviour, so the registry is what changed it.
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/fixtures/no-such.jsonl" -- --no-threads
-assert_not_contains "control: without the registry the inherited PR is invisible" "#40"
-default_pr_list
-
-echo "pr-sessions: clone_id continuity resolves a rename the role cannot"
-# The case that role-matching CANNOT reach: the retired row predates roles
-# and carries no `role` at all, so there is nothing to match on. It is the
-# same working copy under a new name, which the shared clone_id says
-# exactly. Real instance: legacy-claude3, seeded 2026-06-19 with reason
-# "initial" and no role field.
-BINDINGS="$SANDBOX/fixtures/bindings-chain.jsonl"
-: > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"legacy-renamed-away",
-    host:$h, valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c9", dir_basename:$d,
-    host:$h, role:"devex-tooling", valid_to:null}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg old "$HOST/legacy-renamed-away"     --arg t "$(ago '1 hour')" '[
-  {number: 50, state: "MERGED", headRefName: ($old + "/fix/renamed"),
-   title: "renamed", updatedAt: $t, isDraft: false, mergedAt: $t}
+run --no-threads
+assert_rc       "exits 0" 0
+assert_contains "the legacy-named row is in the default (mine) scope" "#731"
+assert_contains "and marked as this session's" "* #731"
+write_pr_list "$(jq -n --arg other "$HOST/legacy-old" --arg t "$(ago '1 hour')" '[
+  {number: 732, state: "OPEN", isDraft: false, headRefName: ($other + "/fix/theirs"), updatedAt: $t}
 ]')"
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
-assert_rc       "clone_id chain exits 0" 0
-assert_contains "a roleless retired row still resolves via clone_id" "#50"
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
-assert_not_contains "the chained row is NOT an orphan" "#50"
-default_pr_list
-
-echo "pr-sessions: two live holders of one role is unowned, not a guess"
-# A role slug is held by a working copy, and one role can have two live
-# ones at once (backend-dev-01 and backend-dev-02). Taking heirs[0] handed
-# the retired clone's PRs to whichever sorted first -- letting the WRONG
-# session reply and refusing the right one. Ambiguity must surface, not
-# resolve arbitrarily.
-BINDINGS="$SANDBOX/fixtures/bindings-ambiguous.jsonl"
-: > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"r1", dir_basename:"legacy-ambiguous",
-    host:$h, role:"backend-dev", valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"r2", dir_basename:$d,
-    host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"r3", dir_basename:"other-live-holder",
-    host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg old "$HOST/legacy-ambiguous"     --arg t "$(ago '1 hour')" '[
-  {number: 51, state: "MERGED", headRefName: ($old + "/fix/ambiguous"),
-   title: "ambiguous", updatedAt: $t, isDraft: false, mergedAt: $t}
-]')"
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
-assert_rc           "ambiguous succession exits 0" 0
-assert_not_contains "two heirs: NOT silently claimed by this clone" "#51"
-run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- /unattributed --no-threads
-assert_contains     "two heirs: surfaces under /unattributed instead" "#51"
+run --no-threads
+assert_not_contains "another working copy's older branch is not in the mine scope" "#732"
+run /unattributed --no-threads
+assert_not_contains "nor is it unattributed: it names a session" "#732"
+run /all --no-threads
+assert_contains "it is listed under /all, as that session's" "#732"
 default_pr_list
 
 echo "pr-sessions: pool filters"

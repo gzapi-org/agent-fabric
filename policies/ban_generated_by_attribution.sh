@@ -110,7 +110,7 @@ payload_range() {
 # Fallback for a hand-run in a full clone.
 ref_range() {
     local candidate
-    for candidate in "${AGENT_FABRIC_ATTRIBUTION_BASE:-${GZAPP_ATTRIBUTION_BASE:-}}" \
+    for candidate in "${AGENT_FABRIC_ATTRIBUTION_BASE:-}" \
                      "origin/${GITHUB_BASE_REF:-}" "${GITHUB_BASE_REF:-}" \
                      origin/main main; do
         [[ -n "$candidate" && "$candidate" != "origin/" ]] || continue

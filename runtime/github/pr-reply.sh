@@ -223,114 +223,16 @@ branch_names_a_session() {
     return 0
 }
 
-# RETIRED CLONES. A branch prefix that parses as a session may name one
-# that no longer exists: clones are retired and replaced under new names,
-# and their pull requests keep the old prefix forever. Read as a rival,
-# such a PR is refused for a session that is not there; read as INHERITED
-# by the successor it is simply that session's; read as unowned it is at
-# least answerable.
-#
-# THE RECORD IS .roles/registry/bindings.jsonl, not a table kept here. That
-# file is tracked, lint-governed (one open window per clone, closures only
-# move forward) and written by the legacy switcher's materialize_bindings.py (retired), so it
-# is maintained by something other than memory. A first version of this
-# used a hand-written list and shipped three clones as retired that the
-# registry marks LIVE -- which would have turned a refusal into permission
-# for any clone to answer their PRs. A second record that can disagree
-# with the first is worse than no second record.
-#
-# A clone is RETIRED when every binding window for it is closed. Succession
-# is then resolved twice, most reliable first: (1) clone_id CONTINUITY — a
-# renamed working copy keeps its clone_id, so the closed row and the open
-# row are one clone under two names; (2) a UNIQUE live holder of the same
-# role on the same host. The role fallback REQUIRES exactly one heir,
-# because one role slug can be held by two live clones at once
-# (backend-dev-01 and backend-dev-02 both hold backend-dev) and picking
-# the first silently lets the WRONG session reply. Neither rule reads the
-# directory NAME: some clones are numbered and some are not (db-admin,
-# devex-tooling), so there is no scheme there to key on.
-#
-# THIS BLOCK IS DUPLICATED IN tools/gh/pr-sessions.sh, and the two must
-# agree — a PR that one says is inherited and the other says is unowned is
-# the disagreement this whole file exists to prevent. They were fixed
-# together; fix them together. They are not shared because the two jq
-# programs have different shapes — this one answers about a single clone,
-# pr-sessions.sh reduces over every clone in the file — and each has its
-# own self-test. If a third caller ever needs the rule, extract it then,
-# with a self-test that runs both callers against one fixture.
-#
-# Anything the registry does not positively say is retired is
-# treated as LIVE and refused: unknown prefixes, an unreadable file, a jq
-# failure. Fail-closed is the only safe default for a script that posts.
-#
-# ONE CAVEAT ON "UNOWNED", because the word arrived here from a listing
-# and does not mean the same thing in a script that POSTS. In
-# pr-sessions.sh an unowned PR is merely visible; here it is one this
-# clone MAY reply to. So widening anything into the unowned bucket widens
-# write access, and the ambiguous case below does exactly that: it used to
-# exit 2. That is deliberate — refusing was not safety, it came with
-# NAMING one of several possible successors, so the wrong clone was
-# invited to answer while the right one was turned away — and it is
-# bounded by leave_open_unless_explicit, which makes resolving opt-in on
-# every unowned path. Replying to a thread nobody owns is recoverable;
-# resolving it, or sending the owner away, is not.
-# The retired-clone registry is now migration data in agent-fabric
-# (AGENT_FABRIC_CLONE_BINDINGS, when set): it records the
-# working copies that existed under the directory-bound identity model
-# and which succeeded which. New sessions are agents (logins) and are not
-# registered anywhere — an agent does not retire when a directory does.
-# A record of directory-bound clones — which working copy succeeded which
-# under the retired identity model — is optional and, today, absent: with
-# none, every older-prefix branch reads as live (nobody inherits it, nobody
-# is refused). AGENT_FABRIC_CLONE_BINDINGS (or the older GZAPP_CLONE_BINDINGS)
-# names one when a deployment keeps such a record — visibly, below.
-CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}"
-if [[ -n "${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}" ]]; then
-    # An ownership input that can be pointed anywhere deserves to be
-    # visible in the transcript: this is the one variable that can turn a
-    # refusal into a reply, and a laundered run must not look ordinary.
-    echo "pr-reply: clone registry overridden: $CLONE_BINDINGS" >&2
-fi
-
-# Prints exactly one of: LIVE | ORPHAN | HEIR <host>/<clone>
-clone_status() {
-    local want="$1" out
-    [[ -r "$CLONE_BINDINGS" ]] || { printf 'LIVE'; return 0; }
-    out="$(jq -s -r --arg want "$want" '
-        ( $want | split("/") ) as $w
-        | [ .[] | select(.host == $w[0] and .dir_basename == $w[1]) ] as $mine
-        | def open: (.valid_to == null or .valid_to == "");
-          if ($mine | length) == 0 then "LIVE"
-          elif ($mine | map(select(open)) | length) > 0 then "LIVE"
-          else
-            . as $all
-            | ( $mine | sort_by(.valid_to_epoch // .valid_to) | last ) as $lastrow
-            | ( $lastrow | .role ) as $role
-            | ( [ $all[] | select(open
-                                  and $lastrow.clone_id != null
-                                  and .clone_id == $lastrow.clone_id
-                                  and (.host != $w[0] or .dir_basename != $w[1])) ] ) as $chain
-            | ( [ $all[] | select(open and .host == $w[0]
-                                  and $role != null and .role == $role
-                                  and .dir_basename != $w[1]) ] ) as $heirs
-            | if ($chain | length) == 1
-              then "HEIR " + ($chain[0] | .host + "/" + .dir_basename)
-              elif ($chain | length) > 1 then "AMBIGUOUS"
-              elif ($heirs | length) == 1
-              then "HEIR " + ($heirs[0] | .host + "/" + .dir_basename)
-              elif ($heirs | length) > 1 then "AMBIGUOUS"
-              else "ORPHAN" end
-          end' "$CLONE_BINDINGS" 2>/dev/null)" || out=""
-    case "$out" in
-        ORPHAN|AMBIGUOUS|HEIR\ */*) printf '%s' "$out" ;;
-        *)                printf 'LIVE' ;;
-    esac
-}
+# OLDER BRANCHES. Before the login identity model, branch prefixes carried
+# the working-copy directory name; such a branch named for THIS working
+# copy is this agent's own and is treated so. Any other older prefix is
+# some session's, or nobody's, and reads as that session's: refused, like
+# any branch that is not ours. No record of retired clones is kept.
 
 # The unowned path's one enforced rule: resolving is a claim, and a PR no
 # session owns is the path with the least standing to make it, so the
 # default flips to leave-open and --resolve is the opt-in. Shared by the
-# no-session and retired-without-successor cases below.
+# no-session case below.
 leave_open_unless_explicit() {
     if [[ "$RESOLVE" -eq 1 && "$RESOLVE_EXPLICIT" -eq 0 ]]; then
         RESOLVE=0
@@ -358,44 +260,8 @@ elif [[ "$OWNER" == "$ME_LEGACY" && "$OWNER" != "$ME" ]]; then
     # carry the agent's login. It is this agent's own branch under the
     # older convention; treat it as owned, and say so once.
     echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH', named for this working copy; this agent ($ME) owns it." >&2
-elif [[ "$OWNER" != "$ME" ]] && [[ "$(clone_status "$OWNER")" != "LIVE" ]]; then
-    # The registry says this prefix names a retired clone. Two outcomes,
-    # by whether it records an heir.
-    STATUS="$(clone_status "$OWNER")"
-    if [[ "$STATUS" == "HEIR $ME" || "$STATUS" == "HEIR $ME_LEGACY" ]]; then
-        # Inherited: this clone is the recorded successor, so the PR is its
-        # own -- no warning, resolve stays the default. Deliberately does
-        # NOT say "whose role this clone now holds": the succession may
-        # have been resolved by clone_id, i.e. this IS that working copy
-        # under its old name, and the row that retired may carry no role at
-        # all. Naming the role there was simply false.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', which this clone succeeds." >&2
-    elif [[ "$STATUS" == "AMBIGUOUS" ]]; then
-        # More than one live successor. NOT the same as nobody: saying "no
-        # live clone holds its role" here would be the exact inverse of the
-        # truth, and the old code silently picked one of them instead --
-        # which in this script meant refusing the session that owns the
-        # work and naming one that does not.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and MORE THAN ONE live" >&2
-        echo "  clone could be its successor, so the registry cannot say whose it is." >&2
-        echo "  Replying without claiming it. To make this exact, record the" >&2
-        echo "  succession for '$OWNER' rather than leaving it to be inferred." >&2
-        leave_open_unless_explicit
-    elif [[ "$STATUS" == HEIR\ * ]]; then
-        # Somebody else holds it. That is a live session's PR now.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', inherited by '${STATUS#HEIR }'." >&2
-        echo "  Not replying: that session owns it now, and a review reply cannot" >&2
-        echo "  be unsent. Raise it in the PR, or from that clone." >&2
-        exit 2
-    else
-        # Retired with no recorded successor at all: nobody's, like a branch
-        # that names no session, and treated the same way.
-        echo "pr-reply: #$PR_NUMBER is on retired clone '$OWNER', and no live clone succeeds it." >&2
-        echo "  No session owns it, so there is nobody to defer to — replying." >&2
-        leave_open_unless_explicit
-    fi
 elif [[ "$OWNER" != "$ME" ]]; then
-    echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this clone is '$ME'." >&2
+    echo "pr-reply: #$PR_NUMBER belongs to '$OWNER', and this session is '$ME'." >&2
     echo "  Not replying. That session is mid-flight on a fix you cannot see," >&2
     echo "  and a review reply cannot be unsent. Raise it in the PR instead." >&2
     exit 2

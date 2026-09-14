@@ -19,10 +19,10 @@ The role payload lands in `<out>/claims/`, one directory below the drain
 metadata, because assemble.py reads EVERY .json under `--claims` as a
 role payload and would take `references.json` for one.
 
-WHY THIS AND NOT AN OBSERVER. The drain used to read claude-mem's store;
-that plugin is gone and observe.py, which was written to replace it from
-raw transcripts, is dormant (see its docstring). Claude's own memory is a
-better input than either: a memory file is ONE fact, written deliberately
+WHY MEMORY AND NOT TRANSCRIPTS. Earlier drains read a session-memory
+plugin's store and, later, raw transcripts; both are retired. Claude's
+own memory is a better input than either: a memory file is ONE fact,
+written deliberately
 at the moment it was learned, carrying a `why` and a `how to apply`. That
 is already the shape a claim wants, so this needs no model pass, no
 transcript scraping, and no redaction layer -- the input is curated text

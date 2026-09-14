@@ -66,7 +66,7 @@ cd "$ROOT" || { echo "cannot cd to repo root" >&2; exit 2; }
 # failed the build for an environment limitation rather than a violation.
 resolve_base() {
     local candidate
-    for candidate in "${AGENT_FABRIC_CHARTER_BASE:-${GZAPP_CHARTER_BASE:-}}" \
+    for candidate in "${AGENT_FABRIC_CHARTER_BASE:-}" \
                      "origin/${GITHUB_BASE_REF:-}" "${GITHUB_BASE_REF:-}" \
                      origin/main main; do
         [[ -n "$candidate" && "$candidate" != "origin/" ]] || continue
@@ -95,7 +95,7 @@ BASE="$(resolve_base)" || {
 
 # GITHUB_HEAD_REF is set on pull_request and empty elsewhere; fall back to
 # the local branch so this is runnable by hand before pushing.
-BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GZAPP_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}}"
+BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}"
 [[ -n "$BRANCH" ]] || BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- \

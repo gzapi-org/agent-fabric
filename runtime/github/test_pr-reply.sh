@@ -292,161 +292,20 @@ for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
     fi
 done
 
-echo "pr-reply: a retired clone's PR goes to its successor, or to nobody"
-# A retired clone's prefix still PARSES as a session, so it read as a live
-# rival and was refused -- and it appeared in no sweep either. The registry
-# decides: a clone whose every window is closed is retired, and the clone
-# holding an OPEN window for the same role inherits it.
+echo "pr-reply: an older branch named for this working copy is this agent's own"
+# Before the login model, prefixes carried the working-copy directory name.
 HOST="$(hostname -s)"
-OTHER_CLONE="${OTHER#*/}"
-BINDINGS="$SANDBOX/state/bindings.jsonl"
-mk_bindings() {
-    : > "$BINDINGS"
-    # retired, same role as this clone -> inherited by ME
-    jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"legacy-old", host:$h,
-        role:"architect-cto", valid_to:"2026-09-05T00:00:00Z"}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c2", dir_basename:$d,
-        host:$h, role:"architect-cto", valid_to:null}' >> "$BINDINGS"
-    # retired, no live holder of its role -> nobody's
-    jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"legacy-orphan", host:$h,
-        role:"domain-transit", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-    # retired, role held by ANOTHER live clone -> theirs
-    jq -nc --arg h "$HOST" '{clone_id:"c4", dir_basename:"legacy-theirs", host:$h,
-        role:"web-dev", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" --arg d "$OTHER_CLONE" '{clone_id:"c5", dir_basename:$d,
-        host:$h, role:"web-dev", valid_to:null}' >> "$BINDINGS"
-    # a clone with an OPEN window is NOT retired, whatever else is true
-    jq -nc --arg h "$HOST" '{clone_id:"c6", dir_basename:"legacy-stillhere", host:$h,
-        role:"backend-dev", valid_to:null}' >> "$BINDINGS"
-    # PRE-ROLES RENAME: closed, carries NO role at all, and shares c2 with
-    # this clone's live row -- one working copy under two names. Role
-    # matching cannot reach it; clone_id continuity can. Real instance:
-    # legacy-claude3, seeded 2026-06-19 with reason "initial" and no role.
-    jq -nc --arg h "$HOST" '{clone_id:"c2", dir_basename:"legacy-preroles",
-        host:$h, valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
-    # AMBIGUOUS: retired backend-dev with TWO live holders (c6 above and c9
-    # here), which must resolve to nobody rather than to whichever sorts
-    # first. backend-dev-01 and backend-dev-02 are the real pair.
-    jq -nc --arg h "$HOST" '{clone_id:"c8", dir_basename:"legacy-ambig", host:$h,
-        role:"backend-dev", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"legacy-second-backend",
-        host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
-    # HOST-MOVE that keeps the directory name. The clone key is the PAIR
-    # (host, dir_basename), so excluding only the NAME from the chain made
-    # a clone unable to claim its own PRs after moving host -- it saw
-    # itself as already excluded and reported nobody. `host-move` is a
-    # first-class `reason` in bindings.schema.json.
-    jq -nc '{clone_id:"cm", dir_basename:"legacy-moved", host:"otherhost-far",
-        role:"edge-hosting", valid_to:"2026-09-01T00:00:00Z",
-        reason:"host-move"}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" '{clone_id:"cm", dir_basename:"legacy-moved", host:$h,
-        role:"edge-hosting", valid_to:null, reason:"host-move"}' >> "$BINDINGS"
-    # BOTH routes available at once: a clone_id chain to one clone, and a
-    # single role heir to THIS one. Pins the ORDERING -- clone_id is exact,
-    # role is an inference, so the exact one must win. Without this,
-    # swapping the two rules left both suites green.
-    jq -nc --arg h "$HOST" '{clone_id:"co", dir_basename:"legacy-both", host:$h,
-        role:"product-i18n", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" '{clone_id:"co", dir_basename:"legacy-chain-heir",
-        host:$h, valid_to:null}' >> "$BINDINGS"
-    jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"cz", dir_basename:$d,
-        host:$h, role:"product-i18n", valid_to:null}' >> "$BINDINGS"
-}
-mk_bindings
-MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS")
-
-thread_fixture "$HOST/legacy-old/fix/inherited" false
+thread_fixture "$HOST/$CLONE_NAME/fix/mine-under-the-old-name" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc       "inherited: exits 0" 0
-assert_contains "inherited: names the succession, not a role" "which this clone succeeds"
-assert_contains "inherited: the override is announced" "clone registry overridden"
-if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
-    pass "inherited: replied AND resolved, as its own"
-else
-    fail "inherited: expected reply and resolve" "$(calls)"
-fi
+assert_rc       "exits 0" 0
+assert_contains "says it is this agent's under the older convention" "named for this working copy"
+[[ "$(calls)" == *REPLY* ]] && pass "replied on the legacy-named branch" || fail "did not reply on the legacy-named branch" "$(calls)"
 
-thread_fixture "$HOST/legacy-orphan/fix/nobody" false
+echo "pr-reply: an older branch named for another working copy is another session's"
+thread_fixture "$HOST/legacy-old/fix/theirs" false
 invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc       "orphan: exits 0" 0
-assert_contains "orphan: names the gap" "no live clone succeeds it"
-if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
-    pass "orphan: replied but left OPEN by default"
-else
-    fail "orphan: expected reply without resolve" "$(calls)"
-fi
-
-thread_fixture "$HOST/legacy-theirs/fix/inherited-by-other" false
-invoke "I would like to answer this." "$THREAD_ID"
-assert_rc       "inherited by another: exits 2" 2
-assert_contains "inherited by another: names the heir" "$OTHER"
-if [[ "$(calls)" != *REPLY* ]]; then
-    pass "inherited by another: nothing was posted"
-else
-    fail "inherited by another: posted to a live session's PR" "$(calls)"
-fi
-
-# An OPEN window means live, so the old refusal stands.
-thread_fixture "$HOST/legacy-stillhere/fix/theirs" false
-invoke "I would like to answer this." "$THREAD_ID"
-assert_rc "a clone with an open window is still refused" 2
-
-# A roleless retired row resolves through clone_id, which is the only rule
-# that can reach the clones seeded before roles existed.
-thread_fixture "$HOST/legacy-preroles/fix/renamed" false
-invoke "Answering my predecessor's thread." "$THREAD_ID"
-assert_rc       "pre-roles rename: exits 0" 0
-assert_contains "pre-roles rename: claimed via the succession path" "which this clone succeeds"
-if [[ "$(calls)" == *REPLY* && "$(calls)" == *RESOLVE* ]]; then
-    pass "pre-roles rename: replied AND resolved, as its own"
-else
-    fail "pre-roles rename: expected reply and resolve" "$(calls)"
-fi
-
-# Two live holders of one role must NOT silently elect a winner: doing so
-# lets the wrong session reply and refuses the right one.
-thread_fixture "$HOST/legacy-ambig/fix/two-heirs" false
-invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc       "ambiguous heir: exits 0 on the unowned path" 0
-assert_contains "ambiguous heir: says TWO could be, not none" "MORE THAN ONE live"
-if [[ "$(calls)" == *REPLY* && "$(calls)" != *RESOLVE* ]]; then
-    pass "ambiguous heir: replied but left OPEN, like any unowned PR"
-else
-    fail "ambiguous heir: expected reply without resolve" "$(calls)"
-fi
-
-# A host-move that keeps the directory name is still the same clone.
-thread_fixture "otherhost-far/legacy-moved/fix/moved" false
-invoke "I would like to answer this." "$THREAD_ID"
-assert_rc       "host-move: exits 2, the heir is another clone" 2
-assert_contains "host-move: names the moved clone as the heir" "$HOST/legacy-moved"
-
-# clone_id is exact and role is an inference, so clone_id must win when
-# both are available. If the order flips, this clone claims the PR instead.
-thread_fixture "$HOST/legacy-both/fix/ordering" false
-invoke "I would like to answer this." "$THREAD_ID"
-assert_rc       "ordering: exits 2 because the CHAIN heir is not me" 2
-assert_contains "ordering: the clone_id heir wins over the role heir" "legacy-chain-heir"
-if [[ "$(calls)" != *REPLY* ]]; then
-    pass "ordering: nothing posted to the chain heir's PR"
-else
-    fail "ordering: role fallback beat the clone_id chain" "$(calls)"
-fi
-
-# CONTROLS. The registry is what changes the verdict, and everything the
-# registry does not positively call retired must FAIL CLOSED.
-MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/state/no-such-registry.jsonl")
-thread_fixture "$HOST/legacy-old/fix/inherited" false
-invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc "control: with no registry, the retired prefix is refused" 2
-
-printf 'not json at all\n' > "$SANDBOX/state/broken.jsonl"
-MOCK_ENV=(env "AGENT_FABRIC_CLONE_BINDINGS=$SANDBOX/state/broken.jsonl")
-thread_fixture "$HOST/legacy-old/fix/inherited" false
-invoke "Verified against main; obsolete." "$THREAD_ID"
-assert_rc "control: an unparseable registry fails CLOSED, not open" 2
-
-MOCK_ENV=(env)
+assert_rc "refused: no record of retired clones exists, so it is someone's" 2
+[[ "$(calls)" != *REPLY* ]] && pass "nothing posted" || fail "posted on another session's legacy branch" "$(calls)"
 
 echo "pr-reply: an unowned PR still warns before it replies"
 # Allowed is not the same as unremarkable — the finding may belong to a

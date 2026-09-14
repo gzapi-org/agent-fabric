@@ -69,10 +69,9 @@ say ""
 say "== the launcher's stamp (runtime/openrouter/launch) =="
 # The session model reaches claude only as --model, which nothing inside
 # the session can read back; the launcher stamps what it applied.
-# AGENT_FABRIC_LAUNCH_* is the stamp; GZAPP_LAUNCH_* is the name the
-# legacy repository's embedded launcher used and is still read during the transition.
-STAMP_SESSION="${AGENT_FABRIC_LAUNCH_SESSION_MODEL:-${GZAPP_LAUNCH_SESSION_MODEL:-}}"
-STAMP_PROFILE="${AGENT_FABRIC_LAUNCH_PROFILE:-${GZAPP_LAUNCH_PROFILE:-?}}"
+# AGENT_FABRIC_LAUNCH_* is the stamp the launcher writes.
+STAMP_SESSION="${AGENT_FABRIC_LAUNCH_SESSION_MODEL:-}"
+STAMP_PROFILE="${AGENT_FABRIC_LAUNCH_PROFILE:-?}"
 if [[ -n "$STAMP_SESSION" ]]; then
     say "  profile : $STAMP_PROFILE"
     [[ -z "${AGENT_FABRIC_LAUNCH_AGENT:-}" ]] || say "  agent   : $AGENT_FABRIC_LAUNCH_AGENT"

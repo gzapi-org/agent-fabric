@@ -31,10 +31,10 @@
 set -euo pipefail
 
 # The managed repository to check: the working copy this runs in, or the
-# one named. AGENT_FABRIC_SETTINGS_FILE / GZAPP_SETTINGS_FILE name a file
+# one named. AGENT_FABRIC_SETTINGS_FILE names a file
 # directly (the latter is the name gzapp's CI still uses).
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-FILE="${AGENT_FABRIC_SETTINGS_FILE:-${GZAPP_SETTINGS_FILE:-$REPO_ROOT/.claude/settings.json}}"
+FILE="${AGENT_FABRIC_SETTINGS_FILE:-${AGENT_FABRIC_SETTINGS_FILE:-$REPO_ROOT/.claude/settings.json}}"
 
 [[ -f "$FILE" ]] || { echo "check_repo_settings_carry_no_model_pins: OK — $FILE does not exist."; exit 0; }
 

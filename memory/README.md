@@ -129,8 +129,8 @@ distilled_at: "2026-09-05"       # when
 Agent, host, project and working copy are four separate facts. Slices
 written before the identity migration carry `clone_id` instead of `agent`;
 they are preserved verbatim, and
-an agent map, when a deployment keeps one (`harvest.py --registry`), resolves a
-clone to the login it ran under; otherwise the label is kept as it is. An observation that resolves to no agent is reported
+the label is kept as it is — a record of where the slice was learned, not
+resolved to a login. An observation that resolves to no agent is reported
 **provisional**, never guessed, and the tally lands in
 `last-drain-report.json` and on stderr at assembly.
 
@@ -169,13 +169,6 @@ regenerate from scratch — that discards accumulated curation. Same claims
 in, byte-identical tree out, which is what makes a drain reviewable as a
 content diff.
 
-The older pipeline — `harvest.py` over a claude-mem store, a classification
-fan-out, `merge_classified.py`, and the transcript observer `observe.py` —
-is retained. Its store is gone and the observer is deliberately not wired
-(see its docstring); the corpus below is what it produced, and
-`harvest.py` still resolves legacy rows to agents through the migration
-registry.
-
 ## Tools
 
 ```text
@@ -185,9 +178,6 @@ tools/fabric/assemble.py          claims → slices, indexes, citation graph
 tools/fabric/lint.py              guard the committed corpus (CI)
 tools/fabric/query.sh             ask the citation graph
 tools/fabric/role.py              /role — activate a role for this agent
-tools/fabric/harvest.py           legacy: drain a claude-mem store
-tools/fabric/merge_classified.py  legacy: fold the model pass back in
-tools/fabric/observe.py           dormant: transcript observer
 ```
 
 `query.sh` answers the questions the citation graph exists for:

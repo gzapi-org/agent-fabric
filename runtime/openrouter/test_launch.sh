@@ -243,8 +243,6 @@ out="$(env -i PATH="$PATH" HOME="$HOME" ANTHROPIC_BASE_URL='sk-or-v1-notaurl' ba
 ! grep -q 'sk-or' <<<"$out" && grep -q 'ANTHROPIC_BASE_URL = <set, 16 chars>' <<<"$out" && ok "a non-URL base value is reported set, never echoed" || bad "non-URL printed" "$out"
 out="$(env -i PATH="$PATH" HOME="$HOME" AGENT_FABRIC_LAUNCH_SESSION_MODEL=vendor/s AGENT_FABRIC_LAUNCH_PROFILE=r/a AGENT_FABRIC_LAUNCH_AGENT=a bash "$HERE/model-audit.sh" 2>&1)"
 grep -q 'session : vendor/s' <<<"$out" && grep -q 'profile : r/a' <<<"$out" && grep -q 'agent   : a' <<<"$out" && ok "the launcher's stamp is reported, agent included" || bad "stamp not reported" "$out"
-out="$(env -i PATH="$PATH" HOME="$HOME" GZAPP_LAUNCH_SESSION_MODEL=vendor/s GZAPP_LAUNCH_PROFILE=r/i bash "$HERE/model-audit.sh" 2>&1)"
-grep -q 'session : vendor/s' <<<"$out" && ok "the legacy-era stamp name is still read during the transition" || bad "old stamp ignored" "$out"
 out="$(env -i PATH="$PATH" HOME="$HOME" ANTHROPIC_CUSTOM_HEADERS=$'Authorization: Bearer first-secret\nANTHROPIC_MODEL=second-secret' bash "$HERE/model-audit.sh" 2>&1)"
 ! grep -qE 'first-secret|second-secret' <<<"$out" && grep -q 'ANTHROPIC_CUSTOM_HEADERS = <set, 64 chars>' <<<"$out" && ! grep -q 'ANTHROPIC_MODEL = ' <<<"$out" && ok "a newline inside a redacted value neither splits the entry nor truncates the count" || bad "env entry boundary lost on newline" "$out"
 out="$(env -i PATH="$PATH" HOME="$HOME" ANTHROPIC_BASE_URL='HTTPS://OPENROUTER.AI/api' bash "$HERE/model-audit.sh" 2>&1)"

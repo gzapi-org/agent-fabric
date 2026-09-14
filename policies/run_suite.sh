@@ -60,14 +60,14 @@ SUITE="$1"; shift
 [[ -r "$SUITE" ]] || { echo "run_suite: cannot read $SUITE" >&2; exit 2; }
 
 MARKER="$(mktemp)"
-export GZAPP_UNDEF_MARKER="$MARKER"
+export AGENT_FABRIC_UNDEF_MARKER="$MARKER"
 cleanup() { rm -f "$MARKER"; }
 trap cleanup EXIT
 
 # Exported so it reaches the suite's shell, and every shell the suite
 # itself spawns. Returns rather than exits — see THE FORK MATTERS above.
 command_not_found_handle() {
-    printf '%s\n' "$1" >> "$GZAPP_UNDEF_MARKER"
+    printf '%s\n' "$1" >> "$AGENT_FABRIC_UNDEF_MARKER"
     printf 'run_suite: undefined command: %s\n' "$1" >&2
     return 127
 }

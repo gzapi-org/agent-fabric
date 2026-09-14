@@ -1010,7 +1010,6 @@ def main() -> int:
             "host": hr.get("host"),
             "since_watermark": hr.get("since_watermark"),
             "next_watermark": hr.get("next_watermark"),
-            # `provisional_clone` is the key the clone-bound harvester wrote.
             "provisional_agent": counts.get("provisional_agent", counts.get("provisional_clone")),
             "in_scope": counts.get("in_scope"),
         }
@@ -1084,10 +1083,8 @@ def main() -> int:
             f"\nPROVISIONAL BINDINGS: {provisional}{share} observation(s) resolved "
             f"to no agent.\n"
             "  Their knowledge is kept; only the agent attribution is missing.\n"
-            "  A row from a legacy store is attributed by (host, working-copy label,\n"
-            "  time) through an agent map, when a deployment keeps one (harvest.py --registry); a label\n"
-            "  absent there stays provisional rather than guessed. Add the mapping,\n"
-            "  or drain through harvest_memory.py, which stamps the agent at source.",
+            "  harvest_memory.py stamps the agent at source; a drain built from\n"
+            "  anything else must carry the agent in each observation.",
             file=sys.stderr,
         )
     if problems:

@@ -25,10 +25,10 @@ Do not create a nested Git repository, and do not vendor the subsystem.
    to the agent's runtime binding — never authored independently of
    agent-fabric's `identities/roles/catalog.json`.
 4. Relay hosting: [`BRIDGE-RELAY-SETUP.md`](BRIDGE-RELAY-SETUP.md). The
-   token and the relay's runtime stay in the hosting working copy's
-   gitignored `.gzcoord/`; every other working copy carries the token
-   only in its gitignored `.claude/settings.local.json` or
-   `infra/local/.env.local`.
+   relay's runtime — venv, token, database, log — lives in the hosting
+   workspace's `projects/.gzcoord/`, outside every repository; each
+   working copy carries the token only in its gitignored
+   `.claude/settings.local.json` or `infra/local/.env.local`.
 
 The agent's address is `<host>/<login>` (SPEC §3.1): the account the
 session runs under, not the working-copy directory. `gzapp-claude2` and

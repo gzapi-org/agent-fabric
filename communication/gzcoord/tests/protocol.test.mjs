@@ -690,7 +690,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -842,4 +842,16 @@ test('inboxRoot uses the binding working copy outside a checkout', () => {
     fs.rmSync(wc, { recursive: true });
     assert.equal(inboxRoot({ working_copy: null, binding }), tmp, 'a vanished working copy falls back to the cwd');
   } finally { process.chdir(cwd); fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// The relay's runtime (venv, token, database) is host state and lives in
+// the workspace — the projects/ directory the fabric checkout sits in —
+// never inside a working copy: a repository, gitignored or not, is the
+// wrong owner for the channel's only record and a secret.
+test('relay runtime dir resolves against the workspace, not a working copy', () => {
+  assert.equal(WORKSPACE, path.dirname(path.resolve(import.meta.dirname, '..', '..', '..')));
+  assert.equal(relayRuntimeDir({ relay_runtime_dir: '.gzcoord' }, '/ws'), '/ws/.gzcoord');
+  assert.equal(relayRuntimeDir({}, '/ws'), '/ws/.gzcoord');
+  assert.equal(relayRuntimeDir({ relay_runtime_dir: '/var/lib/gzcoord' }, '/ws'), '/var/lib/gzcoord');
+  assert.ok(!relayRuntimeDir({ relay_runtime_dir: '.gzcoord' }).includes('/gzapp/'));
 });

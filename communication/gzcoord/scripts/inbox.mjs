@@ -57,6 +57,15 @@ import { parse, validate, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoa
 // (projects/gzapp/integration/gzcoord/config.json is the committed copy);
 // another project overrides them by environment, or by its own
 // config.json found through the working copy's project (whoami().project).
+// token_env_file is relative to the working copy (a clone carries its
+// own token); relay_runtime_dir is relative to the WORKSPACE — the
+// projects/ directory the fabric checkout sits in — because the relay's
+// database, token and venv are host state, not project state: they must
+// not live inside any repository, gitignored or not.
+export const WORKSPACE = path.dirname(FABRIC_ROOT);
+export function relayRuntimeDir(cfg, workspace = WORKSPACE) {
+  return path.resolve(workspace, cfg.relay_runtime_dir ?? '.gzcoord');
+}
 function integrationConfig(project) {
   const defaults = { relay_url: 'http://127.0.0.1:8765', channel: 'gzapp:gzcoord',
                      token_env_file: 'infra/local/.env.local', relay_runtime_dir: '.gzcoord' };
@@ -97,6 +106,10 @@ function token(root, cfg = integrationConfig()) {
       if (line.startsWith('CLAUDE_BRIDGE_AUTH_TOKEN=')) return line.slice('CLAUDE_BRIDGE_AUTH_TOKEN='.length).trim();
   const local = path.join(root, '.claude/settings.local.json');
   try { const t = JSON.parse(fs.readFileSync(local, 'utf8')).env?.CLAUDE_BRIDGE_AUTH_TOKEN; if (t) return t; } catch {}
+  // The hosting workspace holds the token the relay itself reads
+  // (projects/.gzcoord/bridge-token, mode 0600): a session there — in
+  // whichever working copy, or in none — is the host and needs no copy.
+  try { const t = fs.readFileSync(path.join(relayRuntimeDir(cfg), 'bridge-token'), 'utf8').trim(); if (t) return t; } catch {}
   return undefined;
 }
 
@@ -125,23 +138,24 @@ export function forMe(msg, me) {
   return false;
 }
 
-// The relay dies with its hosting session, and the hosting working copy —
-// the one holding the relay runtime (venv) and the token — is the
+// The relay dies with its hosting session, and the hosting workspace —
+// the one whose runtime dir holds the relay's venv, token and database
+// (projects/.gzcoord/, outside every repository) — is the
 // fabric-coordinator's (a project integration rule, not a protocol
 // one). So the host's session start IS the activation: if the relay is
 // not answering, bring it up before draining, exactly as the runbook
-// says. Working copies without the venv return false and skip silently:
+// says. Workspaces without the venv return false and skip silently:
 // they are clients, not hosts, and nothing in a client session may try
 // to host.
-export function ensureRelay(root, relayUrl = RELAY, runtimeDir = '.gzcoord') {
-  const bin = path.join(root, runtimeDir, 'venv', 'bin', 'claude-bridge');
+export function ensureRelay(runtimeDir, relayUrl = RELAY) {
+  const bin = path.join(runtimeDir, 'venv', 'bin', 'claude-bridge');
   if (!fs.existsSync(bin)) return { hosted: false, started: false };
   try { execFileSync('curl', ['-sf', '-m', '2', `${relayUrl}/status`], { stdio: 'ignore' }); return { hosted: true, started: false }; }
   catch { /* down or unreachable: start it */ }
-  const tokenFile = path.join(root, runtimeDir, 'bridge-token');
-  const db = path.join(root, runtimeDir, 'claude-bridge.db');
-  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${runtimeDir}/bridge-token; cannot start` };
-  const out = fs.openSync(path.join(root, runtimeDir, 'bridge.log'), 'a');
+  const tokenFile = path.join(runtimeDir, 'bridge-token');
+  const db = path.join(runtimeDir, 'claude-bridge.db');
+  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${tokenFile}; cannot start` };
+  const out = fs.openSync(path.join(runtimeDir, 'bridge.log'), 'a');
   const child = spawn(bin, [
     '--host', '127.0.0.1', '--port', '8765',
     '--db', db, '--auth-token-file', tokenFile,
@@ -151,7 +165,7 @@ export function ensureRelay(root, relayUrl = RELAY, runtimeDir = '.gzcoord') {
       return { hosted: true, started: true, pid: child.pid }; } catch { /* not up yet */ }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
   }
-  return { hosted: true, started: false, note: 'relay did not answer within 8s; check .gzcoord/bridge.log' };
+  return { hosted: true, started: false, note: `relay did not answer within 8s; check ${path.join(runtimeDir, 'bridge.log')}` };
 }
 
 async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
@@ -257,11 +271,11 @@ export async function main(argv = process.argv.slice(2)) {
   const channel = process.env.GZCOORD_CHANNEL ?? cfg.channel;
   // Activate what this session owns before anything else: the hosting
   // working copy starts its relay here, so a session restart is also the relay's.
-  const up = ensureRelay(root, relayUrl, cfg.relay_runtime_dir);
+  const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
   if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
   else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
   const tok = token(root, cfg);
-  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file} or .claude/settings.local.json — skipping`); return 0; }
+  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);

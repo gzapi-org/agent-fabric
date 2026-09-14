@@ -26,7 +26,8 @@ is the limitation to fix next, and it is named at the bottom.
 
 One relay process, bound to `127.0.0.1:8765`, is the whole transport.
 Every instance on this host is a *client* of it: they write nothing into
-the hosting clone, and the hosting clone holds the database. The shared
+the hosting workspace, and the hosting workspace's `projects/.gzcoord/`
+holds the database — the only record of the channel's past. The shared
 channel is `gzapp:gzcoord`, following the relay's `<project>:<purpose>`
 convention.
 
@@ -55,17 +56,24 @@ unavailable; nothing else breaks.
 
 ## Hosting the relay
 
-Only one clone does this, and everything it creates stays inside that
-clone, under the already-gitignored `.gzcoord/`. The hosting duty is
-the **fabric-coordinator role's**: the relay dies with its hosting
+Only one workspace does this, and everything it creates lives in that
+workspace's runtime directory, `projects/.gzcoord/` — beside the working
+copies, inside none of them (`relay_runtime_dir` in `config.json`,
+resolved against the directory the fabric checkout sits in). The relay's
+database is the only record of the channel's past, the token is a
+secret, and the venv is host state: none of it belongs in a repository,
+gitignored or not (until 2026-09-14 it sat in the hosting clone's
+`.gzcoord/`, and a directory rename stranded it once). The hosting duty
+is the **fabric-coordinator role's**: the relay dies with its hosting
 session, so that role's session start is the activation — the
 `SessionStart` drain (`scripts/inbox.mjs`, "Receiving", below) starts
-the relay before draining whenever this clone hosts and the relay is
-not answering. A client clone has no `.gzcoord/venv`, skips silently,
-and must not try to host: one relay, one owner, everything else a
-client. Starting it by hand stays the documented fallback:
+the relay before draining whenever this workspace hosts and the relay
+is not answering. A client workspace has no `.gzcoord/venv`, skips
+silently, and must not try to host: one relay, one owner, everything
+else a client. Starting it by hand stays the documented fallback:
 
 ```bash
+cd "$(dirname "$AGENT_FABRIC_ROOT")"          # the projects/ workspace
 python3 -m venv .gzcoord/venv
 .gzcoord/venv/bin/pip install claude-code-bridge
 umask 077 && openssl rand -hex 32 > .gzcoord/bridge-token   # never printed, never committed
@@ -207,17 +215,23 @@ the 2026-09-13 host reboot). Read with a throwaway consumer id only to
 
 Both limits recorded at first bring-up are closed: real instances
 exchange traffic on the channel daily, and the relay's lifetime is the
-hosting working copy's (`.gzcoord/venv`), brought up by the
-fabric-coordinator's session start. One thing learned since: **renaming
-the hosting working copy strands the venv** — its scripts keep the old
-interpreter path — and nothing can start the relay again until
-`.gzcoord/venv` is rebuilt in place (`python3 -m venv .gzcoord/venv &&
-.gzcoord/venv/bin/pip install claude-code-bridge`; token, DB and log
-stay). The old process keeps running from open file handles, which
-hides the breakage until it exits.
-  Giving it an owner that outlives a session — a user service, or a
-  container — is the next decision, and it belongs to the runtime
-  surface rather than to the protocol role.
+hosting session's, brought up by the fabric-coordinator's session start
+from the workspace runtime directory (`projects/.gzcoord/venv`). One
+thing learned while it still lived in a clone: **renaming the directory
+holding the venv strands it** — its scripts keep the old interpreter
+path — and nothing can start the relay again until the venv is rebuilt
+in place (`python3 -m venv .gzcoord/venv && .gzcoord/venv/bin/pip
+install claude-code-bridge`; token, DB and log stay). The old process
+keeps running from open file handles, which hides the breakage until it
+exits; the workspace directory is not one anybody renames, which is
+one more reason the runtime lives there now.
+
+Still open:
+
+- **The relay dies with its hosting session.** Giving it an owner that
+  outlives a session — a user service, or a container — is the next
+  decision, and it belongs to the runtime surface rather than to the
+  protocol role.
 - **The token has to reach the other clones**, and every way of doing
-  that either writes outside the hosting clone or commits a secret. It
-  is a deliberate open question, not an oversight.
+  that either writes outside the hosting workspace or commits a secret.
+  It is a deliberate open question, not an oversight.

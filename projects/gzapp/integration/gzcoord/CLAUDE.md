@@ -32,8 +32,8 @@ block and the person copies it into the receiving session's prompt
 - **Do** activate what you own at session start. The relay dies with
   its hosting session and the fabric-coordinator hosts it: the
   `SessionStart` drain brings the relay up before draining, and only the
-  hosting working copy (the one holding `.gzcoord/venv`) can — every
-  other skips by design, one relay, one owner.
+  hosting workspace (the one whose `projects/.gzcoord/` holds the relay
+  venv) can — every other skips by design, one relay, one owner.
 - **Do** expect your inbox at session start —
   `communication/gzcoord/scripts/inbox.mjs` drains the relay from the
   `SessionStart` hook and shows what is addressed to you, bodies

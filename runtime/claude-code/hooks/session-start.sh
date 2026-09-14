@@ -11,7 +11,9 @@
 # in a live session (devex-tooling, 2026-09-13).
 FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
 AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$FABRIC_ROOT}"
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+# Once: the hook also runs on resume and after a compaction, and the file
+# accumulates across them.
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qs '^export AGENT_FABRIC_ROOT=' "$CLAUDE_ENV_FILE"; then
   printf 'export AGENT_FABRIC_ROOT=%q\n' "$AGENT_FABRIC_ROOT" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
 fi
 AGENT_FABRIC_ROOT="$AGENT_FABRIC_ROOT" python3 "$FABRIC_ROOT/runtime/claude-code/hooks/session-start.py"

@@ -855,3 +855,76 @@ test('relay runtime dir resolves against the workspace, not a working copy', () 
   assert.equal(relayRuntimeDir({ relay_runtime_dir: '/var/lib/gzcoord' }, '/ws'), '/var/lib/gzcoord');
   assert.ok(!relayRuntimeDir({ relay_runtime_dir: '.gzcoord' }).includes('/gzapp/'));
 });
+
+// send.mjs is the other half of the inbox: same identity, same relay,
+// same token resolution. It validates last, refuses a FROM that is not
+// this login's address, and posts exactly {channel, sender, content}.
+import http from 'node:http';
+import { execFile } from 'node:child_process';
+const SEND = new URL('../scripts/send.mjs', import.meta.url).pathname;
+function withRelay(fn) {
+  const posts = [];
+  const server = http.createServer((req, res) => {
+    let body = ''; req.on('data', c => body += c); req.on('end', () => {
+      posts.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body || '{}') });
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ seq: 42, id: 'relay-id', deduplicated: false }));
+    });
+  });
+  return new Promise((resolve, reject) => server.listen(0, '127.0.0.1', async () => {
+    try { resolve(await fn(`http://127.0.0.1:${server.address().port}`, posts)); } catch (e) { reject(e); } finally { server.close(); }
+  }));
+}
+// Asynchronous on purpose: the stub relay lives in this process, and a
+// synchronous exec would block the event loop the server answers on.
+function sendWith(relay, text, extra = []) {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, text);
+  const env = { ...process.env, CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
+  return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
+    (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
+}
+const ME = whoami();
+const MY_ADDRESS = `${ME.host}/${ME.agent}`;
+const valid = `[GZCOORD/1] INFO\nFROM: ${MY_ADDRESS}\nROLE: backend-dev\nPROJECT: fixture\nBROADCAST: true\nMESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\nSUBJECT: fixture\n\nNOTES:\nhello\n`;
+
+test('send posts a valid message as this login, to the configured channel', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^sent seq 42 INFO 01a09fc1-0000-7000-8000-000000000001/);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].url, '/api/send');
+    assert.equal(posts[0].auth, 'Bearer tok-fixture');
+    assert.deepEqual(Object.keys(posts[0].body).sort(), ['channel', 'content', 'sender']);
+    assert.equal(posts[0].body.sender, MY_ADDRESS);
+    assert.equal(posts[0].body.channel, 'fixture:chan');
+    assert.equal(posts[0].body.content, valid);
+  });
+});
+
+test('send refuses a message that does not validate, and posts nothing', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\n', ''));
+    assert.equal(r.code, 2); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+  });
+});
+
+test('send refuses a FROM that is not this session', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid.replace(`FROM: ${MY_ADDRESS}`, 'FROM: other-host/someone'));
+    assert.equal(r.code, 2); assert.match(r.err, /FROM is other-host\/someone but this session is/); assert.equal(posts.length, 0);
+  });
+});
+
+test('send --dry-run validates and resolves but posts nothing', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid, ['--dry-run']);
+    assert.equal(r.code, 0); assert.equal(posts.length, 0);
+  });
+});
+
+test('send normalizes a pasted, indented message before validating', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid.split('\n').map(l => l ? '    ' + l : l).join('\n'));
+    assert.equal(r.code, 0, r.err); assert.equal(posts[0].body.content, valid);
+  });
+});

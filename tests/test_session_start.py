@@ -85,6 +85,9 @@ def test_hook_exports_the_control_plane_into_the_session_shell(tmp: str) -> None
     exported = subprocess.run(["bash", "-c", f'source "{env_file}" && printf %s "$AGENT_FABRIC_ROOT"'],
                               capture_output=True, text=True).stdout
     assert exported == ROOT, exported
+    # Resume and compaction run the hook again: the line is written once.
+    run_hook({"cwd": "/"}, env)
+    assert open(env_file, encoding="utf-8").read().count("export AGENT_FABRIC_ROOT=") == 1
     # Without the file nothing is written anywhere and the hook still runs.
     env.pop("CLAUDE_ENV_FILE")
     assert run_hook({"cwd": "/"}, env).returncode == 0
@@ -106,6 +109,8 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert os.path.isfile(os.path.join(home, ".claude", "commands", "role.md"))
+    for skill in ("subagent-dispatch", "gzcoord-send", "gzcoord-receive"):
+        assert os.path.isfile(os.path.join(home, ".claude", "skills", skill, "SKILL.md")), skill
     for f in ("code-low.md", "code-medium.md", "code-high.md"):
         assert os.path.isfile(os.path.join(home, ".claude", "agents", f))
     assert not os.path.exists(os.path.join(projects, ".git")), "projects/ must not become a repository"

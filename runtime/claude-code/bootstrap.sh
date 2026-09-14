@@ -16,6 +16,7 @@
 #                                      the review class's Bash fence; the blind-reviewer agent file
 #                                      looks here when the launch project has no .claude/ copy
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
+#   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md
 #                                      the dispatch policy as a loadable skill, from policies/
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
@@ -112,6 +113,10 @@ put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/
 # The dispatch policy is a skill the project CLAUDE.md files tell a session
 # to load (`subagent-dispatch`); user-scope, so no project needs a copy.
 put "$CLAUDE_HOME/skills/subagent-dispatch/SKILL.md" "$FABRIC_ROOT/policies/subagent-dispatch/SKILL.md"
+# Talking to other agents is two procedures, each a skill: composing and
+# sending a message, and receiving one (the watch, and what a delivery is).
+put "$CLAUDE_HOME/skills/gzcoord-send/SKILL.md" "$FABRIC_ROOT/communication/gzcoord/skills/gzcoord-send/SKILL.md"
+put "$CLAUDE_HOME/skills/gzcoord-receive/SKILL.md" "$FABRIC_ROOT/communication/gzcoord/skills/gzcoord-receive/SKILL.md"
 
 # 4. The agent-fabric checkout this runs from enforces its own git
 #    discipline at commit time (policies/githooks/commit-msg). A repo

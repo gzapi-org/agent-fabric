@@ -66,7 +66,7 @@ export const WORKSPACE = path.dirname(FABRIC_ROOT);
 export function relayRuntimeDir(cfg, workspace = WORKSPACE) {
   return path.resolve(workspace, cfg.relay_runtime_dir ?? '.gzcoord');
 }
-function integrationConfig(project) {
+export function integrationConfig(project) {
   const defaults = { relay_url: 'http://127.0.0.1:8765', channel: 'gzapp:gzcoord',
                      token_env_file: 'infra/local/.env.local', relay_runtime_dir: '.gzcoord' };
   if (!project) return defaults;
@@ -101,7 +101,7 @@ export function inboxRoot(who) {
 // The environment comes first: fabric-secrets sync exports the token
 // there from the account's Doppler config, which is how an enrolled
 // account gets it. The file lookups serve a clone provisioned by hand.
-function token(root, cfg = integrationConfig()) {
+export function token(root, cfg = integrationConfig()) {
   if (process.env.CLAUDE_BRIDGE_AUTH_TOKEN) return process.env.CLAUDE_BRIDGE_AUTH_TOKEN;
   const env = path.join(root, cfg.token_env_file);
   if (fs.existsSync(env))
@@ -171,7 +171,7 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
   return { hosted: true, started: false, note: `relay did not answer within 8s; check ${path.join(runtimeDir, 'bridge.log')}` };
 }
 
-async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
+export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
   const r = await fetch(`${relayUrl}${pathAndQuery}`, {
     ...init,
     headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },

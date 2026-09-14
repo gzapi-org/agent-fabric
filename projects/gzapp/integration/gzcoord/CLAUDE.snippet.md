@@ -13,7 +13,8 @@ git, GitHub, PRs and reviews.
 Protocol specification: `communication/gzcoord/protocol/SPEC.md`; the
 shape of a good message: `communication/gzcoord/protocol/MESSAGE-FORMAT.md`.
 
-When coordinating with another agent:
+The procedures are two skills every account has: `gzcoord-send` and
+`gzcoord-receive`. When coordinating with another agent:
 
 - your address is `<host>/<login>` — the Linux account this session runs under, as `agent-fabric/bin/fabric-whoami` reports it (SPEC §3.1); the working copy you are in is context, never identity;
 - as `ROLE`, the slug of the role you hold (`/role`; `identities/roles/catalog.json`) — `backend-dev`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;

@@ -129,7 +129,7 @@ distilled_at: "2026-09-05"       # when
 Agent, host, project and working copy are four separate facts. Slices
 written before the identity migration carry `clone_id` instead of `agent`;
 they are preserved verbatim, and
-`docs/migration/legacy-registry/agent-map.json` resolves a clone to the
+`the project's .agent-fabric/legacy-registry/agent-map.json` resolves a clone to the
 login it ran under. An observation that resolves to no agent is reported
 **provisional**, never guessed, and the tally lands in
 `last-drain-report.json` and on stderr at assembly.

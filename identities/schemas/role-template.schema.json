@@ -52,7 +52,7 @@
       "uniqueItems": true
     },
     "origin": {
-      "description": "Who produced the evidence and where: the agent (Linux login), the host, the logical project and the working-copy label, kept as separate facts. Records written by the retired clone-bound system carry `clone_id` instead of `agent` and are preserved verbatim as historical provenance (docs/migration/legacy-registry/agent-map.json resolves them).",
+      "description": "Who produced the evidence and where: the agent (Linux login), the host, the logical project and the working-copy label, kept as separate facts. Records written by the retired clone-bound system carry `clone_id` instead of `agent` and are preserved verbatim as historical provenance (the project's .agent-fabric/legacy-registry/agent-map.json resolves them).",
       "type": "array",
       "items": {
         "type": "object",

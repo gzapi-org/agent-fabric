@@ -1085,7 +1085,7 @@ def main() -> int:
             f"to no agent.\n"
             "  Their knowledge is kept; only the agent attribution is missing.\n"
             "  A row from a legacy store is attributed by (host, working-copy label,\n"
-            "  time) through docs/migration/legacy-registry/agent-map.json; a label\n"
+            "  time) through the project's .agent-fabric/legacy-registry/agent-map.json; a label\n"
             "  absent there stays provisional rather than guessed. Add the mapping,\n"
             "  or drain through harvest_memory.py, which stamps the agent at source.",
             file=sys.stderr,

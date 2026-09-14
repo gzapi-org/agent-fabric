@@ -343,7 +343,7 @@ fi
 # this they appear in nobody's sweep: not the successor's (different
 # name), not /unattributed (the branch parses).
 #
-# THE RECORD IS agent-fabric's docs/migration/legacy-registry/bindings.jsonl
+# THE RECORD IS agent-fabric's the project's .agent-fabric/legacy-registry/bindings.jsonl
 # -- the working copies that existed under the directory-bound identity
 # model, kept as migration data. New sessions are agents (logins), which
 # are not registered and do not retire when a directory does; this

@@ -32,6 +32,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "dispatch guard" bash runtime/claude-code/hooks/test_agent-dispatch-guard.sh
     run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh
     run "subagent clone guard" bash runtime/claude-code/hooks/test_subagent-clone-guard.sh
+    run "model-switch guard" bash runtime/claude-code/hooks/test_model-switch-guard.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
     run "fabric-secrets" bash policies/run_suite.sh runtime/provisioning/secrets/test_fabric-secrets.sh

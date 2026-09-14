@@ -11,6 +11,7 @@ Two independent dimensions, one derived artifact:
     routing.py resolve code-high --provider anthropic
     routing.py table [--provider P]
     routing.py check                                  # validate the canonical files
+    routing.py shim <model>                           # the family shim a bare model id needs, if any
 
 Profile layers (routing/profiles.json and the agent's local override) may
 override a class's model; the shim is looked up on the MERGED model, so an
@@ -226,8 +227,20 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--role", default=None)
     t.add_argument("--agent", default=None)
     sub.add_parser("check", help="validate the canonical routing files")
+    s = sub.add_parser("shim", help="the family shim a model id needs, or nothing")
+    s.add_argument("model")
+    s.add_argument("--harness", default="claude-code")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.fabric) if args.fabric else None
+
+    if args.cmd == "shim":
+        # One line, the shim or nothing; exit 0 either way. A hook asks this
+        # so that "which families need a shim" has one implementation. A
+        # composite already names its shim and gets nothing more.
+        shim = shim_for(args.model.split("@", 1)[0], load_shims(root), args.harness)
+        if shim:
+            print(shim)
+        return 0
 
     if args.cmd == "check":
         findings = check(root)

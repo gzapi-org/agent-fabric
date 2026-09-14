@@ -90,6 +90,23 @@ def test_shim_follows_the_family_of_the_merged_model(tmp: str) -> None:
     assert routing.resolve("code-high", "openrouter", local=local, root=root)["composite"] == "openai/gpt-5"
 
 
+def test_shim_subcommand_answers_for_a_bare_id_and_stays_quiet_otherwise(tmp: str) -> None:
+    """A hook asks `routing.py shim <model>` rather than matching families
+    itself: a bare id of a shimmed family prints the shim; a composite,
+    a foreign family and a bare preset print nothing; every case exits 0."""
+    cli = os.path.join(ROOT, "tools", "fabric", "routing.py")
+
+    def ask(model: str) -> str:
+        out = subprocess.run([sys.executable, cli, "shim", model], capture_output=True, text=True, check=True)
+        return out.stdout.strip()
+
+    assert ask("z-ai/glm-5.3") == GLM_SHIM
+    assert ask("z-ai/glm-5.3" + GLM_SHIM) == GLM_SHIM      # composite: same family, same answer
+    assert ask("anthropic/claude-opus-5") == ""
+    assert ask("@preset/reviewer") == ""
+    assert ask("not-a-model") == ""
+
+
 def test_a_bare_preset_gets_nothing_attached() -> None:
     assert routing.shim_for("@preset/reviewer", routing.load_shims()) is None
     assert routing.composite("@preset/reviewer", None) == "@preset/reviewer"
@@ -162,6 +179,7 @@ def main() -> int:
         test_a_non_glm_model_gets_no_shim,
         test_shim_follows_the_family_of_the_merged_model,
         test_a_bare_preset_gets_nothing_attached,
+        test_shim_subcommand_answers_for_a_bare_id_and_stays_quiet_otherwise,
         test_only_live_tested_families_have_a_shim,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,

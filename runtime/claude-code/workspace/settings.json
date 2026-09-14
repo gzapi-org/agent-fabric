@@ -63,6 +63,18 @@
           }
         ]
       }
+    ],
+    "PreModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$AGENT_FABRIC_ROOT/runtime/claude-code/hooks/model-switch-guard.sh\"; if [ -f \"$f\" ]; then bash \"$f\"; else printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreModelSwitch\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"The model-switch guard script was not found; in a broker session a bare model id runs without its family shim. Approve only if the target is a composite or needs no shim.\"}}'; fi",
+            "timeout": 10,
+            "statusMessage": "agent-fabric: checking the switch keeps its family shim…"
+          }
+        ]
+      }
     ]
   }
 }

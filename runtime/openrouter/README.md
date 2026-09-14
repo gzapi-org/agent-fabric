@@ -52,6 +52,19 @@ The main agent's GLM compatibility is the same shim applied to the
 `session` model and passed as `--model` — separate from, and unaffected by,
 how the capability classes resolve.
 
+**A hand `/model` inside the session cannot drop the shim.** The launch
+binds a family to its shim once, in the child's environment; `/model
+<bare id>` afterwards would run that family with none, and what follows
+reads as a model defect rather than a routing one. The `PreModelSwitch`
+hook `runtime/claude-code/hooks/model-switch-guard.sh` — armed only when
+`AGENT_FABRIC_LAUNCH_PROFILE` is set, so a vanilla `claude` never sees
+it — refuses a bare target whose family `routing/shims.json` gives a shim
+and names the composite to switch to instead; a composite, a tier alias
+(the launcher's own export) and a family with no shim pass. It asks
+`tools/fabric/routing.py shim <model>` rather than matching families
+itself, so a family added to `shims.json` is guarded from that moment
+with nothing else to update.
+
 ## Who is launching
 
 The agent is the Linux login; the launcher asks `runtime/identity.py` and

@@ -65,6 +65,16 @@ bind fabric-coordinator
 [[ "$(try_commit src/a.txt 'code')" == 0 ]] && pass "fabric-coordinator bound: allowed" || fail "coordinator refused in fabric" "$(cat "$TMP/err")"
 git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: fabric-coordinator$' && pass "…and every fabric commit declares the role" || fail "no trailer on a fabric commit"
 
+echo "in agent-fabric itself an amend is a guarded change too"
+bind backend-dev
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -q --amend --no-edit >/dev/null 2>"$TMP/err" ); rc=$?
+[[ $rc == 1 ]] && pass "backend-dev bound: an amend in the fabric is refused" || fail "amend admitted under backend-dev" "$(cat "$TMP/err")"
+bind fabric-coordinator
+( cd "$TMP/repo" && git commit -q --amend -m 'rewritten' >/dev/null 2>"$TMP/err" ); rc=$?   # message without a trailer
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -q --amend --no-edit >/dev/null 2>"$TMP/err" ); rc=$?
+[[ $rc == 0 ]] && pass "fabric-coordinator bound: the amend commits" || fail "amend refused" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: fabric-coordinator$' && pass "…and the amend carries the trailer (git am + amend is the handover route)" || fail "no trailer on an amend" "$(git -C "$TMP/repo" log -1 --format=%B)"
+
 echo "a merge that only folds main's .agent-fabric/ changes is no change of its own"
 # main gets a drain (coordinator); a backend-dev branch then folds main.
 bind fabric-coordinator; new_repo

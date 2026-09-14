@@ -27,9 +27,17 @@ guarded_change() {
     else
         mapfile -t guarded < <(git diff --cached --name-only --diff-filter=ACDMRT 2>/dev/null)
     fi
-    (( ${#guarded[@]} )) || return 0
+    local merge_head; merge_head="$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" || merge_head=""
+    if (( ${#guarded[@]} == 0 )); then
+        # Nothing staged against HEAD: an --amend (the index equals the
+        # commit being rewritten) or an empty commit. In agent-fabric
+        # itself every commit is the coordinator's, an amend included —
+        # it rewrites a guarded commit and must carry the trailer.
+        [[ -z "$prefix" && -z "$merge_head" ]] && guarded=("(amend or empty commit: the whole repository)")
+        return 0
+    fi
     # A merge in progress: compare the staged guarded subtree with each parent's.
-    local merge_head; merge_head="$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" || return 0
+    [[ -n "$merge_head" ]] || return 0
     staged_tree="$(git write-tree 2>/dev/null)" || return 0
     local staged_sub head_sub merge_sub
     staged_sub="$(git rev-parse -q --verify "$staged_tree:${prefix%/}" 2>/dev/null || echo none)"

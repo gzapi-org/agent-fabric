@@ -51,7 +51,9 @@ d = {"AGENT_LOGIN": login, "AGENT_HOST": "fixture-host",
      "CLAUDE_BRIDGE_AUTH_TOKEN": "bridge-FIXTURE with 'quote' and $dollar",
      "GIT_USER_NAME": "Fixture Person", "GIT_USER_EMAIL": "fixture@example.invalid",
      "GIT_SIGNING_KEY": "0123456789ABCDEF0123456789ABCDEF01234567", "GIT_GPG_PROGRAM": "/usr/bin/gpg",
-     "SSH_PRIVATE_KEY": "-----BEGIN OPENSSH PRIVATE KEY-----\nFIXTUREKEYMATERIAL\n-----END OPENSSH PRIVATE KEY-----",
+     # Deliberately NOT shaped like a real key: GitHub secret scanning
+     # flags the BEGIN/END armour even around fixture text (alert on cdac5d2).
+     "SSH_PRIVATE_KEY": "fixture-private-key-material FIXTUREKEYMATERIAL (not a key)",
      "SSH_PUBLIC_KEY": "ssh-ed25519 AAAAFIXTURE fixture",
      "DOPPLER_PROJECT": "fixture-project", "DOPPLER_CONFIG": login, "DOPPLER_ENVIRONMENT": login}
 for k in omit: d.pop(k, None)

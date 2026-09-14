@@ -95,9 +95,13 @@ def test_a_bare_preset_gets_nothing_attached() -> None:
     assert routing.composite("@preset/reviewer", None) == "@preset/reviewer"
 
 
-def test_only_glm_has_a_shim_today() -> None:
+def test_only_live_tested_families_have_a_shim() -> None:
     shims = routing.load_shims()
-    assert [s["family"] for s in shims] == ["z-ai/glm-*"], "no speculative families"
+    assert [s["family"] for s in shims] == ["z-ai/glm-*", "deepseek/deepseek-v4*"], "no speculative families"
+    for s in shims:
+        assert s["tested"].startswith("2026-"), f"{s['family']}: a shim is added only with a live check"
+    assert routing.shim_for("deepseek/deepseek-v4-pro-0813", shims) == "@preset/deepseek2claude-shim"
+    assert routing.shim_for("deepseek/deepseek-v3", shims) is None, "v3 was never checked"
 
 
 def test_review_grade_gate_is_on_review_only(tmp: str) -> None:
@@ -158,7 +162,7 @@ def main() -> int:
         test_a_non_glm_model_gets_no_shim,
         test_shim_follows_the_family_of_the_merged_model,
         test_a_bare_preset_gets_nothing_attached,
-        test_only_glm_has_a_shim_today,
+        test_only_live_tested_families_have_a_shim,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,
         test_every_class_rides_its_own_alias,

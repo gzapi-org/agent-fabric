@@ -237,7 +237,27 @@ def validate_json(schema: dict[str, Any], doc: Any, where: str) -> list[str]:
     ]
 
 
-def _structural_check(schema: dict[str, Any], doc: Any, where: str, path: str = "") -> list[str]:
+def _structural_check(schema: dict[str, Any], doc: Any, where: str, path: str = "",
+                      root: dict[str, Any] | None = None) -> list[str]:
+    """The no-dependency validator: type, required, properties, items, enum,
+    pattern — and the two composition keywords the schemas here use,
+    local `$ref` (#/$defs/…) and `allOf`. Anything else is jsonschema's."""
+    root = root if root is not None else schema
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if ref.startswith("#/"):
+            target: Any = root
+            for part in ref[2:].split("/"):
+                target = target.get(part, {}) if isinstance(target, dict) else {}
+            merged = {k: v for k, v in schema.items() if k != "$ref"}
+            problems = _structural_check(target, doc, where, path, root)
+            return problems + (_structural_check(merged, doc, where, path, root) if merged else [])
+    if "allOf" in schema:
+        problems: list[str] = []
+        for sub in schema["allOf"]:
+            problems += _structural_check(sub, doc, where, path, root)
+        rest = {k: v for k, v in schema.items() if k != "allOf"}
+        return problems + (_structural_check(rest, doc, where, path, root) if rest else [])
     """Enough of JSON Schema to be useful without the dependency."""
     problems: list[str] = []
     expected = schema.get("type")
@@ -266,17 +286,17 @@ def _structural_check(schema: dict[str, Any], doc: Any, where: str, path: str = 
                 problems.append(f"{where}{path}: unexpected property '{key}'")
         for key, sub in props.items():
             if key in doc:
-                problems += _structural_check(sub, doc[key], where, f"{path}/{key}")
+                problems += _structural_check(sub, doc[key], where, f"{path}/{key}", root)
         extra = schema.get("additionalProperties")
         if isinstance(extra, dict):
             for key, value in doc.items():
                 if key not in props:
-                    problems += _structural_check(extra, value, where, f"{path}/{key}")
+                    problems += _structural_check(extra, value, where, f"{path}/{key}", root)
     if isinstance(doc, list):
         items = schema.get("items")
         if isinstance(items, dict):
             for i, value in enumerate(doc):
-                problems += _structural_check(items, value, where, f"{path}[{i}]")
+                problems += _structural_check(items, value, where, f"{path}[{i}]", root)
         if schema.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in doc}) != len(doc):
             problems.append(f"{where}{path}: duplicate items")
     if "enum" in schema and doc not in schema["enum"]:

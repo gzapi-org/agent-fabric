@@ -106,6 +106,13 @@ export function inboxRoot(who) {
 // there from the account's Doppler config, which is how an enrolled
 // account gets it. The file lookups serve a clone provisioned by hand.
 export function token(root, cfg = integrationConfig()) {
+  // The synced file first: it is what fabric-secrets sync writes, and the
+  // environment is only a copy of it taken when the session's shell
+  // started — a snapshot the harness never refreshes, so after a rotation
+  // it stays wrong for the life of the session while the file is current
+  // (web-dev-01, 2026-09-14: one refused call per re-arm, for hours).
+  const synced = syncedToken();
+  if (synced) return synced;
   if (process.env.CLAUDE_BRIDGE_AUTH_TOKEN) return process.env.CLAUDE_BRIDGE_AUTH_TOKEN;
   const env = path.join(root, cfg.token_env_file);
   if (fs.existsSync(env))

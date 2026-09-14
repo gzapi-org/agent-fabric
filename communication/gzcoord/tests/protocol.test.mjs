@@ -878,7 +878,8 @@ function withRelay(fn) {
 // synchronous exec would block the event loop the server answers on.
 function sendWith(relay, text, extra = []) {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, text);
-  const env = { ...process.env, CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
+  // HOME is a scratch dir: the runner's own synced secrets.env must not be the token here.
+  const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
   return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
     (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
 }
@@ -935,7 +936,7 @@ test('inbox reports a refused token as a rotation, exit 4', async () => {
   const server = http.createServer((req, res) => { res.statusCode = 401; res.setHeader('connection', 'close'); res.end('{}'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
   const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, err: String(err) })));
   server.closeAllConnections(); server.close();
   assert.equal(r.code, 4, r.err);
@@ -955,7 +956,7 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const run = args => new Promise(resolve => execFile('node', [INBOX, ...args], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
   const a = await run(['--replay', '7']);
   const b = await run(['--replay', '01a09fc1-0000-7000-8000-00000000000b']);
@@ -972,7 +973,7 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
 // The environment is a snapshot; the synced file is current. A refused
 // token is retried once with the file's value, and that is what recovers
 // a watch re-armed from a pre-rotation shell.
-test('inbox retries a refused token with the synced file value, once', async () => {
+test('the synced file is the token; the environment snapshot is not consulted while it exists', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-'));
   fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), "# x\nexport CLAUDE_BRIDGE_AUTH_TOKEN='fresh-token'\n");
@@ -989,7 +990,7 @@ test('inbox retries a refused token with the synced file value, once', async () 
   const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
   server.closeAllConnections(); server.close();
   assert.equal(r.code, 0, r.err);
-  assert.match(r.err, /retrying with the synced value/);
-  assert.ok(seen.includes('Bearer dead') && seen.includes('Bearer fresh-token'), seen);
+  assert.ok(seen.includes('Bearer fresh-token') && !seen.includes('Bearer dead'), seen);
+  assert.doesNotMatch(r.err, /retrying/);
   assert.match(r.out + r.err, /nothing for you/);
 });

@@ -109,11 +109,12 @@ seen where it should not be). Your environment is a snapshot — in Claude
 Code every Bash call runs from the shell the session started with — so
 after a rotation it carries the dead value for the life of the session,
 however many times `fabric-secrets sync` runs. The inbox and `send.mjs`
-know that: on a refused token they re-read
-`~/.config/agent-fabric/secrets.env` (what `sync` writes) and retry once,
-so the recovery is `bin/fabric-secrets sync`, then re-arm the watch — no
-login shell, no `source`, nothing pasted into a file. Only when the synced
-file still holds the refused value does the inbox report
+know that: they read `~/.config/agent-fabric/secrets.env` (what `sync`
+writes) before the environment, and retry a refused token once with the
+file's value if it changed underneath a long wait — so the recovery is
+`bin/fabric-secrets sync`, then re-arm the watch; no login shell, no
+`source`, nothing pasted into a file, and no refused call per re-arm.
+Only when the synced file still holds the refused value does the inbox report
 `refused this token … it was rotated` and exit 4, and the watch loop
 stops on that rather than repeat it: sync had not run yet, or the account
 is not enrolled.

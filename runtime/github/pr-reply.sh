@@ -185,6 +185,10 @@ FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &&
 AGENT="$(python3 "$FABRIC_ROOT/runtime/identity.py" 2>/dev/null || id -un)"
 ME="$(hostname -s)/$AGENT"
 ME_LEGACY="$(hostname -s)/$(basename "$root")"
+# The ROLE this session holds: some PRs are a role's, not a session's
+# (below, bot_owner_role), and only the session holding that role may
+# answer on them. No binding, no role.
+ROLE="$(python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || true)"
 OWNER="$(printf '%s' "$PR_BRANCH" | cut -d/ -f1,2)"
 
 # Does the branch name a SESSION at all? Same structural test
@@ -223,6 +227,17 @@ branch_names_a_session() {
     return 0
 }
 
+# BOT BRANCHES HAVE AN OWNER TOO -- a ROLE. Same map as pr-sessions.sh
+# (a Dependabot pull request is devex-tooling's: architect-cto decision,
+# 2026-09-14), duplicated for the same reason the predicate above is.
+# Prints the owning role for a bot prefix, or nothing.
+bot_owner_role() {
+    case "${1%%/*}" in
+        dependabot) printf '%s' "devex-tooling" ;;
+        *) ;;
+    esac
+}
+
 # OLDER BRANCHES. Before the login identity model, branch prefixes carried
 # the working-copy directory name; such a branch named for THIS working
 # copy is this agent's own and is treated so. Any other older prefix is
@@ -241,7 +256,20 @@ leave_open_unless_explicit() {
     fi
 }
 
-if ! branch_names_a_session "$PR_BRANCH"; then
+BOT_ROLE="$(bot_owner_role "$PR_BRANCH")"
+if [[ -n "$BOT_ROLE" && "$ROLE" == "$BOT_ROLE" ]]; then
+    # A bot PR, and this session holds the role that owns bot PRs: it is
+    # ours to answer, findings and resolves alike, as a session's own
+    # branch would be.
+    echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH' — a bot branch, owned by the $BOT_ROLE role, which this session holds." >&2
+elif [[ -n "$BOT_ROLE" ]]; then
+    # A bot PR that a ROLE owns, and this session does not hold it. The
+    # same refusal as for another session's branch: the owner is
+    # mid-flight on it, and a reply cannot be unsent.
+    echo "pr-reply: #$PR_NUMBER is on '$PR_BRANCH', which the $BOT_ROLE role owns; this session holds '${ROLE:-no role}'." >&2
+    echo "  Not replying. Hand the finding to that role (GZCoord), or raise it in the PR." >&2
+    exit 2
+elif ! branch_names_a_session "$PR_BRANCH"; then
     # Unowned, NOT someone else's. Refusing here is what kept these
     # threads unanswerable; claiming a rival session owns them would be
     # a statement the branch cannot support.

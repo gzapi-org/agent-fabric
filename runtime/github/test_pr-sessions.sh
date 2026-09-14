@@ -503,35 +503,75 @@ run -n abc
 assert_rc       "non-numeric limit exits 2" 2
 assert_contains "names the expectation" "positive integer"
 
-echo "pr-sessions: bot branches are not attributed to a session"
+echo "pr-sessions: a Dependabot branch is not a session — it is the devex-tooling ROLE's"
+# The vendor deny-list still says a bot branch names no session. It used
+# to end there: every bot row read "(unconventional)", fell outside every
+# scope, and 28 of 31 unreachable rows on gzapp were Dependabot's — their
+# review findings routed to nobody. A Dependabot row now resolves to
+# role:devex-tooling (architect-cto, 2026-09-14). A bot with no owner in
+# the map stays unattributed, visibly, exactly as before.
 write_pr_list "$(jq -n --arg me "$ME" \
   --arg t1 "$(ago '1 hour')" --arg t2 "$(ago '2 hours')" \
-  --arg t3 "$(ago '3 hours')" '[
+  --arg t3 "$(ago '3 hours')" --arg t4 "$(ago '4 hours')" '[
   {number: 40, state: "OPEN", headRefName: "dependabot/github_actions/actions-minor-patch-5c7bcdc794",
    title: "bump", updatedAt: $t1, isDraft: false, mergedAt: null},
   {number: 41, state: "OPEN", headRefName: "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2",
    title: "bump", updatedAt: $t2, isDraft: false, mergedAt: null},
   {number: 42, state: "OPEN", headRefName: ($me + "/feat/real"),
-   title: "real", updatedAt: $t3, isDraft: false, mergedAt: null}
+   title: "real", updatedAt: $t3, isDraft: false, mergedAt: null},
+  {number: 43, state: "OPEN", headRefName: "renovate/npm/vite-6.x",
+   title: "bump", updatedAt: $t4, isDraft: false, mergedAt: null}
 ]')"
 write_graphql "$(jq -n '{data: {repository: {
   p40: {number: 40, author: {login: "app/dependabot"}, reviewThreads: {nodes: []}},
-  p41: {number: 41, author: {login: "app/dependabot"}, reviewThreads: {nodes: []}},
-  p42: {number: 42, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}}
+  p41: {number: 41, author: {login: "app/dependabot"}, reviewThreads: {nodes: [{isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}]}},
+  p42: {number: 42, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
+  p43: {number: 43, author: {login: "app/renovate"}, reviewThreads: {nodes: []}}
 }}}')"
 run /all
 assert_rc       "exits 0" 0
 # The branch name itself still shows in the WORK column, so the claim
-# has to be about the SESSION column of each bot row specifically.
+# has to be about the SESSION column of each row specifically.
 for n in 40 41; do
     row="$(printf '%s\n' "$RUN_OUT" | grep -- "#$n")"
-    if [[ "$row" == *"(unconventional)"* ]]; then
-        pass "#$n is not attributed to a session"
+    if [[ "$row" == *"role:devex-tooling"* && "$row" != *"(unconventional)"* ]]; then
+        pass "#$n is the devex-tooling role's"
     else
-        fail "#$n was attributed to a session" "$row"
+        fail "#$n did not resolve to role:devex-tooling" "$row"
     fi
 done
+row="$(printf '%s\n' "$RUN_OUT" | grep -- "#43")"
+if [[ "$row" == *"(unconventional)"* ]]; then pass "#43 (a bot with no owner in the map) stays unattributed"
+else fail "#43 was attributed" "$row"; fi
 assert_contains "a real session branch still resolves" "$ME"
+
+# ROLE SCOPE. A session whose binding holds devex-tooling sees the
+# Dependabot rows in its DEFAULT scope and in /unresolved; a session
+# bound to any other role does not, and neither counts them as
+# unattributed. The binding is what identity.py --role reads, planted
+# under a private state dir, keyed by this login as identity.py demands.
+plant_role() {  # <role> -> AGENT_FABRIC_STATE_DIR holding a binding for this login
+    local role="$1" login; login="$(id -un)"
+    local d="$SANDBOX/state-$role"; mkdir -p "$d/agents/$login"
+    jq -n --arg a "$login" --arg r "$role" '{agent:$a, role:$r}' > "$d/agents/$login/binding.json"
+    printf '%s' "$d"
+}
+run_env AGENT_FABRIC_STATE_DIR="$(plant_role devex-tooling)" --
+assert_rc       "devex-tooling default scope: exits 0" 0
+assert_contains "devex-tooling default scope lists the Dependabot row #40" "#40"
+assert_contains "devex-tooling default scope lists the Dependabot row #41" "#41"
+assert_not_contains "devex-tooling default scope does not list the renovate row" "#43"
+row="$(printf '%s\n' "$RUN_OUT" | grep -- "#41")"
+if [[ "$row" == "*"* ]]; then pass "the Dependabot row is marked mine (*)"; else fail "the Dependabot row is not marked mine" "$row"; fi
+run_env AGENT_FABRIC_STATE_DIR="$(plant_role devex-tooling)" -- /unresolved
+assert_rc       "devex-tooling /unresolved: exits 0" 0
+assert_contains "devex-tooling /unresolved surfaces the Dependabot thread" "#41"
+assert_not_contains "devex-tooling /unresolved does not surface a resolved bot row" "#40"
+run_env AGENT_FABRIC_STATE_DIR="$(plant_role backend-dev)" --
+assert_rc       "backend-dev default scope: exits 0" 0
+assert_not_contains "backend-dev default scope does not list #40" "#40"
+assert_not_contains "backend-dev default scope does not list #41" "#41"
+assert_contains "the NOTE counts only the unowned bot row" "1 PR(s) name no live session"
 default_pr_list; default_graphql
 
 echo "pr-sessions: a session branch is attributed by SHAPE, not a type vocabulary"

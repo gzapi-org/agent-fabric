@@ -228,12 +228,17 @@ done
 # on this host, which is what newer branch prefixes carry. Older branches
 # carry the working-copy name in the second segment; ME_LEGACY lets the
 # default "mine" filter still find them while they last.
-ME=""; ME_LEGACY=""
+ME=""; ME_LEGACY=""; ROLE=""
 FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     AGENT="$(python3 "$FABRIC_ROOT/runtime/identity.py" 2>/dev/null || id -un)"
     ME="$(hostname -s)/$AGENT"
     ME_LEGACY="$(hostname -s)/$(basename "$root")"
+    # The ROLE this session holds (its runtime binding), because some
+    # rows are owned by a role rather than by a session: a Dependabot
+    # pull request is devex-tooling's, whichever login holds that role
+    # today. No binding, no role — those rows are then nobody's here.
+    ROLE="$(python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || true)"
 fi
 
 # Inside a clone with no explicit scope: show that clone's PRs. If ME
@@ -344,7 +349,7 @@ fi
 # no record of retired clones is kept, so nothing is inherited and
 # nothing is orphaned.
 
-envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" --arg filter "$FILTER" \
+envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" --arg role "$ROLE" --arg filter "$FILTER" \
         --argjson limit "$CANDIDATES" --arg cutoff "$CUTOFF" \
         --argjson lastitem "${LAST_ITEM:-0}" '
   # Automation vendors, whose branch names also have four or more
@@ -355,6 +360,16 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" 
   # allow-list silently deletes real work from this listing.
   def bots: ["dependabot","renovate","github-actions","weblate","imgbot",
              "allcontributors","pre-commit-ci","snyk-bot"];
+  # BOT ROWS HAVE AN OWNER TOO -- a ROLE, not a session. A Dependabot
+  # pull request belongs to devex-tooling (architect-cto decision,
+  # 2026-09-14): its review findings are answered by whichever session
+  # holds that role, and a group that fails to land is triaged by it.
+  # Before this map every bot row was "(unconventional)", outside every
+  # scope by construction, and 28 of the 31 unreachable rows were
+  # Dependabot -- findings on them were routed to nobody. The deny-list
+  # above still says "not a session"; this map says whose the row is
+  # instead. A bot not listed here stays unattributed, visibly, as before.
+  def bot_owner: {"dependabot": "role:devex-tooling"};
   # STRUCTURAL, not an allow-list of type words.
   #
   # CLAUDE.md specifies <host>/<clone>/<type>/<short-desc> and puts no
@@ -382,16 +397,19 @@ envelope="$(printf '%s' "$rows" | jq --arg me "$ME" --arg melegacy "$ME_LEGACY" 
   # SPECIFIED shape and nothing more.
   def session:
     (.headRefName | split("/")) as $p
-    | if conventional then ($p[0] + "/" + $p[1]) else "(unconventional)" end;
-  # OWNER is the session the prefix names. NO APOSTROPHES in this block --
-  # it is a single-quoted jq program.
+    | if conventional then ($p[0] + "/" + $p[1])
+      elif (bot_owner[$p[0]] // "") != "" then bot_owner[$p[0]]
+      else "(unconventional)" end;
+  # OWNER is the session the prefix names, or the ROLE a bot row maps
+  # to. NO APOSTROPHES in this block -- it is a single-quoted jq program.
   def owner: session;
   def work:
     (.headRefName | split("/")) as $p
     | if conventional then ($p[2:] | join("/")) else .headRefName end;
   # Mine: the prefix of this agent, host/login, or -- while older
   # branches last -- the prefix that named this working copy.
-  def mine: (. == $me) or ($melegacy != "" and . == $melegacy);
+  def mine: (. == $me) or ($melegacy != "" and . == $melegacy)
+            or ($role != "" and . == ("role:" + $role));
   def mark: if mine then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def st:
@@ -450,7 +468,8 @@ UNATTRIBUTED="$(printf '%s' "$envelope" | jq '.unattributed')"
 unattributed_note() {
     [[ "${UNATTRIBUTED:-0}" -gt 0 ]] || return 0
     echo "  NOTE: $UNATTRIBUTED PR(s) name no live session — the branch does not" >&2
-    echo "  parse as <host>/<agent>/<type>/<short-desc>" >&2
+    echo "  parse as <host>/<agent>/<type>/<short-desc> (a Dependabot branch" >&2
+    echo "  is not among them: those rows are role:devex-tooling's)" >&2
     echo "  with no recorded successor, or one with SEVERAL possible" >&2
     echo "  successors — so they cannot be scoped to a" >&2
     echo "  session and are not listed. Pass /unattributed to list exactly" >&2
@@ -543,12 +562,13 @@ if [[ "$UNRESOLVED_ONLY" -eq 1 && "$THREAD_JSON" == "null" ]]; then
     exit 2
 fi
 
-out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --arg melegacy "$ME_LEGACY" --argjson grouped "$GROUPED" \
+out="$(printf '%s' "$selected" | jq -r --arg me "$ME" --arg melegacy "$ME_LEGACY" --arg role "$ROLE" --argjson grouped "$GROUPED" \
         --argjson th "$THREAD_JSON" --argjson want "$THREADS" \
         --argjson unres "$UNRESOLVED_ONLY" --argjson limit "$LIMIT" '
   # Mine: the prefix of this agent, host/login, or -- while older
   # branches last -- the prefix that named this working copy.
-  def mine: (. == $me) or ($melegacy != "" and . == $melegacy);
+  def mine: (. == $me) or ($melegacy != "" and . == $melegacy)
+            or ($role != "" and . == ("role:" + $role));
   def mark: if mine then "*" else " " end;
   def pad($n): . + (" " * ($n - length));
   def lpad($n): (" " * ($n - length)) + .;

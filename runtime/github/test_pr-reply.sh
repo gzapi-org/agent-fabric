@@ -174,10 +174,23 @@ thread_fixture() {
 }
 
 # Runs the script with the given stdin body and arguments.
+# THE ROLE IS PART OF EVERY FIXTURE. Bot branches are owned by a role, so
+# whoever runs this suite must not decide a case through their own
+# binding: every run reads its binding from a private state dir — empty
+# (no role) unless a case plants one with `with_role`, for this login, in
+# the shape identity.py reads.
+ROLE_STATE_DIR=""
+with_role() {  # <role> | -   (- = no binding)
+    local role="$1" login; login="$(id -un)"
+    ROLE_STATE_DIR="$SANDBOX/state-role"; rm -rf "$ROLE_STATE_DIR"; mkdir -p "$ROLE_STATE_DIR/agents/$login"
+    [[ "$role" == "-" ]] || jq -n --arg a "$login" --arg r "$role" '{agent:$a, role:$r}' > "$ROLE_STATE_DIR/agents/$login/binding.json"
+}
 invoke() {
     local body="$1"; shift
+    [[ -n "$ROLE_STATE_DIR" ]] || with_role -
     RUN_OUT="$(cd "$SANDBOX/$CLONE_NAME" && printf '%s' "$body" | \
         env PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
+        AGENT_FABRIC_STATE_DIR="$ROLE_STATE_DIR" \
         "${MOCK_ENV[@]}" bash "$UNDER_TEST" "$@" 2>&1)"
     RUN_RC=$?
 }
@@ -279,7 +292,7 @@ echo "pr-reply: a branch naming no session is answered, not refused as a rival's
 # see" about something that does not exist. Nobody owned those PRs and
 # nobody could answer them: four held seven unresolved findings for a
 # month.
-for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
+for branch in "renovate/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
               "agent/global-event-identity" \
               "add-claude-github-actions-1785994932117" \
               "feat/brand-logos"; do
@@ -318,14 +331,39 @@ assert_contains "warns about the owning surface"   "another SURFACE's"
 assert_contains "  and bounds what may be resolved" "left OPEN"
 assert_not_contains "does not invent a rival session" "mid-flight"
 
-echo "pr-reply: a bot branch is unowned, not a session called after the bot"
-# `dependabot/pub` has the right SHAPE for a session prefix, so only the
+echo "pr-reply: a bot branch is never a session called after the bot"
+# `renovate/pub` has the right SHAPE for a session prefix, so only the
 # vendor deny-list separates it from a real one. Without that this case
-# would refuse, naming "dependabot/pub" as the session to defer to.
-thread_fixture "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2" false
+# would refuse, naming "renovate/pub" as the session to defer to.
+thread_fixture "renovate/pub/apps/driver_flutter/flutter-minor-patch-7a91" false
 invoke "Answered." "$THREAD_ID"
 assert_rc           "exits 0" 0
-assert_not_contains "never names the bot as a session" "belongs to 'dependabot"
+assert_not_contains "never names the bot as a session" "belongs to 'renovate"
+
+echo "pr-reply: a Dependabot PR is the devex-tooling role's — that role answers, others do not"
+# Bot branches name no session, but a Dependabot PR has an OWNER: the
+# devex-tooling role (architect-cto, 2026-09-14). The session holding it
+# answers and may resolve as on its own branch; any other session is
+# refused as on another session's branch; with no role bound the PR is
+# still somebody's, so refused too.
+thread_fixture "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2" false
+with_role devex-tooling
+invoke "Superseded by #694; rebased there." "$THREAD_ID"
+assert_rc       "devex-tooling: exits 0" 0
+assert_contains "devex-tooling: says the role owns it" "owned by the devex-tooling role"
+[[ "$(calls)" == *REPLY* ]] && pass "devex-tooling: replied" || fail "devex-tooling: did not reply" "$(calls)"
+[[ "$(calls)" == *RESOLVE* ]] && pass "devex-tooling: resolved by default, as on its own branch" || fail "devex-tooling: did not resolve" "$(calls)"
+thread_fixture "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2" false
+with_role backend-dev
+invoke "Let me answer this one." "$THREAD_ID"
+assert_rc       "backend-dev: refused" 2
+assert_contains "backend-dev: names the owning role" "devex-tooling role owns"
+[[ "$(calls)" != *REPLY* ]] && pass "backend-dev: nothing posted" || fail "backend-dev: posted on a role-owned PR" "$(calls)"
+thread_fixture "dependabot/nuget/apps/backend_dotnet/dotnet-minor-patch-04e2" false
+with_role -
+invoke "No role here." "$THREAD_ID"
+assert_rc       "no role bound: refused" 2
+[[ "$(calls)" != *REPLY* ]] && pass "no role bound: nothing posted" || fail "no role bound: posted" "$(calls)"
 
 echo "pr-reply: a real session's PR is STILL refused"
 # The whole point of relaxing the guard is that it must not relax for
@@ -410,8 +448,10 @@ echo "pr-reply: removing the type test did not make the orphans unreachable"
 # The shape test bought nothing it was credited with: every branch this
 # relaxation exists to answer is unowned by segment count or by the
 # vendor deny-list, never by <type>. If that stops being true the four
-# cases below start failing rather than silently narrowing.
-for branch in "dependabot/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
+# cases below start failing rather than silently narrowing. (The bot here
+# is one with no owner in bot_owner_role — a Dependabot branch is no
+# longer an orphan, it is the devex-tooling role's; that case is above.)
+for branch in "renovate/pub/apps/driver_flutter/flutter-minor-patch-7a91" \
               "add-claude-github-actions-1785994932117" \
               "agent/global-event-identity" \
               "agent/common-api-idempotency"; do

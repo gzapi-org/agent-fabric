@@ -943,19 +943,18 @@ def test_hygiene_violation_fails_the_run(tmp: str) -> None:
     assert "city name" in proc.stderr
 
 
-def test_non_english_slice_is_flagged_by_lint(tmp: str) -> None:
+def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
+    """Non-English prose fails the same hygiene check a city name does: the
+    claim is rejected and named, never written for lint to find later."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "it", "title": "T",
          "body": "Questo perche' la configurazione della nella cache dovrebbe essere anche molto lenta.",
          "evidence": ["h1"]},
     ])})
-    run_assemble(drain, claims_dir, out)
-    if os.path.isdir(SCHEMA_DIR):
-        import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
-    proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+    proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 1, "non-English prose must be reported"
-    assert "non-English" in proc.stderr
+    assert "non-English" in proc.stderr, proc.stderr
+    assert not os.path.exists(dom(out, "alpha", "domain.md")), "the rejected claim was written"
 
 
 def test_lint_detects_index_drift(tmp: str) -> None:
@@ -1077,6 +1076,108 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
     assert "session-local temp path" in proc.stderr, proc.stderr
 
 
+def lintable(out: str) -> None:
+    """Schemas, a catalogue naming alpha, and alpha's charter — what lint
+    wants beyond what the assembler writes."""
+    import shutil
+    shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+
+
+def run_lint_wc(out: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"],
+                          capture_output=True, text=True)
+
+
+def test_a_hygiene_failure_rejects_the_claim_instead_of_writing_it(tmp: str) -> None:
+    """A body naming a deployment city fails RUBRIC hygiene. It must not
+    reach the tree and then fail lint there; it is rejected, named in the
+    report, and the drain's other claims land."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "clean", "title": "Clean", "body": "fine", "evidence": ["h1"]},
+        {"class": "workflow", "topic": "dirty", "title": "Dirty", "body": "the Springfield line", "evidence": ["h2"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, "a rejection is loud: the run exits non-zero so nobody commits without reading the report"
+    text = read(proj(out, "alpha", "workflow.md"))   # one surviving topic: the flat shape
+    assert "Clean" in text, "the clean claim must still land"
+    assert "Springfield" not in text and "Dirty" not in text, "a hygiene failure was written"
+    assert "REJECTED (hygiene" in proc.stderr and "Springfield" in proc.stderr, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert any("Springfield" in r for r in report["rejected_hygiene"]), report
+    assert report["telemetry"]["alpha"]["rejected_hygiene"] == 1
+
+
+def test_an_overlong_description_is_clipped_everywhere_it_appears(tmp: str) -> None:
+    """The schema caps a description at 240; a longer title is clipped at a
+    word boundary in the slice AND in the index entry (an index that kept
+    the long form read as drift), and the clip is reported."""
+    long = "word " * 70
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "long", "title": long.strip(), "body": "b", "evidence": ["h1"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    text = read(proj(out, "alpha", "workflow.md"))
+    desc = [l for l in text.splitlines() if l.startswith("description:")][0]
+    assert len(desc) <= 240 + len("description: ") + 2 and desc.rstrip('"').endswith("…"), desc
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert "…" in index and long.strip() not in index
+    assert "DESCRIPTIONS CLIPPED" in proc.stderr
+    lintable(out); run_assemble(drain, claims_dir, out)   # re-index with the charter present
+    lint = run_lint_wc(out)
+    assert lint.returncode == 0, lint.stderr
+
+
+def test_a_flat_class_file_moves_into_the_directory_when_the_class_splits(tmp: str) -> None:
+    """Drain one: a single workflow topic -> flat workflow.md. Drain two
+    brings two topics at once: the class becomes a directory and the flat
+    file MOVES in (named for its one prior topic), instead of staying
+    unreachable beside it and being counted as carried text for the new
+    topics."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "first", "title": "First", "body": "one", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert os.path.exists(proj(out, "alpha", "workflow.md"))
+    drain, claims_dir, _ = build(os.path.join(tmp, "two"), {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "second", "title": "Second", "body": "two", "evidence": ["h2"]},
+        {"class": "workflow", "topic": "third", "title": "Third", "body": "three", "evidence": ["h3"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert not os.path.exists(proj(out, "alpha", "workflow.md")), "flat file left beside the directory"
+    assert os.path.exists(proj(out, "alpha", "workflow", "first.md")), os.listdir(proj(out, "alpha", "workflow"))
+    assert os.path.exists(proj(out, "alpha", "workflow", "second.md"))
+    assert "First" in read(proj(out, "alpha", "workflow", "first.md"))
+    assert "LAYOUT: flat class file moved" in proc.stderr
+    for name in ("first.md", "second.md", "third.md"):
+        text = read(proj(out, "alpha", "workflow", name))
+        assert "derived_from:" in text, f"{name} lost its provenance"
+    lintable(out); run_assemble(drain, claims_dir, out)   # re-index with the charter present
+    lint = run_lint_wc(out)
+    assert lint.returncode == 0, lint.stderr
+
+
+def test_an_oversized_single_claim_is_written_whole_and_reported(tmp: str) -> None:
+    """A claim larger than the budget cannot be split; it lands as one slice
+    and the report says which memory to split — never an empty part one
+    with no provenance followed by the whole text in part two."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "threads", "topic": "big", "title": "Big", "body": "x" * 9000, "evidence": ["h1"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out, "--budget", "1000")
+    assert proc.returncode == 0, proc.stderr
+    files = sorted(os.listdir(proj(out, "alpha")))
+    assert "threads.md" in files and not any(f.startswith("threads-") for f in files), files
+    assert "derived_from:" in read(proj(out, "alpha", "threads.md"))
+    assert "OVER BUDGET" in proc.stderr and "split the memory" in proc.stderr, proc.stderr
+
+
 def main() -> int:
     cases = [
         test_places_claims_and_writes_provenance,
@@ -1085,6 +1186,10 @@ def main() -> int:
         test_index_banner_names_which_sections_load_when,
         test_committed_indexes_carry_the_banner_the_assembler_emits,
         test_fabric_links_use_the_sibling_prefix_even_when_the_checkout_is_nested,
+        test_a_hygiene_failure_rejects_the_claim_instead_of_writing_it,
+        test_an_overlong_description_is_clipped_everywhere_it_appears,
+        test_a_flat_class_file_moves_into_the_directory_when_the_class_splits,
+        test_an_oversized_single_claim_is_written_whole_and_reported,
         test_drain_report_carries_the_watermark_forward,
         test_drain_report_records_unattributable_rows,
         test_drain_report_tolerates_a_drain_with_no_harvest_report,
@@ -1116,7 +1221,7 @@ def main() -> int:
         test_domain_only_evidence_may_only_support_a_domain_claim,
         test_domain_only_evidence_is_accepted_on_a_domain_claim,
         test_hygiene_violation_fails_the_run,
-        test_non_english_slice_is_flagged_by_lint,
+        test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,
         test_a_tracked_scratchpad_path_is_left_alone,

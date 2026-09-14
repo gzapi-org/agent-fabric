@@ -456,6 +456,25 @@ def main() -> int:
     )
     shared_owners: dict[tuple[str, str], set[str]] = defaultdict(set)
 
+    # A claim whose body fails the hygiene check (RUBRIC.md: deployment
+    # specifics, secrets, session-local detail) is REJECTED here, before any
+    # bucket, and named in the report. Writing it and warning afterwards put
+    # the text in the tree first and asked for a fix second — and lint then
+    # failed the drain's branch on exactly that text. The author fixes the
+    # memory; the corpus never receives the claim.
+    rejected_hygiene: list[str] = []
+    for role, claims in list(all_claims.items()):
+        kept = []
+        for claim in claims:
+            issues = hygiene_check(claim.get("body") or "", f"{role}/{claim['class']}:{claim['topic']}")
+            if issues:
+                rejected_hygiene.extend(issues)
+                telemetry.setdefault(role, {}).setdefault("rejected_hygiene", 0)
+                telemetry[role]["rejected_hygiene"] += 1
+            else:
+                kept.append(claim)
+        all_claims[role] = kept
+
     for role, claims in all_claims.items():
         for claim in claims:
             key = (claim["class"], claim["topic"])
@@ -469,15 +488,44 @@ def main() -> int:
                 per_role[role][key].append(claim)
 
     problems: list[str] = []
+    oversized: list[str] = []
+    migrated: list[str] = []
+
+    def crossref_slice_ids(role: str) -> set[str]:
+        """Every `class:topic` id the role's committed crossref names."""
+        path = os.path.join(layout.project_dir(project, role), "crossref.json")
+        try:
+            doc = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        ids: set[str] = set()
+        for kinds in (doc.get("index") or {}).values():
+            for entry in (kinds or {}).values():
+                ids.update(x for x in (entry.get("slices") or []) if isinstance(x, str))
+        return ids
     collisions: list[str] = []
     written: list[str] = []
     index_entries: dict[str, list[dict[str, str]]] = defaultdict(list)
+
+    DESCRIPTION_MAX = 240  # identities/schemas/role-template.schema.json
+    clipped_descriptions: list[str] = []
+
+    def clip_description(description: str, where: str) -> str:
+        """The description is the retrieval cue an index shows; the schema
+        caps it. A cue that runs on is clipped at a word boundary and the
+        clip reported, rather than failing the whole drain on lint."""
+        if len(description) <= DESCRIPTION_MAX:
+            return description
+        cut = description[: DESCRIPTION_MAX - 1].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+        clipped_descriptions.append(f"{where}: description clipped from {len(description)} to {len(cut) + 1} characters")
+        return cut + "…"
 
     def write_slice(
         directory: str, filename: str, role: str, klass: str, claims: list[dict[str, Any]],
         description: str, shared_with: list[str] | None = None,
     ) -> None:
         os.makedirs(directory, exist_ok=True)
+        description = clip_description(description, os.path.join(directory, filename))
         evidence = sorted({h for c in claims for h in c.get("evidence", [])})
         origin_set = {
             origin_key(origins.get(h) or {"agent": "unresolved", "host": "unknown"})
@@ -671,10 +719,10 @@ def main() -> int:
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
             filename = f"{klass}-{topic}{suffix}.md"
-            description = (
+            description = clip_description(
                 (group[0].get("title") if group else None)
-                or f"{topic.replace('-', ' ')} ({klass})"
-            )
+                or f"{topic.replace('-', ' ')} ({klass})",
+                os.path.join(shared_dir, filename))
             write_slice(shared_dir, filename, "shared", klass, group, description, owners)
             for owner in owners:
                 shared_index[owner].append(
@@ -706,6 +754,27 @@ def main() -> int:
             # content: two roles shipped workflow.md files no session would read.
             already_split = os.path.isdir(os.path.join(base, CLASS_FILES[klass]))
             multi = already_split or len(topics) > 1
+            # SWITCHING TO THE DIRECTORY SHAPE MOVES THE FLAT FILE IN. The
+            # activator loads only the directory once it exists, so a flat
+            # `<class>.md` left beside `<class>/` is unreachable knowledge,
+            # and its size was being counted as carried text for whatever
+            # topic came first — which produced an empty "part one" with no
+            # provenance. The flat file may hold several topics' sections
+            # (the crossref says which), so it is not split: it moves whole,
+            # named for the one topic when there is one, else as the carried
+            # file of its class, and its description keeps it findable.
+            flat = os.path.join(base, f"{CLASS_FILES[klass]}.md")
+            if multi and os.path.exists(flat):
+                prior_topics = sorted({sid.split(":", 1)[1] for sid in crossref_slice_ids(role)
+                                       if sid.startswith(f"{klass}:")})
+                if len(prior_topics) == 1:
+                    name = f"{prior_topics[0]}.md"
+                else:
+                    stamp = (read_existing_slice(flat)[0].get("distilled_at") or "earlier")
+                    name = f"{CLASS_FILES[klass]}-carried-{stamp}.md"
+                os.makedirs(os.path.join(base, CLASS_FILES[klass]), exist_ok=True)
+                os.replace(flat, os.path.join(base, CLASS_FILES[klass], name))
+                migrated.append(f"{role}/{klass}: {CLASS_FILES[klass]}.md -> {CLASS_FILES[klass]}/{name}")
             for topic, claims in topics:
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
@@ -714,18 +783,33 @@ def main() -> int:
                     os.path.join(base, CLASS_FILES[klass], f"{topic}.md"),
                 )
                 groups = split_by_budget(claims, prior)
+                # An empty group means "part one is full of carried text":
+                # legitimate when the file on disk exists, a phantom header
+                # otherwise. A claim larger than the budget cannot be split
+                # (claims are atomic); it is written whole and REPORTED, so
+                # the author splits the memory — lint says the same thing.
+                limit = args.budget * CHARS_PER_TOKEN
+                for claim in claims:
+                    if len(claim["body"]) > limit:
+                        oversized.append(f"{role}/{klass}:{topic}: one claim is ~{len(claim['body']) // CHARS_PER_TOKEN} tokens, "
+                                         f"over the {args.budget} budget; split the memory it came from")
                 for part, group in enumerate(groups, start=1):
                     suffix = "" if part == 1 else f"-{part}"
+                    if not group:
+                        exists = (os.path.exists(os.path.join(base, CLASS_FILES[klass], f"{topic}{suffix}.md"))
+                                  or os.path.exists(os.path.join(base, f"{CLASS_FILES[klass]}.md")))
+                        if not exists:
+                            continue
                     if multi or len(groups) > 1:
                         directory = os.path.join(base, CLASS_FILES[klass])
                         filename = f"{topic}{suffix}.md"
                     else:
                         directory = base
                         filename = f"{CLASS_FILES[klass]}.md"
-                    description = (
+                    description = clip_description(
                         (group[0].get("title") if group else None)
-                        or f"{topic.replace('-', ' ')} ({klass})"
-                    )
+                        or f"{topic.replace('-', ' ')} ({klass})",
+                        os.path.join(directory, filename))
                     write_slice(directory, filename, role, klass, group, description)
                     index_entries[role].append(
                         {"path": layout.link_rel(os.path.join(directory, filename), project),
@@ -950,6 +1034,10 @@ def main() -> int:
         "shared_slices": len(shared),
         "telemetry": telemetry,
         "hygiene_problems": problems,
+        "rejected_hygiene": rejected_hygiene,
+        "oversized_claims": oversized,
+        "clipped_descriptions": clipped_descriptions,
+        "migrated": migrated,
         "title_collisions": collisions,
         "harvest": harvest_meta,
         "watermarks": watermarks,
@@ -968,6 +1056,22 @@ def main() -> int:
             f"admitted={counts.get('admitted', '?')} rejected={counts.get('rejected', '?')}"
         )
     print(f"\n{len(written)} files, {len(shared)} shared slices")
+    if rejected_hygiene:
+        print("\nREJECTED (hygiene — fix the memory, the corpus did not receive it; this run exits 1):", file=sys.stderr)
+        for note in rejected_hygiene:
+            print(f"  {note}", file=sys.stderr)
+    if oversized:
+        print("\nOVER BUDGET (written whole; lint will fail until the memory is split):", file=sys.stderr)
+        for note in oversized:
+            print(f"  {note}", file=sys.stderr)
+    if clipped_descriptions:
+        print("\nDESCRIPTIONS CLIPPED to the schema limit (shorten the memory's description to choose the cue):", file=sys.stderr)
+        for note in clipped_descriptions:
+            print(f"  {note}", file=sys.stderr)
+    if migrated:
+        print("\nLAYOUT: flat class file moved into its directory:", file=sys.stderr)
+        for note in migrated:
+            print(f"  {note}", file=sys.stderr)
     if collisions:
         print("\nTITLE COLLISIONS (both claims kept):", file=sys.stderr)
         for note in collisions:
@@ -993,9 +1097,12 @@ def main() -> int:
             file=sys.stderr,
         )
     if problems:
-        print("\nHYGIENE PROBLEMS:", file=sys.stderr)
+        # Carried text can still trip hygiene (a slice written before the
+        # check existed): reported the same way, and the run is not clean.
+        print("\nHYGIENE PROBLEMS in carried text:", file=sys.stderr)
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
+    if problems or rejected_hygiene:
         return 1
     return 0
 

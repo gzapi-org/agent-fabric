@@ -11,11 +11,23 @@
 cd "$1" || exit 1
 export MOVETO_TITLE="$2"
 
-# Entering an account is the refresh point for its secrets: pull this
-# login's Doppler config into ~/.config/agent-fabric/secrets.env before the
-# shell sources it. Best effort — offline or unenrolled, the previous file
-# stands and the shell still opens; only a problem is worth one line.
-fs="$HOME/projects/agent-fabric/bin/fabric-secrets"
+# Entering an account is its refresh point. Three things, each best
+# effort — offline or unenrolled, what is there stands, the shell still
+# opens, and only a problem is worth one line:
+#   1. the control plane: agent-fabric is read-only for every role but the
+#      coordinator, so this clone can only be behind — fast-forward it;
+#   2. bootstrap, which installs from that checkout (hooks, the /role
+#      command, the skills, the workspace settings) and is idempotent;
+#   3. the account's secrets, from its Doppler config into
+#      ~/.config/agent-fabric/secrets.env, before the shell sources it.
+fabric="$HOME/projects/agent-fabric"
+if [ -d "$fabric/.git" ]; then
+    if ! timeout 30 git -C "$fabric" pull -q --ff-only origin main 2>/dev/null; then
+        echo "moveto: agent-fabric not fast-forwarded (offline, or the clone is not on main); using it as is" >&2
+    fi
+    timeout 30 bash "$fabric/runtime/claude-code/bootstrap.sh" >/dev/null 2>&1         || echo "moveto: bootstrap did not complete; run it by hand" >&2
+fi
+fs="$fabric/bin/fabric-secrets"
 if [ -x "$fs" ]; then
     timeout 20 "$fs" sync --quiet || true
 fi

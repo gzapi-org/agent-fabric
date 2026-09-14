@@ -24,6 +24,13 @@ index exists so that knowledge stays out of context until something calls
 for it — when you touch a subject whose index line matches, open that one
 slice and no more.
 
+The activator also told the channel: a role change sends a `GOODBYE` as
+the role you left and a `HELLO` as the one you now hold (first
+activation: `HELLO` only; `deactivate`: `GOODBYE` only) — the lines
+`announced …` above say so, or a parenthesis says why not (relay down,
+account not enrolled). Nothing to do; a peer routing by `TO-ROLE` now
+finds you under the new one. Do not send a second `HELLO` yourself.
+
 Four things worth knowing while you hold a role:
 
 - **You are still the same agent.** The role changed; your name — the

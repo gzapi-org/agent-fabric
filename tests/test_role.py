@@ -289,6 +289,48 @@ def test_deactivate_clears_role_keeps_agent(f: Fixture) -> None:
     f.run("flutter-dev")
 
 
+def test_a_role_change_says_goodbye_then_hello(f: Fixture, tmp: str) -> None:
+    """A HELLO tells peers what role an address holds (SPEC §4); a GOODBYE
+    from the role being left closes it for TO-ROLE routing. Both ride
+    send.mjs, best effort. The fixture stands in a stub `node` that records
+    every invocation, so the order and the roles are what is asserted."""
+    # Own fixture: the shared one has no gzcoord scripts and the stub node must not leak into other cases.
+    own = os.path.join(tmp, "announce"); os.makedirs(own, exist_ok=True); f = Fixture(own)
+    scripts = os.path.join(f.root, "communication", "gzcoord", "scripts")
+    os.makedirs(scripts); open(os.path.join(scripts, "gzmsg.mjs"), "w").close(); open(os.path.join(scripts, "send.mjs"), "w").close()
+    log = os.path.join(own, "node.log"); bindir = os.path.join(own, "bin"); os.makedirs(bindir)
+    stub = r"""#!/usr/bin/env bash
+case "$*" in
+  *gzmsg.mjs\ new-id) echo 01a09fc1-0000-7000-8000-000000000009 ;;
+  *gzmsg.mjs\ hello*) printf '[GZCOORD/1] HELLO\nROLE: %s\n' "$4" ;;
+  *send.mjs\ -) body=$(cat); printf 'SEND %s\n' "$(printf '%s' "$body" | head -3 | tr '\n' ' ')" >> "$LOG"; echo 'sent seq 1' ;;
+esac
+"""
+    with open(os.path.join(bindir, "node"), "w", encoding="utf-8") as fh:
+        fh.write(stub)
+    os.chmod(os.path.join(bindir, "node"), 0o755)
+    f.env["PATH"] = bindir + os.pathsep + f.env["PATH"]; f.env["LOG"] = log
+    f.env.pop("AGENT_FABRIC_NO_ANNOUNCE", None)
+    assert f.run("backend-dev").returncode == 0
+    assert f.run("flutter-dev").returncode == 0
+    assert f.run("deactivate").returncode == 0
+    lines = open(log, encoding="utf-8").read().splitlines()
+    sends = [l for l in lines if l.startswith("SEND")]
+    assert len(sends) == 4, lines
+    assert "HELLO" in sends[0] and "backend-dev" in sends[0], sends            # initial activation: HELLO only
+    assert "GOODBYE" in sends[1] and "ROLE: backend-dev" in sends[1], sends    # change: GOODBYE as the old role…
+    assert "HELLO" in sends[2] and "flutter-dev" in sends[2], sends            # …then HELLO as the new one
+    assert "GOODBYE" in sends[3] and "ROLE: flutter-dev" in sends[3], sends    # deactivate: GOODBYE only
+    # Re-activating the same role announces nothing.
+    assert f.run("flutter-dev").returncode == 0
+    n = len(open(log, encoding="utf-8").read().splitlines())
+    assert f.run("flutter-dev").returncode == 0
+    assert len(open(log, encoding="utf-8").read().splitlines()) == n, "same role, no announcement"
+    # --no-announce silences it.
+    assert f.run("backend-dev", "--no-announce").returncode == 0
+    assert len(open(log, encoding="utf-8").read().splitlines()) == n, "--no-announce"
+
+
 def test_unknown_role_is_a_usage_error(f: Fixture) -> None:
     assert f.run("no-such-role").returncode == 2
 
@@ -341,6 +383,7 @@ def main() -> int:
             test_explicit_project_binds_even_without_a_working_copy,
             test_status_reports_agent_and_role,
             test_deactivate_clears_role_keeps_agent,
+            test_a_role_change_says_goodbye_then_hello,
             test_unknown_role_is_a_usage_error,
             test_activation_works_inside_a_linked_worktree,
         ]

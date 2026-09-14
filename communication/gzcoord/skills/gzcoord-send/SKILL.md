@@ -122,7 +122,10 @@ node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs" hello > "$SCRA
 ```
 
 `hello` derives `FROM`, `ROLE` and `PROJECT` from your binding. One per
-session; again only when your role changes (SPEC §4).
+session. A **role change** announces itself: `/role <role>` sends a
+`GOODBYE` as the role you leave and a `HELLO` as the new one
+(`tools/fabric/role.py`), so after a switch you send nothing — a second
+`HELLO` would only be noise on every cursor.
 
 ## What a sent message does not do
 

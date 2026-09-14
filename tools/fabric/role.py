@@ -135,6 +135,41 @@ def append_history(state_dir: str, record: dict) -> None:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Announcing a role change on the channel. A HELLO is how peers learn what
+# role an address holds (SPEC §4: re-announce when the role changes), and a
+# GOODBYE from the role being left closes it for anyone routing by TO-ROLE.
+# Best effort, like every message: the relay down or the account not
+# enrolled is one line on stderr and never a failed activation. Disabled
+# by --no-announce or AGENT_FABRIC_NO_ANNOUNCE=1 (tests, scripted use).
+GZCOORD = os.path.join(layout.FABRIC_ROOT, "communication", "gzcoord", "scripts")
+
+
+def _announce(kind: str, ctx: dict, role: str | None, project: str | None, note: str) -> None:
+    if os.environ.get("AGENT_FABRIC_NO_ANNOUNCE") == "1":
+        return
+    if not (project and role and shutil.which("node")):
+        return
+    gzmsg, send = os.path.join(GZCOORD, "gzmsg.mjs"), os.path.join(GZCOORD, "send.mjs")
+    if not (os.path.isfile(gzmsg) and os.path.isfile(send)):
+        return
+    try:
+        if kind == "HELLO":
+            text = subprocess.run(["node", gzmsg, "hello", "--role", role, "--project", project],
+                                  capture_output=True, text=True, check=True).stdout
+        else:
+            mid = subprocess.run(["node", gzmsg, "new-id"], capture_output=True, text=True, check=True).stdout.strip()
+            text = (f"[GZCOORD/1] GOODBYE\nFROM: {ctx['host']}/{ctx['agent']}\nROLE: {role}\n"
+                    f"PROJECT: {project}\nMESSAGE-ID: {mid}\n\nNOTES:\n{note}\n")
+        r = subprocess.run(["node", send, "-"], input=text, capture_output=True, text=True)
+        if r.returncode == 0:
+            print(f"  announced {kind} as {role}: {r.stdout.strip()}")
+        else:
+            print(f"  ({kind} not announced: {(r.stderr or '').strip().splitlines()[-1] if r.stderr else 'send failed'})", file=sys.stderr)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"  ({kind} not announced: {exc})", file=sys.stderr)
+
+
 def cmd_list() -> int:
     roles = layout.list_roles()
     if not roles:
@@ -196,6 +231,7 @@ def cmd_deactivate(ctx: dict) -> int:
     if os.path.islink(active) or os.path.exists(active):
         os.remove(active)
     print(f"agent: {ctx['agent']}   role: (none)")
+    _announce("GOODBYE", ctx, binding.get("role"), binding.get("project"), "role deactivated")
     return 0
 
 
@@ -294,6 +330,9 @@ def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str
     if not project and ctx.get("project_source") == "working-copy":
         project = ctx["project"]
     changed = binding.get("role") != role or binding.get("project") != project
+    previous_role = binding.get("role")
+    if changed and previous_role:
+        _announce("GOODBYE", ctx, previous_role, binding.get("project"), f"role change: {previous_role} -> {role}")
     if changed or not binding:
         append_history(ctx["state_dir"], {
             "agent": ctx["agent"], "host": ctx["host"], "role": role,
@@ -313,6 +352,8 @@ def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str
     # 5. Tell the caller what to load. Tier 1 only.
     print(f"agent: {ctx['agent']}   role: {role}   host: {ctx['host']}   "
           f"project: {project or '(none)'}")
+    if changed or not binding:
+        _announce("HELLO", ctx, role, project, "")
     if stash_dir:
         print(f"stashed adapted copies -> {stash_dir}")
     if installed:
@@ -347,7 +388,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--project", default=None, help="logical project id to bind the role to")
     ap.add_argument("--workspace", default=None,
                     help="directory whose .claude/ receives skills (default: $CLAUDE_PROJECT_DIR or cwd)")
+    ap.add_argument("--no-announce", action="store_true",
+                    help="do not send GOODBYE/HELLO over GZCoord for this change")
     args = ap.parse_args(argv)
+    if args.no_announce:
+        os.environ["AGENT_FABRIC_NO_ANNOUNCE"] = "1"
 
     workspace = os.path.abspath(args.workspace or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     ctx = identity.resolve_context(cwd=workspace)

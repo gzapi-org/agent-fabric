@@ -51,7 +51,7 @@ is not what creates the session.) What it does **not** give
 you is persistence: that directory is removed when the account's last session
 ends, so anything expected to outlive the shell needs
 `sudo loginctl enable-linger <account>`, which
-[`.roles/PROVISIONING.md`](../../.roles/PROVISIONING.md) does when standing an
+the deployment's provisioning runbook does when standing an
 account up.
 
 That document is the other half of this one: it covers creating a role account

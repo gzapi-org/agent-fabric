@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioural tests for tools/roles/assemble.py and tools/roles/lint.py.
+"""Behavioural tests for tools/fabric/assemble.py and tools/fabric/lint.py.
 
 Stdlib only; runnable as `python3 test_assemble.py` or under pytest.
 

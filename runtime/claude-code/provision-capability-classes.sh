@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/launch/provision-capability-classes.sh
+# runtime/claude-code/provision-capability-classes.sh
 #
 # Install the capability-class agent files from THIS REPOSITORY into
 # every account on this host.
@@ -10,16 +10,16 @@
 # agents, ~/.claude/agents/code-{low,medium,high}.md: an account
 # without the three files fails every class-named dispatch as an
 # unknown agent type. The CANONICAL COPIES live in the repo at
-# tools/launch/agents/ — not in any one account's home — so
+# runtime/claude-code/agents/ — not in any one account's home — so
 # provisioning a new account never depends on another account being
-# present or current. PROVISIONING section 12 is the durable home of
+# present or current. runtime/provisioning/README.md is the durable home of
 # the procedure.
 #
 # RUN AS ROOT — the role homes are mode 700, so only root can write
 # into them. The owner runs it:
 #
-#   sudo tools/launch/provision-capability-classes.sh --dry-run   # preview
-#   sudo tools/launch/provision-capability-classes.sh             # do it
+#   sudo runtime/claude-code/provision-capability-classes.sh --dry-run   # preview
+#   sudo runtime/claude-code/provision-capability-classes.sh             # do it
 #
 # WHAT IT DOES per account: mkdir -p ~/.claude/agents, copy the three
 # files, mode 644, owned by the account. Nothing else under ~/.claude

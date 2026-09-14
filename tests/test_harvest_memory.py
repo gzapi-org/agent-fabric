@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Behavioural tests for tools/roles/harvest_memory.py.
+"""Behavioural tests for tools/fabric/harvest_memory.py.
 
 Stdlib only; run as `python3 test_harvest_memory.py`. NOT pytest-collectable:
 every case takes a `tmp: str`, which pytest would try to resolve as a fixture.

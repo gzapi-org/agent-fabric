@@ -16,8 +16,10 @@
       "legacy_clone_bindings": "docs/migration/legacy-registry/bindings.jsonl"
     },
     "agent-fabric": {
-      "title": "agent-fabric, the control plane itself",
+      "title": "agent-fabric, the control plane itself (public repository)",
       "remotes": [
+        "git@github.com:gzapi-org/agent-fabric-public.git",
+        "https://github.com/gzapi-org/agent-fabric-public",
         "git@github.com:gzapi-org/agent-fabric.git",
         "https://github.com/gzapi-org/agent-fabric"
       ],

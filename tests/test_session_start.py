@@ -72,6 +72,24 @@ def test_hook_never_blocks(tmp: str) -> None:
     assert proc.returncode == 0
 
 
+def test_hook_exports_the_control_plane_into_the_session_shell(tmp: str) -> None:
+    """A SessionStart hook may append `export` lines to $CLAUDE_ENV_FILE;
+    the harness sources them into every later Bash call. AGENT_FABRIC_ROOT
+    must be one of them — the integration docs run inbox.mjs through it,
+    and until 2026-09-14 it was set only for the hook's own child."""
+    env_file = os.path.join(tmp, "claude-env")
+    env = {**os.environ, "AGENT_FABRIC_STATE_DIR": os.path.join(tmp, "state"), "CLAUDE_ENV_FILE": env_file}
+    env.pop("AGENT_FABRIC_ROOT", None)
+    proc = run_hook({"cwd": "/"}, env)
+    assert proc.returncode == 0, proc.stderr
+    exported = subprocess.run(["bash", "-c", f'source "{env_file}" && printf %s "$AGENT_FABRIC_ROOT"'],
+                              capture_output=True, text=True).stdout
+    assert exported == ROOT, exported
+    # Without the file nothing is written anywhere and the hook still runs.
+    env.pop("CLAUDE_ENV_FILE")
+    assert run_hook({"cwd": "/"}, env).returncode == 0
+
+
 def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     projects = os.path.join(tmp, "projects")
     home = os.path.join(tmp, "home")
@@ -117,7 +135,8 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
 
 def main() -> int:
     cases = [test_hook_records_context_not_identity, test_hook_from_the_parent_directory_has_no_project,
-             test_hook_never_blocks, test_bootstrap_writes_only_the_workspace_and_home_files]
+             test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
+             test_bootstrap_writes_only_the_workspace_and_home_files]
     failures = 0
     for case in cases:
         with tempfile.TemporaryDirectory() as tmp:

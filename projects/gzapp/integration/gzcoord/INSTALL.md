@@ -16,8 +16,11 @@ Do not create a nested Git repository, and do not vendor the subsystem.
 2. Wire the `SessionStart` hook in gzapp's `.claude/settings.json` at
    `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs"`
    (`agent-fabric/runtime/claude-code/bootstrap.sh` writes the workspace
-   copy; a project keeps its own for sessions launched inside the
-   working copy).
+   copy with the path substituted; a project keeps its own for sessions
+   launched inside the working copy, resolved as
+   `$CLAUDE_PROJECT_DIR/../agent-fabric/…` — hook commands run before
+   the fabric hook has exported `AGENT_FABRIC_ROOT` into the session
+   shell, so a hook line never relies on the variable).
 3. Create the concrete instance configuration outside Git, for example
    `~/.config/gzcoord/gzapp.yaml`, from
    `communication/gzcoord/config/instance.example.yaml`. `role.name`

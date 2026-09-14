@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# policies/ban_generated_by_attribution.sh (imported from gzapp tools/checks/, 2026-09-13)
+# policies/ban_generated_by_attribution.sh (imported from the legacy repository's tools/checks/, 2026-09-13)
 #
 # Ban machine-attribution boilerplate from the artifacts this repo authors:
 # a `Co-authored-by:` or `Claude-Session:` trailer in a commit message, and

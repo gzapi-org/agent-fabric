@@ -60,7 +60,7 @@ for home in /home/*/; do
   home="${home%/}"
   # A home is an account's when the directory NAME is a login whose passwd
   # home is this directory. Keying on the directory's owner instead let an
-  # orphaned pre-rename home (gzapp-architect-cto, owned by architect-cto-01)
+  # orphaned pre-rename home (a legacy pre-rename home, owned by its successor account)
   # be provisioned as if it were an account, 2026-09-13.
   name="$(basename "$home")"
   if ! getent passwd "$name" >/dev/null; then

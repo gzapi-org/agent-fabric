@@ -96,8 +96,8 @@ plane's (`test_check_charter_authority.sh`).
 - The charter and taxonomy authority rule, and its tripwire, moved from
   `tools/checks/` to `policies/`, widened to the catalogue, every
   project's taxonomy, the routing policies and the holders file. The
-  owning role changed from `architect-cto` (gzapp's architecture role,
-  which owned charters only because they lived in gzapp) to
+  owning role changed from `architect-cto` (the legacy repository's
+  architecture role, which owned charters only because they lived there) to
   `fabric-coordinator`, the role whose remit is this repository.
 - The review-grade gate moved from "the opus tier" to "the review
   capability" and is enforced in the same two places (lint on the

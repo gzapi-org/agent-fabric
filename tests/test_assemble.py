@@ -319,7 +319,7 @@ def test_unattributable_rows_warn_loudly_but_do_not_fail_the_drain(tmp: str) -> 
     assert "PROVISIONAL BINDINGS" in proc.stderr, proc.stderr
     assert "41 of 60" in proc.stderr, proc.stderr
     # The remedy has to be in the message: it is not doable from here.
-    assert "agent-map" in proc.stderr, proc.stderr
+    assert "agent map" in proc.stderr, proc.stderr
 
 
 def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:
@@ -989,7 +989,7 @@ def test_scratchpad_references_are_normalized(tmp: str) -> None:
     resolves nowhere — and three such keys reached the repo from other
     sessions before this existed.
     """
-    scratch = ("/tmp/claude-1000/-home-user-projects-gzapp-claude9/"
+    scratch = ("/tmp/claude-1000/-home-user-projects-legacy-clone-9/"
                "cbbf4344-dead-beef-0000-000000000000/scratchpad/probe.test.ts")
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "one", "title": "T", "body": "b",
@@ -1073,7 +1073,7 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
     with open(crossref_path, encoding="utf-8") as fh:
         doc = json.load(fh)
     doc["index"].setdefault("files", {})[
-        "/tmp/claude-1000/-home-user-projects-gzapp-claude9/x/scratchpad/p.ts"
+        "/tmp/claude-1000/-home-user-projects-legacy-clone-9/x/scratchpad/p.ts"
     ] = {"observations": [], "slices": []}
     with open(crossref_path, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2, sort_keys=True)

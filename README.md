@@ -68,20 +68,18 @@ each account's shell environment.
 Every distilled slice records who learned it (`agent`), where (`host`,
 `working_copy`), what it applies to (`project`, the role, the class) and
 when (`distilled_at`, the observation hashes). Slices from before the
-identity migration carry the old `clone_id`; the project they came from
-resolves those to logins (`.agent-fabric/legacy-registry/agent-map.json`
-in its working copy).
+identity migration carry the old `clone_id` as a label; nothing resolves
+it any more, and a slice that names one is simply older than the login
+model.
 
 ## Origin
 
 This infrastructure began inside one managed repository and was
 extracted with `git filter-repo` into a control plane of its own; before
 it went public its history was rewritten once more so that no commit
-carries that project's knowledge. The record of the extraction — the
-commit map, the dependency matrix, the identity migration, the removal
-plan — lives with the project it was extracted from
-(`.agent-fabric/migration/` in its working copy), because it is about
-that project. `docs/live-checks/` holds what was verified live here.
+carries that project's knowledge or names its internals. The record of
+the extraction is not kept: what it explained, this repository now
+states. `docs/live-checks/` holds what was verified live here.
 
 ## One-call status
 

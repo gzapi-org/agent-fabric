@@ -34,7 +34,7 @@ def run_hook(payload: dict, env: dict) -> subprocess.CompletedProcess:
 
 def test_hook_records_context_not_identity(tmp: str) -> None:
     state = os.path.join(tmp, "state")
-    wc = os.path.join(tmp, "gzapp-claude2")
+    wc = os.path.join(tmp, "legacy-clone-2")
     git_repo(wc, "git@github.com:gzapi-org/gzapp.git")
     env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state,
            "USER": "architect01", "LOGNAME": "architect01"}

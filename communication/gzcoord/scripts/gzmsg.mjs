@@ -178,7 +178,7 @@ export function whoami() {
 // validator can consult: it is committed and identical in every clone,
 // where a sender's active-role record is gitignored on the sender's disk.
 // Nothing ties ROLE to the address: SPEC §4 says an instance MAY change
-// its role without changing its address, a live clone (gzapp-claude2,
+// its role without changing its address, a legacy clone directory (legacy-clone-2,
 // holding backend-dev) carries no slug in its name at all, and a recipient
 // tests TO against its own address by equality, so a slug in an instance
 // name buys the protocol nothing. Where the name does carry one that

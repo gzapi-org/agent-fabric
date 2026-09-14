@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gzapp:roles:claims",
+  "$id": "urn:agent-fabric:roles:claims",
   "title": "Distiller output — the contract between judgement and assembly",
   "description": "Distillers judge; tools assemble. A distiller never writes a role file: it emits claims, and the assembler decides which slice each one lands in, writes the frontmatter, regenerates the index and merges the citation graph. Same claims in, byte-identical tree out — which is what makes a drain reviewable as a content diff.",
   "type": "object",

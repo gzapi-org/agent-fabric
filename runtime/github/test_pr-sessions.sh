@@ -49,10 +49,10 @@ trap cleanup EXIT
 # The script derives "this clone" from `hostname -s` + the git toplevel
 # basename, so the sandbox is a real git repo with a known directory
 # name and the fixtures are written against that same identity.
-CLONE_NAME="gzapp-testclone"
+CLONE_NAME="legacy-testclone"
 HOST="$(hostname -s)"
 ME="$HOST/$CLONE_NAME"
-OTHER="$HOST/gzapp-otherclone"
+OTHER="$HOST/legacy-otherclone"
 
 setup_sandbox() {
     SANDBOX="$(mktemp -d)"
@@ -277,7 +277,7 @@ assert_contains "includes the other session's PR" "#29"
 assert_contains "still includes this clone's"     "#30"
 
 echo "pr-sessions: explicit session filter"
-run --session gzapp-otherclone
+run --session legacy-otherclone
 assert_rc           "exits 0" 0
 assert_contains     "matches the named session"     "#29"
 assert_not_contains "excludes the other session"    "#30"
@@ -385,14 +385,14 @@ echo "pr-sessions: a retired clone is scoped to its successor, or to nobody"
 HOST="$(hostname -s)"
 BINDINGS="$SANDBOX/fixtures/bindings.jsonl"
 : > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"gzapp-old", host:$h,
+jq -nc --arg h "$HOST" '{clone_id:"c1", dir_basename:"legacy-old", host:$h,
     role:"architect-cto", valid_to:"2026-09-05T00:00:00Z"}' >> "$BINDINGS"
 jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c2", dir_basename:$d,
     host:$h, role:"architect-cto", valid_to:null}' >> "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"gzapp-orphan", host:$h,
+jq -nc --arg h "$HOST" '{clone_id:"c3", dir_basename:"legacy-orphan", host:$h,
     role:"domain-transit", valid_to:"2026-09-01T00:00:00Z"}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
-    --arg orphan "$HOST/gzapp-orphan" --arg t "$(ago '1 hour')" '[
+write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/legacy-old" \
+    --arg orphan "$HOST/legacy-orphan" --arg t "$(ago '1 hour')" '[
   {number: 40, state: "MERGED", headRefName: ($old    + "/fix/inherited"),
    title: "inherited", updatedAt: $t, isDraft: false, mergedAt: $t},
   {number: 41, state: "MERGED", headRefName: ($orphan + "/fix/nobody"),
@@ -403,7 +403,7 @@ write_pr_list "$(jq -n --arg me "$ME" --arg old "$HOST/gzapp-old" \
 run_env "AGENT_FABRIC_CLONE_BINDINGS=$BINDINGS" -- --no-threads
 assert_rc           "default scope exits 0" 0
 assert_contains     "inherited PR is in the successor's default sweep" "#40"
-assert_contains     "inherited row still shows the retired name" "gzapp-old"
+assert_contains     "inherited row still shows the retired name" "legacy-old"
 assert_contains     "own PR still listed" "#42"
 assert_not_contains "orphan PR is NOT in the default sweep" "#41"
 assert_contains     "the NOTE counts the orphan" "1 PR(s) name no live session"
@@ -434,15 +434,15 @@ echo "pr-sessions: clone_id continuity resolves a rename the role cannot"
 # The case that role-matching CANNOT reach: the retired row predates roles
 # and carries no `role` at all, so there is nothing to match on. It is the
 # same working copy under a new name, which the shared clone_id says
-# exactly. Real instance: gzapp-claude3, seeded 2026-06-19 with reason
+# exactly. Real instance: legacy-claude3, seeded 2026-06-19 with reason
 # "initial" and no role field.
 BINDINGS="$SANDBOX/fixtures/bindings-chain.jsonl"
 : > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"gzapp-renamed-away",
+jq -nc --arg h "$HOST" '{clone_id:"c9", dir_basename:"legacy-renamed-away",
     host:$h, valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
 jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"c9", dir_basename:$d,
     host:$h, role:"devex-tooling", valid_to:null}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg old "$HOST/gzapp-renamed-away"     --arg t "$(ago '1 hour')" '[
+write_pr_list "$(jq -n --arg old "$HOST/legacy-renamed-away"     --arg t "$(ago '1 hour')" '[
   {number: 50, state: "MERGED", headRefName: ($old + "/fix/renamed"),
    title: "renamed", updatedAt: $t, isDraft: false, mergedAt: $t}
 ]')"
@@ -461,13 +461,13 @@ echo "pr-sessions: two live holders of one role is unowned, not a guess"
 # resolve arbitrarily.
 BINDINGS="$SANDBOX/fixtures/bindings-ambiguous.jsonl"
 : > "$BINDINGS"
-jq -nc --arg h "$HOST" '{clone_id:"r1", dir_basename:"gzapp-ambiguous",
+jq -nc --arg h "$HOST" '{clone_id:"r1", dir_basename:"legacy-ambiguous",
     host:$h, role:"backend-dev", valid_to:"2026-09-06T00:00:00Z"}' >> "$BINDINGS"
 jq -nc --arg h "$HOST" --arg d "$CLONE_NAME" '{clone_id:"r2", dir_basename:$d,
     host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
 jq -nc --arg h "$HOST" '{clone_id:"r3", dir_basename:"other-live-holder",
     host:$h, role:"backend-dev", valid_to:null}' >> "$BINDINGS"
-write_pr_list "$(jq -n --arg old "$HOST/gzapp-ambiguous"     --arg t "$(ago '1 hour')" '[
+write_pr_list "$(jq -n --arg old "$HOST/legacy-ambiguous"     --arg t "$(ago '1 hour')" '[
   {number: 51, state: "MERGED", headRefName: ($old + "/fix/ambiguous"),
    title: "ambiguous", updatedAt: $t, isDraft: false, mergedAt: $t}
 ]')"

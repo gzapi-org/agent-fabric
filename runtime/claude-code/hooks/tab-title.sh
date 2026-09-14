@@ -81,7 +81,7 @@ branch=$(git -C "$toplevel" branch --show-current 2>/dev/null)
 [ -n "$branch" ] || branch=$(git -C "$toplevel" rev-parse --short HEAD 2>/dev/null)
 [ -n "$branch" ] || exit 0
 
-# gzapp branches are named <host>/<agent>/<type>/<desc> (older ones carry
+# Branches are named <host>/<agent>/<type>/<desc> (older ones carry
 # the working-copy name in the second segment), so the prefix is redundant
 # on a narrow tab. Strip it when it is this session's own — by agent or by
 # working copy — leaving <type>/<desc>. Any other branch is left as it is.

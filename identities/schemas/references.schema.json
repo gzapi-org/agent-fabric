@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gzapp:roles:references",
+  "$id": "urn:agent-fabric:roles:references",
   "title": "Citation graph, keyed by observation content hash",
   "description": "What each observation cites. This outlives the observation store itself: commits, PRs, ADRs and migrations remain resolvable long after the memory buffer is drained and emptied, which is what keeps distilled claims traceable.",
   "type": "object",
@@ -14,7 +14,7 @@
       "archs": { "type": "array", "items": { "type": "string", "pattern": "^ARCH-" }, "uniqueItems": true },
       "prs": { "type": "array", "items": { "type": "string", "pattern": "^#\\d+$" }, "uniqueItems": true },
       "commits": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }, "uniqueItems": true },
-      "contracts": { "type": "array", "items": { "type": "string", "pattern": "^urn:gzapp:" }, "uniqueItems": true },
+      "contracts": { "type": "array", "items": { "type": "string", "pattern": "^urn:[A-Za-z0-9-]+:" }, "uniqueItems": true },
       "error_codes": { "type": "array", "items": { "type": "string", "pattern": "^error\\." }, "uniqueItems": true },
       "migrations": {
         "description": "Numbered, append-only, and the unit the semantic-collision scan guards — its own class, not a plain file path.",

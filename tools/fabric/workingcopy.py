@@ -3,13 +3,13 @@
 
 A WORKING COPY is a filesystem checkout: a path, a git toplevel, a remote.
 A PROJECT is the logical system that checkout is a copy of. Many working
-copies map to one project (gzapp, gzapp-claude2, gzapp-claude3 were all
-copies of `gzapp`), and neither of them is the agent using it.
+copies map to one project (the legacy repository's clone directories were
+all copies of one project), and neither of them is the agent using it.
 
 Resolution is by the checkout's origin remote against projects/registry.json,
 or by a `.agent-fabric-project` marker file at the toplevel naming the
 project id. A directory basename is never used to guess a project: names
-are conveniences, and the old system's `gzapp-family` bucket is what
+are conveniences, and the old system's `legacy-family` bucket is what
 guessing from them produced.
 """
 from __future__ import annotations

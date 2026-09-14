@@ -232,7 +232,7 @@ branch_names_a_session() {
 #
 # THE RECORD IS .roles/registry/bindings.jsonl, not a table kept here. That
 # file is tracked, lint-governed (one open window per clone, closures only
-# move forward) and written by tools/roles/materialize_bindings.py, so it
+# move forward) and written by the legacy switcher's materialize_bindings.py (retired), so it
 # is maintained by something other than memory. A first version of this
 # used a hand-written list and shipped three clones as retired that the
 # registry marks LIVE -- which would have turned a refusal into permission
@@ -275,28 +275,16 @@ branch_names_a_session() {
 # every unowned path. Replying to a thread nobody owns is recoverable;
 # resolving it, or sending the owner away, is not.
 # The retired-clone registry is now migration data in agent-fabric
-# (a project's `legacy_clone_bindings` in projects/registry.json): it records the
+# (AGENT_FABRIC_CLONE_BINDINGS, when set): it records the
 # working copies that existed under the directory-bound identity model
 # and which succeeded which. New sessions are agents (logins) and are not
 # registered anywhere — an agent does not retire when a directory does.
-# The legacy clone record is a PROJECT fact (projects/registry.json,
-# `legacy_clone_bindings`, a path inside the project's working copy);
-# a project that never had directory-bound clones simply has none, and every
-# older-prefix branch then reads as live. AGENT_FABRIC_CLONE_BINDINGS (or the
-# older GZAPP_CLONE_BINDINGS) overrides it — visibly, below.
-_legacy_bindings() {
-    python3 - "$FABRIC_ROOT" "$root" <<'PY' 2>/dev/null
-import importlib.util, json, os, sys
-fabric, wc = sys.argv[1], sys.argv[2]
-spec = importlib.util.spec_from_file_location("wcm", os.path.join(fabric, "tools", "fabric", "workingcopy.py"))
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-pid = m.resolve(wc).get("project")
-reg = json.load(open(os.path.join(fabric, "projects", "registry.json")))
-rel = ((reg.get("projects") or {}).get(pid) or {}).get("legacy_clone_bindings") or ""
-print(os.path.join(wc, rel) if rel else "")   # the project's data, in the project's working copy
-PY
-}
-CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-$(_legacy_bindings)}}"
+# A record of directory-bound clones — which working copy succeeded which
+# under the retired identity model — is optional and, today, absent: with
+# none, every older-prefix branch reads as live (nobody inherits it, nobody
+# is refused). AGENT_FABRIC_CLONE_BINDINGS (or the older GZAPP_CLONE_BINDINGS)
+# names one when a deployment keeps such a record — visibly, below.
+CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}"
 if [[ -n "${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}" ]]; then
     # An ownership input that can be pointed anywhere deserves to be
     # visible in the transcript: this is the one variable that can turn a

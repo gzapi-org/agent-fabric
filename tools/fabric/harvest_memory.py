@@ -6,7 +6,7 @@ can consume.
 
     tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain
     tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \\
-        --project gzapp --stamp $(date +%F)
+        --project <project> --stamp $(date +%F)
 
 PROVENANCE. Every observation is stamped with the AGENT (the Linux login,
 from runtime/identity.py), the HOST, the PROJECT the working copy belongs

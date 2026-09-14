@@ -5,7 +5,7 @@ window title set to the session.
 
 ```
 moveto architect-cto-01        # shell as that account, in its clone
-moveto user gzapp-claude2      # name the clone when an account holds several
+moveto user legacy-clone-2     # name the clone when an account holds several
 moveto --list                  # accounts that have at least one clone
 moveto <account> --list        # that account's clones
 moveto <account> --print       # resolve only — print path and title, spawn nothing

@@ -4,7 +4,7 @@
 >>> help
 Turn distiller claims into the knowledge corpus, filed by scope.
 
-    tools/fabric/assemble.py --claims DIR --drain DIR --project gzapp --stamp DATE
+    tools/fabric/assemble.py --claims DIR --drain DIR --project <project> --stamp DATE
 
 Where a slice lands is decided by tools/fabric/layout.py from its class:
 domain knowledge under memory/domains/<role>/, everything learned about
@@ -1085,7 +1085,7 @@ def main() -> int:
             f"to no agent.\n"
             "  Their knowledge is kept; only the agent attribution is missing.\n"
             "  A row from a legacy store is attributed by (host, working-copy label,\n"
-            "  time) through the project's .agent-fabric/legacy-registry/agent-map.json; a label\n"
+            "  time) through an agent map, when a deployment keeps one (harvest.py --registry); a label\n"
             "  absent there stays provisional rather than guessed. Add the mapping,\n"
             "  or drain through harvest_memory.py, which stamps the agent at source.",
             file=sys.stderr,

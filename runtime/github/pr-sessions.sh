@@ -52,7 +52,7 @@
 #   runtime/github/pr-sessions.sh -n 50           # last 50 rows
 #   runtime/github/pr-sessions.sh /OPEN           # open PRs only
 #   runtime/github/pr-sessions.sh /MERGED         # merged only  (/CLOSED too)
-#   runtime/github/pr-sessions.sh --session gzapp-claude3
+#   runtime/github/pr-sessions.sh --session legacy-clone-3
 #   runtime/github/pr-sessions.sh /all --by-session   # grouped, all sessions
 #   runtime/github/pr-sessions.sh /lastItem:50    # pool = 50 most recent PRs
 #   runtime/github/pr-sessions.sh /lastDate:2d    # pool = updated in the last 2 days
@@ -343,7 +343,7 @@ fi
 # this they appear in nobody's sweep: not the successor's (different
 # name), not /unattributed (the branch parses).
 #
-# THE RECORD IS agent-fabric's the project's .agent-fabric/legacy-registry/bindings.jsonl
+# THE RECORD, when a deployment keeps one, is the file AGENT_FABRIC_CLONE_BINDINGS names
 # -- the working copies that existed under the directory-bound identity
 # model, kept as migration data. New sessions are agents (logins), which
 # are not registered and do not retire when a directory does; this
@@ -361,7 +361,7 @@ fi
 #   1. clone_id CONTINUITY. A working copy that is renamed keeps its
 #      clone_id, so the row that closed and the row now open are the same
 #      clone under two names. That is exact, and it is how
-#      gzapp-architect-cto -> architect-cto-01 resolves. Nothing about the
+#      a pre-rename clone name -> its successor account resolves. Nothing about the
 #      directory NAME is consulted: names carry no scheme to key on --
 #      some clones are numbered (backend-dev-01, backend-dev-02) and some
 #      are not (db-admin, devex-tooling) -- so any rule reading the name
@@ -380,24 +380,12 @@ fi
 # the right one. Ambiguous now means unowned: the rows surface under
 # /unattributed, where a person can see them, instead of being quietly
 # misassigned. Record a rename (which keeps the clone_id) to make it exact.
-# The legacy clone record is a PROJECT fact (projects/registry.json,
-# `legacy_clone_bindings`, a path inside the project's working copy);
-# a project that never had directory-bound clones simply has none, and every
-# older-prefix branch then reads as live. AGENT_FABRIC_CLONE_BINDINGS (or the
-# older GZAPP_CLONE_BINDINGS) overrides it — visibly, below.
-_legacy_bindings() {
-    python3 - "$FABRIC_ROOT" "$root" <<'PY' 2>/dev/null
-import importlib.util, json, os, sys
-fabric, wc = sys.argv[1], sys.argv[2]
-spec = importlib.util.spec_from_file_location("wcm", os.path.join(fabric, "tools", "fabric", "workingcopy.py"))
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-pid = m.resolve(wc).get("project")
-reg = json.load(open(os.path.join(fabric, "projects", "registry.json")))
-rel = ((reg.get("projects") or {}).get(pid) or {}).get("legacy_clone_bindings") or ""
-print(os.path.join(wc, rel) if rel else "")   # the project's data, in the project's working copy
-PY
-}
-CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-$(_legacy_bindings)}}"
+# A record of directory-bound clones — which working copy succeeded which
+# under the retired identity model — is optional and, today, absent: with
+# none, every older-prefix branch reads as live (nobody inherits it, nobody
+# is refused). AGENT_FABRIC_CLONE_BINDINGS (or the older GZAPP_CLONE_BINDINGS)
+# names one when a deployment keeps such a record — visibly, below.
+CLONE_BINDINGS="${AGENT_FABRIC_CLONE_BINDINGS:-${GZAPP_CLONE_BINDINGS:-}}"
 INHERIT_JSON='{}'; ORPHANS_JSON='[]'
 if [[ -r "$CLONE_BINDINGS" ]]; then
     registry="$(jq -s '

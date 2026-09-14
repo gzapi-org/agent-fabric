@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:gzapp:roles:crossref",
+  "$id": "urn:agent-fabric:roles:crossref",
   "title": "A role's slice of the citation graph, inverted",
   "description": "artifact -> where it was learned and where that knowledge landed. Answers 'which sessions touched ADR-054, and which slice carries what they learned' — and keeps answering it after the observation store is emptied, because ADRs, PRs, commits and migrations resolve against git and GitHub rather than against the buffer.",
   "type": "object",

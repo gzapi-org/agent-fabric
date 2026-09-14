@@ -420,7 +420,7 @@ test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
 // SPEC §4 deployment catalogue: ROLE and TO-ROLE are taxonomy slugs,
 // matched by equality. One role was live in three spellings on the
 // relay's first day. The address is NOT bound to the role: a role can
-// change without the address changing (§4), and gzapp-claude2 is a live
+// change without the address changing (§4), and a legacy clone directory is a live
 // clone holding backend-dev with no slug in its name — an earlier cut of
 // this rule silenced it.
 test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to the role', () => {
@@ -449,10 +449,10 @@ test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to t
 
 test('slugOf finds the longest whole-token slug an instance carries', () => {
   assert.equal(slugOf('agent-fabric-coordinator', taxonomy), 'fabric-coordinator');
-  assert.equal(slugOf('gzapp-gzcoord-coordinator', taxonomy), undefined);   // renamed role: the old slug is not in the catalogue
+  assert.equal(slugOf('legacy-gzcoord-coordinator', taxonomy), undefined);   // renamed role: the old slug is not in the catalogue
   assert.equal(slugOf('architect-cto-01', taxonomy), 'architect-cto');
   assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
-  assert.equal(slugOf('gzapp-claude2', taxonomy), undefined);
+  assert.equal(slugOf('legacy-clone-2', taxonomy), undefined);
   assert.equal(slugOf('web-developer', taxonomy), undefined);   // token match, not substring
   assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/identities/roles/catalog.json'));
 });

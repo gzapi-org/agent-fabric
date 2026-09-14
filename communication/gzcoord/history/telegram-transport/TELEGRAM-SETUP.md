@@ -33,10 +33,10 @@ impersonators with similar names) and run:
 
 1. `/newbot`
 2. Name: a human-readable display name for the instance — the first one
-   used `gzapp gzcoord coordinator`, matching the `.roles/` role the
+   used `<project> gzcoord coordinator`, matching the `.roles/` role the
    working copy holds (see `../../runtime/README.md` "Role sourcing").
 3. Username: globally unique, must end in `bot` — the first one is
-   `gzapp_gzcoord_bot`.
+   `<project>_gzcoord_bot`.
 
 BotFather replies with the **HTTP API token**. That token is a
 credential: it goes straight into the local configuration below and
@@ -52,7 +52,7 @@ which limits them to `/commands` and @mentions.
 In BotFather:
 
 1. `/setprivacy`
-2. Select the bot (e.g. `@gzapp_gzcoord_bot`)
+2. Select the bot (e.g. `@<project>_gzcoord_bot`)
 3. Choose **Disable** → expect "Success! The new status is: DISABLED."
 
 Order matters: change privacy **before** adding the bot to the group. A
@@ -63,7 +63,7 @@ after removing and re-adding it.
 
 The coordination surface is a **private group** (not a broadcast
 channel — bots in channels cannot see each other's ordinary messages).
-The first one is named `gzapp-gzcoord-channel`.
+The first one is named `<project>-gzcoord-channel`.
 
 1. Telegram → compose → **New Group**.
 2. Add the bot as a member (search its username).

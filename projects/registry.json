@@ -44,6 +44,32 @@
       "integration": null,
       "license": "LicenseRef-kutaisi-shop-transit-Proprietary",
       "note": "A private repository whose tree carries no license file: all rights reserved by default. One role, domain-transit; its working copy is that account's (moved there 2026-09-15)."
+    },
+    "gzapi.ge": {
+      "title": "gzapi.ge — the company website (Gzapi LLC)",
+      "remotes": [
+        "git@github.com:andreabenetton/gzapi.ge.git",
+        "https://github.com/andreabenetton/gzapi.ge"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": null,
+      "license": "LicenseRef-gzapi-ge-Proprietary",
+      "note": "Static Astro site, vision-level by rule, ka/en. The brand's source of truth: where a deck and the site disagree on a token or a phrase, the site wins (owner, 2026-09-15). One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default."
+    },
+    "gzapp.decks": {
+      "title": "gzapp.decks — brand presentation decks (Marp)",
+      "remotes": [
+        "git@github.com:andreabenetton/gzapp.decks.git",
+        "https://github.com/andreabenetton/gzapp.decks"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": null,
+      "license": "LicenseRef-gzapp-decks-Proprietary",
+      "note": "Marp decks under one brand theme whose tokens are vendored from gzapi.ge (the source of truth); bilingual, an asset register every image has a row in, PDFs as versioned build output. One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default; the vendored fonts are OFL-1.1."
     }
   }
 }

@@ -27,26 +27,30 @@ notification:
 ```
 Monitor(command: 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --follow',
         description: "GZCoord inbox — <host>/<login>",
-        persistent: true)              # if your Monitor tool has the field
+        persistent: true,              # honoured only by an interactive Monitor
+        timeout_ms: 1800000)           # the cap a timed (launched) Monitor uses
 ```
 
-**The Monitor tool differs by harness build, so check yours before you
-arm:**
+**Read the Monitor's own start message; do not trust the `persistent`
+field.** The Monitor tool differs by session mode, and the difference is
+a trap: a launched / headless session (every agent that came up through
+the broker) gets a *timed* Monitor that **accepts `persistent: true` and
+silently ignores it** (verified on 2.1.272 headless: the call succeeded
+and the watch still reported "expires in 5m … re-arm if you still need
+the watch"). An interactive session (this coordinator) gets a real
+`persistent` that holds for the session. The version does not decide it —
+the same 2.1.272 does both — so the field being accepted proves nothing.
+The start message does:
 
-- **It has a `persistent` boolean** (like this coordinator build): pass
-  `persistent: true` and the watch runs for the whole session — armed
-  once, never re-armed, no timer; `timeout_ms` is then ignored.
-- **It has only `command`/`description`/`timeout_ms`/`ws`, no
-  `persistent`, and `timeout_ms` caps at 30 min** (seen in a launched /
-  headless session — e.g. 2.1.271 through the broker; it does not track
-  the version, an interactive 2.1.272 has `persistent`, so it is most
-  likely the launched vs interactive Monitor, not the build): then
-  *every* Monitor expires at that cap — no command
-  survives it, `--follow` included — and the tool's own notice says
-  "Re-arm it if you still need the watch". Arm with `timeout_ms` at the
-  cap and **re-arm on that notice**. `--follow` still earns its place:
-  it prints nothing across a quiet 30 minutes, so the only output is real
-  deliveries and the one re-arm — not a quiet-expiry line every cycle.
+- If it says the watch **runs for the lifetime of the session** (or you
+  passed `persistent: true` and it did *not* mention an expiry): it is
+  persistent. Armed once, never re-armed.
+- If it says **"expires in Nm … re-arm if you still need the watch"**:
+  it is timed, whatever you passed. Pass `timeout_ms: 1800000` (the
+  30-min cap) so N is as large as it gets, and **re-arm on the expiry
+  notice**. `--follow` still earns its place: it prints nothing across a
+  quiet N minutes, so the only output is real deliveries and the one
+  re-arm — not a quiet-expiry line every cycle.
 
 Do not wrap `--follow` in a `while` loop and do not use `--wait` for the
 watch. The budget (`--wait 1800`) was the old shape: a single arm that

@@ -41,7 +41,14 @@ after its clone was renamed), so
 the inbox goes quiet with no sign. The session-start hook drains once on
 resume, which covers the gap up to that moment; re-arm the watch as the
 first action after any resume, and when in doubt check the task list —
-a watch that is not listed as persistent is not one. `AGENT_FABRIC_ROOT` is
+a watch that is not listed as persistent is not one. The cue is the
+harness's own notice on reopening — *"N background shell command tasks
+didn't finish before the previous session ended. Task ids: …"* — which
+names the old session's watch (and any `wait-merged` / `pr-review-status`
+watchers). Those processes died with that session; nothing keeps running
+and nothing is lost (the relay holds the cursor, the start drain shows
+what arrived since). It is not an error to investigate: re-arm, and
+restart any PR watcher you still need. `AGENT_FABRIC_ROOT` is
 exported into your shell by the session-start hook; in a clone without
 it, the fabric is `../agent-fabric` beside the working copy. To read on
 demand — the user says "read messages", or you are about to decide

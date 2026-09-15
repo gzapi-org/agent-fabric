@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # runtime/claude-code/hooks/test_statusline.sh — the status line's branch
 # segment: a branch name inside a repository, the short SHA on a detached
-# HEAD, and NO segment outside a repository (the parent projects/
+# HEAD (a link icon, not the branch one), and NO segment outside a repository (the parent projects/
 # workspace), which used to read "detached" and sent the owner looking for
 # a branch nobody had made (2026-09-15). Each case runs the real script
 # against a throwaway git repo.
@@ -21,10 +21,14 @@ out="$(line_of "$repo")"
 git -C "$repo" checkout -q --detach main
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 out="$(line_of "$repo")"
-[[ "$out" == *"📁 clone 🌿 $sha" ]] && pass "a detached HEAD: its short SHA, never the word" || fail "detached" "$out"
+[[ "$out" == *"📁 clone 🔗 $sha" ]] && pass "a detached HEAD: a link and its short SHA, not the branch icon" || fail "detached" "$out"
+[[ "$out" != *"🌿"* ]] && pass "…and no branch icon on a detached HEAD" || fail "branch icon on detached" "$out"
 plain="$SANDBOX/projects"; mkdir -p "$plain"
 out="$(line_of "$plain")"
-[[ "$out" == *"📁 projects" && "$out" != *"🌿"* ]] && pass "outside a repository: no branch segment at all" || fail "no repo" "$out"
+[[ "$out" == *"📁 projects" && "$out" != *"🌿"* && "$out" != *"🔗"* ]] && pass "outside a repository: no ref segment at all" || fail "no repo" "$out"
+unborn="$SANDBOX/fresh"; mkdir -p "$unborn"; git -C "$unborn" init -q -b main
+out="$(line_of "$unborn")"
+[[ "$out" == *"📁 fresh 🌿 main" ]] && pass "a repository with no commit yet: still its branch name" || fail "unborn" "$out"
 [[ "$out" != *detached* ]] && pass "…and the word 'detached' appears nowhere" || fail "detached word" "$out"
 
 if (( failures )); then echo "test_statusline: FAILED — $failures"; exit 1; fi

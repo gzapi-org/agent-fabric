@@ -17,6 +17,18 @@ agent=$("$FABRIC_ROOT/bin/fabric-whoami" 2>/dev/null || id -un)
 host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "?")
 wc=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)
 wc=${wc:+$(basename "$wc")}
-branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+# The branch segment exists only inside a repository: a branch name, or
+# the short SHA of a detached HEAD (as tab-title.sh reads it). Outside a
+# repository — the parent projects/ workspace, by design — there is no
+# segment at all. It used to print the word "detached" for both, and a
+# session launched from projects/ read as sitting on a detached HEAD it
+# had never made (owner, 2026-09-15).
+branch=""
+if [ -n "$wc" ]; then
+    branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+    [ -n "$branch" ] || branch=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null)
+    [ -n "$branch" ] || branch="unborn"
+fi
 
-printf '[%s] 👤 %s@%s 📁 %s 🌿 %s' "$model" "$agent" "$host" "${wc:-$(basename "$dir")}" "${branch:-detached}"
+printf '[%s] 👤 %s@%s 📁 %s' "$model" "$agent" "$host" "${wc:-$(basename "$dir")}"
+[ -z "$branch" ] || printf ' 🌿 %s' "$branch"

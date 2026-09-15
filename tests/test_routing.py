@@ -76,11 +76,11 @@ def test_native_path_pins_the_top_of_each_class() -> None:
     assert "code-review" not in {v["class"] for v in ex.values()}, "the review class is never an export"
     s = routing.resolve_session(provider="anthropic")
     assert (s["model"], s["composite"], s["openrouter_id"], s["source"], s["skipped"]) == \
-        ("claude-sonnet-5", "claude-sonnet-5", "anthropic/claude-sonnet-5", "defaults", None), s
+        ("claude-opus-5", "claude-opus-5", "anthropic/claude-opus-5", "defaults", None), s
     # A broker-only local override (GLM) says nothing about plain claude: the
     # nearest layer naming an Anthropic model wins, and the skip is reported.
     s = routing.resolve_session(local={"session": "z-ai/glm-5.3"}, provider="anthropic")
-    assert (s["model"], s["source"], s["skipped"]) == ("claude-sonnet-5", "defaults", "z-ai/glm-5.3"), s
+    assert (s["model"], s["source"], s["skipped"]) == ("claude-opus-5", "defaults", "z-ai/glm-5.3"), s
     s = routing.resolve_session(local={"session": "anthropic/claude-opus-5[1m]"}, provider="anthropic")
     assert (s["model"], s["source"]) == ("claude-opus-5[1m]", "local"), s
 
@@ -127,8 +127,8 @@ def test_a_layer_is_per_provider() -> None:
     s = routing.resolve_session(local={"session": "code-high"}, provider="anthropic")
     assert (s["model"], s["capability"]) == ("claude-opus-5", "code-high"), "a flat class-named session serves both providers"
     # A flat layer over a per-provider one: the nearest layer wins per key.
-    both = {"providers": {"anthropic": {"session": "claude-opus-5"}}, "session": "anthropic/claude-sonnet-5"}
-    assert routing.resolve_session(local=both, provider="anthropic")["model"] == "claude-opus-5", \
+    both = {"providers": {"anthropic": {"session": "claude-opus-5[1m]"}}, "session": "anthropic/claude-sonnet-5"}
+    assert routing.resolve_session(local=both, provider="anthropic")["model"] == "claude-opus-5[1m]", \
         "providers.anthropic.session outranks what the flat anthropic/ session implies"
     assert routing.resolve_session(local=both, provider="openrouter")["model"] == "anthropic/claude-sonnet-5"
 

@@ -7,10 +7,10 @@
         "session": "anthropic/claude-sonnet-5"
       },
       "anthropic": {
-        "session": "claude-sonnet-5"
+        "session": "claude-opus-5"
       }
     },
-    "notes": "The session model is the main agent's, per provider; the capability classes and the alias bindings come from routing/capabilities.json unless a layer overrides one. A session on these defaults is a provider switch, not a cost switch."
+    "notes": "The session model is the main agent's, per provider: Sonnet 5 on the broker (a provider switch, not a cost switch), Opus 5 on plain claude (the owner, 2026-09-15); the capability classes come from routing/capabilities.json unless a layer overrides one."
   },
   "roles": {},
   "agents": {}

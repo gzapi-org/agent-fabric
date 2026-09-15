@@ -156,7 +156,7 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr
     got = f.read()["providers"]["anthropic"]
-    assert got == {"session": "claude-sonnet-5", "capabilities": {
+    assert got == {"session": "claude-opus-5", "capabilities": {
         "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"}}, got
     j = json.loads(f.run("list", "--json").stdout)

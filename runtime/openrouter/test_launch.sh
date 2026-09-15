@@ -224,7 +224,7 @@ mkfabric
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "--print exits 0" || bad "rc=$rc" "$out"
 grep -q "provider anthropic)" <<<"$out" && ok "the header names the provider" || bad "provider not in header" "$out"
-grep -q "session : claude-sonnet-5$" <<<"$out" && ok "the session is the profile's model spoken natively (anthropic/ dropped)" || bad "session not native" "$out"
+grep -q "session : claude-opus-5$" <<<"$out" && ok "the session is the anthropic default, Opus 5 (its own, not the broker's spelled natively)" || bad "session not the anthropic default" "$out"
 grep -q "code-review : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
 grep -q "code-high   : claude-opus-5  (exported for its tier; from capabilities.providers.anthropic)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "a coding class pinned by the column is exported for the tier it rides (the top of each class)" || bad "column pin not exported" "$out"
 grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "the fable export is code-plan's pin; the reviewer never rides it" || bad "fable export wrong" "$out"
@@ -237,7 +237,7 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 grep -q "code-high   : opus  (harness default for its tier)" <<<"$out" && ! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "a null in the column is the harness's own tier: nothing exported for it" || bad "null column not the harness's" "$out"
 mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
-grep -q "CLAUDE-EXECCED:--model claude-sonnet-5 --version" <<<"$out" && ok "execs plain claude with the native session model" || bad "no plain-claude exec" "$out"
+grep -q "CLAUDE-EXECCED:--model claude-opus-5 --version" <<<"$out" && ok "execs plain claude with the native session model" || bad "no plain-claude exec" "$out"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"

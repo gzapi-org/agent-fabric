@@ -4,6 +4,9 @@
 //
 // Two modes, one tool:
 //   node communication/gzcoord/scripts/inbox.mjs            drain: return at once
+//   node communication/gzcoord/scripts/inbox.mjs --follow   the watch: block for the
+//                                        life of the session, print each delivery
+//                                        as it lands, never return on a quiet spell
 //   node communication/gzcoord/scripts/inbox.mjs --wait [S] block up to S seconds
 //   node communication/gzcoord/scripts/inbox.mjs --replay <seq|message-id>
 //                                        re-read ONE message already past the cursor
@@ -27,15 +30,17 @@
 // addressed to this session or when the budget expires quiet, and the
 // harness wakes the session with the return. It is one-shot by design —
 // a process that never exits never notifies — and the procedure around
-// it is a PERSISTENT LOOP the session arms once, at its first turn, and
-// forgets (owner rule, 2026-09-13; the loop is in skills/gzcoord-receive):
-// `while true; do inbox.mjs --wait 1800 …; sleep 5; done` under a
-// persistent Monitor. The loop re-arms after every return, quiet or not;
-// the session re-arms nothing except after a resume, which the harness
-// does not restore. The earlier shape — arm only "while expecting a
-// reply", re-arm by hand after each return — is retired: sessions forgot
-// to re-arm and went deaf. Nothing can be missed between arms either
-// way: an empty wait leaves the cursor untouched.
+// it is --follow: one process for the life of the session, armed once at
+// its first turn under a persistent Monitor and forgotten (owner rule,
+// 2026-09-13; skills/gzcoord-receive). It prints a delivery when one
+// lands and nothing on a quiet spell — no budget, no expiry line, no
+// shell loop around it, no restart every half hour. It says once when
+// the relay stops answering and once when it is back, and exits 4 on a
+// refused token (a rotation: sync, then arm again). The session re-arms
+// nothing except after a resume, which the harness does not restore. The
+// earlier shapes — a hand-re-armed --wait, then a shell loop around
+// --wait 1800 — are retired: the first went deaf when a session forgot,
+// the second produced a quiet-expiry line to filter every thirty minutes.
 //
 // The WAIT exits only on a message addressed to this session (SPEC §7.1:
 // a broadcast, `TO` its address, or `TO-ROLE` its slug). Anything else —
@@ -327,8 +332,31 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
   }
 }
 
+// One delivery (or drain) as the session reads it: what is for me in
+// full, what is not by its metadata line (SPEC §17).
+function render(res, me, channel, taxonomy) {
+  const mine = [], others = [];
+  for (const { rec, msg, isMine } of res.classified) {
+    if (!msg) { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
+    (isMine ? mine : others).push({ rec, msg });
+  }
+  const out = [];
+  out.push(`gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${channel}`);
+  for (const { rec, msg } of mine) {
+    const v = validate(rec.content, { taxonomy });
+    const flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
+    out.push('', `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`, '```text', rec.content.replace(/\n$/, ''), '```');
+  }
+  if (others.length) {
+    out.push('', 'Not addressed to you — listed, bodies not read (SPEC §17):');
+    for (const o of others) out.push(`  ${o.line ?? oneLine(o.msg)}`);
+  }
+  return out.join('\n');
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const waitIdx = argv.indexOf('--wait');
+  const follow = argv.includes('--follow');
   const replayIdx = argv.indexOf('--replay');
   const replayWhich = replayIdx >= 0 ? argv[replayIdx + 1] : null;
   if (replayIdx >= 0 && !replayWhich) { console.error('usage: inbox.mjs --replay <seq|message-id>'); return 1; }
@@ -376,11 +404,34 @@ export async function main(argv = process.argv.slice(2)) {
   // Drain mode spends 1 s on the cursor page and lists everything; wait
   // mode chains slices until a message ADDRESSED TO THIS SESSION lands,
   // passing others' traffic through acknowledged and unprinted.
-  let res;
   const CHANNEL = channel;
+  const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
+  const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
+
+  if (follow) {
+    // The watch. Each arm waits an hour of slices; a delivery is printed
+    // and the next arm starts at once; a quiet hour starts the next arm
+    // silently. Transport trouble is one line each way; a refused token
+    // ends the watch with exit 4 so the harness reports it once.
+    let down = false;
+    for (;;) {
+      let r;
+      try {
+        r = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal: 3600, forMeFn: msg => forMe(msg, me), keywords: [], ownAddress: me.address }));
+      } catch (e) {
+        const x = explainRelayError(e, relayUrl);
+        if (x.code === 4) { console.error(x.line); return 4; }
+        if (!down) { console.log(`gzcoord watch: relay unreachable at ${relayUrl} — waiting for it (this line prints once)`); down = true; }
+        await new Promise(r => setTimeout(r, 30000));
+        continue;
+      }
+      if (down) { console.log('gzcoord watch: relay is back; watching again'); down = false; }
+      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy));
+    }
+  }
+
+  let res;
   try {
-    const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
-    const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
     res = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address }));
   } catch (e) {
     const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code;
@@ -394,26 +445,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!res.delivered && waitIdx >= 0)
     console.log(`gzcoord inbox: nothing for you on ${CHANNEL} in ${res.waited}s (${res.othersPassed} passed for others)`);
   if (!res.delivered) return 0;
-
-  const mine = [], others = [];
-  for (const { rec, msg, isMine } of res.classified) {
-    if (!msg) { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
-    (isMine ? mine : others).push({ rec, msg });
-  }
-
-  const out = [];
-  out.push(`gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${CHANNEL}`);
-  for (const { rec, msg } of mine) {
-    const v = validate(rec.content, { taxonomy });
-    const flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
-    out.push('', `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`, '```text', rec.content.replace(/\n$/, ''), '```');
-  }
-  if (others.length) {
-    out.push('', 'Not addressed to you — listed, bodies not read (SPEC §17):');
-    for (const o of others) out.push(`  ${o.line ?? oneLine(o.msg)}`);
-  }
-  console.log(out.join('\n'));
-
+  console.log(render(res, me, CHANNEL, taxonomy));
   // The cursor is already advanced past everything shown — waitLoop
   // acknowledges every slice it sees, delivered or passed.
   return 0;

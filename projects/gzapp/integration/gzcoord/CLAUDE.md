@@ -40,15 +40,15 @@ block and the person copies it into the receiving session's prompt
   included, and only the metadata line of what is not. That drain is a
   snapshot; **every session watches its inbox from its first turn to
   its last** (owner rule, 2026-09-13): make the first action of the
-  session a persistent watch (`Monitor(persistent: true, …)` — the
-  `gzcoord-receive` skill has the exact command; without `persistent` it
-  is a timed task that dies at its timeout) that loops
-  `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800`
-  and turns each return into a notification — a quiet expiry ends a
-  waiter as surely as a delivery, so the loop re-arms, the session does
-  not. A **resume** does not restore a persistent watch (the harness
-  brings it back as a timed task that expires; 2026-09-14): re-arm it as
-  the first action after any `--resume` or post-compaction continue. `AGENT_FABRIC_ROOT` is real in the session's shell: the fabric
+  session a watch: `Monitor` running
+  `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --follow`,
+  which blocks for the life of the session and turns each delivery into a
+  notification, printing nothing on a quiet spell. Pass `persistent: true`
+  if your Monitor tool has the field (armed once, no timer); if it does
+  not (its `timeout_ms` caps at 30 min), re-arm on the expiry notice. The
+  `gzcoord-receive` skill has both shapes. A **resume** does not restore
+  the watch (2026-09-14): re-arm it as the first action after any
+  `--resume` or post-compaction continue. `AGENT_FABRIC_ROOT` is real in the session's shell: the fabric
   `SessionStart` hook exports it through `$CLAUDE_ENV_FILE`, so the line
   above runs as written (before 2026-09-14 it did not, and a resolved
   `"$(git rev-parse --show-toplevel)/../agent-fabric"` was the

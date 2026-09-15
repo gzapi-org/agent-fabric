@@ -18,38 +18,51 @@ are `communication/gzcoord/scripts/inbox.mjs`:
 
 ## 1. Arm the watch, first turn, once
 
+The watch is `inbox.mjs --follow`: one process that blocks for the life
+of the session, prints each delivery as it lands, and returns nothing on
+a quiet spell — no budget, no expiry line, no shell loop, no restart.
+Run it under the Monitor tool so each printed delivery becomes a
+notification:
+
 ```
-Monitor(persistent: true, timeout_ms: 3600000, description: "GZCoord inbox — <host>/<login>",
-  command: 'cd "$AGENT_FABRIC_ROOT/.." && while true; do
-      node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800 2>&1 \
-        | grep --line-buffered -v -E "^gzcoord inbox: nothing for you on ";
-      [ "${PIPESTATUS[0]}" = 4 ] && { echo "gzcoord watch: token refused — re-sync and re-arm"; break; }
-      sleep 5; done')
+Monitor(command: 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --follow',
+        description: "GZCoord inbox — <host>/<login>",
+        persistent: true)              # if your Monitor tool has the field
 ```
 
-`persistent: true` is the whole point: the harness keeps the task for
-the life of the session and nothing expires. The Monitor tool's schema
-also *requires* `timeout_ms`, so pass one — it is ignored when
-`persistent` is true. A watch armed without `persistent: true` is a timed
-task: it dies at its timeout (thirty minutes, an hour) and the session is
-deaf until it notices and re-arms — the "re-arm every thirty minutes"
-loop some sessions ran was exactly this mistake, not a design.
+**The Monitor tool differs by harness build, so check yours before you
+arm:**
+
+- **It has a `persistent` boolean** (like this coordinator build): pass
+  `persistent: true` and the watch runs for the whole session — armed
+  once, never re-armed, no timer; `timeout_ms` is then ignored.
+- **It has only `command`/`description`/`timeout_ms`/`ws`, no
+  `persistent`, and `timeout_ms` caps at 30 min** (Claude Code 2.1.271,
+  the agent build): then *every* Monitor expires at that cap — no command
+  survives it, `--follow` included — and the tool's own notice says
+  "Re-arm it if you still need the watch". Arm with `timeout_ms` at the
+  cap and **re-arm on that notice**. `--follow` still earns its place:
+  it prints nothing across a quiet 30 minutes, so the only output is real
+  deliveries and the one re-arm — not a quiet-expiry line every cycle.
+
+Do not wrap `--follow` in a `while` loop and do not use `--wait` for the
+watch. The budget (`--wait 1800`) was the old shape: a single arm that
+returned on a quiet expiry and had to be re-armed by hand, then by a
+shell loop that printed a line to filter every 30 minutes. `--follow`
+replaces both — it is the primitive built for a watch. (`--wait [S]`
+remains the *bounded* read: use it, once, to block for a reply you are
+actively expecting, or `--wait 3` for a one-off "read messages".)
 
 Owner rule (2026-09-13): every session watches its inbox from its first
 turn to its last. **One watch per session** — the cursor is per address,
-and a second consumer on it steals deliveries from the first. The wait
-wakes only on a message addressed to you (`TO` your address, `TO-ROLE`
-your slug, or a broadcast); everyone else's traffic passes through
-acknowledged and unprinted. A quiet expiry ends a waiter as surely as a
-delivery, so the loop re-arms; you do not. **A resume does not bring the
-watch back**: after `claude --resume` (or a continue after compaction)
-the harness restores a persistent monitor as a plain timed task that
-expires on its timeout (observed 2026-09-14 on architect-cto-01, resumed
-after its clone was renamed), so
-the inbox goes quiet with no sign. The session-start hook drains once on
-resume, which covers the gap up to that moment; re-arm the watch as the
-first action after any resume, and when in doubt check the task list —
-a watch that is not listed as persistent is not one. The cue is the
+and a second consumer on it steals deliveries from the first. The watch
+prints only what is addressed to you (`TO` your address, `TO-ROLE` your
+slug, or a broadcast); everyone else's traffic passes through
+acknowledged and unprinted. **A resume does not bring the watch back**:
+after `claude --resume` (or a continue after compaction) the harness
+does not restore the monitor, so the inbox goes quiet with no sign. The
+session-start hook drains once on resume, which covers the gap up to that
+moment; re-arm the watch as the first action after any resume. The cue is the
 harness's own notice on reopening — *"N background shell command tasks
 didn't finish before the previous session ended. Task ids: …"* — which
 names the old session's watch (and any `wait-merged` / `pr-review-status`

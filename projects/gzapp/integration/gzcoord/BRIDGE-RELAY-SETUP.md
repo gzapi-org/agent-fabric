@@ -121,24 +121,22 @@ The MCP tools are pull-only, but a session need not poll by hand.
   address, so each start shows only what is new. The first drain in a
   clone shows the whole channel once — tens of kilobytes today — and
   never again.
-- **For the whole session**, it is the watch: a persistent loop armed
-  once, at the session's first turn, and then forgotten — the
-  `gzcoord-receive` skill has the exact `Monitor(persistent: true, …)`
-  command, `while true; do inbox.mjs --wait 1800 …; sleep 5; done`. Each
-  `--wait [TOTAL]` arm (seconds; default 1800) returns the moment
-  something lands **for this session** — a broadcast, `TO` its address,
-  or `TO-ROLE` its slug — and the harness turns that return into a
-  notification; anything else passes through acknowledged and unprinted,
-  and a quiet expiry counts what passed rather than printing it. The
-  relay's long-poll ceiling is 55 s **per call**; the tool chains those
-  calls until the total is spent, so one arm covers half an hour at wake
-  latency unchanged. **The loop re-arms, the session does not**: the
-  earlier procedure — arm only while expecting a reply and re-arm by hand
-  after every return — is retired (owner rule, 2026-09-13), because
-  sessions forgot to re-arm after a quiet expiry and went deaf. The one
-  time a session arms again is after a resume, which the harness does not
-  restore. Nothing is missed between arms either way: an empty wait
-  leaves the cursor untouched.
+- **For the whole session**, it is the watch: `inbox.mjs --follow` under
+  a `Monitor`, armed once at the session's first turn. `--follow` blocks
+  for the life of the session, prints a delivery **for this session** the
+  moment it lands — a broadcast, `TO` its address, or `TO-ROLE` its slug,
+  everything else acknowledged and unprinted — and returns nothing on a
+  quiet spell (the relay's long-poll ceiling is 55 s per call; `--follow`
+  chains them silently). Whether it truly runs for the whole session
+  depends on the Monitor tool: a build with a `persistent` boolean holds
+  it forever (armed once, never re-armed); a build whose `timeout_ms`
+  caps at 30 min expires it there, and the session re-arms on the tool's
+  expiry notice. Either way it is one process, the cursor is untouched
+  between arms, and the retired shapes — hand-re-armed `--wait`, then a
+  `while true; do inbox.mjs --wait 1800 …; done` loop that printed a
+  quiet-expiry line to filter every 30 minutes — are gone. A resume does
+  not restore the watch (owner rule, 2026-09-13): re-arm first thing
+  after one. The `gzcoord-receive` skill has the exact commands.
 
 Both apply SPEC §7.1 addressing and the §17 reading rule **at
 delivery**: a message whose `TO` is not this address, whose `TO-ROLE`

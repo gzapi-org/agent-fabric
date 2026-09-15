@@ -860,7 +860,7 @@ test('relay runtime dir resolves against the workspace, not a working copy', () 
 // same token resolution. It validates last, refuses a FROM that is not
 // this login's address, and posts exactly {channel, sender, content}.
 import http from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 const SEND = new URL('../scripts/send.mjs', import.meta.url).pathname;
 function withRelay(fn) {
   const posts = [];
@@ -993,4 +993,37 @@ test('the synced file is the token; the environment snapshot is not consulted wh
   assert.ok(seen.includes('Bearer fresh-token') && !seen.includes('Bearer dead'), seen);
   assert.doesNotMatch(r.err, /retrying/);
   assert.match(r.out + r.err, /nothing for you/);
+});
+
+// --follow is the watch: it blocks, prints a delivery as it lands, and
+// does not return on a quiet spell. We cannot let it run forever in a
+// test, so a stub relay returns one message then stalls; the child is
+// killed after the message is observed.
+test('inbox --follow prints a delivery and keeps running', async () => {
+  const mine = `[GZCOORD/1] INFO\nFROM: x/y\nROLE: backend-dev\nPROJECT: fixture\nBROADCAST: true\nMESSAGE-ID: 01a09fc1-0000-7000-8000-00000000000f\nSUBJECT: live\n\nNOTES:\nFOLLOW-BODY\n`;
+  let served = false;
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json'); res.setHeader('connection', 'close');
+    if (req.url === '/status') { res.end('{}'); return; }
+    if (req.url.startsWith('/api/wait')) {
+      if (!served) { served = true; res.end(JSON.stringify({ messages: [{ seq: 5, id: 'r5', ts: 'T', sender: 'x/y', content: mine }], next_cursor: 'c' })); }
+      else { /* stall: never respond, --follow keeps waiting */ }
+      return;
+    }
+    res.end('{}');   // ack
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const child = spawn('node', [INBOX, '--follow'], { env });
+  let out = '';
+  const done = new Promise(resolve => {
+    child.stdout.on('data', d => { out += d; if (out.includes('FOLLOW-BODY')) resolve(); });
+    setTimeout(resolve, 8000);
+  });
+  await done;
+  const stillRunning = child.exitCode === null;
+  child.kill('SIGKILL'); server.closeAllConnections(); server.close();
+  assert.match(out, /FOLLOW-BODY/, 'the delivery was printed');
+  assert.ok(stillRunning, '--follow did not exit after the delivery');
 });

@@ -86,8 +86,8 @@ The message is parseable, but it remains readable without tooling.
 `scripts/send.mjs <file>` posts one message: normalized, validated last,
 refused when `FROM` is not the session's own address, resolved (relay,
 channel, token) exactly as `scripts/inbox.mjs` resolves the inbox.
-`scripts/inbox.mjs` drains at session start and, with `--wait`, is the
-persistent watch. The procedures around them — when a message is the
+`scripts/inbox.mjs` drains at session start and, with `--follow`, is the
+session-long watch (`--wait [S]` is a bounded read for a reply you expect). The procedures around them — when a message is the
 right instrument, how to address it, what a delivery is and is not — are
 two skills every account has: `skills/gzcoord-send/SKILL.md` and
 `skills/gzcoord-receive/SKILL.md` (installed user-scope by

@@ -191,7 +191,7 @@ def test_index_banner_names_which_sections_load_when(tmp: str) -> None:
     run_assemble(drain, claims_dir, out)
     index = read(proj(out, "alpha", "INDEX.md"))
     assert "Tier 1" in index, index
-    assert "loads at activation" in index, index
+    assert "is given" in index and "launch prompt" in index and "session-start hook" in index, index
     assert "Everything below loads on demand" not in index, index
 
 

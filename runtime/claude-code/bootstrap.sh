@@ -11,7 +11,8 @@
 #   <projects>/.claude/settings.json   hooks + status line pointing at agent-fabric
 #   ~/.claude/commands/role.md         /role for this account, from runtime/claude-code/commands/
 #   ~/.claude/agents/{code-*,blind-reviewer}.md
-#                                      the capability-class agent files, from runtime/claude-code/agents/
+#                                      the capability-class agent files, from runtime/claude-code/agents/,
+#                                      via install-agent-files.sh (the review pin, merged for this login)
 #   ~/.claude/hooks/review-bash-guard.sh
 #                                      the review class's Bash fence; the blind-reviewer agent file
 #                                      looks here when the launch project has no .claude/ copy
@@ -106,27 +107,14 @@ put "$PROJECTS/.claude/settings.json" "$TMP/settings.json"
 #    the capability-class agent files.
 sed "s|__AGENT_FABRIC_ROOT__|$FABRIC_ROOT|g" "$FABRIC_ROOT/runtime/claude-code/commands/role.md" > "$TMP/role.md"
 put "$CLAUDE_HOME/commands/role.md" "$TMP/role.md"
-# A class the anthropic column pins to a native model (routing/
-# capabilities.json; `routing.py pins`) gets that id in its agent file's
-# `model:` line — the reviewer, claude-opus-5[1m]. On a fabric vanilla
-# launch the dispatch guard drops the dispatch's alias so this line
-# decides; everywhere else the dispatch's `model: fable` outranks it and
-# the file's value is inert. The repo file keeps the alias; the pin is
-# applied at install, from routing, so there is one source.
-declare -A PIN_BY_CLASS=()
-while read -r klass alias model; do
-    [[ -n "$klass" ]] && PIN_BY_CLASS["$klass"]="$model"
-done < <(python3 "$FABRIC_ROOT/tools/fabric/routing.py" pins 2>/dev/null)
-agent_class() { case "$1" in blind-reviewer.md) echo review ;; *) echo "${1%.md}" ;; esac; }
-for f in code-low.md code-medium.md code-high.md blind-reviewer.md; do
-    pin="${PIN_BY_CLASS[$(agent_class "$f")]:-}"
-    if [[ -n "$pin" ]]; then
-        sed "0,/^model: .*/s||model: $pin|" "$FABRIC_ROOT/runtime/claude-code/agents/$f" > "$TMP/$f"
-        put "$CLAUDE_HOME/agents/$f" "$TMP/$f"
-    else
-        put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
-    fi
-done
+# The capability-class agent files, with the review pin applied for this
+# account: runtime/claude-code/install-agent-files.sh (bin/fabric-model
+# re-runs it when the account's local layer changes the pin).
+if (( DRY_RUN )); then
+    bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --dry-run
+else
+    bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh"
+fi
 # The review class's Bash fence rides with its agent file: the agent runs
 # unisolated in the session's clone, and a review dispatched from
 # projects/ (no .claude/ of its own) found no guard and lost Bash entirely

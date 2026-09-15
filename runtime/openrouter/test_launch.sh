@@ -223,7 +223,7 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "--print exits 0" || bad "rc=$rc" "$out"
 grep -q "provider anthropic)" <<<"$out" && ok "the header names the provider" || bad "provider not in header" "$out"
 grep -q "session : claude-sonnet-5$" <<<"$out" && ok "the session is the profile's model spoken natively (anthropic/ dropped)" || bad "session not native" "$out"
-grep -q "review      : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
+grep -q "review      : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
 grep -q "code-high   : opus  (harness default for the alias)" <<<"$out" && ok "a tier alias in the column is left to the harness" || bad "alias treated as a pin" "$out"
 ! grep -q "export ANTHROPIC_DEFAULT_" <<<"$out" && ok "no tier is exported on plain claude — a /model fable stays fable" || bad "a tier export on vanilla" "$out"
 out="$(run --provider=anthropic --version 2>&1)"
@@ -239,9 +239,27 @@ rm -f "$STATE/agents/$LOGIN/binding.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q "no active role binding" <<<"$out" && ok "vanilla through the launcher still needs a bound role" || bad "unbound vanilla launch admitted" "$out"
 mkfabric
-profile defaults '{"session": "z-ai/glm-5.3"}'
+profile defaults '{"session": "z-ai/glm-5.3", "providers": {}}'
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q "not an Anthropic model and no profile layer names one" <<<"$out" && ok "a non-Anthropic session with no Anthropic layer is refused on vanilla, not mistranslated" || bad "foreign session admitted" "$out"
+# A layer is per provider: plain claude's session, alias bindings and
+# review pin are named in its own vocabulary and never leak to the broker.
+mkfabric
+printf '%s\n' '{"providers":{"openrouter":{"session":"z-ai/glm-5.3"},"anthropic":{"session":"opus","aliases":{"opus":"claude-opus-5[1m]","haiku":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "session : opus" <<<"$out" && ! grep -q "is not an Anthropic model" <<<"$out" && ok "plain claude's session is providers.anthropic.session, an alias, with no skip to report" || bad "per-provider session not honoured" "$out"
+grep -q "code-high   : claude-opus-5\[1m\]  (the opus alias, exported; from local)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "a bound alias is exported as ANTHROPIC_DEFAULT_<ALIAS>_MODEL and the class riding it says so" || bad "alias binding not exported" "$out"
+grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5" <<<"$out" && ! grep -q "ANTHROPIC_DEFAULT_SONNET_MODEL\|ANTHROPIC_DEFAULT_FABLE_MODEL" <<<"$out" && ok "only the bound aliases are exported: sonnet and fable stay the harness's" || bad "unbound alias exported" "$out"
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the same file on the broker: its own session, and the alias binding does not reach the broker's exports" || bad "anthropic layer leaked to the broker" "$out"
+printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"review":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "not in routing/policies/review-grade.json" <<<"$out" && ok "a local review pin outside the grade is refused on vanilla" || bad "ungraded local review pin admitted" "$out"
+printf '%s\n' '{"providers":{"anthropic":{"aliases":{"opus":"z-ai/glm-5.3"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "providers.anthropic.aliases.opus is 'z-ai/glm-5.3', not a native Claude id" <<<"$out" && ok "an alias bound to a broker id is refused by name" || bad "wrong vocabulary admitted" "$out"
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ok "…on the broker path too: one malformed layer refuses every launch" || bad "malformed anthropic layer admitted on the broker" "$out"
 mkfabric
 profile agents "$LOGIN" '{"session": "z-ai/glm-5.3"}'
 out="$(run --provider anthropic --print 2>&1)"; rc=$?

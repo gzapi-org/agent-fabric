@@ -1,9 +1,16 @@
 {
   "version": 2,
-  "description": "Per-role and per-agent overrides for the OpenRouter launch path, layered over routing/capabilities.json: defaults <- roles.<role> <- agents.<login> <- the agent's gitignored model-profile.local.json. Each layer may set `session` (the main conversation's model) and any `capabilities.<class>` model. `agents` is keyed by the Linux login — the agent — never by a directory name. Credentials are never here.",
+  "description": "Per-role and per-agent overrides, layered over routing/capabilities.json: defaults <- roles.<role> <- agents.<login> <- the agent's gitignored model-profile.local.json (bin/fabric-model writes it). A layer is PER PROVIDER — `providers.openrouter` names the session and any class as OpenRouter ids; `providers.anthropic` names the session, what each tier alias (haiku, sonnet, opus, fable) binds to, and the reviewer's pin — because the two launch paths speak different vocabularies. The flat `session`/`capabilities` are the OpenRouter form. `agents` is keyed by the Linux login — the agent — never by a directory name. Credentials are never here.",
   "defaults": {
-    "session": "anthropic/claude-sonnet-5",
-    "notes": "The session model is the main agent's; the capability classes come from routing/capabilities.json unless a layer overrides one. A session on these defaults is a provider switch, not a cost switch."
+    "providers": {
+      "openrouter": {
+        "session": "anthropic/claude-sonnet-5"
+      },
+      "anthropic": {
+        "session": "claude-sonnet-5"
+      }
+    },
+    "notes": "The session model is the main agent's, per provider; the capability classes and the alias bindings come from routing/capabilities.json unless a layer overrides one. A session on these defaults is a provider switch, not a cost switch."
   },
   "roles": {},
   "agents": {}

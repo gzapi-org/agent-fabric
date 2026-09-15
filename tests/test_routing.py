@@ -74,6 +74,56 @@ def test_native_path_is_aliases_except_the_review_pin() -> None:
     assert (s["model"], s["source"]) == ("claude-opus-5[1m]", "local"), s
 
 
+def test_a_layer_is_per_provider() -> None:
+    """One layer names each provider's choices in that provider's
+    vocabulary; the merge is per provider, per key, nearest layer wins.
+    The flat session/capabilities are the OpenRouter form (and an
+    anthropic/ session serves plain claude too), so an old local file
+    reads exactly as before."""
+    local = {"providers": {"openrouter": {"session": "z-ai/glm-5.3", "capabilities": {"code-low": "z-ai/glm-5.2"}},
+                           "anthropic": {"session": "opus", "aliases": {"opus": "claude-opus-5[1m]"},
+                                         "capabilities": {"review": "claude-opus-5"}}}}
+    s = routing.resolve_session(local=local, provider="openrouter")
+    assert (s["model"], s["source"]) == ("z-ai/glm-5.3", "local"), s
+    s = routing.resolve_session(local=local, provider="anthropic")
+    assert (s["model"], s["source"], s["skipped"], s["openrouter_id"]) == ("opus", "local", None, None), s
+    assert routing.resolve("code-low", "openrouter", local=local)["model"] == "z-ai/glm-5.2"
+    assert routing.resolve("code-low", "anthropic", local=local)["model"] == "haiku", "the broker override stays on the broker"
+    hi = routing.resolve("code-high", "anthropic", local=local)
+    assert (hi["model"], hi["pinned"], hi["source"], hi["alias"]) == ("claude-opus-5[1m]", True, "local", "opus"), \
+        "a coding class on plain claude is pinned by binding the alias it rides"
+    assert routing.resolve("code-high", "openrouter", local=local)["model"] == "z-ai/glm-5.3", "the alias binding stays on plain claude"
+    rv = routing.resolve("review", "anthropic", local=local)
+    assert (rv["model"], rv["source"]) == ("claude-opus-5", "local"), rv
+    exports = routing.alias_exports(local=local)
+    assert set(exports) == {"opus"} and exports["opus"]["model"] == "claude-opus-5[1m]", exports
+    assert routing.alias_exports() == {}, "nothing bound by default: every tier is the harness's"
+    # A flat layer over a per-provider one: the nearest layer wins per key.
+    both = {"providers": {"anthropic": {"session": "opus"}}, "session": "anthropic/claude-sonnet-5"}
+    assert routing.resolve_session(local=both, provider="anthropic")["model"] == "opus", \
+        "providers.anthropic.session outranks what the flat anthropic/ session implies"
+    assert routing.resolve_session(local=both, provider="openrouter")["model"] == "anthropic/claude-sonnet-5"
+
+
+def test_a_layer_is_validated_in_its_provider_vocabulary() -> None:
+    def refused(layer, needle):
+        try:
+            routing.normalize_layer(layer, "local")
+        except ValueError as exc:
+            assert needle in str(exc), f"{needle!r} not in {exc}"
+            return
+        raise AssertionError(f"{layer} was accepted")
+    refused({"session": None}, "session is None")
+    refused({"providers": {"anthropic": {"session": "z-ai/glm-5.3"}}}, "neither a harness tier alias")
+    refused({"providers": {"anthropic": {"aliases": {"opus": "opus"}}}}, "not a native Claude id")
+    refused({"providers": {"anthropic": {"aliases": {"turbo": "claude-x"}}}}, "not a tier alias")
+    refused({"providers": {"anthropic": {"capabilities": {"code-high": "claude-opus-5"}}}}, "bind the alias instead")
+    refused({"providers": {"openrouter": {"aliases": {"opus": "claude-opus-5"}}}}, "binds classes, not tier aliases")
+    refused({"providers": {"vertex": {}}}, "unknown provider")
+    refused({"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}, "not a model id")
+    assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}}, "anthropic": {"aliases": {}, "capabilities": {}}}
+
+
 def test_composite_is_derived_not_stored() -> None:
     for name in ("capabilities.json", "profiles.json", "shims.json"):
         text = open(os.path.join(ROOT, "routing", name), encoding="utf-8").read()
@@ -202,6 +252,8 @@ def main() -> int:
         test_a_bare_preset_gets_nothing_attached,
         test_shim_subcommand_answers_for_a_bare_id_and_stays_quiet_otherwise,
         test_only_live_tested_families_have_a_shim,
+        test_a_layer_is_per_provider,
+        test_a_layer_is_validated_in_its_provider_vocabulary,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,
         test_every_class_rides_its_own_alias,

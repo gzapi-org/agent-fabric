@@ -8,13 +8,32 @@ at launch applies to everything under the session, subagents included.
 |---|---|---|---|
 | provider | Anthropic, by construction | Anthropic, plain `claude` | OpenRouter (`ori claude`) |
 | who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding | same |
-| session model | harness default | `session` from `routing/profiles.json`, spoken natively (`anthropic/` dropped; another vendor's id is refused) | `session` (+ family shim) |
-| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | the `anthropic` column of `routing/capabilities.json`: an alias is left to the harness; a native id (`claude-…`) is written into that class's agent file by bootstrap and applied by the dispatch guard — nothing is exported, so `/model <alias>` in the session is untouched | `openrouter` column → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
-| review class | the `fable` alias, whatever the harness binds it to this week | pinned: `review` → `claude-opus-5[1m]` in `~/.claude/agents/blind-reviewer.md`; the dispatch checks `model: fable` and then hands the model to the file (architect-cto, 2026-09-15), gated by review-grade | `review` → `z-ai/glm-5.3` (+ shim), gated by review-grade |
-| per-role / per-agent choice | none | the profile's `session`; class pins are the column's (fabric-wide) | `routing/profiles.json` layers + the agent's `model-profile.local.json` |
+| session model | harness default | `providers.anthropic.session` from the profile layers (an alias or a native id; a flat `anthropic/<id>` session serves too, `anthropic/` dropped; another vendor's id is refused) | `providers.openrouter.session` / flat `session` (+ family shim) |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | each class rides an alias; an alias nothing binds is the harness's, an alias the profile binds (`providers.anthropic.aliases.<alias>` → native id) is exported as `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` — the tier, session-wide | `openrouter` column, overridden per class by the layers → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
+| review class | the `fable` alias, whatever the harness binds it to this week | pinned: `review` → `claude-opus-5[1m]` (the column, or `providers.anthropic.capabilities.review`) in `~/.claude/agents/blind-reviewer.md`; the dispatch checks `model: fable` and then hands the model to the file (architect-cto, 2026-09-15); never the `fable` export, so `/model fable` stays the hand's; gated by review-grade | `review` → `z-ai/glm-5.3` (+ shim), gated by review-grade |
+| per-role / per-agent choice | none | `routing/profiles.json` layers + the agent's `model-profile.local.json`, the `providers.anthropic` part: session, the four aliases, the reviewer — `bin/fabric-model set --provider anthropic …` | the same layers, the `providers.openrouter` part: session and each class — `bin/fabric-model set --provider openrouter …` |
 | review-grade floor | none — the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch | same |
 | refusals | none | no bound role, model pins in any settings scope, an ungraded review pin, a non-Anthropic session | the same, plus `ori` not authenticated from the environment |
 | how to inspect | `bin/fabric-status` says "not launched by the fabric" | `bin/fabric-status` says "launched by the fabric" with the pins; `AGENT_FABRIC_LAUNCH_PROVIDER=anthropic` | same, plus `ori auth --json` |
+
+**Every layer is per provider.** The two paths speak different
+vocabularies — an OpenRouter id on the broker; a tier alias or a native
+`claude-…` id on plain claude — so a layer names each provider's choices
+under `providers.<provider>` and a choice made for one never reaches the
+other (a GLM session on the broker says nothing about plain claude). The
+repository holds the general default per provider (`routing/profiles.json`
+`defaults`, over the column in `routing/capabilities.json`); the agent's
+own layer is `$STATE_DIR/model-profile.local.json`, which `bin/fabric-model`
+lists, sets, unsets and seeds — `list` shows every choice with the layer it
+came from, `seed` copies the merged defaults in as explicit pins:
+
+```sh
+bin/fabric-model list --provider anthropic
+bin/fabric-model set --provider anthropic session opus
+bin/fabric-model set --provider anthropic opus claude-opus-5[1m]     # the alias, exported
+bin/fabric-model set --provider anthropic review claude-opus-5       # the reviewer's file, at once
+bin/fabric-model set --provider openrouter code-medium z-ai/glm-5.3
+```
 
 The middle column exists so that the fabric decides the review model on
 the vanilla path too, without touching what the session itself calls
@@ -25,11 +44,18 @@ Agent tool's `model` accepts only the four aliases (a hook rewriting it to
 a native id is rejected at schema validation); the dispatch's `model`
 outranks the agent file's; and an agent file whose frontmatter names a
 native id runs on it when the dispatch leaves `model` unset. Hence:
-bootstrap writes the pinned id into the class's agent file (`routing.py
-pins` is the one source), the dispatch guard — under
+`runtime/claude-code/install-agent-files.sh` writes the pinned id into the
+reviewer's agent file (`routing.py pins --me` is the one source, merged for
+the login: bootstrap runs it at provisioning, `fabric-model` after a change
+to the review pin), the dispatch guard — under
 `AGENT_FABRIC_LAUNCH_PROVIDER=anthropic` only — checks `model: fable` and
 then allows the dispatch with `model` removed, and the launcher exports
-nothing on this path. Read-back: session `7052df73`, main on
+nothing under `fable` for it. The coding tiers are the opposite case: a
+pin of `haiku`/`sonnet`/`opus` (or of `fable` itself, by hand) means that
+tier session-wide, so it IS the export, and the class riding the alias
+follows it with its dispatch untouched — which is also why the agent-file
+route cannot serve them: the guard *asks* for code-high, and a hook's
+`updatedInput` applies only on `allow`. Read-back: session `7052df73`, main on
 `claude-sonnet-5`, the review subagent on `claude-opus-5`, `fable`
 untouched. A tier alias in the column means "the harness's current model
 of that tier", which is right for the coding classes; the review class is

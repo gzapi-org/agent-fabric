@@ -115,7 +115,10 @@ for payload in '{}' 'not json' ''; do
 done
 
 echo "the vanilla pin: under a fabric vanilla launch a review dispatch keeps its rules, then hands the model to the agent file"
-vanilla() { printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_LAUNCH_PROVIDER=anthropic bash "$UNDER_TEST" 2>/dev/null; }
+# The pin is merged for the login (`pins --me`): an empty state dir keeps
+# the runner's own binding and local layer out of these assertions.
+EMPTY_STATE="$(mktemp -d)"; trap 'rm -rf "$EMPTY_STATE"' EXIT
+vanilla() { printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_STATE_DIR="$EMPTY_STATE" AGENT_FABRIC_LAUNCH_PROVIDER=anthropic bash "$UNDER_TEST" 2>/dev/null; }
 out="$(vanilla "$R")"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == allow ]] && pass "review + fable + no isolation: an explicit allow" || fail "vanilla review not allowed" "$out"
 [[ "$(jq -r '.hookSpecificOutput.updatedInput | has("model")' <<<"$out")" == false ]] && pass "…with the dispatch's model removed, so the reviewer file's claude-opus-5[1m] decides" || fail "model still on the dispatch" "$out"
@@ -128,7 +131,8 @@ out="$(vanilla '{"subagent_type":"blind-reviewer","description":"Review PR 626 d
 out="$(vanilla '{"subagent_type":"code-high","model":"opus","isolation":"worktree","description":"Fix the parser"}')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == ask ]] && pass "an unpinned class is untouched: code-high still asks and keeps its alias" || fail "code-high changed on vanilla" "$out"
 [[ -z "$(printf '{"tool_name":"Agent","tool_input":%s}' "$R" | AGENT_FABRIC_LAUNCH_PROVIDER=openrouter bash "$UNDER_TEST" 2>/dev/null)" ]] && pass "on the broker path the same review dispatch is a plain allow: model fable reaches the harness" || fail "rewrite leaked to the broker path"
-[[ -z "$(printf '{"tool_name":"Agent","tool_input":%s}' "$R" | bash "$UNDER_TEST" 2>/dev/null)" ]] && pass "unlaunched vanilla: plain allow, fable is the harness's" || fail "rewrite leaked to an unlaunched session"
+# The runner may itself be a fabric-launched session; "unlaunched" is the variable absent, not inherited.
+[[ -z "$(printf '{"tool_name":"Agent","tool_input":%s}' "$R" | env -u AGENT_FABRIC_LAUNCH_PROVIDER bash "$UNDER_TEST" 2>/dev/null)" ]] && pass "unlaunched vanilla: plain allow, fable is the harness's" || fail "rewrite leaked to an unlaunched session"
 
 echo
 if [[ "$failures" -eq 0 ]]; then echo "all assertions passed"; exit 0; fi

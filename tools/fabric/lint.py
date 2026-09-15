@@ -330,19 +330,32 @@ def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]
     grade = routing.load_review_grade(root)
     gated = grade.get("capability", "review")
     try:
-        base = routing.load_capabilities(root)["providers"]["openrouter"]["models"]
+        routing.load_capabilities(root)
     except (OSError, KeyError, ValueError):
         return findings
     rows = [("defaults", None, None)]
     rows += [("roles", name, None) for name in (doc.get("roles") or {})]
     rows += [("agents", None, name) for name in (doc.get("agents") or {})]
     for layer, role, agent in rows:
-        merged = routing.merged_profile(role, agent, None, root)
-        model = (merged.get("capabilities") or {}).get(gated) or base.get(gated)
-        if model and not routing.review_grade_ok(model, root):
-            label = layer if layer == "defaults" else f"{layer}.{role or agent}"
-            findings.append(f"{where}: {label} resolves {gated} to {model!r}, which is not in "
-                            "routing/policies/review-grade.json; the review class would run on it")
+        label = layer if layer == "defaults" else f"{layer}.{role or agent}"
+        for provider in routing.PROVIDERS:
+            try:
+                model = routing.resolve(gated, provider, role, agent, None, root)["model"]
+            except (KeyError, ValueError) as exc:
+                findings.append(f"{where}: {label} on {provider}: {exc}")
+                continue
+            if provider == "anthropic" and not routing.NATIVE_ID.match(model):
+                continue  # an alias is the harness's choice, ungated
+            if not routing.review_grade_ok(model, root):
+                findings.append(f"{where}: {label} resolves {gated} on {provider} to {model!r}, which is not in "
+                                "routing/policies/review-grade.json; the review class would run on it")
+    # The bottom layer must give every provider a session: the launcher
+    # refuses a path with none rather than guess one.
+    for provider in routing.PROVIDERS:
+        try:
+            routing.resolve_session(root=root, provider=provider)
+        except (KeyError, ValueError) as exc:
+            findings.append(f"{where}: defaults name no session for {provider}: {exc}")
     if known_roles:
         for name in (doc.get("roles") or {}):
             if name not in known_roles:

@@ -84,15 +84,17 @@ ALIAS_JSON="$(jq -c '.aliases // {}' "$ALIASES" 2>/dev/null || echo '{}')"
 # rejected at schema validation), the dispatch's `model` outranks the
 # agent file's, and an agent file whose frontmatter names a native id runs
 # on it when the dispatch leaves `model` unset. So the pin lives in the
-# reviewer's agent file (bootstrap writes it there from routing), and this
-# guard — AFTER the review rules have held, `model: fable` included —
-# allows the dispatch with `model` removed, so the file's pin applies.
-# Only under a fabric vanilla launch, only for a pinned class; anywhere
-# else the alias reaches the harness as written.
+# reviewer's agent file (install-agent-files.sh writes it there from
+# routing, merged for THIS login — `pins --me` — since the account's own
+# layer may name it), and this guard — AFTER the review rules have held,
+# `model: fable` included — allows the dispatch with `model` removed, so
+# the file's pin applies. Only under a fabric vanilla launch, only for the
+# review class; a coding class's pin is the export of the alias it rides
+# and the dispatch's alias reaches the harness as written.
 PINNED_JSON='{}'
 if [[ "${AGENT_FABRIC_LAUNCH_PROVIDER:-}" == anthropic ]]; then
   ROUTING="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)/tools/fabric/routing.py"
-  PINNED_JSON="$(python3 "$ROUTING" pins 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
+  PINNED_JSON="$(python3 "$ROUTING" pins --me 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
   jq -e . <<<"$PINNED_JSON" >/dev/null 2>&1 || PINNED_JSON='{}'
 fi
 

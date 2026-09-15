@@ -17,14 +17,19 @@
 # launcher exports them, `exec ori claude` carries them to every agent.
 #
 # WHAT IT RESOLVES (tools/fabric/routing.py is the one implementation):
-#   capability class -> model     routing/capabilities.json (openrouter)
+#   capability class -> model     routing/capabilities.json (the provider's column)
 #                                 <- routing/profiles.json defaults
 #                                 <- roles.<role>        (the agent's binding)
 #                                 <- agents.<login>      (the agent itself)
-#                                 <- $STATE_DIR/model-profile.local.json (gitignored)
+#                                 <- $STATE_DIR/model-profile.local.json (gitignored;
+#                                    bin/fabric-model writes it)
 #   model -> family shim          routing/shims.json
 #   class -> harness alias        runtime/claude-code/aliases.json
-# and exports, per class, ANTHROPIC_DEFAULT_<ALIAS>_MODEL=<model@shim>.
+# Every layer is per provider (providers.openrouter / providers.anthropic).
+# On the broker it exports, per class, ANTHROPIC_DEFAULT_<ALIAS>_MODEL=
+# <model@shim>; on plain claude it exports the alias bindings the profile
+# makes (providers.anthropic.aliases) and the review pin goes through the
+# reviewer's agent file.
 # The composite string exists only here, in the child's environment.
 # Every class rides an alias: the Agent tool's `model` field accepts
 # only the tier aliases, so a "declared full id" in an agent file can
@@ -95,10 +100,10 @@ die() { echo "launch: $*" >&2; exit 1; }
 # --print` passed it through to claude and exec'd a real session.
 # --provider openrouter (default) | anthropic: the same resolution and the
 # same refusals, then `ori claude` with every class exported as a
-# composite, or plain `claude` with only the classes the anthropic column
-# pins (a native Claude id) exported — a tier alias there is left to the
-# harness. Either way the session is the fabric's: bound role, gated
-# review model, no pin outside the profile.
+# composite, or plain `claude` with only the tier aliases the profile
+# binds exported — an alias nothing binds is left to the harness, and the
+# review pin goes through the agent file. Either way the session is the
+# fabric's: bound role, gated review model, no pin outside the profile.
 PRINT_ONLY=0
 PROVIDER="openrouter"
 ARGS=()
@@ -195,34 +200,35 @@ if os.path.exists(local_path):
     if not isinstance(local, dict):
         sys.exit("model-profile.local.json is %s, not an object" % type(local).__name__)
 aliases = json.load(open(aliases_path))
-# Every merged model must be a model id: the committed files are linted,
-# the local layer is not, and a null/number/""/prose there once passed the
-# emptiness checks as the string "None" and reached `--model`.
-def valid(name, val):
-    if not isinstance(val, str) or not routing.MODEL_ID.fullmatch(val):
-        sys.exit("merged profile: %s is %r, not a model id (%s)" % (name, val, routing.MODEL_ID.pattern))
-merged = routing.merged_profile(role, agent, local)
-valid("session", merged.get("session"))
-for klass, val in (merged.get("capabilities") or {}).items():
-    valid("capabilities." + klass, val)
-out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}}
-for klass, alias in aliases["aliases"].items():
-    res = routing.resolve(klass, provider, role, agent, local)
-    if provider == "openrouter":
-        if not routing.COMPOSITE.fullmatch(res["composite"]):
-            sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
-        out["exports"][aliases["env"][alias]] = res["composite"]
-    # On plain claude a pinned class is NOT exported: ANTHROPIC_DEFAULT_*
-    # would rebind the alias for the whole session (a hand /model fable
-    # would land on the review model). The pin reaches the class through
-    # its agent file (bootstrap writes it from routing) and the dispatch
-    # guard, which drops the dispatch's alias under this launch so the
-    # file decides. Nothing is exported on this path.
-    out["classes"][klass] = res
+# Every merged value must be a model reference in its provider's
+# vocabulary: the committed files are linted, the local layer is not, and
+# a null/number/""/prose there once passed the emptiness checks as the
+# string "None" and reached `--model`. normalize_layer names the field.
 try:
+    routing.normalize_layer(local, "local")
+    out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}}
+    for klass, alias in aliases["aliases"].items():
+        res = routing.resolve(klass, provider, role, agent, local)
+        if provider == "openrouter":
+            if not routing.COMPOSITE.fullmatch(res["composite"]):
+                sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
+            out["exports"][aliases["env"][alias]] = res["composite"]
+        out["classes"][klass] = res
+    if provider == "anthropic":
+        # Plain claude: an alias the profile binds (providers.anthropic.
+        # aliases, or a coding class the column pins natively) is exported
+        # as that alias's ANTHROPIC_DEFAULT_*_MODEL — a tier pin means the
+        # tier, session-wide, `/model <alias>` included. The review class
+        # is the one exception: its alias (fable) is also the hand's tier,
+        # so its pin is never exported; it reaches the reviewer's agent
+        # file (bin/fabric-model apply, bootstrap) and the dispatch guard
+        # drops the dispatch's alias under this launch so the file decides.
+        out["alias_exports"] = routing.alias_exports(role, agent, local)
+        for alias, entry in out["alias_exports"].items():
+            out["exports"][aliases["env"][alias]] = entry["model"]
     session = routing.resolve_session(role, agent, local, provider=provider)
-except KeyError as exc:
-    sys.exit(str(exc))
+except (KeyError, ValueError) as exc:
+    sys.exit("merged profile: %s" % exc)
 out["session"] = session
 grade = routing.load_review_grade()
 review = out["classes"].get(grade.get("capability", "review"))
@@ -294,13 +300,20 @@ if (( PRINT_ONLY )); then
     echo "  session : $SESSION"
     SKIPPED="$(python3 -c 'import json,sys; s=json.load(sys.stdin)["session"]; print(s.get("skipped") or "")' <<<"$RESOLVED")"
     [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
+    echo "  (from the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer; bin/fabric-model list --provider $PROVIDER shows every choice with its source)"
     [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
     python3 - "$RESOLVED" <<'PY'
 import json, sys
 d = json.loads(sys.argv[1])
 for klass, res in d["classes"].items():
     if d.get("provider") == "anthropic":
-        print("  %-12s: %s  %s" % (klass, res["model"], "(pinned in the agent file; the dispatch guard applies it)" if res.get("pinned") else "(harness default for the alias)"))
+        if not res.get("pinned"):
+            how = "(harness default for the alias)"
+        elif res["alias"] in d.get("alias_exports", {}):
+            how = "(the %s alias, exported; from %s)" % (res["alias"], res["source"])
+        else:
+            how = "(pinned in the agent file; the dispatch guard applies it; from %s)" % res["source"]
+        print("  %-12s: %s  %s" % (klass, res["model"], how))
     else:
         print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
 print()
@@ -313,9 +326,10 @@ PY
     exit 0
 fi
 
-# Plain claude: no broker, no shim, no tier export — a pinned class is
-# served by its agent file under the dispatch guard; the session model
-# and the refusals are what the launcher contributed.
+# Plain claude: no broker, no shim; the exports above are the profile's
+# alias bindings (none by default), the review pin is served by its agent
+# file under the dispatch guard; the session model and the refusals are
+# what the launcher contributed.
 if [[ "$PROVIDER" == anthropic ]]; then
     if (( CALLER_MODEL )); then exec claude "$@"; fi
     exec claude --model "$SESSION" "$@"

@@ -121,25 +121,24 @@ The MCP tools are pull-only, but a session need not poll by hand.
   address, so each start shows only what is new. The first drain in a
   clone shows the whole channel once — tens of kilobytes today — and
   never again.
-- **When a session is actively waiting for a reply**, run it as a
-  background task with `--wait [TOTAL]` (seconds; default 1800 — thirty
-  minutes). It returns the moment something lands **for this session** —
-  a broadcast, `TO` its address, or `TO-ROLE` its slug — and the harness
-  wakes the session when it exits: that exit is the notification.
-  Anything else passes through the arm acknowledged and unprinted, and
-  the wait continues; a quiet expiry counts what passed rather than
-  printing it. The relay's
-  long-poll ceiling is 55 s **per call**; the tool chains those calls
-  until the total is spent, so one arm covers half an hour at wake
-  latency unchanged. It is one-shot by design, because a process that
-  never exits never notifies — so **re-arm it after every return, of
-  either kind**: a slice carrying a message (the harness wakes the
-  session with it), or the total budget expiring with nothing new, which
-  prints `nothing new on <channel> in Ns`. Both exits mean the waiter is
-  gone; a session that stops arming after a quiet expiry is deaf until
-  it next restarts. Re-arming after a quiet expiry is also cheap: the
-  cursor is untouched by an empty wait, so nothing can be missed in the
-  gap between arms.
+- **For the whole session**, it is the watch: a persistent loop armed
+  once, at the session's first turn, and then forgotten — the
+  `gzcoord-receive` skill has the exact `Monitor(persistent: true, …)`
+  command, `while true; do inbox.mjs --wait 1800 …; sleep 5; done`. Each
+  `--wait [TOTAL]` arm (seconds; default 1800) returns the moment
+  something lands **for this session** — a broadcast, `TO` its address,
+  or `TO-ROLE` its slug — and the harness turns that return into a
+  notification; anything else passes through acknowledged and unprinted,
+  and a quiet expiry counts what passed rather than printing it. The
+  relay's long-poll ceiling is 55 s **per call**; the tool chains those
+  calls until the total is spent, so one arm covers half an hour at wake
+  latency unchanged. **The loop re-arms, the session does not**: the
+  earlier procedure — arm only while expecting a reply and re-arm by hand
+  after every return — is retired (owner rule, 2026-09-13), because
+  sessions forgot to re-arm after a quiet expiry and went deaf. The one
+  time a session arms again is after a resume, which the harness does not
+  restore. Nothing is missed between arms either way: an empty wait
+  leaves the cursor untouched.
 
 Both apply SPEC §7.1 addressing and the §17 reading rule **at
 delivery**: a message whose `TO` is not this address, whose `TO-ROLE`

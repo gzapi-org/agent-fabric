@@ -40,7 +40,9 @@ block and the person copies it into the receiving session's prompt
   included, and only the metadata line of what is not. That drain is a
   snapshot; **every session watches its inbox from its first turn to
   its last** (owner rule, 2026-09-13): make the first action of the
-  session a persistent watch that loops
+  session a persistent watch (`Monitor(persistent: true, …)` — the
+  `gzcoord-receive` skill has the exact command; without `persistent` it
+  is a timed task that dies at its timeout) that loops
   `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800`
   and turns each return into a notification — a quiet expiry ends a
   waiter as surely as a delivery, so the loop re-arms, the session does

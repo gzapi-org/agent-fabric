@@ -19,13 +19,21 @@ are `communication/gzcoord/scripts/inbox.mjs`:
 ## 1. Arm the watch, first turn, once
 
 ```
-Monitor(persistent: true, description: "GZCoord inbox — <host>/<login>",
+Monitor(persistent: true, timeout_ms: 3600000, description: "GZCoord inbox — <host>/<login>",
   command: 'cd "$AGENT_FABRIC_ROOT/.." && while true; do
       node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --wait 1800 2>&1 \
         | grep --line-buffered -v -E "^gzcoord inbox: nothing for you on ";
       [ "${PIPESTATUS[0]}" = 4 ] && { echo "gzcoord watch: token refused — re-sync and re-arm"; break; }
       sleep 5; done')
 ```
+
+`persistent: true` is the whole point: the harness keeps the task for
+the life of the session and nothing expires. The Monitor tool's schema
+also *requires* `timeout_ms`, so pass one — it is ignored when
+`persistent` is true. A watch armed without `persistent: true` is a timed
+task: it dies at its timeout (thirty minutes, an hour) and the session is
+deaf until it notices and re-arms — the "re-arm every thirty minutes"
+loop some sessions ran was exactly this mistake, not a design.
 
 Owner rule (2026-09-13): every session watches its inbox from its first
 turn to its last. **One watch per session** — the cursor is per address,

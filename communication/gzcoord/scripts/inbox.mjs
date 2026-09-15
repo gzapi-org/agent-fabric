@@ -22,15 +22,20 @@
 // every 55 seconds was the noise the waiter exists to remove.
 //
 // The drain runs from the SessionStart hook in .claude/settings.json, so a
-// session begins knowing what arrived while it was away. The wait is for a
-// session actively expecting a reply: run it as a background task and its
-// exit is the notification — the harness wakes the session when it ends.
-// It is one-shot by design; a process that never exits never notifies.
-// Three exits end it, and all three are followed by a fresh arm: a
-// message addressed to this session; the budget expiring on slices that
-// held none (quiet, counted, never printed in detail); the budget
-// itself. The quiet exit is how the budget is spent, not a signal to
-// stop listening.
+// session begins knowing what arrived while it was away. The wait is the
+// PRIMITIVE of the watch, not the watch: one arm returns on a message
+// addressed to this session or when the budget expires quiet, and the
+// harness wakes the session with the return. It is one-shot by design —
+// a process that never exits never notifies — and the procedure around
+// it is a PERSISTENT LOOP the session arms once, at its first turn, and
+// forgets (owner rule, 2026-09-13; the loop is in skills/gzcoord-receive):
+// `while true; do inbox.mjs --wait 1800 …; sleep 5; done` under a
+// persistent Monitor. The loop re-arms after every return, quiet or not;
+// the session re-arms nothing except after a resume, which the harness
+// does not restore. The earlier shape — arm only "while expecting a
+// reply", re-arm by hand after each return — is retired: sessions forgot
+// to re-arm and went deaf. Nothing can be missed between arms either
+// way: an empty wait leaves the cursor untouched.
 //
 // The WAIT exits only on a message addressed to this session (SPEC §7.1:
 // a broadcast, `TO` its address, or `TO-ROLE` its slug). Anything else —

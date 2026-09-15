@@ -65,7 +65,11 @@ PROJECT_ROLES_SUBDIR = os.path.join(PROJECT_DIRNAME, "roles")
 FABRIC_LINK_PREFIX = "../agent-fabric"
 FABRIC_PROJECT_ID = "agent-fabric"
 
-IDENTITY_CLASSES = ("charter", "recall")
+# charter: the function; brief: how the role works day to day, in any
+# project (written by fabric-coordinator from the holders' own accounts,
+# 2026-09-15, and read to every session in its launch prompt); recall:
+# where its knowledge lives. All three are authored, never distilled.
+IDENTITY_CLASSES = ("charter", "brief", "recall")
 DOMAIN_CLASSES = ("domain",)
 PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads")
 # Tier-1 knowledge, in load order: the charter, the project index, the

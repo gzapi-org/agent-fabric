@@ -313,6 +313,28 @@ def case_authored_classes_only_in_identities() -> None:
         assert code == 1 and "belongs under identities/roles/" in out, out
 
 
+def case_brief_is_identity_too() -> None:
+    """The brief (how the role works, read to every session at launch) is
+    the third authored class: beside the charter it lints clean and the
+    index may list it; under memory/ it is refused like a charter."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        brief = CHARTER.replace("class: charter", "class: brief")
+        write(ident(fabric, "brief.md"), brief)
+        write(proj(fabric, "INDEX.md"), index_for(
+            CHARTER_LINE +
+            "- [`identities/roles/web-dev/brief.md`](identities/roles/web-dev/brief.md) — The web sub-apps.\n"))
+        code, out = run_lint(fabric)
+        assert code == 0, f"a brief beside its charter was refused:\n{out}"
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(proj(fabric, "brief.md"), CHARTER.replace("class: charter", "class: brief"))
+        write(proj(fabric, "INDEX.md"), index_for(
+            "- [`memory/projects/demo/web-dev/brief.md`](memory/projects/demo/web-dev/brief.md) — The web sub-apps.\n"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "belongs under identities/roles/" in out, out
+
+
 def case_knowledge_not_in_identities() -> None:
     """A distilled slice beside the charter is knowledge nothing indexes."""
     with tempfile.TemporaryDirectory() as root:
@@ -469,6 +491,7 @@ def main() -> int:
         case_payload_shape_is_asserted,
         case_index_need_not_list_payload,
         case_authored_classes_only_in_identities,
+        case_brief_is_identity_too,
         case_knowledge_not_in_identities,
         case_taxonomy_roles_are_catalogued,
         case_model_profiles_layered_file_passes,

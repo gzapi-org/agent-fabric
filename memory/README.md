@@ -141,8 +141,8 @@ The input is each agent's own Claude memory
 one fact per file. A memory reaches this corpus only if it opts in with a
 `roles_class` in its `metadata:` block; nothing is inferred from `type`. A
 memory with no `roles_class` is skipped **and named** in the report.
-`charter` and `recall` are refused as targets — they are authored identity,
-not derived knowledge.
+`charter`, `brief` and `recall` are refused as targets — they are authored
+identity, not derived knowledge.
 
 ```sh
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain --dry-run

@@ -17,8 +17,8 @@ have been committed at all.
 Checks:
   schemas    the role catalogue, every project taxonomy, the routing
              profiles and every slice's frontmatter validate
-  identity   every role directory is catalogued; charter and recall are
-             the only authored classes; payload is well-shaped
+  identity   every role directory is catalogued; charter, brief and recall
+             are the only authored classes; payload is well-shaped
   index      every (project, role) index lists every slice the role has —
              its domain slices, its project slices, its charter and recall,
              its shared slices — and every index line resolves
@@ -459,16 +459,16 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
                 findings += validate_json(template_schema, meta, rel)
             if isinstance(meta.get("description"), str):
                 descriptions[rel] = meta["description"]
-            # charter and recall are authored, not distilled: they define
+            # charter, brief and recall are authored, not distilled: they define
             # the role rather than assert anything about the system, so
             # they carry no evidence by nature — and they live ONLY under
             # identities/roles/; a slice of that class anywhere in memory/
             # is a hand-authored claim smuggled past provenance.
             klass = meta.get("class")
-            if klass in ("charter", "recall") and not where_prefix.startswith("identities/"):
+            if klass in layout.IDENTITY_CLASSES and not where_prefix.startswith("identities/"):
                 findings.append(f"{rel}: class {klass!r} is authored role identity and "
                                 "belongs under identities/roles/, not in memory/")
-            if not meta.get("derived_from") and klass not in ("charter", "recall"):
+            if not meta.get("derived_from") and klass not in layout.IDENTITY_CLASSES:
                 findings.append(f"{rel}: no derived_from — a claim with no evidence")
             for owner in meta.get("shared_with", []) or []:
                 shared_owner_count[rel].add(owner)
@@ -622,7 +622,7 @@ def main() -> int:
                                             findings, shared_owner_count, descriptions)
         for rel in identity_slices[role]:
             klass = (parse_frontmatter(open(os.path.join(root, rel), encoding="utf-8").read()) or {}).get("class")
-            if klass not in ("charter", "recall"):
+            if klass not in layout.IDENTITY_CLASSES:
                 findings.append(f"{rel}: class {klass!r} is knowledge, not identity — it belongs under memory/")
     for role in known_roles - set(role_ids):
         findings.append(f"identities/roles/catalog.json: role {role!r} has no identities/roles/{role}/ directory")

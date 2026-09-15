@@ -3,7 +3,7 @@
 # policies/check_charter_authority.sh
 #
 # A role's DEFINITION is fabric-coordinator's to change: `identities/roles/*/
-# charter.md`, the catalogue `identities/roles/catalog.json`, the
+# charter.md` and `brief.md`, the catalogue `identities/roles/catalog.json`, the
 # per-project binding rules `.agent-fabric/taxonomy.json` (this repository's own; a
 # managed project's is under the .agent-fabric/ guard), the routing policy
 # `routing/policies/*` and `policies/authority.json` itself. This fails
@@ -20,9 +20,10 @@
 #
 # WHY THIS EXISTS. Every distilled slice is generated -- the
 # assembler writes it and lint.py rejects a hand-edit -- so a role's scope
-# cannot drift by accident. `charter` and `recall` are the two classes
+# cannot drift by accident. `charter`, `brief` and `recall` are the classes
 # lint.py exempts from `derived_from`, precisely because they are authored
-# rather than distilled. That exemption is what makes charter.md the one
+# rather than distilled. That exemption is what makes charter.md (and the
+# brief beside it, read to every session at launch) the one
 # place a session can quietly widen its own remit, and it lints clean:
 # lint checks PROVENANCE, and this is a question of AUTHORITY.
 #
@@ -99,7 +100,7 @@ BRANCH="${AGENT_FABRIC_CHARTER_BRANCH:-${GITHUB_HEAD_REF:-}}"
 [[ -n "$BRANCH" ]] || BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 
 mapfile -t changed < <(git diff --name-only "$BASE"...HEAD -- \
-    'identities/roles/*/charter.md' 'identities/roles/catalog.json' \
+    'identities/roles/*/charter.md' 'identities/roles/*/brief.md' 'identities/roles/catalog.json' \
     '.agent-fabric/taxonomy.json' 'projects/*/taxonomy.json' 'routing/policies/*' 'policies/authority.json' 2>/dev/null)
 
 if (( ${#changed[@]} == 0 )); then

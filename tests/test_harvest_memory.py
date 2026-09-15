@@ -127,9 +127,9 @@ def test_a_user_memory_needs_no_special_case(tmp: str) -> None:
 
 
 def test_hand_authored_classes_are_refused(tmp: str) -> None:
-    """lint.py exempts charter and recall from derived_from, which is what
-    marks them hand-authored. A derived claim must not enter there."""
-    for klass in ("charter", "recall"):
+    """lint.py exempts charter, brief and recall from derived_from, which is
+    what marks them hand-authored. A derived claim must not enter there."""
+    for klass in ("charter", "brief", "recall"):
         mem = os.path.join(tmp, f"m5{klass}")
         out = os.path.join(tmp, f"o5{klass}")
         os.makedirs(mem)

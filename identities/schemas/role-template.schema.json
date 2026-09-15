@@ -19,6 +19,7 @@
     "class": {
       "enum": [
         "charter",
+        "brief",
         "domain",
         "solution",
         "intersection",

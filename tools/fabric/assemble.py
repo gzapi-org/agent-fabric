@@ -820,7 +820,7 @@ def main() -> int:
         # they are part of the role and the index must account for them — an
         # index that lists only what this tool wrote would read as complete
         # while omitting the first thing a session should open.
-        for filename, klass in (("charter.md", "charter"), ("recall.md", "recall")):
+        for filename, klass in (("charter.md", "charter"), ("brief.md", "brief"), ("recall.md", "recall")):
             path = os.path.join(layout.role_dir(role), filename)
             if not os.path.exists(path):
                 continue

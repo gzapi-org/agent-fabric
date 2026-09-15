@@ -33,6 +33,7 @@ apply to this whole repository.
 | what | who may change it | how it is made visible |
 |---|---|---|
 | `identities/roles/<role>/charter.md` (any role) | `fabric-coordinator` | `policies/check_charter_authority.sh` |
+| `identities/roles/<role>/brief.md` (any role) | `fabric-coordinator` — written from the holders' own accounts of the role (GZCoord replies), named in `origin` | `policies/check_charter_authority.sh` |
 | `identities/roles/catalog.json` | `fabric-coordinator` | same |
 | a project's taxonomy — where roles apply in its repository: `<working copy>/.agent-fabric/taxonomy.json` | `fabric-coordinator` | the `.agent-fabric/` fence and tripwire |
 | `routing/policies/review-grade.json`, the review class's model | `fabric-coordinator` | same; `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |

@@ -9,7 +9,8 @@
 # Writes, idempotently, and only machine-local files:
 #   <projects>/CLAUDE.md               3 lines; imports agent-fabric/CLAUDE.md
 #   <projects>/.claude/settings.json   hooks + status line pointing at agent-fabric
-#   ~/.claude/commands/role.md         /role for this account, from runtime/claude-code/commands/
+#   (removes ~/.claude/commands/role.md if an earlier bootstrap installed it:
+#    /role is retired — a role is bound from the shell, bin/fabric-role)
 #   ~/.claude/agents/{code-*,code-review}.md
 #                                      the capability-class agent files, from runtime/claude-code/agents/,
 #                                      via install-agent-files.sh (the review pin, merged for this login)
@@ -102,11 +103,17 @@ open(out, "a").write("\n")
 PY
 put "$PROJECTS/.claude/settings.json" "$TMP/settings.json"
 
-# 3. /role for this account (the command runner refuses shell parameter
-#    expansion, so the control-plane path is substituted literally), and
-#    the capability-class agent files.
-sed "s|__AGENT_FABRIC_ROOT__|$FABRIC_ROOT|g" "$FABRIC_ROOT/runtime/claude-code/commands/role.md" > "$TMP/role.md"
-put "$CLAUDE_HOME/commands/role.md" "$TMP/role.md"
+# 3. The /role command is retired (owner, 2026-09-15): a role is bound from
+#    a login shell with bin/fabric-role and reaches the session in its
+#    system prompt at launch; nothing inside a session changes it. An
+#    earlier bootstrap installed ~/.claude/commands/role.md — remove OUR
+#    copy (it names agent-fabric, the test put() uses), never a file the
+#    human wrote; a .before-agent-fabric sibling is theirs and stays.
+retired="$CLAUDE_HOME/commands/role.md"
+if [[ -f "$retired" ]] && grep -q "agent-fabric" "$retired" 2>/dev/null; then
+    if (( DRY_RUN )); then echo "  -  $retired (would remove: /role is retired, use bin/fabric-role)"
+    else rm -f "$retired"; changed=$((changed+1)); echo "  -  $retired (removed: /role is retired, use bin/fabric-role)"; fi
+fi
 # The capability-class agent files, with the review pin applied for this
 # account: runtime/claude-code/install-agent-files.sh (bin/fabric-model
 # re-runs it when the account's local layer changes the pin).

@@ -109,7 +109,7 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"
-    assert os.path.isfile(os.path.join(home, ".claude", "commands", "role.md"))
+    assert not os.path.exists(os.path.join(home, ".claude", "commands", "role.md")), "/role is retired; nothing installs it"
     with open(os.path.join(home, ".claude", "agents", "code-review.md"), encoding="utf-8") as fh:
         assert "\nmodel: claude-opus-5[1m]\n" in fh.read(), "the reviewer file carries the anthropic column's pin"
     with open(os.path.join(home, ".claude", "agents", "code-high.md"), encoding="utf-8") as fh:
@@ -122,6 +122,25 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     # Idempotent: a second run changes nothing.
     proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
     assert "0 written" in proc.stdout, proc.stdout
+    # An account that still carries the retired /role command from an
+    # earlier bootstrap: our copy is removed (dry-run says so first), a
+    # human's own commands/role.md and a .before-agent-fabric backup stay.
+    retired = os.path.join(home, ".claude", "commands", "role.md")
+    os.makedirs(os.path.dirname(retired), exist_ok=True)
+    with open(retired, "w", encoding="utf-8") as fh:
+        fh.write("---\ndescription: x\n---\n!`python3 /old/agent-fabric/tools/fabric/role.py $ARGUMENTS`\n")
+    with open(retired + ".before-agent-fabric", "w", encoding="utf-8") as fh:
+        fh.write("the human's own\n")
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects, "--dry-run"], capture_output=True, text=True, env=env)
+    assert "would remove" in proc.stdout and os.path.isfile(retired), proc.stdout
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+    assert not os.path.exists(retired) and "removed: /role is retired" in proc.stdout, proc.stdout
+    assert os.path.isfile(retired + ".before-agent-fabric"), "the human's backup was touched"
+    with open(retired, "w", encoding="utf-8") as fh:
+        fh.write("---\ndescription: my own role command\n---\nnothing to do with the fabric\n")
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+    assert os.path.isfile(retired), "a command the human wrote was removed"
+    os.remove(retired); os.remove(retired + ".before-agent-fabric")
     # An existing settings file keeps its own entries.
     with open(os.path.join(projects, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
         json.dump({"permissions": {"allow": ["Bash(ls:*)"]}, "env": {"MY_OWN": "x"}, "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}, fh)

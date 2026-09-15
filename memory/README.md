@@ -33,8 +33,9 @@ checks the `Fabric-Role:` trailer they write (`policies/AUTHORITY.md`). Index li
 relative to the working copy; a fabric-side slice is linked as
 `../agent-fabric/<path>`, the sibling-checkout layout.
 
-The reusable definition of a role — its charter, its recall guide, its
-skills — is **not** memory. It lives under `identities/roles/<role>/`.
+The reusable definition of a role — its charter, its brief (how it works,
+in any project; in every launch prompt), its recall guide, its skills — is
+**not** memory. It lives under `identities/roles/<role>/`.
 Where a role applies inside a repository is a project binding under
 the project's `.agent-fabric/taxonomy.json`. This directory holds only what was
 learned.

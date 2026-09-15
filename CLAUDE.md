@@ -157,7 +157,8 @@ avoid silent shell expansion.
 ## Layout
 
 ```text
-identities/     roles (charter, recall, skills), the role catalogue, schemas
+identities/     roles (charter, brief, recall, skills), the role catalogue, schemas,
+                prompt/ (the team and memory sections of every launch prompt)
 memory/         domains/ agents/<login>/ shared/ — field knowledge; project knowledge is in each project
 routing/        capability classes -> models; model families -> shims; review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
@@ -166,7 +167,8 @@ projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
 tools/fabric/   role.py, assemble.py, lint.py, routing.py, harvest*, query.sh
 tests/          python suites; tests/run.sh runs everything
-docs/live-checks/ what was verified live, with the read-backs behind design decisions
+docs/           a note when a concept changes meaning; live-checks/ — what was
+                verified live, with the read-backs behind design decisions
 ```
 
 This repository is Apache-2.0 throughout (`LICENSE`, `REUSE.toml`),

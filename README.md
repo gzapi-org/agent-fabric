@@ -84,7 +84,8 @@ extracted with `git filter-repo` into a control plane of its own; before
 it went public its history was rewritten once more so that no commit
 carries that project's knowledge or names its internals. The record of
 the extraction is not kept: what it explained, this repository now
-states. `docs/live-checks/` holds what was verified live here.
+states. `docs/live-checks/` holds what was verified live here; `docs/` a
+note whenever a concept changed meaning (`role-binding-and-launch-prompt.md`).
 
 ## One-call status
 

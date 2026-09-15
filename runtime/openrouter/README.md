@@ -144,11 +144,21 @@ reads the role from that agent's runtime binding (written from a login
 shell by `bin/fabric-role`), renders it into the session's system prompt
 (`tools/fabric/launch_prompt.py`, passed as `--append-system-prompt-file`;
 a caller's own `--system-prompt*` is refused) and stamps it
-(`AGENT_FABRIC_LAUNCH_ROLE`, `_PROMPT_DIGEST`). The launch
+(`AGENT_FABRIC_LAUNCH_ROLE`, `_PROMPT_DIGEST`); it also sends the GZCoord
+`HELLO` just before exec, so a `HELLO` means a session exists. The launch
 directory decides which settings scopes are fenced and which working copy
 the child starts in. It never decides who the agent is: `test_launch.sh`
 launches from a directory named for another agent with `USER` forged and
 checks the label still reads this login.
+
+The prompt file carries the ROLE layer only — the identity header, the
+charter, the brief, the shared team and memory sections
+(`identities/prompt/`). The project layer (the remit, the INDEX pointer)
+follows the working copy and reaches the session from the SessionStart
+hook, not from this file; `docs/role-binding-and-launch-prompt.md` has
+the whole account, and `docs/live-checks/2026-09-15-append-system-prompt.md`
+the read-backs. A session's role is fixed at exec: a rebind from the shell
+under it is reported as DRIFT by `bin/fabric-status`, never applied.
 
 ## Files
 

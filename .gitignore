@@ -10,9 +10,6 @@ projects/*/taxonomy.local.json
 # ${XDG_STATE_HOME:-~/.local/state}/agent-fabric (runtime/identity.py).
 runtime/state/
 
-# GZCoord relay runtime (venv, token, database, log) when hosted from here
-.gzcoord/
-
 # Editors / OS
 .vscode/
 .idea/

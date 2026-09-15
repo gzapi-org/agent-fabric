@@ -4,8 +4,9 @@
 # it unless the agent's runtime binding holds that role right now.
 #
 # The role, not the login: an account is whoever is logged in, and a
-# session becomes fabric-coordinator by binding the role (`/role
-# fabric-coordinator`). That binding is machine-local state
+# session becomes fabric-coordinator by binding the role from a login
+# shell (`bin/fabric-role bind fabric-coordinator`) and launching. That
+# binding is machine-local state
 # (runtime/identity.py), so this is the one place the question "is the
 # committer the coordinator" can be answered for real — CI sees only what
 # the commit declares (the Fabric-Role trailer commit-msg adds, checked by
@@ -44,7 +45,8 @@ agent-fabric is read-only for every role but $owner_role; in a managed
 project, .agent-fabric/ is. A change you need there is proposed to
 $owner_role (a pull request, or a message), and a wrong slice is raised
 with it — a correction enters through a drain with provenance, never as a
-hand edit. If you hold the role, bind it first: /role $owner_role.
+hand edit. If you hold the role, bind it from a login shell first —
+bin/fabric-role bind $owner_role — and relaunch.
 See agent-fabric policies/AUTHORITY.md.
 MSG
 exit 1

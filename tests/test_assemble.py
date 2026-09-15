@@ -26,6 +26,18 @@ ROOT = os.path.dirname(HERE)
 ASSEMBLE = os.path.join(ROOT, "tools", "fabric", "assemble.py")
 LINT = os.path.join(ROOT, "tools", "fabric", "lint.py")
 SCHEMA_DIR = os.path.join(ROOT, "identities", "schemas")
+PROMPT_DIR = os.path.join(ROOT, "identities", "prompt")
+
+
+def lint_inputs(out: str) -> None:
+    """The committed inputs lint wants beyond what the assembler writes:
+    the real schemas, and the launch-prompt sections (identities/prompt/,
+    checked by name)."""
+    import shutil
+    if os.path.isdir(SCHEMA_DIR):
+        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    if os.path.isdir(PROMPT_DIR):
+        shutil.copytree(PROMPT_DIR, os.path.join(out, "identities", "prompt"), dirs_exist_ok=True)
 
 OBSERVATIONS = [
     {"content_hash": "h1", "clone_id": "clone-aaa", "host": "hostA"},
@@ -865,9 +877,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
     run_assemble(drain, claims_dir, out)
     assert "collisions:" in read(dom(out, "alpha", "domain.md")), \
         "the collision should have been recorded in the slice"
-    if os.path.isdir(SCHEMA_DIR):
-        import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    lint_inputs(out)
     # Lint also wants the role catalogued; the assembler does not author that.
     os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
     with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
@@ -970,9 +980,7 @@ def test_lint_detects_index_drift(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "T", "body": "b", "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    if os.path.isdir(SCHEMA_DIR):
-        import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    lint_inputs(out)
     with open(proj(out, "alpha", "solution.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: solution\ndescription: added by hand\n"
                  "tier: 2\ndistilled_at: 2026-01-01\nderived_from:\n  - h1\n---\n\nbody\n")
@@ -1065,9 +1073,7 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
          "evidence": ["h1"]},
     ])})
     run_assemble(drain, claims_dir, out)
-    if os.path.isdir(SCHEMA_DIR):
-        import shutil
-        shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    lint_inputs(out)
 
     crossref_path = proj(out, "alpha", "crossref.json")
     with open(crossref_path, encoding="utf-8") as fh:
@@ -1087,8 +1093,7 @@ def test_lint_rejects_a_session_temp_crossref_key(tmp: str) -> None:
 def lintable(out: str) -> None:
     """Schemas, a catalogue naming alpha, and alpha's charter — what lint
     wants beyond what the assembler writes."""
-    import shutil
-    shutil.copytree(SCHEMA_DIR, os.path.join(out, "identities", "schemas"), dirs_exist_ok=True)
+    lint_inputs(out)
     os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
     with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
         json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)

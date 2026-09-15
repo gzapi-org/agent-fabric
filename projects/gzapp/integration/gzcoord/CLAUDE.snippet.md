@@ -17,8 +17,8 @@ The procedures are two skills every account has: `gzcoord-send` and
 `gzcoord-receive`. When coordinating with another agent:
 
 - your address is `<host>/<login>` — the Linux account this session runs under, as `../agent-fabric/bin/fabric-whoami` from the working copy reports it (SPEC §3.1); the working copy you are in is context, never identity;
-- as `ROLE`, the slug of the role you hold (`/role`; `identities/roles/catalog.json`) — `backend-dev`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
-- emit one `HELLO` at session start; a role change announces itself (`/role` sends `GOODBYE` as the old role, then `HELLO` as the new — SPEC §4), so do not re-send one by hand;
+- as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `backend-dev`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
+- send no `HELLO` yourself: the launcher sent it just before your session started; a role change is a rebind from a login shell (`bin/fabric-role`, which sends the `GOODBYE`) and a relaunch (which sends the new `HELLO` — SPEC §4);
 - watch your inbox for the whole session, not only while waiting on a reply: one watch, `inbox.mjs --follow` under Monitor, started first, never a second one — the cursor is per address and a second consumer swallows deliveries;
 - validate every message with `communication/gzcoord/scripts/gzmsg.mjs validate` before sending; for the human relay print it in a fenced text block, lines of 72 columns or fewer;
 - give every message a `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by construction, no counter to seed or continue;

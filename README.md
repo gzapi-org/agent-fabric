@@ -29,7 +29,7 @@ agent-fabric contains agent infrastructure
 | **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm2claude-shim` |
 | **COMMUNICATION** | How do independent agents exchange work and knowledge? | `communication/gzcoord/` — GZCOORD/1; the address is `<host>/<login>` |
 | **PROJECT BINDING** | Which roles, domains and path rules apply to each managed repository? | `<working copy>/.agent-fabric/taxonomy.json` in the project itself (`projects/registry.json` names the project); the fabric's own is `.agent-fabric/taxonomy.json` here |
-| **RUNTIME ADAPTER** | How does all of this become Claude Code / OpenRouter / another harness's configuration? | `runtime/claude-code/` (hooks, `/role`, agent files, bootstrap), `runtime/openrouter/launch`, `runtime/provisioning/` |
+| **RUNTIME ADAPTER** | How does all of this become Claude Code / OpenRouter / another harness's configuration? | `runtime/claude-code/` (hooks, agent files, bootstrap), `bin/fabric-role`, `runtime/openrouter/launch`, `runtime/provisioning/` |
 
 Never collapse them. An agent keeps its name across roles, projects,
 working copies, hosts and sessions. Two agents in one working copy are
@@ -46,8 +46,12 @@ claude
 `runtime/claude-code/bootstrap.sh`) imports `agent-fabric/CLAUDE.md`. The
 workspace `.claude/settings.json` runs `runtime/claude-code/hooks/session-start.sh`,
 which asks the OS who is running, records the working copy and project
-the session is in, and prints one context line. `/role <role>` binds a
-role to the agent and installs that role's skills into the workspace.
+the session is in, and returns the project's remit for the role as
+context. A role is bound before launch, from a login shell —
+`bin/fabric-role bind <role>` records it and installs that role's skills
+into the workspace — and the launcher (`runtime/openrouter/launch`) puts
+the role into the session's system prompt; nothing inside a session
+changes it.
 Every sibling repository keeps its own `CLAUDE.md`; `projects/` is not a
 git repository.
 

@@ -4,8 +4,8 @@
 Reads the hook payload (cwd, session_id) on stdin, resolves the agent and
 its context through runtime/identity.py, records the working copy,
 project and session in the agent's runtime binding — never the role,
-which only /role changes — and prints one line of context for the
-session.
+which only bin/fabric-role changes, from a login shell — and prints one
+line of context for the session.
 
     agent-fabric: agent=user host=develop-qzapp role=backend-dev project=gzapp working_copy=/home/user/projects/gzapp-claude2
 
@@ -48,7 +48,7 @@ def main() -> int:
         })
         identity.write_binding(binding, ctx["agent"])
         print(f"agent-fabric: agent={ctx['agent']} host={ctx['host']} "
-              f"role={binding.get('role') or '(none — /role <role>)'} "
+              f"role={binding.get('role') or '(none — bin/fabric-role bind <role>)'} "
               f"project={ctx['project'] or '(none)'} "
               f"working_copy={ctx['working_copy'] or '(not in a working copy)'} "
               f"control_plane={FABRIC_ROOT}")

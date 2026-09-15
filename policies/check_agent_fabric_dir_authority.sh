@@ -117,7 +117,8 @@ cat >&2 <<MSG
 
 agent-fabric is read-only for every role but $owner_role; in a managed
 project, .agent-fabric/ (the project's distilled knowledge) is. A commit
-there is made with that role bound (/role $owner_role) and the
+there is made with that role bound (bin/fabric-role bind $owner_role,
+from a login shell, then a relaunch) and the
 agent-fabric git hooks installed (bootstrap.sh sets core.hooksPath): the
 pre-commit hook checks the binding, the commit-msg hook records it as
 the Fabric-Role trailer this check reads. The login that committed is

@@ -16,8 +16,8 @@ export MOVETO_TITLE="$2"
 # opens, and only a problem is worth one line:
 #   1. the control plane: agent-fabric is read-only for every role but the
 #      coordinator, so this clone can only be behind — fast-forward it;
-#   2. bootstrap, which installs from that checkout (hooks, the /role
-#      command, the skills, the workspace settings) and is idempotent;
+#   2. bootstrap, which installs from that checkout (hooks, the agent
+#      files, the skills, the workspace settings) and is idempotent;
 #   3. the account's secrets, from its Doppler config into
 #      ~/.config/agent-fabric/secrets.env, before the shell sources it.
 fabric="$HOME/projects/agent-fabric"

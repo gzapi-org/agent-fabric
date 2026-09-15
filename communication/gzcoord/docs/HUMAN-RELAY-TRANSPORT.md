@@ -71,8 +71,9 @@ Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
 this session declares; the id is minted for you. Do not re-announce on seeing a peer's
 `HELLO`; there is no peer cache to refresh and no storm to guard against.
 Do re-announce
-when your role changes (SPEC §4) — a `/role` switch mid-session changes
-what `ROLE` this address answers for, and the person routing `TO-ROLE` is
+when your role changes (SPEC §4) — a role is bound from a login shell
+(`bin/fabric-role`) and takes effect at the next launch, which sends the
+`HELLO`; the switch changes what `ROLE` this address answers for, and the person routing `TO-ROLE` is
 the cache that needs to hear it. `GOODBYE` is not needed: the person
 knows which sessions are running.
 

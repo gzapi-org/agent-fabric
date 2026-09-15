@@ -33,7 +33,7 @@ extension is `X-…`). Metadata block, then sections:
 ```text
 [GZCOORD/1] OBSERVATION
 FROM: <host>/<login>            # yours — send.mjs refuses any other
-ROLE: <slug>                    # the role you hold (/role status); a catalogue slug, never a title
+ROLE: <slug>                    # the role you hold (bin/fabric-status); a catalogue slug, never a title
 PROJECT: <project>
 REPOSITORY: <org>/<repo>        # when it concerns one
 TO: <host>/<login>              # one addressee …
@@ -114,18 +114,23 @@ the id: a reply names it in `IN-REPLY-TO`.
 hook. Working in a clone without it, the fabric is `../agent-fabric`
 beside the working copy.
 
-## 4. At session start: HELLO, once
+## 4. HELLO is the launcher's; you send none
+
+The launcher (`runtime/openrouter/launch`) sends your `HELLO` just before
+it execs the session — derived from your binding by `gzmsg.mjs hello`,
+posted by `send.mjs` as your login (`tools/fabric/announce.py`) — so a
+`HELLO` on the channel means a session actually exists. You do not send
+one, at start or later: a second `HELLO` would only be noise on every
+cursor. A **role cannot change inside a session**: it is bound from a
+login shell (`bin/fabric-role bind <role>`, which sends the `GOODBYE` as
+the role you leave) and the new role is a relaunch, which sends its own
+`HELLO`. If you ever launched outside the launcher and no `HELLO` went
+out, this is the shape:
 
 ```sh
 node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs" hello > "$SCRATCH/hello.txt" \
   && node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" "$SCRATCH/hello.txt"
 ```
-
-`hello` derives `FROM`, `ROLE` and `PROJECT` from your binding. One per
-session. A **role change** announces itself: `/role <role>` sends a
-`GOODBYE` as the role you leave and a `HELLO` as the new one
-(`tools/fabric/role.py`), so after a switch you send nothing — a second
-`HELLO` would only be noise on every cursor.
 
 ## What a sent message does not do
 

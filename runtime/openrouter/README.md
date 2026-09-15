@@ -140,7 +140,11 @@ with nothing else to update.
 ## Who is launching
 
 The agent is the Linux login; the launcher asks `runtime/identity.py` and
-reads the role from that agent's runtime binding (`/role`). The launch
+reads the role from that agent's runtime binding (written from a login
+shell by `bin/fabric-role`), renders it into the session's system prompt
+(`tools/fabric/launch_prompt.py`, passed as `--append-system-prompt-file`;
+a caller's own `--system-prompt*` is refused) and stamps it
+(`AGENT_FABRIC_LAUNCH_ROLE`, `_PROMPT_DIGEST`). The launch
 directory decides which settings scopes are fenced and which working copy
 the child starts in. It never decides who the agent is: `test_launch.sh`
 launches from a directory named for another agent with `USER` forged and

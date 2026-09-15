@@ -98,9 +98,10 @@ nothing else. The sibling project is never named.
 
 ## Two tiers, and why
 
-Activation (`/role`) loads tier 1 only: the role's charter, the project's
-`INDEX.md` for that role, and every `workflow` slice of that project.
-Everything else waits for a cue.
+A session is born with tier 1 only: the role's charter and brief, in the
+system prompt the launcher renders (`tools/fabric/launch_prompt.py`), and
+the project's remit for the role plus the pointer to its `INDEX.md`, from
+the session-start hook. Everything else waits for a cue.
 
 The index is the mechanism. Each slice's frontmatter carries a one-line
 description written as a retrieval cue, and the index is **generated** from
@@ -177,7 +178,8 @@ tools/fabric/harvest_memory.py    drain this agent's memory into claims
 tools/fabric/assemble.py          claims → slices, indexes, citation graph
 tools/fabric/lint.py              guard the committed corpus (CI)
 tools/fabric/query.sh             ask the citation graph
-tools/fabric/role.py              /role — activate a role for this agent
+tools/fabric/role.py              bin/fabric-role — bind a role to this agent, from a login shell
+tools/fabric/launch_prompt.py     the system prompt a session is born with: charter, brief, team and memory sections
 ```
 
 `query.sh` answers the questions the citation graph exists for:

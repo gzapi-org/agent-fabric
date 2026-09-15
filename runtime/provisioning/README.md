@@ -27,15 +27,18 @@ directory it stands in identifies context, never identity.
 2. **Run bootstrap** as the account:
    `~/projects/agent-fabric/runtime/claude-code/bootstrap.sh`. It writes
    the workspace `CLAUDE.md` and `.claude/settings.json`, installs
-   user-scope the `/role` command, the capability-class agent files, the
+   user-scope the capability-class agent files, the
    review class's Bash fence and the `subagent-dispatch` skill, and sets
    `core.hooksPath` on this checkout and on every registered working copy
    beside it (the attribution ban and the `.agent-fabric/` fence).
    Idempotent; re-run after pulling.
-3. **Bind a role once** from inside a working copy: `/role <role>`
-   (`tools/fabric/role.py`). The binding lives under
-   `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`;
-   the broker launcher refuses to run without one.
+3. **Bind a role once**, as the account, from a login shell, inside its
+   working copy: `~/projects/agent-fabric/bin/fabric-role bind <role>`
+   (`tools/fabric/role.py`; refused inside a session). The binding lives
+   under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`;
+   the launcher refuses to run without one and renders the role into the
+   session's system prompt. A different role later is a rebind here and a
+   relaunch.
 4. **Enrol the identity's secrets** (fabric-coordinator, as root):
    `runtime/provisioning/secrets/enroll.sh <login>` — see "Secrets" below.
    After it, `OPENROUTER_API_KEY`, `GH_TOKEN` and the GZCoord token are in

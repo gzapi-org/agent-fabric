@@ -24,8 +24,8 @@ Do not create a nested Git repository, and do not vendor the subsystem.
 3. Create the concrete instance configuration outside Git, for example
    `~/.config/gzcoord/gzapp.yaml`, from
    `communication/gzcoord/config/instance.example.yaml`. `role.name`
-   is the slug of the role the agent currently holds — `/role` writes it
-   to the agent's runtime binding — never authored independently of
+   is the slug of the role the agent currently holds — `bin/fabric-role`
+   writes it to the agent's runtime binding, from a login shell — never authored independently of
    agent-fabric's `identities/roles/catalog.json`.
 4. Relay hosting: [`BRIDGE-RELAY-SETUP.md`](BRIDGE-RELAY-SETUP.md). The
    relay's runtime — venv, token, database, log — lives in the hosting

@@ -25,8 +25,9 @@ every managed project. This is a fence, not only a rule: the git hooks
 holds the role, and record the role they verified as a `Fabric-Role:`
 trailer that CI checks on every commit a branch adds
 (`policies/AUTHORITY.md`). The login is irrelevant — a session becomes
-`fabric-coordinator` by binding it (`/role fabric-coordinator`), and
-holding any other role, whatever account it runs as, is what is refused.
+`fabric-coordinator` by being launched with it bound (`bin/fabric-role
+bind fabric-coordinator`, from a login shell), and holding any other
+role, whatever account it runs as, is what is refused.
 
 Your name is the account this session runs under. Ask it, never guess it:
 
@@ -53,7 +54,7 @@ directory, the repository, the branch or the session.
 | dimension | what it is | where it is |
 |---|---|---|
 | agent | the Linux login | `runtime/identity.py` |
-| role | the function you currently perform | `identities/roles/<role>/charter.md`, bound by `/role` |
+| role | the function you currently perform | `identities/roles/<role>/{charter,brief}.md`, bound by `bin/fabric-role` before launch, in your system prompt |
 | project | the logical system being worked on | `projects/registry.json`, matched by a working copy's remote |
 | working copy | the checkout in use | your cwd's git toplevel; a label, not an identity |
 | host | the machine | recorded beside the agent |
@@ -61,12 +62,19 @@ directory, the repository, the branch or the session.
 
 ## Working here
 
-- **Activate a role** with `/role <role>` (or `python3 agent-fabric/tools/fabric/role.py <role>`),
-  then read the files it lists under "load now": the role's charter and
-  the project's index and workflow for that role. Everything else loads
-  when its index line matches what you are doing. `/role status` says what
-  you are; `/role deactivate` clears it. Holding a role never entitles you
-  to change its charter, or anything else here (above).
+- **You were launched with your role.** It is in your system prompt —
+  the identity header, the role's charter and brief, and the team and
+  memory sections (`identities/prompt/`) — rendered by
+  `tools/fabric/launch_prompt.py` for the role the launcher found bound.
+  The project layer is not there: the project's remit for your role
+  (`.agent-fabric/roles/<role>.md`) and the pointer to its `INDEX.md`
+  arrive from the session-start hook and follow your working copy.
+  Everything else loads when an index line matches what you are doing.
+  A role is bound from a **login shell**, never inside a session:
+  `agent-fabric/bin/fabric-role bind <role>`, then launch; a different
+  role is a rebind there and a relaunch. `bin/fabric-role status` (or
+  `bin/fabric-status`) says what you are. Holding a role never entitles
+  you to change its charter or brief, or anything else here (above).
 - **Work in the project's working copy**, under that project's
   `CLAUDE.md`. From `projects/`, `cd` into the working copy first; the
   session-start hook records which one you are in.

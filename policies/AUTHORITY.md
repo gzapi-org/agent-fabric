@@ -10,7 +10,10 @@ an agent operating WITHIN a role's charter      -> the role's runtime binding
 who may REDEFINE that charter                   -> a policy, attached to a role
 ```
 
-An agent holds a role by binding it (`/role`, `tools/fabric/role.py`).
+An agent holds a role by binding it from a login shell (`bin/fabric-role`,
+`tools/fabric/role.py`) and being launched with it: the launcher puts the
+role into the session's system prompt, and nothing inside a session
+changes it.
 Holding a role gives the agent that role's remit for its work. It gives
 the agent nothing over the role's definition: a `flutter-dev` instance
 does not widen `flutter-dev`'s charter, and the account it runs under is
@@ -50,8 +53,9 @@ apply to this whole repository.
 A project's knowledge lives in the project's own repository, under
 `.agent-fabric/memory/<role>/` — versioned with the tree it describes,
 under the project's license. Who may write it is the **role**, not the
-account: a session that has bound `fabric-coordinator` (`/role
-fabric-coordinator`) may commit under `.agent-fabric/`; any other
+account: a session launched with `fabric-coordinator` bound
+(`bin/fabric-role bind fabric-coordinator`, from a login shell, then a
+relaunch) may commit under `.agent-fabric/`; any other
 session, whatever login it runs as, may not. The reason is the same as
 for the corpus here: a slice is a claim with provenance, and the drain
 is the only thing that makes one. A `backend-dev` session working in

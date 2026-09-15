@@ -91,7 +91,7 @@ if mode == "--json":
     print(json.dumps(report, indent=2)); sys.exit(0)
 
 print(f"agent        {report['agent']}@{report['host']}")
-print(f"role         {report['role'] or '(none — /role <role>)'}")
+print(f"role         {report['role'] or '(none — bin/fabric-role bind <role>, from a login shell)'}")
 print(f"project      {report['project'] or '(none)'}    working copy  {report['working_copy'] or '(none)'}")
 print(f"session      {report['session'] or '(unknown)'}    binding updated {report['binding_updated'] or '-'}")
 print()

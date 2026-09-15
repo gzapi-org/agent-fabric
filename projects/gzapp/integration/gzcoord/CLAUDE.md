@@ -24,7 +24,7 @@ block and the person copies it into the receiving session's prompt
   Announce the role's **slug** (`identities/roles/catalog.json` —
   `backend-dev`, never `.NET backend developer`) — or omit `--role`,
   `--from` and `--project` and let `hello` derive them from your runtime
-  binding (what `/role` wrote) and only failing that the role from the
+  binding (what `bin/fabric-role` wrote) and only failing that the role from the
   login — a binding naming a role the catalogue does not have is refused,
   not guessed past: the person resolves `TO-ROLE` by equality against
   the last `HELLO` they saw, and one addressing field per message is the

@@ -10,7 +10,7 @@ identity:
   instance: backend-dev-02
 
 # `role.name` is the SLUG of the role the agent currently holds — its
-# runtime binding, written by `/role` (tools/fabric/role.py) — and
+# runtime binding, written by `bin/fabric-role` (tools/fabric/role.py) — and
 # `specialties`/`capabilities` follow the same source. Never authored
 # independently. GZCoord keeps no role catalog of its own; the slugs are
 # agent-fabric's identities/roles/catalog.json (runtime/README.md,

@@ -38,7 +38,7 @@ provisioned account is usually named for the role it was stood up as
 the address changing (`protocol/SPEC.md` §4), and an account named
 otherwise (`user`) is as much an agent as any. Which role the agent
 holds is its runtime binding (`$AGENT_FABRIC_STATE_DIR/agents/<login>/
-binding.json`), written by `tools/fabric/role.py` (`/role`) and read
+binding.json`), written by `tools/fabric/role.py` (`bin/fabric-role`, from a login shell) and read
 through `whoami()`; `role.name`/`specialties`/`capabilities` in local
 config follow the same source and are never authored independently of
 it. `scripts/gzmsg.mjs` loads the catalogue from agent-fabric (or a

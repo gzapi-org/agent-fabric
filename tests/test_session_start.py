@@ -32,6 +32,14 @@ def run_hook(payload: dict, env: dict) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", HOOK], input=json.dumps(payload), capture_output=True, text=True, env=env)
 
 
+def context_of(proc: subprocess.CompletedProcess) -> str:
+    """The hook's stdout is one JSON object whose additionalContext is
+    what the session is given; the human line is its first line."""
+    doc = json.loads(proc.stdout)
+    assert doc["hookSpecificOutput"]["hookEventName"] == "SessionStart", proc.stdout
+    return doc["hookSpecificOutput"]["additionalContext"]
+
+
 def test_hook_records_context_not_identity(tmp: str) -> None:
     state = os.path.join(tmp, "state")
     wc = os.path.join(tmp, "legacy-clone-2")
@@ -44,11 +52,41 @@ def test_hook_records_context_not_identity(tmp: str) -> None:
         json.dump({"agent": id_un(), "host": "h", "role": "architect-cto", "updated_at": "x"}, fh)
     proc = run_hook({"cwd": wc, "session_id": "sess-123"}, env)
     assert proc.returncode == 0, proc.stderr
-    assert f"agent={id_un()}" in proc.stdout, proc.stdout
-    assert "project=gzapp" in proc.stdout and "role=architect-cto" in proc.stdout, proc.stdout
+    ctx = context_of(proc)
+    assert ctx.splitlines()[0].startswith(f"agent-fabric: agent={id_un()}"), ctx
+    assert "project=gzapp" in ctx and "role=architect-cto" in ctx, ctx
     b = json.load(open(os.path.join(state, "agents", id_un(), "binding.json"), encoding="utf-8"))
     assert b["agent"] == id_un() and b["role"] == "architect-cto"
     assert b["project"] == "gzapp" and b["working_copy"] == wc and b["session"] == "sess-123", b
+
+
+def test_hook_gives_the_project_layer_from_the_working_copy(tmp: str) -> None:
+    """The remit for the role in THIS working copy and the pointer to its
+    INDEX are the hook's to give (the role layer is the launcher's); what
+    the working copy lacks is said in one line, and outside a working
+    copy there is no project layer at all."""
+    state = os.path.join(tmp, "state")
+    wc = os.path.join(tmp, "gzapp")
+    git_repo(wc, "git@github.com:gzapi-org/gzapp.git")
+    os.makedirs(os.path.join(state, "agents", id_un()))
+    with open(os.path.join(state, "agents", id_un(), "binding.json"), "w", encoding="utf-8") as fh:
+        json.dump({"agent": id_un(), "host": "h", "role": "db-admin", "updated_at": "x"}, fh)
+    env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state}
+    ctx = context_of(run_hook({"cwd": wc}, env))
+    assert "has no remit for db-admin" in ctx and "no distilled knowledge for db-admin" in ctx, ctx
+    os.makedirs(os.path.join(wc, ".agent-fabric", "roles"))
+    os.makedirs(os.path.join(wc, ".agent-fabric", "memory", "db-admin"))
+    with open(os.path.join(wc, ".agent-fabric", "roles", "db-admin.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: db-admin\nclass: remit\nproject: gzapp\n---\n\n# db-admin — remit in gzapp\n\nREMIT-BODY-LINE: migrations under infra/db/.\n")
+    with open(os.path.join(wc, ".agent-fabric", "memory", "db-admin", "INDEX.md"), "w", encoding="utf-8") as fh:
+        fh.write("# index\n")
+    ctx = context_of(run_hook({"cwd": wc}, env))
+    assert "REMIT-BODY-LINE" in ctx and "class: remit" not in ctx, ctx
+    assert "# db-admin — remit in gzapp (.agent-fabric/roles/db-admin.md)" in ctx, ctx
+    assert ".agent-fabric/memory/db-admin/INDEX.md lists every slice" in ctx and "nothing else now" in ctx, ctx
+    parent = os.path.join(tmp, "projects"); os.makedirs(parent)
+    ctx = context_of(run_hook({"cwd": parent}, env))
+    assert "not in a registered working copy" in ctx and "REMIT-BODY-LINE" not in ctx, ctx
 
 
 def test_hook_says_when_the_binding_drifted_from_the_launch(tmp: str) -> None:
@@ -184,7 +222,8 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
 
 
 def main() -> int:
-    cases = [test_hook_records_context_not_identity, test_hook_says_when_the_binding_drifted_from_the_launch,
+    cases = [test_hook_records_context_not_identity, test_hook_gives_the_project_layer_from_the_working_copy,
+             test_hook_says_when_the_binding_drifted_from_the_launch,
              test_hook_from_the_parent_directory_has_no_project,
              test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
              test_bootstrap_writes_only_the_workspace_and_home_files]

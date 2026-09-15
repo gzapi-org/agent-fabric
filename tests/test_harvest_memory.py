@@ -276,8 +276,59 @@ def test_the_assembler_actually_consumes_the_drain(tmp: str) -> None:
     assert "admitted=" in r.stdout and "admitted=?" not in r.stdout, r.stdout
 
 
+def test_the_watermark_round_trips_through_the_committed_report(tmp: str) -> None:
+    """A drain reads only what is newer than the watermark the project's
+    last report recorded for this host, writes harvest-report.json with
+    the next one, and the assembler carries it into the committed report
+    -- so the next drain starts where this one stopped, and an already
+    drained memory is not re-read. --all ignores the watermark."""
+    assemble = os.path.join(os.path.dirname(TOOL), "assemble.py")
+    if not os.path.exists(assemble):
+        return
+    wc = os.path.join(tmp, "wc-wm"); os.makedirs(os.path.join(wc, ".agent-fabric", "memory"))
+    mem = os.path.join(tmp, "m14"); os.makedirs(mem)
+    write_memory(mem, "old-fact", "project", roles_class="solution")
+    os.utime(os.path.join(mem, "old-fact.md"), (1_000_000, 1_000_000))       # 1970: older than any watermark
+    write_memory(mem, "new-fact", "project", roles_class="workflow")
+    new_ms = int(os.path.getmtime(os.path.join(mem, "new-fact.md")) * 1000)
+    # First drain: no report yet, everything in scope, the watermark is the newest memory read.
+    out1 = os.path.join(tmp, "o14a")
+    r = run(mem, out1, "--working-copy", wc, "--project", "demo", "--host", "hostA")
+    assert r.returncode == 0, r.stderr
+    hr = json.load(open(os.path.join(out1, "harvest-report.json"), encoding="utf-8"))
+    assert hr["since_watermark"] == 0 and hr["next_watermark"] == new_ms, hr
+    assert hr["counts"] == {"in_scope": 2, "total": 2, "before_watermark": 0, "provisional_agent": 0}, hr
+    assert "memory_dir" not in hr, "an absolute home path reached the report the assembler carries"
+    assert len(claims_of(out1)) == 2
+    r = subprocess.run([sys.executable, assemble, "--claims", os.path.join(out1, "claims"), "--drain", out1,
+                        "--fabric", os.path.join(tmp, "assembled14"), "--project", "demo",
+                        "--working-copy", wc, "--stamp", "2026-01-01"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    committed = json.load(open(os.path.join(wc, ".agent-fabric", "memory", "last-drain-report.json"), encoding="utf-8"))
+    assert committed["watermarks"] == {"hostA": new_ms}, committed.get("watermarks")
+    assert committed["harvest"]["next_watermark"] == new_ms and committed["harvest"]["in_scope"] == 2, committed["harvest"]
+    # Second drain, nothing new: an empty delta, and the watermark holds.
+    out2 = os.path.join(tmp, "o14b")
+    r = run(mem, out2, "--working-copy", wc, "--project", "demo", "--host", "hostA")
+    assert r.returncode == 0, r.stderr
+    hr = json.load(open(os.path.join(out2, "harvest-report.json"), encoding="utf-8"))
+    assert hr["since_watermark"] == new_ms and hr["next_watermark"] == new_ms, hr
+    assert hr["counts"]["in_scope"] == 0 and hr["counts"]["before_watermark"] == 2, hr
+    assert claims_of(out2) == [], "a drained memory was read again"
+    # Another host has its own watermark: everything is in scope for it.
+    out3 = os.path.join(tmp, "o14c")
+    assert run(mem, out3, "--working-copy", wc, "--project", "demo", "--host", "hostB").returncode == 0
+    assert len(claims_of(out3)) == 2, "the watermark is per host"
+    # --all reads everything regardless.
+    out4 = os.path.join(tmp, "o14d")
+    assert run(mem, out4, "--working-copy", wc, "--project", "demo", "--host", "hostA", "--all").returncode == 0
+    hr = json.load(open(os.path.join(out4, "harvest-report.json"), encoding="utf-8"))
+    assert hr["since_watermark"] == 0 and len(claims_of(out4)) == 2, hr
+
+
 def main() -> int:
     cases = [
+        test_the_watermark_round_trips_through_the_committed_report,
         test_role_knowledge_is_opt_in,
         test_the_class_is_taken_verbatim_not_mapped,
         test_a_generated_class_is_refused,

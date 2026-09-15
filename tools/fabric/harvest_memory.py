@@ -130,6 +130,21 @@ def default_memory_dir(working_copy: str) -> str:
     return os.path.expanduser(f"~/.claude/projects/{slug}/memory")
 
 
+def previous_watermark(working_copy: str, host: str) -> tuple[int, str | None]:
+    """The ms-epoch watermark the project's last drain recorded for this
+    host, and the report it came from — (0, None) when there is none.
+    Read from the working copy's own report (the assembler writes it
+    under .agent-fabric/memory/); keyed by host because the memory store
+    is per machine."""
+    report = os.path.join(working_copy, ".agent-fabric", "memory", "last-drain-report.json")
+    try:
+        with open(report, encoding="utf-8") as fh:
+            marks = json.load(fh).get("watermarks") or {}
+        return int(marks.get(host) or 0), report
+    except (OSError, ValueError, TypeError):
+        return 0, None
+
+
 def parse_memory(path: str) -> dict[str, Any] | None:
     """Parse one memory file. Returns None for a file that is not one."""
     with open(path, encoding="utf-8") as fh:
@@ -165,6 +180,7 @@ def parse_memory(path: str) -> dict[str, Any] | None:
         "links": sorted(set(WIKILINK_RE.findall(body))),
         "path": path,
         "mtime": int(os.path.getmtime(path)),
+        "mtime_ms": int(os.path.getmtime(path) * 1000),
     }
 
 
@@ -192,6 +208,8 @@ def main() -> int:
     ap.add_argument("--project", default=None,
                     help="logical project id (default: resolved from the working copy's remote)")
     ap.add_argument("--host", default=None, help="host label (default: hostname -s)")
+    ap.add_argument("--all", action="store_true",
+                    help="harvest every memory, not only those newer than the project's last drain watermark")
     ap.add_argument("--dry-run", action="store_true", help="report, write nothing")
     args = ap.parse_args()
 
@@ -210,6 +228,20 @@ def main() -> int:
     project = args.project or ctx.get("project")
     label = ctx.get("working_copy_id") or os.path.basename(working_copy)
 
+    # THE WATERMARK. The assembler commits, per host, the ms-epoch up to
+    # which a drain read the store (last-drain-report.json, `watermarks`),
+    # and reads it back from <drain>/harvest-report.json — which this
+    # harvester never wrote, so every memory-era drain committed an empty
+    # map, the next drain could not answer "since when", and fabric-status
+    # counted undrained memories "since ever" (2026-09-15). Now: memories
+    # newer than the last watermark for this host are in scope (all of
+    # them under --all, or when there is no report yet), and the report
+    # carries the max mtime read as the next watermark.
+    since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host)
+    next_ms = since_ms
+    total = 0
+    before_watermark: list[str] = []
+
     claims: list[dict[str, Any]] = []
     observations: list[dict[str, Any]] = []
     skipped: list[str] = []
@@ -221,6 +253,11 @@ def main() -> int:
         parsed = parse_memory(os.path.join(memory_dir, name))
         if parsed is None:
             continue                    # no frontmatter: the index, not a memory
+        total += 1
+        if parsed["mtime_ms"] <= since_ms:
+            before_watermark.append(name)   # drained already; merge mode would no-op it
+            continue
+        next_ms = max(next_ms, parsed["mtime_ms"])
         mtype = parsed["type"]
         klass = parsed["roles_class"]
         if not klass:
@@ -286,6 +323,13 @@ def main() -> int:
         # NAMED, not counted. A count tells you something was left out; the
         # names tell you whether it should have been.
         "skipped_no_roles_class": skipped,
+        # The window this drain read, in the shape the assembler carries
+        # into the committed report (`harvest`, `watermarks`).
+        "since_watermark": since_ms,
+        "since_report": since_report,
+        "next_watermark": next_ms,
+        "counts": {"in_scope": total - len(before_watermark), "total": total,
+                   "before_watermark": len(before_watermark), "provisional_agent": 0},
     }
     if args.dry_run:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -323,6 +367,12 @@ def main() -> int:
     # name, not by git object, so there is no citation graph to build.
     with open(os.path.join(args.out, "references.json"), "w", encoding="utf-8") as fh:
         json.dump({}, fh)
+        fh.write("\n")
+    # What the assembler reads for the committed report's `harvest` and
+    # `watermarks`: the same dict, minus the memory directory (an absolute
+    # path into a home; the assembler drops such things, this never offers).
+    with open(os.path.join(args.out, "harvest-report.json"), "w", encoding="utf-8") as fh:
+        json.dump({k: v for k, v in report.items() if k != "memory_dir"}, fh, indent=2, sort_keys=True)
         fh.write("\n")
 
     print(json.dumps(report, indent=2, sort_keys=True))

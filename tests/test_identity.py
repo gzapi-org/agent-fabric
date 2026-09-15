@@ -161,8 +161,21 @@ def test_binding_round_trip_is_stamped_by_the_os(tmp: str) -> None:
         del os.environ["AGENT_FABRIC_STATE_DIR"]
 
 
+def test_launch_role_drift_is_one_sentence_or_none() -> None:
+    """The launcher stamps the role a session was born with; a rebind from
+    a login shell under it must be said, never silent. No stamp (not a
+    fabric launch) and no difference are both None."""
+    assert identity.launch_role_drift({"role": "db-admin"}, environ={}) is None
+    assert identity.launch_role_drift({"role": "db-admin"}, environ={"AGENT_FABRIC_LAUNCH_ROLE": "db-admin"}) is None
+    d = identity.launch_role_drift({"role": "db-admin"}, environ={"AGENT_FABRIC_LAUNCH_ROLE": "backend-dev"})
+    assert d and "launched as backend-dev" in d and "binding now db-admin" in d and "relaunch" in d, d
+    d = identity.launch_role_drift({}, environ={"AGENT_FABRIC_LAUNCH_ROLE": "backend-dev"})
+    assert d and "binding now (none)" in d, d
+
+
 def main() -> int:
     cases = [
+        test_launch_role_drift_is_one_sentence_or_none,
         test_agent_is_the_effective_login,
         test_agent_is_computed_from_the_uid_not_from_names,
         test_agent_ignores_cwd_and_environment,

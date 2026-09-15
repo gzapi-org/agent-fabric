@@ -52,6 +52,12 @@ def main() -> int:
               f"project={ctx['project'] or '(none)'} "
               f"working_copy={ctx['working_copy'] or '(not in a working copy)'} "
               f"control_plane={FABRIC_ROOT}")
+        # The hook runs on start, resume and after a compaction: a rebind
+        # from a login shell under a running session is said at the next
+        # of those, never left to disagree silently with the prompt.
+        drift = identity.launch_role_drift(binding)
+        if drift:
+            print(f"agent-fabric: DRIFT {drift}")
     except Exception as exc:  # noqa: BLE001 — a hook must never block a session
         print(f"agent-fabric session-start: {exc}", file=sys.stderr)
     return 0

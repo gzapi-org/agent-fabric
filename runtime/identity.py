@@ -120,6 +120,24 @@ def write_binding(binding: dict, agent: str | None = None) -> str:
     return path
 
 
+def launch_role_drift(binding: dict, environ: dict | None = None) -> str | None:
+    """A session was launched with one role in its system prompt
+    (AGENT_FABRIC_LAUNCH_ROLE, stamped by runtime/openrouter/launch); the
+    binding may have been changed under it since, from a login shell.
+    The two must not disagree silently: this is the one sentence both
+    bin/fabric-status and the session-start hook print when they do.
+    None when there is no stamp (not a fabric launch) or no drift."""
+    env = os.environ if environ is None else environ
+    launched = env.get("AGENT_FABRIC_LAUNCH_ROLE")
+    if not launched:
+        return None
+    current = binding.get("role")
+    if launched == current:
+        return None
+    return (f"launched as {launched}, binding now {current or '(none)'} — this session's prompt "
+            f"still holds {launched}; relaunch to hold {current or 'no role'}")
+
+
 def _workingcopy():
     """tools/fabric/workingcopy.py, loaded by path so this file works from
     any cwd and any sys.path."""

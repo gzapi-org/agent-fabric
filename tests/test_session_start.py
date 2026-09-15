@@ -51,6 +51,26 @@ def test_hook_records_context_not_identity(tmp: str) -> None:
     assert b["project"] == "gzapp" and b["working_copy"] == wc and b["session"] == "sess-123", b
 
 
+def test_hook_says_when_the_binding_drifted_from_the_launch(tmp: str) -> None:
+    """Launched as one role (the stamp the launcher exports), bound to
+    another since: the hook prints the drift line; same role, no line."""
+    state = os.path.join(tmp, "state")
+    parent = os.path.join(tmp, "projects"); os.makedirs(parent)
+    os.makedirs(os.path.join(state, "agents", id_un()))
+    with open(os.path.join(state, "agents", id_un(), "binding.json"), "w", encoding="utf-8") as fh:
+        json.dump({"agent": id_un(), "host": "h", "role": "db-admin", "updated_at": "x"}, fh)
+    env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state, "AGENT_FABRIC_LAUNCH_ROLE": "backend-dev"}
+    proc = run_hook({"cwd": parent}, env)
+    assert proc.returncode == 0, proc.stderr
+    assert "DRIFT launched as backend-dev, binding now db-admin" in proc.stdout and "relaunch" in proc.stdout, proc.stdout
+    env["AGENT_FABRIC_LAUNCH_ROLE"] = "db-admin"
+    proc = run_hook({"cwd": parent}, env)
+    assert "DRIFT" not in proc.stdout, proc.stdout
+    env.pop("AGENT_FABRIC_LAUNCH_ROLE")
+    proc = run_hook({"cwd": parent}, env)
+    assert "DRIFT" not in proc.stdout, "an unlaunched session has nothing to drift from"
+
+
 def test_hook_from_the_parent_directory_has_no_project(tmp: str) -> None:
     state = os.path.join(tmp, "state")
     parent = os.path.join(tmp, "projects")
@@ -164,7 +184,8 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
 
 
 def main() -> int:
-    cases = [test_hook_records_context_not_identity, test_hook_from_the_parent_directory_has_no_project,
+    cases = [test_hook_records_context_not_identity, test_hook_says_when_the_binding_drifted_from_the_launch,
+             test_hook_from_the_parent_directory_has_no_project,
              test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
              test_bootstrap_writes_only_the_workspace_and_home_files]
     failures = 0

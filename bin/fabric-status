@@ -10,7 +10,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
 exec python3 - "$ROOT" "${1:-}" <<'PY'
-import importlib.util, json, os, sys
+import hashlib, importlib.util, json, os, sys
 from urllib.parse import urlsplit
 
 root, mode = sys.argv[1], sys.argv[2]
@@ -74,10 +74,41 @@ for klass in routing.load_capabilities(root)["classes"]:
         classes[klass] += " (local layer ignored: %s)" % local_error
 checks = routing.check(root)
 
+# --- drift: what this session was launched with vs. what is bound now ---
+# A rebind from a login shell, or a new default in routing/, does not
+# reach a running session (its prompt and --model are fixed at exec);
+# say so rather than let the two disagree silently (backend-dev-01's
+# session on the previous session default, 2026-09-15).
+role_drift = identity.launch_role_drift(binding)
+model_drift = None
+launch_provider = os.environ.get("AGENT_FABRIC_LAUNCH_PROVIDER")
+if stamp and launch_provider in ("openrouter", "anthropic"):
+    try:
+        now = routing.resolve_session(binding.get("role"), ctx["agent"], local, root=root, provider=launch_provider)
+        current_session = now.get("composite") or now.get("model")
+        if current_session and current_session != stamp:
+            model_drift = f"launched on {stamp}, the {launch_provider} session now resolves to {current_session} — relaunch to apply"
+    except (KeyError, ValueError):
+        pass
+prompt_drift = None
+digest = os.environ.get("AGENT_FABRIC_LAUNCH_PROMPT_DIGEST")
+if digest:
+    prompt_path = os.path.join(ctx["state_dir"], "launch-prompt.md")
+    try:
+        with open(prompt_path, "rb") as fh:
+            actual = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+        if actual != digest:
+            prompt_drift = f"the prompt file was rewritten since launch ({prompt_path}); this session still holds the launched text"
+    except OSError:
+        prompt_drift = f"the launched prompt file is gone ({prompt_path})"
+
 report = {
     "agent": ctx["agent"], "host": ctx["host"],
     "role": binding.get("role"), "project": ctx["project"], "working_copy": ctx["working_copy"],
     "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
+    "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
+    "launch_prompt_digest": digest,
+    "drift": [d for d in (role_drift, model_drift, prompt_drift) if d] or None,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",
             "launch_profile": os.environ.get("AGENT_FABRIC_LAUNCH_PROFILE"),
@@ -92,6 +123,10 @@ if mode == "--json":
 
 print(f"agent        {report['agent']}@{report['host']}")
 print(f"role         {report['role'] or '(none — bin/fabric-role bind <role>, from a login shell)'}")
+if report["launched_role"]:
+    print(f"launched as  {report['launched_role']}    prompt {report['launch_prompt_digest'] or '(no digest stamped)'}")
+for d in report["drift"] or []:
+    print(f"DRIFT        {d}")
 print(f"project      {report['project'] or '(none)'}    working copy  {report['working_copy'] or '(none)'}")
 print(f"session      {report['session'] or '(unknown)'}    binding updated {report['binding_updated'] or '-'}")
 print()

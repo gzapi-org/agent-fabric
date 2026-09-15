@@ -74,7 +74,29 @@ fi
 ALIASES="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/aliases.json"
 ALIAS_JSON="$(jq -c '.aliases // {}' "$ALIASES" 2>/dev/null || echo '{}')"
 
-jq -c --argjson aliases "$ALIAS_JSON" '
+# THE VANILLA PIN. On plain claude launched by the fabric
+# (runtime/openrouter/launch --provider anthropic) the review class is
+# pinned to a native model (routing/capabilities.json, anthropic column) —
+# but not by exporting ANTHROPIC_DEFAULT_FABLE_MODEL: that rebinds the
+# alias for the whole session, so a hand `/model fable` would land on the
+# review model too. Verified live 2026-09-15: the Agent tool's `model`
+# accepts only the four aliases (a hook rewriting it to a native id is
+# rejected at schema validation), the dispatch's `model` outranks the
+# agent file's, and an agent file whose frontmatter names a native id runs
+# on it when the dispatch leaves `model` unset. So the pin lives in the
+# reviewer's agent file (bootstrap writes it there from routing), and this
+# guard — AFTER the review rules have held, `model: fable` included —
+# allows the dispatch with `model` removed, so the file's pin applies.
+# Only under a fabric vanilla launch, only for a pinned class; anywhere
+# else the alias reaches the harness as written.
+PINNED_JSON='{}'
+if [[ "${AGENT_FABRIC_LAUNCH_PROVIDER:-}" == anthropic ]]; then
+  ROUTING="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)/tools/fabric/routing.py"
+  PINNED_JSON="$(python3 "$ROUTING" pins 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
+  jq -e . <<<"$PINNED_JSON" >/dev/null 2>&1 || PINNED_JSON='{}'
+fi
+
+jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" '
   def deny(reason): {hookSpecificOutput:{hookEventName:"PreToolUse",
                      permissionDecision:"deny",
                      permissionDecisionReason:reason}};
@@ -95,6 +117,11 @@ jq -c --argjson aliases "$ALIAS_JSON" '
         deny("Review dispatch with model \"" + ($t.model // "unset") + "\". The review class rides the fable alias, always: set model: fable. Not opus -- code-high rides opus, and on the broker path one alias carries one exported model, so a reviewer on opus is whatever code-high resolves to (GLM). Not unset -- the review is not a retryable step, its failure mode is a green PR that merges. The Agent tool accepts no full model id. The review capability is gated by agent-fabric routing/policies/review-grade.json, and the broker launcher (runtime/openrouter/launch) refuses a profile that resolves it to anything else, so policy stays here and vendor plumbing stays in routing/. See CLAUDE.md - Subagent dispatch.")
       elif $iso != "" then
         deny("Review dispatch sets isolation. A review writes nothing, so isolation protects nothing, and it hurts: worktree.baseRef is head, so a reviewer in a worktree cannot see uncommitted work. Omit isolation, pass the repository path, and tell the agent the tree is read-only and it runs no git writes. See CLAUDE.md - Subagent dispatch.")
+      elif ($pinned["review"] // "") != "" then
+        # The rules held; on the fabric vanilla path the reviewer file carries the pin.
+        {hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"allow",
+          permissionDecisionReason:("Review dispatch on the fabric vanilla path: model fable checked, then removed so the reviewer runs on its pinned model " + $pinned["review"] + " (the agent file, from routing/capabilities.json) while the session keeps fable as fable."),
+          updatedInput:($t | del(.model))}}
       else empty end
     elif $review_desc then
       deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the blind-reviewer class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")

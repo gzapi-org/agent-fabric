@@ -12,6 +12,7 @@ Two independent dimensions, one derived artifact:
     routing.py table [--provider P]
     routing.py check                                  # validate the canonical files
     routing.py shim <model>                           # the family shim a bare model id needs, if any
+    routing.py pins                                   # classes the anthropic column pins: <class> <alias> <id>
 
 Profile layers (routing/profiles.json and the agent's local override) may
 override a class's model; the shim is looked up on the MERGED model, so an
@@ -262,12 +263,23 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--role", default=None)
     t.add_argument("--agent", default=None)
     sub.add_parser("check", help="validate the canonical routing files")
+    s = sub.add_parser("pins", help="classes the harness provider pins to a native id: `<class> <alias> <id>` per line")
     s = sub.add_parser("shim", help="the family shim a model id needs, or nothing")
     s.add_argument("model")
     s.add_argument("--harness", default="claude-code")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.fabric) if args.fabric else None
 
+    if args.cmd == "pins":
+        # For the dispatch guard and bootstrap: which classes the anthropic
+        # column pins (a native id), with the alias each class rides. One
+        # line per pin, nothing when none; exit 0 either way.
+        aliases = (_load(os.path.join(root or FABRIC_ROOT, "runtime", "claude-code", "aliases.json")) or {}).get("aliases") or {}
+        for klass in load_capabilities(root)["classes"]:
+            res = resolve(klass, "anthropic", root=root)
+            if res.get("pinned"):
+                print(f"{klass} {aliases.get(klass, '')} {res['model']}")
+        return 0
     if args.cmd == "shim":
         # One line, the shim or nothing; exit 0 either way. A hook asks this
         # so that "which families need a shim" has one implementation. A

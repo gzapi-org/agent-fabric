@@ -212,9 +212,12 @@ for klass, alias in aliases["aliases"].items():
         if not routing.COMPOSITE.fullmatch(res["composite"]):
             sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
         out["exports"][aliases["env"][alias]] = res["composite"]
-    elif res.get("pinned"):
-        # A native id pins the alias; an alias leaves the harness's default.
-        out["exports"][aliases["env"][alias]] = res["model"]
+    # On plain claude a pinned class is NOT exported: ANTHROPIC_DEFAULT_*
+    # would rebind the alias for the whole session (a hand /model fable
+    # would land on the review model). The pin reaches the class through
+    # its agent file (bootstrap writes it from routing) and the dispatch
+    # guard, which drops the dispatch's alias under this launch so the
+    # file decides. Nothing is exported on this path.
     out["classes"][klass] = res
 try:
     session = routing.resolve_session(role, agent, local, provider=provider)
@@ -297,7 +300,7 @@ import json, sys
 d = json.loads(sys.argv[1])
 for klass, res in d["classes"].items():
     if d.get("provider") == "anthropic":
-        print("  %-12s: %s  %s" % (klass, res["model"], "(pinned)" if res.get("pinned") else "(harness default for the alias)"))
+        print("  %-12s: %s  %s" % (klass, res["model"], "(pinned in the agent file; the dispatch guard applies it)" if res.get("pinned") else "(harness default for the alias)"))
     else:
         print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
 print()
@@ -310,8 +313,9 @@ PY
     exit 0
 fi
 
-# Plain claude: no broker, no shim, the pins above are what the fabric
-# decided; everything else is the harness's own.
+# Plain claude: no broker, no shim, no tier export — a pinned class is
+# served by its agent file under the dispatch guard; the session model
+# and the refusals are what the launcher contributed.
 if [[ "$PROVIDER" == anthropic ]]; then
     if (( CALLER_MODEL )); then exec claude "$@"; fi
     exec claude --model "$SESSION" "$@"

@@ -110,6 +110,10 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"
     assert os.path.isfile(os.path.join(home, ".claude", "commands", "role.md"))
+    with open(os.path.join(home, ".claude", "agents", "blind-reviewer.md"), encoding="utf-8") as fh:
+        assert "\nmodel: claude-opus-5[1m]\n" in fh.read(), "the reviewer file carries the anthropic column's pin"
+    with open(os.path.join(home, ".claude", "agents", "code-high.md"), encoding="utf-8") as fh:
+        assert "\nmodel: opus\n" in fh.read(), "an unpinned class keeps its alias"
     for skill in ("subagent-dispatch", "gzcoord-send", "gzcoord-receive"):
         assert os.path.isfile(os.path.join(home, ".claude", "skills", skill, "SKILL.md")), skill
     for f in ("code-low.md", "code-medium.md", "code-high.md"):

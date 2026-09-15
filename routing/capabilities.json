@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much reasoning a task needs; a provider entry says which model currently satisfies it there. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py — it is never written here.",
+  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much and what kind of reasoning a task needs; a provider entry says which model currently satisfies it there. Five classes, and the class is the whole vocabulary a user sees — in this file, in routing/profiles.json and in bin/fabric-model; which harness tier alias a class rides is the Claude Code adapter's business (runtime/claude-code/aliases.json), never named here. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py — it is never written here.",
   "classes": {
     "code-low": {
       "title": "Inexpensive, mechanical delegated coding work",
@@ -14,30 +14,36 @@
       "title": "Difficult or high-consequence engineering work",
       "description": "Architecture, difficult debugging, security review, subtle refactoring, concurrency, protocol design, and important cross-component reasoning."
     },
-    "review": {
+    "code-plan": {
+      "title": "Planning and design reasoning",
+      "description": "The top reasoning tier for work whose output is a plan, a design or a judgement rather than an edit: shaping an implementation across components, weighing architectural trade-offs, reading a large change for what it means. The session itself can run on it (a profile's session may name any class)."
+    },
+    "code-review": {
       "title": "The review class",
-      "description": "The adversarial substitute reviewer. Not a coding class: it rides its own harness alias (fable) so a profile can give it a different model from code-high, and its model is gated by routing/policies/review-grade.json — chosen there by architect-cto, never by a profile layer alone."
+      "description": "The adversarial substitute reviewer (the code-review agent). Not a coding class: its model is gated by routing/policies/review-grade.json — chosen there by architect-cto, never by a profile layer alone — and reaches the reviewer through its agent file rather than a tier export, so it never shares an export with code-plan on the tier they both ride (runtime/claude-code/aliases.json)."
     }
   },
   "providers": {
     "anthropic": {
       "resolution": "harness",
-      "description": "Plain `claude`, Anthropic by construction. A value is either a harness tier alias (haiku, sonnet, opus, fable) — the harness binds it to its current Claude model of that tier and the fabric leaves it there — or a native Claude id (claude-…), which the launcher (`runtime/openrouter/launch --provider anthropic`) pins as that tier's ANTHROPIC_DEFAULT_*_MODEL so the fabric decides the model rather than the harness's week. The review class rides `fable`, the alias no coding class uses, and is pinned to claude-opus-5[1m] (architect-cto, 2026-09-15): a vanilla review is never on a tier the fabric has not named, and the pin is gated by routing/policies/review-grade.json like every other review model. No shim applies to a native Claude model.",
+      "description": "Plain `claude`, Anthropic by construction. A value is a native Claude id (claude-…) that pins the class — the launcher (`runtime/openrouter/launch --provider anthropic`) exports it for the tier the class rides, so the fabric decides the model rather than the harness's week — or null: the harness's own current model of that tier. The default is the top model of each class's tier (the owner, 2026-09-15): Haiku 4.5, Sonnet 5, Opus 5, Fable 5.1, and the review class on claude-opus-5[1m] (architect-cto, 2026-09-15), whose pin reaches the reviewer's agent file rather than the fable export and is gated by routing/policies/review-grade.json like every other review model. No shim applies to a native Claude model.",
       "models": {
-        "code-low": "haiku",
-        "code-medium": "sonnet",
-        "code-high": "opus",
-        "review": "claude-opus-5[1m]"
+        "code-low": "claude-haiku-4-5-20251001",
+        "code-medium": "claude-sonnet-5",
+        "code-high": "claude-opus-5",
+        "code-plan": "claude-fable-5-1",
+        "code-review": "claude-opus-5[1m]"
       }
     },
     "openrouter": {
       "resolution": "model-id",
-      "description": "The broker path (runtime/openrouter/launch via the ori CLI). Values are OpenRouter model ids; the launcher derives the composite with the family shim and exports it under the harness alias the class maps to (runtime/claude-code/aliases.json). The review class is exported under the fable alias and gated by routing/policies/review-grade.json.",
+      "description": "The broker path (runtime/openrouter/launch via the ori CLI). Values are OpenRouter model ids; the launcher derives the composite with the family shim and exports it for the tier the class rides (runtime/claude-code/aliases.json). The review class is not exported: its composite reaches the reviewer's agent file, gated by routing/policies/review-grade.json.",
       "models": {
         "code-low": "z-ai/glm-5.3-flash",
         "code-medium": "z-ai/glm-5.2",
         "code-high": "z-ai/glm-5.3",
-        "review": "z-ai/glm-5.3"
+        "code-plan": "z-ai/glm-5.3",
+        "code-review": "z-ai/glm-5.3"
       }
     }
   }

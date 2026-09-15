@@ -2,32 +2,42 @@
 # runtime/claude-code/install-agent-files.sh
 #
 # Install THIS account's capability-class agent files,
-# ~/.claude/agents/{code-low,code-medium,code-high,blind-reviewer}.md, from
+# ~/.claude/agents/{code-low,code-medium,code-high,code-review}.md, from
 # runtime/claude-code/agents/, with the review pin applied.
 #
-#   runtime/claude-code/install-agent-files.sh [--dry-run]
+#   runtime/claude-code/install-agent-files.sh [--provider openrouter|anthropic] [--dry-run]
 #
-# bootstrap.sh calls this at provisioning; bin/fabric-model calls it after
-# a change to the account's local layer, because the pin it applies is
-# per agent: `routing.py pins --me` merges the column with the login's
-# role and its model-profile.local.json.
+# The launcher calls this for its provider before every exec; bootstrap.sh
+# at provisioning (anthropic, the unlaunched default); bin/fabric-model
+# after a change to the review pin. The pin it applies is per agent and
+# per provider: `routing.py pins --me --provider P` merges the column with
+# the login's role and its model-profile.local.json.
 #
-# WHY A FILE CARRIES THE PIN. On a fabric vanilla launch (runtime/
-# openrouter/launch --provider anthropic) the review class runs on a
-# native model, but its alias (fable) is also the hand's tier, so the
-# launcher exports nothing under it — a hand `/model fable` must stay the
-# harness's. The one route left (verified live 2026-09-15): the agent
-# file's `model:` line decides when the dispatch leaves `model` unset,
-# and the dispatch guard drops the dispatch's alias under this launch
-# after checking it was `fable`. The coding classes ride the exported
-# aliases and keep the repo file's alias line; the pin here is the review
-# class's alone, from routing, so there is one source.
+# WHY A FILE CARRIES THE PIN. The review class rides the same tier alias
+# as code-plan (fable): the Agent tool's `model` takes only the four
+# aliases, and one alias carries one export, so through the export the
+# reviewer would follow code-plan (as it once followed code-high on opus,
+# 2026-09-13). The one route left (verified live on plain claude,
+# 2026-09-15): the agent file's `model:` line decides when the dispatch
+# leaves `model` unset, and the dispatch guard drops the dispatch's alias
+# under a fabric launch after checking it was `fable`. The coding classes
+# ride the exported aliases and keep the repo file's alias line; the pin
+# here is the review class's alone, from routing, so there is one source.
+# One file serves one launch at a time: two sessions of one account on
+# different providers would rewrite it in turn, which the guard catches.
 set -euo pipefail
 
 FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-DRY_RUN=0
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+DRY_RUN=0; PROVIDER="${AGENT_FABRIC_LAUNCH_PROVIDER:-anthropic}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1; shift ;;
+        --provider) PROVIDER="$2"; shift 2 ;;
+        --provider=*) PROVIDER="${1#--provider=}"; shift ;;
+        *) echo "install-agent-files: unknown argument $1" >&2; exit 2 ;;
+    esac
+done
 
 changed=0; same=0
 put() {  # put <dest> <content-file>
@@ -49,10 +59,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 declare -A PIN_BY_CLASS=()
 while read -r klass alias model; do
     [[ -n "$klass" ]] && PIN_BY_CLASS["$klass"]="$model"
-done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" pins --me)
-agent_class() { case "$1" in blind-reviewer.md) echo review ;; *) echo "${1%.md}" ;; esac; }
-for f in code-low.md code-medium.md code-high.md blind-reviewer.md; do
-    pin="${PIN_BY_CLASS[$(agent_class "$f")]:-}"
+done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" pins --me --provider "$PROVIDER")
+for f in code-low.md code-medium.md code-high.md code-plan.md code-review.md; do
+    pin="${PIN_BY_CLASS[${f%.md}]:-}"
     if [[ -n "$pin" ]]; then
         sed "0,/^model: .*/s||model: $pin|" "$FABRIC_ROOT/runtime/claude-code/agents/$f" > "$TMP/$f"
         put "$CLAUDE_HOME/agents/$f" "$TMP/$f"
@@ -60,4 +69,11 @@ for f in code-low.md code-medium.md code-high.md blind-reviewer.md; do
         put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
     fi
 done
-echo "agent files: $changed written, $same already current."
+# The review class was installed as blind-reviewer.md until 2026-09-15; a
+# copy of ours left there would offer the retired type beside the new one.
+old="$CLAUDE_HOME/agents/blind-reviewer.md"
+if [[ -f "$old" ]] && grep -q "agent-fabric" "$old" 2>/dev/null; then
+    if (( DRY_RUN )); then echo "  -  $old (would remove: retired name of code-review)"
+    else rm -f "$old"; echo "  -  $old (retired name of code-review)"; changed=$((changed+1)); fi
+fi
+echo "agent files ($PROVIDER): $changed written, $same already current."

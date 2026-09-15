@@ -11,7 +11,7 @@
 # TWO CLASSES OF DISPATCH, decided in this order:
 #
 #   fork            -> allowed; a fork continues the session.
-#   REVIEW class    -> subagent_type "blind-reviewer" AND description
+#   REVIEW class    -> subagent_type "code-review" AND description
 #                      beginning "review" / "re-review" (any word
 #                      form: Reviewing, Re-review of ...) AND model
 #                      "fable" AND NO isolation. All four, or denied --
@@ -74,31 +74,33 @@ fi
 ALIASES="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/aliases.json"
 ALIAS_JSON="$(jq -c '.aliases // {}' "$ALIASES" 2>/dev/null || echo '{}')"
 
-# THE VANILLA PIN. On plain claude launched by the fabric
-# (runtime/openrouter/launch --provider anthropic) the review class is
-# pinned to a native model (routing/capabilities.json, anthropic column) —
-# but not by exporting ANTHROPIC_DEFAULT_FABLE_MODEL: that rebinds the
-# alias for the whole session, so a hand `/model fable` would land on the
-# review model too. Verified live 2026-09-15: the Agent tool's `model`
-# accepts only the four aliases (a hook rewriting it to a native id is
-# rejected at schema validation), the dispatch's `model` outranks the
-# agent file's, and an agent file whose frontmatter names a native id runs
-# on it when the dispatch leaves `model` unset. So the pin lives in the
-# reviewer's agent file (install-agent-files.sh writes it there from
-# routing, merged for THIS login — `pins --me` — since the account's own
-# layer may name it), and this guard — AFTER the review rules have held,
-# `model: fable` included — allows the dispatch with `model` removed, so
-# the file's pin applies. Only under a fabric vanilla launch, only for the
-# review class; a coding class's pin is the export of the alias it rides
-# and the dispatch's alias reaches the harness as written.
-PINNED_JSON='{}'
-if [[ "${AGENT_FABRIC_LAUNCH_PROVIDER:-}" == anthropic ]]; then
+# THE FILE PIN. Under a fabric launch (runtime/openrouter/launch, either
+# provider) the review class runs on the model routing resolves for it —
+# but not through the fable export: code-plan rides fable too, and one
+# alias carries one export, so through it the reviewer would follow
+# code-plan (as it once followed code-high on opus, 2026-09-13). Verified
+# live 2026-09-15 on plain claude: the Agent tool's `model` accepts only
+# the four aliases (a hook rewriting it to a model id is rejected at
+# schema validation), the dispatch's `model` outranks the agent file's,
+# and an agent file whose frontmatter names a model id runs on it when
+# the dispatch leaves `model` unset. So the pin lives in the reviewer's
+# agent file (install-agent-files.sh writes it there at launch, for the
+# launch's provider, merged for this login — `pins --me`), and this
+# guard — AFTER the review rules have held, `model: fable` included —
+# allows the dispatch with `model` removed, so the file's pin applies.
+# The file is checked against the same resolution first: another launch
+# of this account on the other provider rewrites it, and a reviewer on a
+# model nothing chose for this session is denied, not run. Only under a
+# fabric launch; anywhere else the alias reaches the harness as written.
+PINNED_JSON='{}'; FILE_MODEL=""
+if [[ -n "${AGENT_FABRIC_LAUNCH_PROVIDER:-}" ]]; then
   ROUTING="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)/tools/fabric/routing.py"
-  PINNED_JSON="$(python3 "$ROUTING" pins --me 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
+  PINNED_JSON="$(python3 "$ROUTING" pins --me --provider "$AGENT_FABRIC_LAUNCH_PROVIDER" 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
   jq -e . <<<"$PINNED_JSON" >/dev/null 2>&1 || PINNED_JSON='{}'
+  FILE_MODEL="$(sed -n '0,/^model: /s/^model: //p' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/code-review.md" 2>/dev/null || true)"
 fi
 
-jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" '
+jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file_model "$FILE_MODEL" '
   def deny(reason): {hookSpecificOutput:{hookEventName:"PreToolUse",
                      permissionDecision:"deny",
                      permissionDecisionReason:reason}};
@@ -113,21 +115,25 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" '
      | test("^\\s*(re-)?review")) as $review_desc
   | if $type == "fork" then empty
     elif $type == "blind-reviewer" then
+      deny("subagent_type \"blind-reviewer\" is the retired name of the review class; dispatch it as subagent_type: code-review (the capability class, like code-low/medium/high/plan), everything else unchanged. See CLAUDE.md - Subagent dispatch.")
+    elif $type == "code-review" then
       if ($review_desc | not) then
-        deny("blind-reviewer dispatch whose description does not BEGIN with review or re-review. The review class is read-only and unisolated; a writing task under this type would run in the session clone. Describe a review as one, or dispatch a normal agent with isolation worktree. See CLAUDE.md - Subagent dispatch.")
+        deny("code-review dispatch whose description does not BEGIN with review or re-review. The review class is read-only and unisolated; a writing task under this type would run in the session clone. Describe a review as one, or dispatch a normal agent with isolation worktree. See CLAUDE.md - Subagent dispatch.")
       elif $model != "fable" then
-        deny("Review dispatch with model \"" + ($t.model // "unset") + "\". The review class rides the fable alias, always: set model: fable. Not opus -- code-high rides opus, and on the broker path one alias carries one exported model, so a reviewer on opus is whatever code-high resolves to (GLM). Not unset -- the review is not a retryable step, its failure mode is a green PR that merges. The Agent tool accepts no full model id. The review capability is gated by agent-fabric routing/policies/review-grade.json, and the broker launcher (runtime/openrouter/launch) refuses a profile that resolves it to anything else, so policy stays here and vendor plumbing stays in routing/. See CLAUDE.md - Subagent dispatch.")
+        deny("Review dispatch with model \"" + ($t.model // "unset") + "\". The review class rides the fable alias, always: set model: fable. Not opus -- code-high rides opus, and one alias carries one exported model, so a reviewer on opus is whatever code-high resolves to (on the broker, GLM). Not unset -- the review is not a retryable step, its failure mode is a green PR that merges. The Agent tool accepts no full model id; under a fabric launch this guard drops the alias after checking it and the agent file of the reviewer carries the model routing resolved for code-review. That capability is gated by agent-fabric routing/policies/review-grade.json, and the launcher (runtime/openrouter/launch) refuses a profile that resolves it to anything else, so policy stays here and vendor plumbing stays in routing/. See CLAUDE.md - Subagent dispatch.")
       elif $iso != "" then
         deny("Review dispatch sets isolation. A review writes nothing, so isolation protects nothing, and it hurts: worktree.baseRef is head, so a reviewer in a worktree cannot see uncommitted work. Omit isolation, pass the repository path, and tell the agent the tree is read-only and it runs no git writes. See CLAUDE.md - Subagent dispatch.")
-      elif ($pinned["review"] // "") != "" then
-        # The rules held; on the fabric vanilla path the reviewer file carries the pin.
+      elif ($pinned["code-review"] // "") != "" and $file_model != $pinned["code-review"] then
+        deny("Review dispatch under a fabric launch, but the agent file of the reviewer says model \"" + $file_model + "\" while this launch resolves code-review to \"" + $pinned["code-review"] + "\". Another launch of this account (the other provider) has rewritten ~/.claude/agents/code-review.md since this session started; a reviewer would run on a model nothing chose for this session. Re-run agent-fabric/bin/fabric-model apply from this session, or relaunch. See CLAUDE.md - Subagent dispatch.")
+      elif ($pinned["code-review"] // "") != "" then
+        # The rules held; under a fabric launch the reviewer file carries the pin.
         {hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"allow",
-          permissionDecisionReason:("Review dispatch on the fabric vanilla path: model fable checked, then removed so the reviewer runs on its pinned model " + $pinned["review"] + " (the agent file, from routing/capabilities.json) while the session keeps fable as fable."),
+          permissionDecisionReason:("Review dispatch under a fabric launch: model fable checked, then removed so the reviewer runs on its pinned model " + $pinned["code-review"] + " (the agent file, from routing) while fable itself stays the tier of code-plan."),
           updatedInput:($t | del(.model))}}
       else empty end
     elif $review_desc then
-      deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the blind-reviewer class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
-    elif ($type | test("^code-(low|medium|high)$")) then
+      deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the code-review class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
+    elif ($type | test("^code-(low|medium|high|plan)$")) then
       ($aliases[$type] // "") as $alias
       | if $alias == "" then
           deny("Dispatch names the class \"" + $type + "\" but runtime/claude-code/aliases.json binds no alias to it (file missing, unreadable, or the class is not in it). The class decides the tier and this guard cannot tell which; nothing is inferred. Fix the binding, or set model to the alias the class is documented to ride. See CLAUDE.md - Subagent dispatch.")
@@ -135,8 +141,8 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" '
           deny("Dispatch names the class \"" + $type + "\" with model \"" + ($t.model // "unset") + "\"; that class rides the " + $alias + " alias (runtime/claude-code/aliases.json), and the two must agree -- a class whose tier a call can override is a label, and " + $type + " on another tier is that work on a model nothing chose for it. Set model: " + $alias + ", or name the class that rides the tier you mean. See CLAUDE.md - Subagent dispatch.")
         elif $iso != "worktree" then
           deny("Agent dispatch does not set isolation to worktree. Every writing subagent works in its own worktree, never the session clone: the dispatcher opens and closes it, the agent stays in the path it is given, runs no git, and never commits. A premium-model authorisation grants a model tier, not an isolation exemption. Forks and the review class are the only carve-outs. See CLAUDE.md - Subagent dispatch.")
-        elif $type == "code-high" then
-          ask("Agent dispatch names code-high, the premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
+        elif $type == "code-high" or $type == "code-plan" then
+          ask("Agent dispatch names " + $type + ", a premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
         else empty end
     elif ($model | length) == 0 then
       deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")

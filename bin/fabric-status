@@ -65,8 +65,9 @@ alias_env = routing.load_aliases(root)["env"]
 for klass in routing.load_capabilities(root)["classes"]:
     try:
         r = routing.resolve(klass, provider, binding.get("role"), ctx["agent"], local, root=root)
-        exported = pins.get(alias_env.get(r.get("alias") or r["model"], ""))
-        classes[klass] = r["composite"] + (" (exported)" if exported else "") + " (from %s)" % r["source"]
+        how = {"export": " (exported)" if pins.get(alias_env.get(r.get("alias") or "", "")) else " (not exported in this session)",
+               "file": " (the agent file)", "harness": " (the harness's tier)"}[r["via"]]
+        classes[klass] = r["composite"] + how + " (from %s)" % r["source"]
     except (KeyError, ValueError) as exc:
         classes[klass] = "unresolved: %s" % exc
     if local_error:

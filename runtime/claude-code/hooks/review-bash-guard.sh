@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook on Bash, scoped to the blind-reviewer agent
-# (declared in runtime/claude-code/agents/blind-reviewer.md frontmatter,
+# Claude Code PreToolUse hook on Bash, scoped to the code-review agent
+# (declared in runtime/claude-code/agents/code-review.md frontmatter,
 # so it runs ONLY while that agent is active). bootstrap.sh installs it
 # user-scope at ~/.claude/hooks/review-bash-guard.sh; the agent file
 # looks in the launch project's .claude/ first, then there, so a review

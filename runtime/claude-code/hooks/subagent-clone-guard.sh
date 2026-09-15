@@ -53,7 +53,7 @@ read -r agent_id agent_type tool cwd < <(printf '%s' "$input" | jq -r '[(.agent_
 
 [[ "${agent_id:-}" != "-" && -n "${agent_id:-}" ]] || exit 0   # the main session, or unparsable
 case "$agent_type" in
-  code-low|code-medium|code-high|blind-reviewer|general-purpose|claude|Explore|Plan) ;;
+  code-low|code-medium|code-high|code-plan|code-review|general-purpose|claude|Explore|Plan) ;;
   *) exit 0 ;;                                            # a fork, or a type this control plane does not dispatch
 esac
 [[ "$cwd" != */.claude/worktrees/* ]] || exit 0           # isolated: it may write there

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:agent-fabric:routing:profiles",
   "title": "Per-role and per-agent model profile layers for the OpenRouter launch path",
-  "description": "Committed at routing/profiles.json. The class -> model mapping lives in routing/capabilities.json; this file carries the layers that override it for one role or one agent, plus the session model — per provider, because the two launch paths speak different vocabularies (an OpenRouter id on the broker; a tier alias or a native claude-… id on plain claude). Resolution is a per-provider, per-key merge, nearest layer wins: capabilities.providers.<provider>.models <- defaults <- roles.<role> <- agents.<login> <- the agent's gitignored model-profile.local.json (written by bin/fabric-model). On the broker path the launcher applies the family shim (routing/shims.json) to every merged model and exports the composites under the harness aliases (runtime/claude-code/aliases.json); on plain claude it exports the merged alias bindings and the review pin reaches the reviewer's agent file. The review capability's merged model must be in routing/policies/review-grade.json on every provider. Credentials are never here. Authored by architect-cto like a charter.",
+  "description": "Committed at routing/profiles.json. The class -> model mapping lives in routing/capabilities.json; this file carries the layers that override it for one role or one agent, plus the session model — per provider, because the two launch paths speak different vocabularies (an OpenRouter id on the broker; a native claude-… id on plain claude). The vocabulary is the capability class (code-low, code-medium, code-high, code-plan, code-review) and the provider's model id; a harness tier alias is never named here — which alias a class rides is runtime/claude-code/aliases.json's, internal to the adapter. Resolution is a per-provider, per-key merge, nearest layer wins: capabilities.providers.<provider>.models <- defaults <- roles.<role> <- agents.<login> <- the agent's gitignored model-profile.local.json (written by bin/fabric-model). The launcher exports each class for the tier it rides (the broker: with its family shim); the review class reaches the reviewer's agent file instead, on both paths. The review capability's merged model must be in routing/policies/review-grade.json on every provider. Credentials are never here. Authored by architect-cto like a charter.",
   "type": "object",
   "required": [
     "version",
@@ -21,8 +21,15 @@
       "additionalProperties": false,
       "properties": {
         "session": {
-          "description": "The OpenRouter form of the session: what `ori claude --model` receives (with its family shim) unless an explicit --model is given. An `anthropic/<id>` here also serves plain claude as `<id>` unless providers.anthropic.session says otherwise.",
-          "$ref": "#/$defs/model_id"
+          "description": "The OpenRouter form of the session: what `ori claude --model` receives (with its family shim) unless an explicit --model is given — an OpenRouter id, or a class. An `anthropic/<id>` (or a class) here also serves plain claude unless providers.anthropic.session says otherwise.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/model_id"
+            },
+            {
+              "$ref": "#/$defs/capability"
+            }
+          ]
         },
         "capabilities": {
           "$ref": "#/$defs/openrouter_capabilities"
@@ -51,18 +58,20 @@
       "type": "string",
       "pattern": "^claude-[a-z0-9.-]+(\\[1m\\])?$"
     },
-    "harness_ref": {
-      "description": "What plain claude's --model takes: a tier alias (haiku, sonnet, opus, fable) the harness binds to its current model of that tier, or a native Claude id.",
-      "type": "string",
-      "pattern": "^(haiku|sonnet|opus|fable|claude-[a-z0-9.-]+(\\[1m\\])?)$"
-    },
     "openrouter_layer": {
-      "description": "The broker path's choices for this layer: the session and any class, as OpenRouter ids. The same as the flat `session`/`capabilities`, spelled under its provider.",
+      "description": "The broker path's choices for this layer: the session (an OpenRouter id, or a class) and any class, as OpenRouter ids. The same as the flat `session`/`capabilities`, spelled under its provider.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "session": {
-          "$ref": "#/$defs/model_id"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/model_id"
+            },
+            {
+              "$ref": "#/$defs/capability"
+            }
+          ]
         },
         "capabilities": {
           "$ref": "#/$defs/openrouter_capabilities"
@@ -83,48 +92,62 @@
         "code-high": {
           "$ref": "#/$defs/model_id"
         },
-        "review": {
+        "code-plan": {
+          "$ref": "#/$defs/model_id"
+        },
+        "code-review": {
           "description": "The merged value MUST be one of routing/policies/review-grade.json; lint and the launcher both refuse otherwise.",
           "$ref": "#/$defs/model_id"
         }
       }
     },
     "anthropic_layer": {
-      "description": "Plain claude's choices for this layer. `session` is what --model receives. `aliases` binds a tier alias to a native id, exported as that alias's ANTHROPIC_DEFAULT_*_MODEL for the whole session — a coding class rides its alias (runtime/claude-code/aliases.json), so binding `opus` is how code-high is pinned here. `capabilities.review` is the reviewer's pin, applied through its agent file rather than the fable export, so a hand `/model fable` stays the hand's; it MUST be review-grade.",
+      "description": "Plain claude's choices for this layer: the session (a native Claude id, or a class) and any class, as native Claude ids. A coding class's pin is exported for the tier it rides (ANTHROPIC_DEFAULT_*_MODEL, session-wide); code-review's reaches the reviewer's agent file and MUST be review-grade.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "session": {
-          "$ref": "#/$defs/harness_ref"
-        },
-        "aliases": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "haiku": {
+          "oneOf": [
+            {
               "$ref": "#/$defs/native_id"
             },
-            "sonnet": {
-              "$ref": "#/$defs/native_id"
-            },
-            "opus": {
-              "$ref": "#/$defs/native_id"
-            },
-            "fable": {
-              "$ref": "#/$defs/native_id"
+            {
+              "$ref": "#/$defs/capability"
             }
-          }
+          ]
         },
         "capabilities": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "review": {
+            "code-low": {
+              "$ref": "#/$defs/native_id"
+            },
+            "code-medium": {
+              "$ref": "#/$defs/native_id"
+            },
+            "code-high": {
+              "$ref": "#/$defs/native_id"
+            },
+            "code-plan": {
+              "$ref": "#/$defs/native_id"
+            },
+            "code-review": {
               "$ref": "#/$defs/native_id"
             }
           }
         }
       }
+    },
+    "capability": {
+      "description": "A capability class, meaning that class's model on the provider.",
+      "enum": [
+        "code-low",
+        "code-medium",
+        "code-high",
+        "code-plan",
+        "code-review"
+      ]
     }
   },
   "properties": {

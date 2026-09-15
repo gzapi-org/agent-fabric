@@ -50,7 +50,8 @@ mkfabric() {
     rm -rf "$FABRIC" "$STATE" "$SANDBOX/repo"
     mkdir -p "$FABRIC/runtime/openrouter" "$FABRIC/runtime/claude-code" "$FABRIC/tools/fabric" "$FABRIC/projects"
     cp -r "$REAL_ROOT/routing" "$FABRIC/routing"
-    cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$FABRIC/runtime/claude-code/"
+    cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
+    cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
     cp "$REAL_ROOT/runtime/identity.py" "$FABRIC/runtime/"
     cp "$REAL_ROOT/tools/fabric/routing.py" "$REAL_ROOT/tools/fabric/workingcopy.py" "$FABRIC/tools/fabric/"
     cp "$REAL_ROOT/projects/registry.json" "$FABRIC/projects/"
@@ -108,10 +109,11 @@ grep -q "ANTHROPIC_DEFAULT_SONNET_MODEL=vendor/agent-medium" <<<"$out" && ok "ag
 grep -q "session : vendor/local-session" <<<"$out" && ok "the local override wins over the agent row" || bad "local override ignored" "$out"
 
 echo "launch: the review gate"
-mkfabric; printf '%s\n' '{"capabilities":{"review":"anthropic/claude-opus-5"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+mkfabric; printf '%s\n' '{"capabilities":{"code-review":"anthropic/claude-opus-5"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5$" <<<"$out" && ok "another review-grade model in the local override is allowed and rides the fable export" || bad "review-grade override refused" "$out"
-mkfabric; printf '%s\n' '{"capabilities":{"review":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+[[ $rc -eq 0 ]] && grep -q "code-review : anthropic/claude-opus-5  shim -  => anthropic/claude-opus-5  (pinned in the agent file" <<<"$out" && ! grep -q "ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5" <<<"$out" && ok "another review-grade model in the local override is allowed; it reaches the reviewer file, never the fable export (code-plan's)" || bad "review-grade override refused" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the fable export is code-plan's" || bad "fable export not code-plan's" "$out"
+mkfabric; printf '%s\n' '{"capabilities":{"code-review":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 run_err --print; [[ $? -ne 0 ]] && ok "a review model outside review-grade.json in the local override is REFUSED" || bad "review gate bypassed by local override"
 mkfabric; printf '%s\n' '{"capabilities":{"code-high":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
@@ -223,14 +225,27 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "--print exits 0" || bad "rc=$rc" "$out"
 grep -q "provider anthropic)" <<<"$out" && ok "the header names the provider" || bad "provider not in header" "$out"
 grep -q "session : claude-sonnet-5$" <<<"$out" && ok "the session is the profile's model spoken natively (anthropic/ dropped)" || bad "session not native" "$out"
-grep -q "review      : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
-grep -q "code-high   : opus  (harness default for the alias)" <<<"$out" && ok "a tier alias in the column is left to the harness" || bad "alias treated as a pin" "$out"
-! grep -q "export ANTHROPIC_DEFAULT_" <<<"$out" && ok "no tier is exported on plain claude — a /model fable stays fable" || bad "a tier export on vanilla" "$out"
+grep -q "code-review : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
+grep -q "code-high   : claude-opus-5  (exported for its tier; from capabilities.providers.anthropic)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "a coding class pinned by the column is exported for the tier it rides (the top of each class)" || bad "column pin not exported" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "the fable export is code-plan's pin; the reviewer never rides it" || bad "fable export wrong" "$out"
+python3 - "$FABRIC/routing/capabilities.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1])); d["providers"]["anthropic"]["models"]["code-high"] = None
+json.dump(d, open(sys.argv[1], "w"))
+PY2
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+grep -q "code-high   : opus  (harness default for its tier)" <<<"$out" && ! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "a null in the column is the harness's own tier: nothing exported for it" || bad "null column not the harness's" "$out"
+mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-EXECCED:--model claude-sonnet-5 --version" <<<"$out" && ok "execs plain claude with the native session model" || bad "no plain-claude exec" "$out"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
-grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=$" <<<"$out" && ok "FABLE not exported: the alias stays the harness's for the session" || bad "fable pin exported on vanilla" "$out"
-grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=$" <<<"$out" && ok "OPUS left unset for the harness" || bad "opus set on vanilla" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
+grep -q "^model: claude-opus-5\[1m\]$" "$HOME/.claude/agents/code-review.md" && ok "the exec installed the reviewer file for plain claude: claude-opus-5[1m]" || bad "reviewer file not installed for anthropic" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
+out="$(run --version 2>&1)"
+grep -q "^model: z-ai/glm-5.3@preset/glm2claude-shim$" "$HOME/.claude/agents/code-review.md" && ok "…and a broker launch rewrites it with the composite: one file, one launch at a time" || bad "reviewer file not installed for the broker" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
+grep -q "^model: fable$" "$HOME/.claude/agents/code-plan.md" && ok "code-plan keeps its alias line: its pin is the export" || bad "code-plan file pinned" "$(head -5 "$HOME/.claude/agents/code-plan.md")"
+out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=$" <<<"$out" && ok "no base URL: Anthropic direct" || bad "base URL set" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROVIDER=anthropic" <<<"$out" && ok "provider stamped" || bad "no provider stamp" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped on vanilla too" || bad "no profile stamp" "$out"
@@ -242,32 +257,36 @@ mkfabric
 profile defaults '{"session": "z-ai/glm-5.3", "providers": {}}'
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q "not an Anthropic model and no profile layer names one" <<<"$out" && ok "a non-Anthropic session with no Anthropic layer is refused on vanilla, not mistranslated" || bad "foreign session admitted" "$out"
-# A layer is per provider: plain claude's session, alias bindings and
-# review pin are named in its own vocabulary and never leak to the broker.
+# A layer is per provider: plain claude's session and pins are named in
+# its own vocabulary (the class, a native id) and never leak to the broker.
 mkfabric
-printf '%s\n' '{"providers":{"openrouter":{"session":"z-ai/glm-5.3"},"anthropic":{"session":"opus","aliases":{"opus":"claude-opus-5[1m]","haiku":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+printf '%s\n' '{"providers":{"openrouter":{"session":"z-ai/glm-5.3"},"anthropic":{"session":"code-plan","capabilities":{"code-high":"claude-opus-5[1m]","code-low":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : opus" <<<"$out" && ! grep -q "is not an Anthropic model" <<<"$out" && ok "plain claude's session is providers.anthropic.session, an alias, with no skip to report" || bad "per-provider session not honoured" "$out"
-grep -q "code-high   : claude-opus-5\[1m\]  (the opus alias, exported; from local)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "a bound alias is exported as ANTHROPIC_DEFAULT_<ALIAS>_MODEL and the class riding it says so" || bad "alias binding not exported" "$out"
-grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5" <<<"$out" && ! grep -q "ANTHROPIC_DEFAULT_SONNET_MODEL\|ANTHROPIC_DEFAULT_FABLE_MODEL" <<<"$out" && ok "only the bound aliases are exported: sonnet and fable stay the harness's" || bad "unbound alias exported" "$out"
+[[ $rc -eq 0 ]] && grep -q "session : claude-fable-5-1  (the code-plan class)" <<<"$out" && ! grep -q "is not an Anthropic model" <<<"$out" && ok "plain claude's session is providers.anthropic.session, a class, resolved on this provider, with no skip to report" || bad "per-provider session not honoured" "$out"
+grep -q "code-high   : claude-opus-5\[1m\]  (exported for its tier; from local)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "a local pin of a coding class is exported for the tier it rides and says where it came from" || bad "local pin not exported" "$out"
+grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5$" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5$" <<<"$out" && ok "the other tiers keep the column's pins" || bad "column pins lost under a local layer" "$out"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the same file on the broker: its own session, and the alias binding does not reach the broker's exports" || bad "anthropic layer leaked to the broker" "$out"
-printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"review":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the same file on the broker: its own session, and the native pins do not reach the broker's exports" || bad "anthropic layer leaked to the broker" "$out"
+printf '%s\n' '{"session":"code-high"}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim  (the code-high class)" <<<"$out" && ok "a flat class-named session is that class's composite on the broker" || bad "class session on the broker" "$out"
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "session : claude-opus-5  (the code-high class)" <<<"$out" && ok "…and that class's native pin on plain claude" || bad "class session on vanilla" "$out"
+printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"code-review":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q "not in routing/policies/review-grade.json" <<<"$out" && ok "a local review pin outside the grade is refused on vanilla" || bad "ungraded local review pin admitted" "$out"
-printf '%s\n' '{"providers":{"anthropic":{"aliases":{"opus":"z-ai/glm-5.3"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"code-high":"z-ai/glm-5.3"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
-[[ $rc -ne 0 ]] && grep -q "providers.anthropic.aliases.opus is 'z-ai/glm-5.3', not a native Claude id" <<<"$out" && ok "an alias bound to a broker id is refused by name" || bad "wrong vocabulary admitted" "$out"
+[[ $rc -ne 0 ]] && grep -q "providers.anthropic.capabilities.code-high is 'z-ai/glm-5.3', not a native Claude id" <<<"$out" && ok "a class pinned to a broker id on plain claude is refused by name" || bad "wrong vocabulary admitted" "$out"
 out="$(run --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && ok "…on the broker path too: one malformed layer refuses every launch" || bad "malformed anthropic layer admitted on the broker" "$out"
-mkfabric
-profile agents "$LOGIN" '{"session": "z-ai/glm-5.3"}'
+printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"code-high":"opus"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : claude-sonnet-5" <<<"$out" && grep -q "merged session z-ai/glm-5.3 is not an Anthropic model; the defaults layer's is used" <<<"$out" && ok "a broker-only agent override is skipped on vanilla and the skip is shown" || bad "broker override blocked the vanilla launch" "$out"
+[[ $rc -ne 0 ]] && grep -q "not a native Claude id" <<<"$out" && ok "a tier alias is not a model: the class is the vocabulary, the alias is the adapter's" || bad "alias admitted as a model" "$out"
 mkfabric
 python3 - "$FABRIC/routing/capabilities.json" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1])); d["providers"]["anthropic"]["models"]["review"] = "claude-haiku-4-5"
+d = json.load(open(sys.argv[1])); d["providers"]["anthropic"]["models"]["code-review"] = "claude-haiku-4-5"
 json.dump(d, open(sys.argv[1], "w"))
 PY
 out="$(run --provider anthropic --print 2>&1)"; rc=$?

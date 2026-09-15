@@ -10,11 +10,11 @@
 #   <projects>/CLAUDE.md               3 lines; imports agent-fabric/CLAUDE.md
 #   <projects>/.claude/settings.json   hooks + status line pointing at agent-fabric
 #   ~/.claude/commands/role.md         /role for this account, from runtime/claude-code/commands/
-#   ~/.claude/agents/{code-*,blind-reviewer}.md
+#   ~/.claude/agents/{code-*,code-review}.md
 #                                      the capability-class agent files, from runtime/claude-code/agents/,
 #                                      via install-agent-files.sh (the review pin, merged for this login)
 #   ~/.claude/hooks/review-bash-guard.sh
-#                                      the review class's Bash fence; the blind-reviewer agent file
+#                                      the review class's Bash fence; the code-review agent file
 #                                      looks here when the launch project has no .claude/ copy
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
 #   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md

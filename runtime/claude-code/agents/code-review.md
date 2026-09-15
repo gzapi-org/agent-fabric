@@ -1,6 +1,6 @@
 ---
-name: blind-reviewer
-description: "The REVIEW CLASS: adversarial substitute reviewer for a PR the automated reviewer will not cover — dispatched at step 26 of the canonical lifecycle (judging a review claim) or when pr-review-status.sh reports a DECLINE. Runs deliberately blind: it is given a repository path and a base..head range, never the reasoning behind the change. Standing authorisation for the whole class — model fable, no per-dispatch ask, no worktree (the tree is read-only for it), description beginning review or re-review; the dispatch guard denies any other shape. The model is the `fable` TIER ALIAS, deliberately, and not `opus`: the code-high class rides the opus alias, and on the broker path (runtime/openrouter/launch) one alias carries one exported model, so a reviewer on opus follows code-high onto whatever that class resolves to — verified live 2026-09-13, it ran on GLM. A full model id is not an option: the Agent tool's `model` field accepts only the four aliases. `fable` is the alias no coding class uses; the launcher exports the review model (routing/capabilities.json, gated by routing/policies/review-grade.json — architect-cto's choice, GLM 5.3 since 2026-09-13) under it and refuses a profile that resolves the review class to anything outside that set. On vanilla claude the alias binds to the harness's current Fable tier."
+name: code-review
+description: "The REVIEW CLASS (capability code-review): adversarial substitute reviewer for a PR the automated reviewer will not cover — dispatched at step 26 of the canonical lifecycle (judging a review claim) or when pr-review-status.sh reports a DECLINE. Runs deliberately blind: it is given a repository path and a base..head range, never the reasoning behind the change. Standing authorisation for the whole class — model fable, no per-dispatch ask, no worktree (the tree is read-only for it), description beginning review or re-review; the dispatch guard denies any other shape. The dispatch says `fable` (the tier alias the class rides; the Agent tool accepts only the four aliases) and, under a fabric launch, the guard drops it so the `model:` line of this file decides — install-agent-files.sh writes the model routing resolves for code-review there, for the launch's provider (routing/capabilities.json and the profile layers, gated by routing/policies/review-grade.json: claude-opus-5[1m] on plain claude, GLM 5.3 on the broker, architect-cto's choice). Never the fable export: code-plan rides fable too, and through the export the reviewer would follow it, as it once followed code-high on opus (verified live 2026-09-13). Unlaunched, the alias binds to the harness's current Fable tier."
 model: fable
 tools: Read, Glob, Grep, Bash
 hooks:
@@ -13,7 +13,7 @@ hooks:
           statusMessage: "Review class: checking the command is read-only…"
 ---
 
-# Blind reviewer
+# Code review: the blind reviewer
 
 You are reviewing code you did not write, for a session whose reasoning
 you deliberately do not have. **That absence is the instrument, not a

@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "description": "The Claude Code adapter's binding of capability classes to harness tier aliases. The Agent tool's `model` field accepts ONLY the tier aliases (haiku, sonnet, opus, fable) \u2014 never a full model id, verified live 2026-09-13 \u2014 so every class rides an alias, and the broker launcher exports each under its ANTHROPIC_DEFAULT_*_MODEL variable: one alias carries one model per launch. The review class rides `fable`, the one alias no coding class uses, so that on the broker path it never shares code-high's export (both on `opus`, the reviewer would have followed code-high onto the cheap tier \u2014 which is exactly what happened before this binding). Harness-specific by nature; nothing outside runtime/ reads this file.",
+  "description": "The Claude Code adapter's binding of capability classes to harness tier aliases — internal to runtime/: the class is the vocabulary users see everywhere else, the alias is how this harness spells a tier. The Agent tool's `model` field accepts ONLY the tier aliases (haiku, sonnet, opus, fable) — never a full model id, verified live 2026-09-13 — so every class rides an alias, and the launcher exports each coding class under its alias's ANTHROPIC_DEFAULT_*_MODEL variable: one alias carries one export per launch. code-plan rides fable, the top tier. code-review rides fable too, for the dispatch's `model:` check only: its model is never the fable export (that would make the reviewer follow code-plan, as it once followed code-high on opus — 2026-09-13) but reaches its agent file, on both paths, and the dispatch guard drops the dispatch's alias under a fabric launch so the file decides.",
   "aliases": {
     "code-low": "haiku",
     "code-medium": "sonnet",
     "code-high": "opus",
-    "review": "fable"
+    "code-plan": "fable",
+    "code-review": "fable"
   },
   "env": {
     "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -17,6 +18,10 @@
     "code-low": "agents/code-low.md",
     "code-medium": "agents/code-medium.md",
     "code-high": "agents/code-high.md",
-    "review": "agents/blind-reviewer.md"
-  }
+    "code-plan": "agents/code-plan.md",
+    "code-review": "agents/code-review.md"
+  },
+  "file_pinned": [
+    "code-review"
+  ]
 }

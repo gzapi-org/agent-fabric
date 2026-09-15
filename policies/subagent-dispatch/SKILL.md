@@ -1,6 +1,6 @@
 ---
 name: subagent-dispatch
-description: "Why every writing subagent dispatch in this repo pins `model` and `isolation: \"worktree\"`, why the REVIEW CLASS (blind-reviewer, description beginning review/re-review, fable, NO isolation) is a standing authorisation the dispatch guard enforces rather than asks about, what the PreToolUse hook cannot see (a Workflow script's agent() calls), how worktree isolation actually behaves — what an agent sees, what survives, and why collection is a copy — and the review brief (base..head, revert test, quoted hunks, pre-existing section, re-review scoped to new hunks). Load it before dispatching agents or writing a Workflow script, when an agent reports files that \"do not exist\", when a worktree or worktree-agent branch is left behind, or when tempted to merge an agent's branch."
+description: "Why every writing subagent dispatch in this repo pins `model` and `isolation: \"worktree\"`, why the REVIEW CLASS (code-review, description beginning review/re-review, fable, NO isolation) is a standing authorisation the dispatch guard enforces rather than asks about, what the PreToolUse hook cannot see (a Workflow script's agent() calls), how worktree isolation actually behaves — what an agent sees, what survives, and why collection is a copy — and the review brief (base..head, revert test, quoted hunks, pre-existing section, re-review scoped to new hunks). Load it before dispatching agents or writing a Workflow script, when an agent reports files that \"do not exist\", when a worktree or worktree-agent branch is left behind, or when tempted to merge an agent's branch."
 ---
 
 # Why dispatch looks like this
@@ -36,7 +36,8 @@ tier decision is where the bill is actually made:
 | `code-low` | `haiku` | mechanical, well-specified work: pattern-following edits, extraction, formatting, single-file lookups, structured search |
 | `code-medium` | `sonnet` | judgement work: multi-file reasoning, prose that must hold a convention |
 | `code-high` | `opus` | only on the user's explicit instruction for that dispatch (the guard asks) |
-| `blind-reviewer` | `fable` | the review class, its own export; see below |
+| `code-plan` | `fable` | planning and design reasoning on the top tier; the guard asks, as for `code-high` |
+| `code-review` | `fable` | the review class; shares the tier with `code-plan` but never its export — its model reaches its agent file; see below |
 
 **The class decides the tier, and the call says both.** The binding is
 `runtime/claude-code/aliases.json` — the same file the broker launcher
@@ -67,17 +68,22 @@ The Agent tool's `model` field accepts ONLY the four harness aliases —
 not a full Claude model id, not a provider-qualified vendor model — so a
 dispatch literally cannot name a model. The mapping lives in agent-fabric, not in
 settings: `routing/capabilities.json` binds each capability class
-(`code-low`, `code-medium`, `code-high`, `review`) to a concrete model
-per provider, `routing/shims.json` binds a model family to its
-compatibility shim, and `runtime/openrouter/launch` resolves this
-agent's layers in `routing/profiles.json` (by role, by login), refuses a
+(`code-low`, `code-medium`, `code-high`, `code-plan`, `code-review`) to a
+concrete model per provider, `routing/shims.json` binds a model family
+to its compatibility shim, and `runtime/openrouter/launch` resolves this
+agent's layers in `routing/profiles.json` (by role, by login, and the
+login's own `model-profile.local.json` — `bin/fabric-model`), refuses a
 review model outside `routing/policies/review-grade.json`, and exports
-`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL` before `exec ori claude`
-— process env, which every subagent inherits. The review class rides the
-`fable` alias — the one no coding class uses — so it never shares
-code-high's `opus` export; the Agent tool accepts only the tier aliases,
-so a full model id cannot be named at dispatch (a reviewer dispatched on
-`opus` on the broker path ran on GLM, 2026-09-13).
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL` before the exec —
+process env, which every subagent inherits — on the broker and on plain
+`claude` alike. The review class rides `fable` with `code-plan`, and one
+alias carries one export, so its model is NOT the fable export (through
+it the reviewer would follow code-plan, as it once followed code-high on
+`opus`: a reviewer dispatched on `opus` on the broker path ran on GLM,
+2026-09-13); it is written into the reviewer's agent file at launch, for
+that launch's provider, and the guard drops the dispatch's alias under a
+fabric launch so the file decides. The Agent tool accepts only the tier
+aliases, so a full model id cannot be named at dispatch.
 `modelOverrides` is NOT used: it is taken as the whole map from the
 highest-precedence scope that sets it, so any scope both launch paths
 share binds both, and it would beat the env pins anyway. The vanilla
@@ -123,12 +129,12 @@ So the carve-out is structural, and it is a CLASS with four conditions,
 enforced by `.claude/agent-dispatch-guard.sh` (the `PreToolUse` hook for
 `Agent`; decision table in `.claude/test_agent-dispatch-guard.sh`):
 
-1. `subagent_type: "blind-reviewer"` — a file in the repo
-   (`.claude/agents/blind-reviewer.md`), reviewable like any other,
+1. `subagent_type: "code-review"` — a file in the repo
+   (`.claude/agents/code-review.md`), reviewable like any other,
    whose charter is review-only;
 2. `description` that BEGINS with `review` or `re-review`;
-3. `model: "fable"` — the alias no coding class rides, so on the broker
-   path its export is the review model and nothing else's;
+3. `model: "fable"` — the review class's alias, checked and then, under
+   a fabric launch, removed so the agent file's pinned model applies;
 4. **no `isolation`** at all.
 
 All four, or the dispatch is **denied** — never asked. These were
@@ -136,18 +142,19 @@ learned one at a time, and each was load-bearing on its own:
 
 - **The model condition was missing when this first shipped.** Keyed on
   the type alone, the branch returned before the premium check for ANY
-  model — `blind-reviewer` with any alias skipped the prompt while the
+  model — `code-review` with any alias skipped the prompt while the
   rule authorised one alias only. The same hole runs the other way: a
   `sonnet` review would take the exemption and evade the rule beside
   it. So the class REQUIRES its one alias, and denies anything else
   rather than asking: a review is not a retryable step, its failure
   mode is a green PR that merges, and "this review looks small" is
   exactly the moment a different tier is tempting and wrong. Which
-  alias: `fable`, not `opus` — code-high rides `opus`, and on the broker
-  path one alias is one export, so a reviewer on `opus` is code-high's
-  model. What `fable` resolves to is `routing/capabilities.json`, gated
-  by `routing/policies/review-grade.json` (architect-cto's decision, not
-  the dispatcher's).
+  alias: `fable`, not `opus` — code-high rides `opus`, and one alias is
+  one export, so a reviewer on `opus` is code-high's model. What the
+  reviewer runs on is `code-review` in `routing/capabilities.json` (or a
+  profile layer), gated by `routing/policies/review-grade.json`
+  (architect-cto's decision, not the dispatcher's), through its agent
+  file — never the `fable` export, which is `code-plan`'s.
 - **The description prefix** stops a writing dispatch from wearing the
   review type. Another project's guard matched `review` ANYWHERE in the
   description and let "Address review feedback" through — a writing
@@ -176,7 +183,7 @@ what the type would otherwise allow.
 
 Two properties of the guard matter and are pinned by the test file:
 
-- The review branch sits INSIDE the type check, so a `blind-reviewer`
+- The review branch sits INSIDE the type check, so a `code-review`
   dispatch missing the prefix, the model or carrying an isolation is
   **denied** with a reason naming which; and a general agent whose
   description begins with `review` is denied too — reviews use the

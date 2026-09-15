@@ -13,7 +13,7 @@ Two independent dimensions, one derived artifact:
     routing.py check                                  # validate the canonical files
     routing.py shim <model>                           # the family shim a bare model id needs, if any
 
-    routing.py pins [--me]                            # classes the anthropic column pins: <class> <alias> <id>
+    routing.py pins [--provider P] [--me]             # the file-pinned classes (the review class): <class> <alias> <model>
 
 Profile layers (routing/profiles.json and the agent's local override) may
 override a class's model and name the session's; the shim is looked up on
@@ -75,7 +75,7 @@ def load_shims(root: str | None = None) -> list[dict[str, Any]]:
 
 def load_review_grade(root: str | None = None) -> dict[str, Any]:
     path = os.path.join(routing_dir(root), "policies", "review-grade.json")
-    return _load(path) if os.path.exists(path) else {"capability": "review", "models": []}
+    return _load(path) if os.path.exists(path) else {"capability": "code-review", "models": []}
 
 
 def load_profiles(root: str | None = None) -> dict[str, Any]:
@@ -104,7 +104,17 @@ def composite(model: str, shim: str | None) -> str:
 PROVIDERS = ("openrouter", "anthropic")
 LAYERS = ("defaults", "role", "agent", "local")
 LOCAL_OVERRIDE = "model-profile.local.json"
-ALIASES = ("haiku", "sonnet", "opus", "fable")
+
+
+def load_aliases(root: str | None = None) -> dict[str, Any]:
+    return _load(os.path.join(root or FABRIC_ROOT, "runtime", "claude-code", "aliases.json"))
+
+
+def file_pinned(root: str | None = None) -> list[str]:
+    """Classes whose model reaches their agent file instead of a tier
+    export (runtime/claude-code/aliases.json `file_pinned`): the review
+    class, so that it never follows the class sharing its alias."""
+    return list(load_aliases(root).get("file_pinned") or [])
 
 
 def _model_id(value: Any, where: str) -> str:
@@ -119,13 +129,6 @@ def _native_id(value: Any, where: str) -> str:
     return value
 
 
-def _harness_ref(value: Any, where: str) -> str:
-    if not isinstance(value, str) or not (HARNESS_REF.fullmatch(value) or NATIVE_ID.fullmatch(value)):
-        raise ValueError(f"{where} is {value!r}, neither a harness tier alias ({', '.join(ALIASES)}) "
-                         "nor a native Claude id (claude-…)")
-    return value
-
-
 def _object(value: Any, where: str) -> dict[str, Any]:
     if value is None:
         return {}
@@ -134,59 +137,67 @@ def _object(value: Any, where: str) -> dict[str, Any]:
     return value
 
 
-def normalize_layer(layer: Any, where: str = "") -> dict[str, dict[str, Any]]:
+def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dict[str, dict[str, Any]]:
     """One layer, as one object per provider, every value validated in that
     provider's vocabulary; a malformed value is a ValueError naming the
     field (the committed file is schema-checked, the local override is
     not, and a null there once reached `--model` as the string "None").
 
-      openrouter: {session: <model id>, capabilities: {<class>: <model id>}}
-      anthropic:  {session: <alias|native id>, aliases: {<alias>: <native id>},
-                   capabilities: {review: <native id>}}
+      openrouter: {session: <model id | class>, capabilities: {<class>: <model id>}}
+      anthropic:  {session: <native id | class>, capabilities: {<class>: <native id>}}
 
-    The flat `session` and `capabilities` are the OpenRouter form; a flat
-    `session` of `anthropic/<id>` also names `<id>` for plain claude
-    unless `providers.anthropic.session` says otherwise. On plain claude
-    a coding class rides a tier alias, so it is set by binding that alias
-    (`aliases.opus`), and the four exports are the four aliases; the
-    review class alone is a capability there, because its pin does not
-    rebind an alias (it reaches the reviewer's agent file)."""
+    The vocabulary is the capability class and the provider's own model
+    id; a harness tier alias is never named here — which alias a class
+    rides is the Claude Code adapter's (runtime/claude-code/aliases.json).
+    A session may name a class, meaning that class's model on the
+    provider. The flat `session` and `capabilities` are the OpenRouter
+    form; a flat `session` of `anthropic/<id>` also names `<id>` for
+    plain claude unless `providers.anthropic.session` says otherwise."""
     prefix = where + "." if where else ""
     layer = _object(layer, where or "the profile layer")
-    out: dict[str, dict[str, Any]] = {"openrouter": {"capabilities": {}},
-                                      "anthropic": {"aliases": {}, "capabilities": {}}}
+    classes = set(load_capabilities(root)["classes"])
+
+    def session(provider: str, value: Any, field: str) -> str:
+        if isinstance(value, str) and value in classes:
+            return value
+        return (_model_id if provider == "openrouter" else _native_id)(value, field) if provider == "openrouter" \
+            else _native_or_class(value, field)
+
+    def _native_or_class(value: Any, field: str) -> str:
+        if not isinstance(value, str) or not NATIVE_ID.fullmatch(value):
+            raise ValueError(f"{field} is {value!r}, neither a capability class ({', '.join(sorted(classes))}) "
+                             "nor a native Claude id (claude-…)")
+        return value
+
+    def klass(name: str, field: str) -> str:
+        if name not in classes:
+            raise ValueError(f"{field}: {name!r} is not a capability class ({', '.join(sorted(classes))})")
+        return name
+
+    out: dict[str, dict[str, Any]] = {p: {"capabilities": {}} for p in PROVIDERS}
     if "session" in layer:
-        value = _model_id(layer["session"], prefix + "session")
+        value = session("openrouter", layer["session"], prefix + "session")
         out["openrouter"]["session"] = value
         if value.startswith("anthropic/"):
             out["anthropic"]["session"] = value[len("anthropic/"):]
-    for klass, model in _object(layer.get("capabilities"), prefix + "capabilities").items():
-        out["openrouter"]["capabilities"][klass] = _model_id(model, f"{prefix}capabilities.{klass}")
+        elif value in classes:
+            out["anthropic"]["session"] = value
+    for name, model in _object(layer.get("capabilities"), prefix + "capabilities").items():
+        out["openrouter"]["capabilities"][klass(name, prefix + "capabilities")] = _model_id(model, f"{prefix}capabilities.{name}")
     for provider, body in _object(layer.get("providers"), prefix + "providers").items():
         p = f"{prefix}providers.{provider}"
         if provider not in PROVIDERS:
             raise ValueError(f"{p}: unknown provider; known: {', '.join(PROVIDERS)}")
         body = _object(body, p)
-        if provider == "openrouter":
-            if "session" in body:
-                out[provider]["session"] = _model_id(body["session"], p + ".session")
-            for klass, model in _object(body.get("capabilities"), p + ".capabilities").items():
-                out[provider]["capabilities"][klass] = _model_id(model, f"{p}.capabilities.{klass}")
-            if "aliases" in body:
-                raise ValueError(f"{p}.aliases: the broker path binds classes, not tier aliases; "
-                                 "set capabilities.<class>")
-            continue
+        for key in body:
+            if key not in ("session", "capabilities"):
+                raise ValueError(f"{p}.{key}: not a field of a provider layer (session, capabilities); "
+                                 "a class is set under capabilities, a tier alias is never named")
         if "session" in body:
-            out[provider]["session"] = _harness_ref(body["session"], p + ".session")
-        for alias, model in _object(body.get("aliases"), p + ".aliases").items():
-            if alias not in ALIASES:
-                raise ValueError(f"{p}.aliases.{alias}: not a tier alias ({', '.join(ALIASES)})")
-            out[provider]["aliases"][alias] = _native_id(model, f"{p}.aliases.{alias}")
-        for klass, model in _object(body.get("capabilities"), p + ".capabilities").items():
-            if klass != "review":
-                raise ValueError(f"{p}.capabilities.{klass}: on plain claude a coding class rides a tier "
-                                 "alias; bind the alias instead (providers.anthropic.aliases.<alias>)")
-            out[provider]["capabilities"][klass] = _native_id(model, f"{p}.capabilities.{klass}")
+            out[provider]["session"] = session(provider, body["session"], p + ".session")
+        check = _model_id if provider == "openrouter" else _native_id
+        for name, model in _object(body.get("capabilities"), p + ".capabilities").items():
+            out[provider]["capabilities"][klass(name, p + ".capabilities")] = check(model, f"{p}.capabilities.{name}")
     return out
 
 
@@ -203,18 +214,16 @@ def layers(role: str | None, agent: str | None, local: dict[str, Any] | None = N
 def merged_provider(provider: str, role: str | None = None, agent: str | None = None,
                     local: dict[str, Any] | None = None, root: str | None = None) -> dict[str, Any]:
     """One provider's merged choices with their provenance, each value as
-    {"model", "source"}: {"session": … | None, "aliases": {alias: …},
-    "capabilities": {class: …}}. Per key, the nearest layer naming it
-    wins. A malformed layer raises ValueError (normalize_layer)."""
+    {"model", "source"}: {"session": … | None, "capabilities": {class: …}}.
+    Per key, the nearest layer naming it wins. A malformed layer raises
+    ValueError (normalize_layer)."""
     if provider not in PROVIDERS:
         raise KeyError(f"unknown provider {provider!r}; known: {list(PROVIDERS)}")
-    out: dict[str, Any] = {"session": None, "aliases": {}, "capabilities": {}}
+    out: dict[str, Any] = {"session": None, "capabilities": {}}
     for name, body in layers(role, agent, local, root):
-        norm = normalize_layer(body, name)[provider]
+        norm = normalize_layer(body, name, root)[provider]
         if "session" in norm:
             out["session"] = {"model": norm["session"], "source": name}
-        for alias, model in norm.get("aliases", {}).items():
-            out["aliases"][alias] = {"model": model, "source": name}
         for klass, model in norm["capabilities"].items():
             out["capabilities"][klass] = {"model": model, "source": name}
     return out
@@ -242,13 +251,14 @@ def load_local(agent: str | None = None, path: str | None = None) -> dict[str, A
     return local
 
 
-def load_aliases(root: str | None = None) -> dict[str, Any]:
-    return _load(os.path.join(root or FABRIC_ROOT, "runtime", "claude-code", "aliases.json"))
-
-
 def resolve(capability: str, provider: str = "openrouter", role: str | None = None,
             agent: str | None = None, local: dict[str, Any] | None = None,
             root: str | None = None, harness: str = "claude-code") -> dict[str, Any]:
+    """One class on one provider: {model, shim, composite, source, alias,
+    pinned, via}. `alias` is the tier the class rides (the adapter's);
+    `via` says how the model reaches the class — "export" (the alias's
+    ANTHROPIC_DEFAULT_*_MODEL), "file" (its agent file), or "harness"
+    (nothing pinned: the harness's own model of that tier)."""
     caps = load_capabilities(root)
     if capability not in caps["classes"]:
         raise KeyError(f"unknown capability class {capability!r}; known: {sorted(caps['classes'])}")
@@ -257,46 +267,48 @@ def resolve(capability: str, provider: str = "openrouter", role: str | None = No
         raise KeyError(f"unknown provider {provider!r}; known: {sorted(caps['providers'])}")
     model = prov["models"].get(capability)
     source = f"capabilities.providers.{provider}"
-    merged = merged_provider(provider, role, agent, local, root)
-    override = merged["capabilities"].get(capability)
+    override = merged_provider(provider, role, agent, local, root)["capabilities"].get(capability)
     if override:
         model, source = override["model"], override["source"]
+    alias = (load_aliases(root).get("aliases") or {}).get(capability)
+    in_file = capability in file_pinned(root)
+    if prov["resolution"] == "harness":
+        if not model:
+            # Nothing pinned: the harness's own model of the tier — spelled
+            # as the alias, which is what plain claude takes.
+            if not alias:
+                raise KeyError(f"provider {provider!r} pins no model to {capability!r} and it rides no alias")
+            return {"capability": capability, "provider": provider, "model": alias, "shim": None,
+                    "composite": alias, "resolution": "harness", "source": "harness",
+                    "alias": alias, "pinned": False, "via": "harness"}
+        return {"capability": capability, "provider": provider, "model": model, "shim": None,
+                "composite": model, "resolution": "harness", "source": source,
+                "alias": alias, "pinned": True, "via": "file" if in_file else "export"}
     if not model:
         raise KeyError(f"provider {provider!r} binds no model to {capability!r}")
-    if prov["resolution"] == "harness":
-        # The class rides an alias (runtime/claude-code/aliases.json). An
-        # alias in the column leaves the tier to the harness unless the
-        # profile binds that alias, which the launcher exports as the
-        # alias's ANTHROPIC_DEFAULT_*_MODEL; a native id is a pin — the
-        # review class's reaches its agent file, a coding class's is the
-        # export of the alias it rides.
-        alias = (load_aliases(root).get("aliases") or {}).get(capability)
-        if HARNESS_REF.match(model) and not override:
-            bound = merged["aliases"].get(model)
-            if bound:
-                model, source = bound["model"], bound["source"]
-        return {"capability": capability, "provider": provider, "model": model, "shim": None,
-                "composite": model, "resolution": "harness", "source": source, "alias": alias,
-                "pinned": bool(NATIVE_ID.match(model))}
     shim = shim_for(model, load_shims(root), harness)
     return {"capability": capability, "provider": provider, "model": model, "shim": shim,
-            "composite": composite(model, shim), "resolution": "model-id", "source": source}
+            "composite": composite(model, shim), "resolution": "model-id", "source": source,
+            "alias": alias, "pinned": True, "via": "file" if in_file else "export"}
 
 
-def alias_exports(role: str | None = None, agent: str | None = None, local: dict[str, Any] | None = None,
-                  root: str | None = None) -> dict[str, dict[str, Any]]:
-    """Plain claude's exports: {alias: {"model", "source"}} — the profile's
-    alias bindings, and the column's native pin of a coding class riding
-    the alias. The review class is never here: its alias (fable) is also
-    the hand's tier, so its pin reaches the reviewer's agent file instead
-    (`pins`)."""
-    aliases = load_aliases(root).get("aliases") or {}
-    gated = load_review_grade(root).get("capability", "review")
-    out = dict(merged_provider("anthropic", role, agent, local, root)["aliases"])
-    column = (load_capabilities(root)["providers"].get("anthropic") or {}).get("models") or {}
-    for klass, alias in aliases.items():
-        if klass != gated and NATIVE_ID.match(column.get(klass) or "") and alias not in out:
-            out[alias] = {"model": column[klass], "source": "capabilities.providers.anthropic"}
+def exports(provider: str = "openrouter", role: str | None = None, agent: str | None = None,
+            local: dict[str, Any] | None = None, root: str | None = None) -> dict[str, dict[str, Any]]:
+    """What the launcher exports, {ALIAS_ENV_VAR: {"model", "class", "source"}}:
+    every class whose model reaches it through its alias's export — on the
+    broker every non-file class; on plain claude the pinned ones. Two
+    classes riding one alias cannot both export: only a file-pinned class
+    may share (check() enforces it), so this raises if it ever happens."""
+    aliases = load_aliases(root)
+    out: dict[str, dict[str, Any]] = {}
+    for klass, alias in (aliases.get("aliases") or {}).items():
+        res = resolve(klass, provider, role, agent, local, root)
+        if res["via"] != "export":
+            continue
+        var = aliases["env"][alias]
+        if var in out and out[var]["model"] != res["composite"]:
+            raise KeyError(f"{klass} and {out[var]['class']} both ride {alias} and would export different models")
+        out[var] = {"model": res["composite"], "class": klass, "source": res["source"], "alias": alias}
     return out
 
 
@@ -304,33 +316,37 @@ def resolve_session(role: str | None = None, agent: str | None = None,
                     local: dict[str, Any] | None = None, root: str | None = None,
                     harness: str = "claude-code", provider: str = "openrouter") -> dict[str, Any]:
     """The main agent's model, with its family shim on the broker path.
-    Separate from capability resolution: the session is not a class. Each
-    provider's session comes from the nearest layer naming one for it —
-    on plain claude that is `providers.anthropic.session` or a flat
-    `session` of `anthropic/<id>`; a broker-only layer (GLM) says nothing
-    about plain claude and is skipped, and the skip is reported. A model
-    of another vendor cannot run there, so none at all is refused rather
-    than mistranslated."""
+    Separate from capability resolution: the session is not a class, but
+    a layer may name one, meaning that class's model on the provider.
+    Each provider's session comes from the nearest layer naming one for
+    it — on plain claude that is `providers.anthropic.session` or a flat
+    `session` of `anthropic/<id>` (or a class); a broker-only layer (GLM)
+    says nothing about plain claude and is skipped, and the skip is
+    reported. A model of another vendor cannot run there, so none at all
+    is refused rather than mistranslated."""
     merged = merged_provider(provider, role, agent, local, root)
     entry = merged["session"]
-    if provider == "anthropic":
-        broker = merged_provider("openrouter", role, agent, local, root)["session"]
-        if not entry:
-            if broker:
-                raise KeyError(f"session model {broker['model']!r} is not an Anthropic model and no profile layer "
-                               "names one; plain claude cannot run it (set providers.anthropic.session, "
-                               "or a session of anthropic/<id>)")
-            raise KeyError("no session model: routing/profiles.json defaults must carry one for every provider")
-        native = entry["model"]
-        skipped = broker["model"] if broker and LAYERS.index(broker["source"]) > LAYERS.index(entry["source"]) else None
-        return {"model": native, "shim": None, "composite": native,
-                "openrouter_id": "anthropic/" + native if NATIVE_ID.match(native) else None,
-                "source": entry["source"], "skipped": skipped}
+    broker = merged_provider("openrouter", role, agent, local, root)["session"] if provider == "anthropic" else None
     if not entry:
+        if broker:
+            raise KeyError(f"session model {broker['model']!r} is not an Anthropic model and no profile layer "
+                           "names one; plain claude cannot run it (set providers.anthropic.session: a class "
+                           "or a native id)")
         raise KeyError("no session model: routing/profiles.json defaults must carry one for every provider")
-    model = entry["model"]
+    model, klass = entry["model"], None
+    if model in load_capabilities(root)["classes"]:
+        model, klass = resolve(model, provider, role, agent, local, root)["composite"], model
+    if provider == "anthropic":
+        skipped = broker["model"] if broker and LAYERS.index(broker["source"]) > LAYERS.index(entry["source"]) else None
+        return {"model": model, "shim": None, "composite": model, "capability": klass,
+                "openrouter_id": "anthropic/" + model if NATIVE_ID.match(model) else None,
+                "source": entry["source"], "skipped": skipped}
+    if klass:
+        return {"model": model.split("@", 1)[0], "shim": shim_for(model.split("@", 1)[0], load_shims(root), harness),
+                "composite": model, "capability": klass, "source": entry["source"]}
     shim = shim_for(model, load_shims(root), harness)
-    return {"model": model, "shim": shim, "composite": composite(model, shim), "source": entry["source"]}
+    return {"model": model, "shim": shim, "composite": composite(model, shim), "capability": None,
+            "source": entry["source"]}
 
 
 def review_grade_ok(model: str, root: str | None = None) -> bool:
@@ -356,8 +372,9 @@ def check(root: str | None = None) -> list[str]:
                                 "a preset is a shim (routing/shims.json), not a model")
             if prov.get("resolution") == "model-id" and not MODEL_ID.match(model or ""):
                 findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is not a model id")
-            if prov.get("resolution") == "harness" and not (HARNESS_REF.match(model or "") or NATIVE_ID.match(model or "")):
-                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is neither a harness tier alias nor a native Claude id")
+            if prov.get("resolution") == "harness" and model is not None and not NATIVE_ID.match(model):
+                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is neither null (the harness's "
+                                "tier) nor a native Claude id; a tier alias is the adapter's, never named here")
         for klass in classes:
             if klass not in (prov.get("models") or {}):
                 findings.append(f"capabilities.json: providers.{name} binds no model to {klass!r}")
@@ -392,17 +409,22 @@ def check(root: str | None = None) -> list[str]:
                             "name a full model id, so every class must ride an alias")
         if set(aliases) != classes:
             findings.append(f"runtime/claude-code/aliases.json: bound classes {sorted(aliases)} != {sorted(classes)}")
-        if len(set(aliases.values())) != len(aliases):
-            findings.append("runtime/claude-code/aliases.json: two classes share one harness alias; "
-                            "the launcher could not export them separately")
+        pinned = set(doc.get("file_pinned") or [])
+        for klass in pinned:
+            if klass not in classes:
+                findings.append(f"runtime/claude-code/aliases.json: file_pinned names unknown class {klass!r}")
+        for alias in set(aliases.values()):
+            exporters = [k for k, a in aliases.items() if a == alias and k not in pinned]
+            if len(exporters) > 1:
+                findings.append(f"runtime/claude-code/aliases.json: {' and '.join(exporters)} share the {alias} alias "
+                                "and both export; one alias carries one export — the class that must not follow "
+                                "the other goes through its agent file (file_pinned)")
         for klass, alias in aliases.items():
             if alias not in (doc.get("env") or {}):
                 findings.append(f"runtime/claude-code/aliases.json: alias {alias!r} has no export variable")
-        native = ((caps.get("providers") or {}).get("anthropic") or {}).get("models") or {}
-        for klass, ref in aliases.items():
-            if native.get(klass) not in (None, ref) and not NATIVE_ID.match(native.get(klass) or ""):
-                findings.append(f"aliases.json binds {klass} to {ref!r} but capabilities.providers.anthropic "
-                                f"says {native.get(klass)!r}")
+        if grade.get("capability") in classes and grade.get("capability") not in pinned:
+            findings.append(f"runtime/claude-code/aliases.json: the gated class {grade.get('capability')!r} is not "
+                            "file_pinned; through an export it would follow whatever shares its alias")
     return findings
 
 
@@ -421,7 +443,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--role", default=None)
     t.add_argument("--agent", default=None)
     sub.add_parser("check", help="validate the canonical routing files")
-    s = sub.add_parser("pins", help="the class whose plain-claude pin reaches its agent file (the review class): `<class> <alias> <id>`")
+    s = sub.add_parser("pins", help="the file-pinned classes' models on a provider (the review class): `<class> <alias> <model>`")
+    s.add_argument("--provider", default="anthropic")
     s.add_argument("--role", default=None)
     s.add_argument("--agent", default=None)
     s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
@@ -434,12 +457,12 @@ def main(argv: list[str] | None = None) -> int:
     root = os.path.abspath(args.fabric) if args.fabric else None
 
     if args.cmd == "pins":
-        # For the dispatch guard and the agent-file installer: the class
-        # whose plain-claude pin goes through its agent file — the review
-        # class, whose alias is also the hand's tier and so is never
-        # exported — with the alias it rides. One line, nothing when the
-        # merged model is an alias; exit 0 either way. Every other pin on
-        # that path is an alias export (`alias_exports`), the launcher's.
+        # For the dispatch guard and the agent-file installer: the classes
+        # whose model goes through their agent file (file_pinned — the
+        # review class, which must never follow the class sharing its
+        # alias), resolved on the given provider, with the alias each
+        # rides. Nothing when the merged model is the harness's; exit 0
+        # either way. Every other class is an alias export (`exports`).
         role, agent, local = args.role, args.agent, None
         if args.me:
             spec = importlib.util.spec_from_file_location(
@@ -449,10 +472,10 @@ def main(argv: list[str] | None = None) -> int:
             role = role or identity.read_binding(agent).get("role")
         if args.local or args.me:
             local = load_local(agent, args.local)
-        gated = load_review_grade(root).get("capability", "review")
-        res = resolve(gated, "anthropic", role, agent, local, root=root)
-        if res.get("pinned"):
-            print(f"{gated} {res.get('alias') or ''} {res['model']}")
+        for klass in file_pinned(root):
+            res = resolve(klass, args.provider, role, agent, local, root=root)
+            if res["via"] == "file":
+                print(f"{klass} {res.get('alias') or ''} {res['composite']}")
         return 0
     if args.cmd == "shim":
         # One line, the shim or nothing; exit 0 either way. A hook asks this

@@ -25,18 +25,23 @@
 #                                    bin/fabric-model writes it)
 #   model -> family shim          routing/shims.json
 #   class -> harness alias        runtime/claude-code/aliases.json
-# Every layer is per provider (providers.openrouter / providers.anthropic).
-# On the broker it exports, per class, ANTHROPIC_DEFAULT_<ALIAS>_MODEL=
-# <model@shim>; on plain claude it exports the alias bindings the profile
-# makes (providers.anthropic.aliases) and the review pin goes through the
-# reviewer's agent file.
-# The composite string exists only here, in the child's environment.
+# Every layer is per provider (providers.openrouter / providers.anthropic)
+# and speaks the CLASS — code-low, code-medium, code-high, code-plan,
+# code-review — and the provider's model id; the tier alias a class
+# rides is the adapter's (aliases.json), never a user's word. Each coding
+# class is exported as ANTHROPIC_DEFAULT_<ALIAS>_MODEL for the tier it
+# rides: on the broker <model@shim>, on plain claude the native pin (the
+# column's top-of-tier, or a layer's). The composite string exists only
+# here, in the child's environment.
 # Every class rides an alias: the Agent tool's `model` field accepts
 # only the tier aliases, so a "declared full id" in an agent file can
 # never be named by a dispatch (verified live 2026-09-13 — the reviewer
 # fell through to the opus alias and ran on GLM). The review class
-# rides `fable`, the alias no coding class uses, so its export is its
-# own and the review gate below guards exactly that export.
+# rides `fable` with code-plan, and one alias carries one export, so it
+# is never exported: its model is written into the reviewer's agent file
+# for this launch's provider (install-agent-files.sh, below) and the
+# dispatch guard drops the dispatch's alias so the file decides. The
+# review gate guards that model.
 #
 # WHO IS LAUNCHING. The agent is the Linux login (runtime/identity.py);
 # the role comes from that agent's runtime binding (tools/fabric/role.py).
@@ -206,32 +211,31 @@ aliases = json.load(open(aliases_path))
 # string "None" and reached `--model`. normalize_layer names the field.
 try:
     routing.normalize_layer(local, "local")
-    out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}}
-    for klass, alias in aliases["aliases"].items():
+    out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}, "files": {}}
+    for klass in aliases["aliases"]:
         res = routing.resolve(klass, provider, role, agent, local)
-        if provider == "openrouter":
-            if not routing.COMPOSITE.fullmatch(res["composite"]):
-                sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
-            out["exports"][aliases["env"][alias]] = res["composite"]
+        if provider == "openrouter" and not routing.COMPOSITE.fullmatch(res["composite"]):
+            sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
         out["classes"][klass] = res
-    if provider == "anthropic":
-        # Plain claude: an alias the profile binds (providers.anthropic.
-        # aliases, or a coding class the column pins natively) is exported
-        # as that alias's ANTHROPIC_DEFAULT_*_MODEL — a tier pin means the
-        # tier, session-wide, `/model <alias>` included. The review class
-        # is the one exception: its alias (fable) is also the hand's tier,
-        # so its pin is never exported; it reaches the reviewer's agent
-        # file (bin/fabric-model apply, bootstrap) and the dispatch guard
-        # drops the dispatch's alias under this launch so the file decides.
-        out["alias_exports"] = routing.alias_exports(role, agent, local)
-        for alias, entry in out["alias_exports"].items():
-            out["exports"][aliases["env"][alias]] = entry["model"]
+        # A file-pinned class (the review class) is never exported: its
+        # alias is also code-plan's, and through the export the reviewer
+        # would follow code-plan (as it once followed code-high on opus).
+        # Its model reaches its agent file — install-agent-files.sh, run
+        # below for this provider — and the dispatch guard drops the
+        # dispatch's alias under a fabric launch so the file decides.
+        if res["via"] == "file":
+            out["files"][klass] = res["composite"]
+    # Every other class rides its alias's ANTHROPIC_DEFAULT_*_MODEL: on
+    # the broker the composite, on plain claude the native pin (a class
+    # the column leaves null is the harness's and exports nothing).
+    for var, entry in routing.exports(provider, role, agent, local).items():
+        out["exports"][var] = entry["model"]
     session = routing.resolve_session(role, agent, local, provider=provider)
 except (KeyError, ValueError) as exc:
     sys.exit("merged profile: %s" % exc)
 out["session"] = session
 grade = routing.load_review_grade()
-review = out["classes"].get(grade.get("capability", "review"))
+review = out["classes"].get(grade.get("capability", "code-review"))
 if review and not routing.review_grade_ok(review["model"]):
     out["review_violation"] = review["model"]
 print(json.dumps(out))
@@ -297,7 +301,7 @@ export AGENT_FABRIC_LAUNCH_PROVIDER="$PROVIDER"
 
 if (( PRINT_ONLY )); then
     echo "# resolved profile for $LABEL (agent $AGENT, role $ROLE, provider $PROVIDER)"
-    echo "  session : $SESSION"
+    echo "  session : $SESSION$(python3 -c 'import json,sys; c=json.load(sys.stdin)["session"].get("capability"); print(f"  (the {c} class)" if c else "")' <<<"$RESOLVED")"
     SKIPPED="$(python3 -c 'import json,sys; s=json.load(sys.stdin)["session"]; print(s.get("skipped") or "")' <<<"$RESOLVED")"
     [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
     echo "  (from the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer; bin/fabric-model list --provider $PROVIDER shows every choice with its source)"
@@ -306,16 +310,16 @@ if (( PRINT_ONLY )); then
 import json, sys
 d = json.loads(sys.argv[1])
 for klass, res in d["classes"].items():
+    if res["via"] == "harness":
+        how = "(harness default for its tier)"
+    elif res["via"] == "file":
+        how = "(pinned in the agent file; the dispatch guard applies it; from %s)" % res["source"]
+    else:
+        how = "(exported for its tier; from %s)" % res["source"]
     if d.get("provider") == "anthropic":
-        if not res.get("pinned"):
-            how = "(harness default for the alias)"
-        elif res["alias"] in d.get("alias_exports", {}):
-            how = "(the %s alias, exported; from %s)" % (res["alias"], res["source"])
-        else:
-            how = "(pinned in the agent file; the dispatch guard applies it; from %s)" % res["source"]
         print("  %-12s: %s  %s" % (klass, res["model"], how))
     else:
-        print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
+        print("  %-12s: %s  shim %s  => %s  %s" % (klass, res["model"], res["shim"] or "-", res["composite"], how))
 print()
 for k, v in sorted(d["exports"].items()):
     print("  export %s=%s" % (k, v))
@@ -326,8 +330,17 @@ PY
     exit 0
 fi
 
-# Plain claude: no broker, no shim; the exports above are the profile's
-# alias bindings (none by default), the review pin is served by its agent
+# The review class's model is per launch (the broker's composite, or the
+# native pin) and reaches the reviewer through its agent file, so the
+# account's agent files are installed for THIS provider now, before the
+# session that will dispatch from them exists. The dispatch guard checks
+# the file against the same resolution and denies a review when another
+# launch on this account has since rewritten it.
+bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --provider "$PROVIDER" >/dev/null ||
+    die "could not install the capability-class agent files for $PROVIDER (runtime/claude-code/install-agent-files.sh)."
+
+# Plain claude: no broker, no shim; the exports above are the column's
+# and the profile's native pins, the review pin is served by its agent
 # file under the dispatch guard; the session model and the refusals are
 # what the launcher contributed.
 if [[ "$PROVIDER" == anthropic ]]; then

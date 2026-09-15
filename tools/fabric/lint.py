@@ -328,7 +328,7 @@ def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]
     spec.loader.exec_module(routing)
     findings += [f"routing: {f}" for f in routing.check(root)]
     grade = routing.load_review_grade(root)
-    gated = grade.get("capability", "review")
+    gated = grade.get("capability", "code-review")
     try:
         routing.load_capabilities(root)
     except (OSError, KeyError, ValueError):

@@ -45,24 +45,35 @@ def test_current_glm_policy() -> None:
         "code-low": ("z-ai/glm-5.3-flash", GLM_SHIM, "z-ai/glm-5.3-flash@preset/glm2claude-shim"),
         "code-medium": ("z-ai/glm-5.2", GLM_SHIM, "z-ai/glm-5.2@preset/glm2claude-shim"),
         "code-high": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
-        "review": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
+        "code-plan": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
+        "code-review": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
     }
     for klass, (model, shim, comp) in expected.items():
         res = routing.resolve(klass, "openrouter")
         assert (res["model"], res["shim"], res["composite"]) == (model, shim, comp), res
 
 
-def test_native_path_is_aliases_except_the_review_pin() -> None:
-    """On plain claude a coding class is a tier alias the harness binds; the
-    review class is pinned to a native id (architect-cto, 2026-09-15), so a
-    vanilla review is never on a tier the fabric has not named. No shim."""
-    got = {k: routing.resolve(k, "anthropic") for k in ("code-low", "code-medium", "code-high", "review")}
+def test_native_path_pins_the_top_of_each_class() -> None:
+    """On plain claude the column pins the top model of each class's tier
+    (the owner, 2026-09-15); a coding class's pin is the export of the
+    alias it rides, the review class's reaches its agent file. No shim.
+    A class the column leaves null is the harness's own tier."""
+    got = {k: routing.resolve(k, "anthropic") for k in routing.load_capabilities()["classes"]}
     assert {k: v["composite"] for k, v in got.items()} == {
-        "code-low": "haiku", "code-medium": "sonnet", "code-high": "opus", "review": "claude-opus-5[1m]"}, got
-    assert [k for k, v in got.items() if v["pinned"]] == ["review"], got
+        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
+        "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"}, got
+    assert {k: v["via"] for k, v in got.items()} == {
+        "code-low": "export", "code-medium": "export", "code-high": "export", "code-plan": "export", "code-review": "file"}, got
+    assert {k: v["alias"] for k, v in got.items()} == {
+        "code-low": "haiku", "code-medium": "sonnet", "code-high": "opus", "code-plan": "fable", "code-review": "fable"}
     assert all(v["shim"] is None for v in got.values()), "no shim on the native path"
     assert routing.review_grade_ok("claude-opus-5[1m]"), "the native spelling is graded under anthropic/"
     assert not routing.review_grade_ok("claude-haiku-4-5")
+    ex = routing.exports("anthropic")
+    assert {k: v["model"] for k, v in ex.items()} == {
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001", "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5", "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5-1"}, ex
+    assert "code-review" not in {v["class"] for v in ex.values()}, "the review class is never an export"
     s = routing.resolve_session(provider="anthropic")
     assert (s["model"], s["composite"], s["openrouter_id"], s["source"], s["skipped"]) == \
         ("claude-sonnet-5", "claude-sonnet-5", "anthropic/claude-sonnet-5", "defaults", None), s
@@ -74,33 +85,50 @@ def test_native_path_is_aliases_except_the_review_pin() -> None:
     assert (s["model"], s["source"]) == ("claude-opus-5[1m]", "local"), s
 
 
+def test_a_null_in_the_harness_column_is_the_harness_tier(tmp: str) -> None:
+    root = scratch_root(tmp)
+    set_model(root, "anthropic", "code-high", None)
+    r = routing.resolve("code-high", "anthropic", root=root)
+    assert (r["model"], r["via"], r["pinned"], r["alias"]) == ("opus", "harness", False, "opus"), r
+    assert "ANTHROPIC_DEFAULT_OPUS_MODEL" not in routing.exports("anthropic", root=root), "nothing pinned, nothing exported"
+    assert routing.check(root) == [], routing.check(root)
+    set_model(root, "anthropic", "code-high", "opus")
+    assert any("tier alias is the adapter" in f for f in routing.check(root)), "an alias in the column is refused: the class is the vocabulary"
+
+
 def test_a_layer_is_per_provider() -> None:
     """One layer names each provider's choices in that provider's
-    vocabulary; the merge is per provider, per key, nearest layer wins.
-    The flat session/capabilities are the OpenRouter form (and an
-    anthropic/ session serves plain claude too), so an old local file
-    reads exactly as before."""
+    vocabulary — the class and the provider's model id, never a tier
+    alias; the merge is per provider, per key, nearest layer wins. The
+    flat session/capabilities are the OpenRouter form (and an anthropic/
+    session serves plain claude too), so an old local file reads exactly
+    as before. A session may name a class."""
     local = {"providers": {"openrouter": {"session": "z-ai/glm-5.3", "capabilities": {"code-low": "z-ai/glm-5.2"}},
-                           "anthropic": {"session": "opus", "aliases": {"opus": "claude-opus-5[1m]"},
-                                         "capabilities": {"review": "claude-opus-5"}}}}
+                           "anthropic": {"session": "code-plan",
+                                         "capabilities": {"code-high": "claude-opus-5[1m]", "code-review": "claude-opus-5"}}}}
     s = routing.resolve_session(local=local, provider="openrouter")
-    assert (s["model"], s["source"]) == ("z-ai/glm-5.3", "local"), s
+    assert (s["model"], s["source"], s["capability"]) == ("z-ai/glm-5.3", "local", None), s
     s = routing.resolve_session(local=local, provider="anthropic")
-    assert (s["model"], s["source"], s["skipped"], s["openrouter_id"]) == ("opus", "local", None, None), s
+    assert (s["model"], s["source"], s["skipped"], s["capability"]) == ("claude-fable-5-1", "local", None, "code-plan"), \
+        "a class-named session is that class's model on the provider"
     assert routing.resolve("code-low", "openrouter", local=local)["model"] == "z-ai/glm-5.2"
-    assert routing.resolve("code-low", "anthropic", local=local)["model"] == "haiku", "the broker override stays on the broker"
+    assert routing.resolve("code-low", "anthropic", local=local)["model"] == "claude-haiku-4-5-20251001", "the broker override stays on the broker"
     hi = routing.resolve("code-high", "anthropic", local=local)
-    assert (hi["model"], hi["pinned"], hi["source"], hi["alias"]) == ("claude-opus-5[1m]", True, "local", "opus"), \
-        "a coding class on plain claude is pinned by binding the alias it rides"
-    assert routing.resolve("code-high", "openrouter", local=local)["model"] == "z-ai/glm-5.3", "the alias binding stays on plain claude"
-    rv = routing.resolve("review", "anthropic", local=local)
-    assert (rv["model"], rv["source"]) == ("claude-opus-5", "local"), rv
-    exports = routing.alias_exports(local=local)
-    assert set(exports) == {"opus"} and exports["opus"]["model"] == "claude-opus-5[1m]", exports
-    assert routing.alias_exports() == {}, "nothing bound by default: every tier is the harness's"
+    assert (hi["model"], hi["via"], hi["source"], hi["alias"]) == ("claude-opus-5[1m]", "export", "local", "opus")
+    assert routing.resolve("code-high", "openrouter", local=local)["model"] == "z-ai/glm-5.3", "the native pin stays on plain claude"
+    rv = routing.resolve("code-review", "anthropic", local=local)
+    assert (rv["model"], rv["source"], rv["via"]) == ("claude-opus-5", "local", "file"), rv
+    ex = routing.exports("anthropic", local=local)
+    assert ex["ANTHROPIC_DEFAULT_OPUS_MODEL"]["model"] == "claude-opus-5[1m]" and \
+        ex["ANTHROPIC_DEFAULT_FABLE_MODEL"]["class"] == "code-plan", ex
+    # A class-named session on the broker carries the class's shim.
+    s = routing.resolve_session(local={"session": "code-high"}, provider="openrouter")
+    assert (s["composite"], s["capability"]) == ("z-ai/glm-5.3@preset/glm2claude-shim", "code-high"), s
+    s = routing.resolve_session(local={"session": "code-high"}, provider="anthropic")
+    assert (s["model"], s["capability"]) == ("claude-opus-5", "code-high"), "a flat class-named session serves both providers"
     # A flat layer over a per-provider one: the nearest layer wins per key.
-    both = {"providers": {"anthropic": {"session": "opus"}}, "session": "anthropic/claude-sonnet-5"}
-    assert routing.resolve_session(local=both, provider="anthropic")["model"] == "opus", \
+    both = {"providers": {"anthropic": {"session": "claude-opus-5"}}, "session": "anthropic/claude-sonnet-5"}
+    assert routing.resolve_session(local=both, provider="anthropic")["model"] == "claude-opus-5", \
         "providers.anthropic.session outranks what the flat anthropic/ session implies"
     assert routing.resolve_session(local=both, provider="openrouter")["model"] == "anthropic/claude-sonnet-5"
 
@@ -114,14 +142,15 @@ def test_a_layer_is_validated_in_its_provider_vocabulary() -> None:
             return
         raise AssertionError(f"{layer} was accepted")
     refused({"session": None}, "session is None")
-    refused({"providers": {"anthropic": {"session": "z-ai/glm-5.3"}}}, "neither a harness tier alias")
-    refused({"providers": {"anthropic": {"aliases": {"opus": "opus"}}}}, "not a native Claude id")
-    refused({"providers": {"anthropic": {"aliases": {"turbo": "claude-x"}}}}, "not a tier alias")
-    refused({"providers": {"anthropic": {"capabilities": {"code-high": "claude-opus-5"}}}}, "bind the alias instead")
-    refused({"providers": {"openrouter": {"aliases": {"opus": "claude-opus-5"}}}}, "binds classes, not tier aliases")
+    refused({"providers": {"anthropic": {"session": "z-ai/glm-5.3"}}}, "neither a capability class")
+    refused({"providers": {"anthropic": {"session": "opus"}}}, "neither a capability class")
+    refused({"providers": {"anthropic": {"capabilities": {"code-high": "opus"}}}}, "not a native Claude id")
+    refused({"providers": {"anthropic": {"aliases": {"opus": "claude-opus-5"}}}}, "a tier alias is never named")
+    refused({"providers": {"anthropic": {"capabilities": {"turbo": "claude-opus-5"}}}}, "not a capability class")
+    refused({"providers": {"openrouter": {"capabilities": {"code-high": "opus"}}}}, "not a model id")
     refused({"providers": {"vertex": {}}}, "unknown provider")
     refused({"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}, "not a model id")
-    assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}}, "anthropic": {"aliases": {}, "capabilities": {}}}
+    assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}}, "anthropic": {"capabilities": {}}}
 
 
 def test_composite_is_derived_not_stored() -> None:
@@ -193,9 +222,9 @@ def test_review_grade_gate_is_on_review_only(tmp: str) -> None:
     assert not routing.review_grade_ok("z-ai/glm-5.3-flash")
     assert not routing.review_grade_ok("z-ai/glm-5.2")
     root = scratch_root(tmp)
-    set_model(root, "openrouter", "review", "z-ai/glm-5.3-flash")
+    set_model(root, "openrouter", "code-review", "z-ai/glm-5.3-flash")
     findings = routing.check(root)
-    assert any("review" in f and "review-grade" in f for f in findings), findings
+    assert any("code-review" in f and "review-grade" in f for f in findings), findings
     root2 = scratch_root(tmp + "/b") if os.path.isdir(tmp + "/b") else scratch_root(os.path.join(tmp, "b"))
     set_model(root2, "openrouter", "code-high", "z-ai/glm-5.3-flash")
     assert routing.check(root2) == [], "a coding class is not review-gated"
@@ -208,31 +237,35 @@ def test_check_refuses_a_preset_as_a_model(tmp: str) -> None:
     assert any("preset" in f for f in findings), findings
 
 
-def test_every_class_rides_its_own_alias(tmp: str) -> None:
+def test_every_class_rides_an_alias_and_only_the_review_class_shares(tmp: str) -> None:
     """The Agent tool accepts only tier aliases, so nothing may be `declared`
-    by full id, the review class must ride an alias of its own (fable), and
-    the harness provider must say the same."""
+    by full id; one alias carries one export, so two exporting classes
+    cannot share one — the review class may share code-plan's fable only
+    because it is file_pinned, and the gated class must be."""
     aliases = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "aliases.json")))
     assert "declared" not in aliases
-    assert aliases["aliases"]["review"] == "fable"
-    assert aliases["aliases"]["code-high"] == "opus", "review and code-high must not share an export"
+    assert aliases["aliases"]["code-review"] == "fable" == aliases["aliases"]["code-plan"]
+    assert aliases["aliases"]["code-high"] == "opus"
+    assert aliases["file_pinned"] == ["code-review"]
     root = scratch_root(tmp)
     path = os.path.join(root, "runtime", "claude-code", "aliases.json")
     d = json.load(open(path))
-    d["declared"] = {"review": d["aliases"].pop("review")}
+    d["declared"] = {"code-review": d["aliases"].pop("code-review")}
     json.dump(d, open(path, "w"))
     findings = routing.check(root)
     assert any("declared" in f and "retired" in f for f in findings), findings
-    # The harness column may pin a native id — graded like any review model —
-    # but never a foreign vendor's id or a composite.
-    root2 = scratch_root(os.path.join(tmp, "b"))
-    set_model(root2, "anthropic", "review", "claude-haiku-4-5")
-    findings = routing.check(root2)
-    assert any("review" in f and "review-grade" in f for f in findings), findings
-    root3 = scratch_root(os.path.join(tmp, "c"))
-    set_model(root3, "anthropic", "review", "z-ai/glm-5.3")
-    findings = routing.check(root3)
-    assert any("neither a harness tier alias nor a native Claude id" in f for f in findings), findings
+    d = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "aliases.json")))
+    d["file_pinned"] = []
+    json.dump(d, open(path, "w"))
+    findings = routing.check(root)
+    assert any("share the fable alias" in f for f in findings), findings
+    assert any("gated class" in f and "not file_pinned" in f for f in findings), findings
+    try:
+        routing.exports("anthropic", root=root)  # fable-5-1 for code-plan, opus[1m] for the reviewer: one export cannot carry both
+    except KeyError as exc:
+        assert "both ride fable" in str(exc), exc
+    else:
+        raise AssertionError("two exporting classes on one alias resolved to different models without complaint")
 
 
 def test_real_files_are_clean() -> None:
@@ -245,7 +278,8 @@ def test_real_files_are_clean() -> None:
 def main() -> int:
     cases = [
         test_current_glm_policy,
-        test_native_path_is_aliases_except_the_review_pin,
+        test_native_path_pins_the_top_of_each_class,
+        test_a_null_in_the_harness_column_is_the_harness_tier,
         test_composite_is_derived_not_stored,
         test_a_non_glm_model_gets_no_shim,
         test_shim_follows_the_family_of_the_merged_model,
@@ -256,7 +290,7 @@ def main() -> int:
         test_a_layer_is_validated_in_its_provider_vocabulary,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,
-        test_every_class_rides_its_own_alias,
+        test_every_class_rides_an_alias_and_only_the_review_class_shares,
         test_real_files_are_clean,
     ]
     failures = 0

@@ -355,7 +355,7 @@ def case_model_profiles_cheap_review_is_refused() -> None:
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         doc = copy.deepcopy(PROFILES)
-        doc["agents"]["web-dev-01"]["capabilities"] = {"review": "z-ai/glm-5.3-flash"}
+        doc["agents"]["web-dev-01"]["capabilities"] = {"code-review": "z-ai/glm-5.3-flash"}
         write_profiles(fabric, doc)
         code, out = run_lint(fabric)
         assert code == 1, f"a non-review-grade review model passed:\n{out}"

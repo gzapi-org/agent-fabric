@@ -80,21 +80,24 @@ directory, the repository, the branch or the session.
   fabric-coordinator holder, distils it into the corpus with your name on
   it. A slice you believe is wrong is raised to fabric-coordinator, never
   edited in place.
-- **Subagents** name a capability class in `subagent_type` — `code-low`,
-  `code-medium`, `code-high`, or the review class `blind-reviewer` — and
-  a harness tier alias in `model` (`haiku`, `sonnet`, `opus`; `fable`
-  for a review), never a vendor model: what an alias resolves to is
-  `routing/`, decided at launch — on the broker path and, with
-  `runtime/openrouter/launch --provider anthropic`, on plain `claude`
-  too (the review class is pinned to `claude-opus-5[1m]` there, through
-  its agent file — the session's own `/model fable` is untouched).
+- **Subagents** name a capability class in `subagent_type` — the five
+  are `code-low`, `code-medium`, `code-high`, `code-plan` and the review
+  class `code-review` — and the harness tier alias that class rides in
+  `model` (`haiku`, `sonnet`, `opus`, `fable`; `fable` for `code-plan`
+  and for a review), never a vendor model: the class is the vocabulary
+  everywhere in the fabric (`routing/capabilities.json`, the profile
+  layers, `bin/fabric-model`), the alias is only how this harness spells
+  a tier, and what a class resolves to is `routing/`, decided at launch
+  on either path — the launcher exports each coding class for the tier
+  it rides; the review class shares `fable` with `code-plan` and so is
+  never an export: its model reaches its agent file, on both paths.
   **The class decides the alias**
   (`runtime/claude-code/aliases.json`): the dispatch guard
   (`runtime/claude-code/hooks/agent-dispatch-guard.sh`) refuses a class
   dispatch whose `model` is not its alias — unset included — a review
   on anything but `fable`, and a writing dispatch without worktree
-  isolation; `code-high` asks. Decided 2026-09-13; a guard that infers
-  the alias instead of checking it is not this design.
+  isolation; `code-high` and `code-plan` ask. Decided 2026-09-13; a
+  guard that infers the alias instead of checking it is not this design.
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Two skills carry the procedure and are
   installed for every account: `gzcoord-send` (compose, mint the id,

@@ -53,7 +53,7 @@
           "additionalProperties": false,
           "properties": {
             "resolution": {
-              "description": "harness: values are the harness's own model references (a tier alias, or a full model id), resolved by the harness. model-id: values are canonical vendor/model ids the launcher resolves, shims applied.",
+              "description": "harness: values are native model ids the harness resolves, or null for its own default of the tier the class rides. model-id: values are canonical vendor/model ids the launcher resolves, shims applied.",
               "enum": [
                 "harness",
                 "model-id"
@@ -67,8 +67,11 @@
               "additionalProperties": false,
               "patternProperties": {
                 "^[a-z][a-z0-9-]*$": {
-                  "description": "A canonical model id (vendor/model) or a harness model reference (alias or full id, no vendor prefix). Never a composite: `@preset/...` is a shim and is attached at runtime.",
-                  "type": "string",
+                  "description": "A canonical model id (vendor/model) on a model-id provider; on a harness provider a native model id (claude-…) that pins the class, or null for the harness's own current model of the tier the class rides. Never a tier alias — which alias a class rides is runtime/claude-code/aliases.json's — and never a composite: `@preset/...` is a shim and is attached at runtime.",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "pattern": "^(~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\\[1m\\])?|[a-z][a-z0-9.-]*(\\[1m\\])?)$"
                 }
               }

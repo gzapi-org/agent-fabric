@@ -43,7 +43,7 @@ expect "Write with no agent_id is allowed" allow Write - "$CLONE"
 expect "Bash git push with no agent_id is allowed (the session's own rules apply)" allow Bash - "$CLONE" "git push"
 
 echo "clone guard: a class subagent in the session clone may not write"
-for t in code-low code-medium code-high blind-reviewer general-purpose claude Explore Plan; do
+for t in code-low code-medium code-high code-plan code-review general-purpose claude Explore Plan; do
   expect "$t: Write in the clone is denied" deny Write "$t" "$CLONE"
 done
 for tool in Edit MultiEdit NotebookEdit; do

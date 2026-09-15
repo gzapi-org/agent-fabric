@@ -8,8 +8,9 @@
     model_profile.py seed [--provider P]               copy the merged repo defaults into the local layer
     model_profile.py apply                             re-install the agent files (the review pin)
 
-    targets on openrouter: session  code-low  code-medium  code-high  review
-    targets on anthropic:  session  haiku  sonnet  opus  fable  review
+    targets, on either provider: session  code-low  code-medium  code-high  code-plan  code-review
+    models: an OpenRouter id (z-ai/glm-5.3) on openrouter; a native Claude id
+            (claude-opus-5[1m]) on anthropic; the session may also name a class.
 
 Installed as bin/fabric-model. The AGENT is the Linux login
 (runtime/identity.py) and the ROLE is its binding; the file written is
@@ -25,22 +26,17 @@ defaults in explicitly so the file can be edited by hand — every seeded
 value is then a pin that no longer follows the repo default; `unset`
 restores following.
 
-Two providers, two vocabularies, so a target means different things:
-  openrouter  a class is bound to an OpenRouter id, exported under the
-              alias it rides (runtime/claude-code/aliases.json) with its
-              family shim; the session is `ori claude --model`.
-  anthropic   a tier alias (haiku/sonnet/opus/fable) is bound to a native
-              Claude id, exported as ANTHROPIC_DEFAULT_<ALIAS>_MODEL —
-              session-wide, so the classes riding it and a hand `/model
-              <alias>` both land there; `review` is the reviewer's pin,
-              applied through its agent file (never the fable export, so
-              a hand `/model fable` stays the hand's); the session is
-              `claude --model`, an alias or a native id.
-
-The review target is gated on both providers by routing/policies/
-review-grade.json: `set` refuses a model outside it, as the launcher
-would. Everything else takes effect at the next launch
-(runtime/openrouter/launch); the review pin is installed at once.
+The vocabulary is the capability class and the provider's model id. Which
+harness tier alias a class rides — and so which ANTHROPIC_DEFAULT_*_MODEL
+the launcher exports it under — is the Claude Code adapter's business
+(runtime/claude-code/aliases.json) and never appears here. The review
+class is the one class that is not an export: its model reaches the
+reviewer's agent file (it shares its tier with code-plan and must never
+follow it), and it is gated on both providers by routing/policies/
+review-grade.json — `set` refuses a model outside it, as the launcher
+would. Everything takes effect at the next launch (runtime/openrouter/
+launch installs the agent files for its provider); `apply` re-installs
+them now, for the provider this session was launched on.
 
 Exit 0 on success, 1 on a refusal, 2 on usage error.
 <<< help
@@ -69,11 +65,9 @@ def _load(name: str, path: str):
 identity = _load("fabric_identity", os.path.join(FABRIC_ROOT, "runtime", "identity.py"))
 routing = _load("fabric_routing", os.path.join(HERE, "routing.py"))
 
-CLASSES = ("code-low", "code-medium", "code-high", "review")
-TARGETS = {
-    "openrouter": ("session",) + CLASSES,
-    "anthropic": ("session",) + routing.ALIASES + ("review",),
-}
+CLASSES = tuple(routing.load_capabilities()["classes"])
+TARGETS = {p: ("session",) + CLASSES for p in routing.PROVIDERS}
+PROVIDER_OF_THIS_SESSION = os.environ.get("AGENT_FABRIC_LAUNCH_PROVIDER") or "anthropic"
 
 
 class Refusal(Exception):
@@ -129,8 +123,6 @@ def place(local: dict[str, Any], provider: str, target: str, model: str | None) 
     layer = out.setdefault("providers", {}).setdefault(provider, {})
     if target == "session":
         container, key = layer, "session"
-    elif provider == "anthropic" and target in routing.ALIASES:
-        container, key = layer.setdefault("aliases", {}), target
     else:
         container, key = layer.setdefault("capabilities", {}), target
     if model is None:
@@ -138,9 +130,8 @@ def place(local: dict[str, Any], provider: str, target: str, model: str | None) 
     else:
         container[key] = model
     # Drop what became empty, so an unset file reads as no choice at all.
-    for name in ("aliases", "capabilities"):
-        if name in layer and not layer[name]:
-            del layer[name]
+    if "capabilities" in layer and not layer["capabilities"]:
+        del layer["capabilities"]
     if not layer:
         del out["providers"][provider]
     if not out["providers"]:
@@ -162,27 +153,13 @@ def resolved(provider: str, role: str | None, agent: str, local: dict[str, Any])
     rows: dict[str, Any] = {}
     try:
         s = routing.resolve_session(role, agent, local, provider=provider)
-        rows["session"] = {"model": s["composite"], "source": s["source"]}
+        rows["session"] = {"model": s["composite"], "source": s["source"], "capability": s.get("capability")}
     except KeyError as exc:
         rows["session"] = {"model": None, "source": None, "error": str(exc)}
-    aliases = routing.load_aliases().get("aliases") or {}
-    if provider == "openrouter":
-        for klass in CLASSES:
-            r = routing.resolve(klass, provider, role, agent, local)
-            rows[klass] = {"model": r["composite"], "source": r["source"], "alias": aliases.get(klass),
-                           "export": routing.load_aliases()["env"].get(aliases.get(klass, ""))}
-        return rows
-    exports = routing.alias_exports(role, agent, local)
-    rides = {alias: [k for k, a in aliases.items() if a == alias] for alias in routing.ALIASES}
-    for alias in routing.ALIASES:
-        entry = exports.get(alias)
-        rows[alias] = {"model": entry["model"] if entry else None,
-                       "source": entry["source"] if entry else None,
-                       "export": routing.load_aliases()["env"].get(alias),
-                       "rides": rides[alias]}
-    r = routing.resolve("review", provider, role, agent, local)
-    rows["review"] = {"model": r["model"], "source": r["source"], "alias": r.get("alias"),
-                      "pinned": r["pinned"], "via": "agent file" if r["pinned"] else "the fable alias"}
+    for klass in CLASSES:
+        r = routing.resolve(klass, provider, role, agent, local)
+        rows[klass] = {"model": r["composite"], "source": r["source"], "via": r["via"],
+                       "pinned": r["pinned"]}
     return rows
 
 
@@ -192,26 +169,24 @@ def print_list(provider: str, rows: dict[str, Any]) -> None:
         if row.get("error"):
             print(f"  {target:12} (unresolved: {row['error']})")
             continue
-        model = row["model"] or "(harness default)"
-        source = row["source"] or "-"
-        extra = ""
-        if provider == "anthropic" and target in routing.ALIASES:
-            extra = f"  export {row['export']}; rides: {', '.join(row['rides']) or '-'}"
-            if target == "fable":
-                extra += " (the dispatch alias; the review's model is the review row)"
-        elif provider == "anthropic" and target == "review":
-            extra = f"  via {row['via']}"
-        elif provider == "openrouter" and target != "session":
-            extra = f"  export {row['export']}"
-        print(f"  {target:12} {model:44} {source}{extra}")
+        if target == "session":
+            extra = f"  (the {row['capability']} class)" if row.get("capability") else ""
+            print(f"  {target:12} {row['model']:44} {row['source']}{extra}")
+            continue
+        if row["via"] == "harness":
+            model, source, how = "(harness default for its tier)", "-", ""
+        else:
+            model, source = row["model"], row["source"]
+            how = "  via the agent file" if row["via"] == "file" else ""
+        print(f"  {target:12} {model:44} {source}{how}")
 
 
 # ── commands ─────────────────────────────────────────────────────────
 
 def check_review_gate(provider: str, role: str | None, agent: str, local: dict[str, Any]) -> None:
-    gated = routing.load_review_grade().get("capability", "review")
+    gated = routing.load_review_grade().get("capability", "code-review")
     r = routing.resolve(gated, provider, role, agent, local)
-    if provider == "anthropic" and not r["pinned"]:
+    if not r["pinned"]:
         return
     if not routing.review_grade_ok(r["model"]):
         raise Refusal(f"{gated} on {provider} would resolve to {r['model']!r}, which is not in "
@@ -221,8 +196,10 @@ def check_review_gate(provider: str, role: str | None, agent: str, local: dict[s
 
 
 def apply_agent_files(quiet: bool = False) -> int:
+    """The agent files for the provider THIS session was launched on (an
+    unlaunched session: anthropic) — one file serves one launch."""
     script = os.path.join(FABRIC_ROOT, "runtime", "claude-code", "install-agent-files.sh")
-    proc = subprocess.run(["bash", script], capture_output=True, text=True,
+    proc = subprocess.run(["bash", script, "--provider", PROVIDER_OF_THIS_SESSION], capture_output=True, text=True,
                           env={**os.environ, "AGENT_FABRIC_ROOT": FABRIC_ROOT})
     if proc.returncode != 0:
         print(proc.stdout + proc.stderr, file=sys.stderr)
@@ -268,7 +245,7 @@ def _change(ctx: dict[str, Any], path: str, provider: str, target: str, model: s
         print(f"  resolves now to {row['model']} (from {row['source']})")
     elif row:
         print("  resolves now to the harness default")
-    if provider == "anthropic" and target == "review":
+    if target == "code-review" and provider == PROVIDER_OF_THIS_SESSION:
         return apply_agent_files()
     print("  takes effect at the next launch (runtime/openrouter/launch)")
     return 0
@@ -291,9 +268,11 @@ def cmd_seed(args: argparse.Namespace, ctx: dict[str, Any], path: str) -> int:
     for provider in providers:
         rows = resolved(provider, ctx["role"], ctx["agent"], local)
         for target, row in rows.items():
-            if not row.get("model") or row.get("source") == "local":
+            if not row.get("model") or row.get("source") in ("local", "harness"):
                 continue  # a harness default has nothing to seed; a local choice is already one
             model = row["model"]
+            if target == "session" and row.get("capability"):
+                model = row["capability"]  # a class-named session is seeded as the class
             if provider == "openrouter":
                 model = model.split("@", 1)[0]  # the shim is derived, never configured
             new = place(new, provider, target, model)

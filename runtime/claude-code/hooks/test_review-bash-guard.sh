@@ -17,7 +17,7 @@ failures=0
 pass() { echo "  ok   $1"; }
 fail() { echo "  FAIL $1" >&2; [[ $# -gt 1 ]] && printf '       %s\n' "$2" >&2; failures=$((failures + 1)); }
 decision() {
-  local out; out="$(jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c},agent_type:"blind-reviewer"}' | bash "$UNDER_TEST" 2>/dev/null)"
+  local out; out="$(jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c},agent_type:"code-review"}' | bash "$UNDER_TEST" 2>/dev/null)"
   if [[ -z "$out" ]]; then echo allow; else printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // "malformed"'; fi
 }
 expect() { local got; got="$(decision "$3")"; if [[ "$got" == "$2" ]]; then pass "$1"; else fail "$1" "want $2, got $got for: $3"; fi; }

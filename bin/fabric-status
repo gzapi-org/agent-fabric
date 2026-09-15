@@ -37,6 +37,13 @@ elif base:
     provider, path = "anthropic", "custom base URL (%s)" % host
 else:
     provider, path = "anthropic", "vanilla claude, Anthropic direct"
+    # Launched by the fabric (runtime/openrouter/launch --provider anthropic):
+    # the review pin and the session model are the fabric's; unlaunched, every
+    # tier is the harness's own default.
+    if os.environ.get("AGENT_FABRIC_LAUNCH_PROVIDER") == "anthropic":
+        path += ", launched by the fabric"
+    else:
+        path += ", not launched by the fabric (harness defaults for every tier)"
 stamp = os.environ.get("AGENT_FABRIC_LAUNCH_SESSION_MODEL") or os.environ.get("GZAPP_LAUNCH_SESSION_MODEL")
 pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                                        "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")}

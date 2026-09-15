@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much reasoning a task needs; a provider entry says which model currently satisfies it there. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py \u2014 it is never written here.",
+  "description": "CAPABILITY CLASS -> CONCRETE MODEL, per provider. A capability class says how much reasoning a task needs; a provider entry says which model currently satisfies it there. Compatibility shims (routing/shims.json) are a separate dimension keyed on the model family, and the composite `model@preset/slug` string is derived at runtime by tools/fabric/routing.py — it is never written here.",
   "classes": {
     "code-low": {
       "title": "Inexpensive, mechanical delegated coding work",
@@ -16,18 +16,18 @@
     },
     "review": {
       "title": "The review class",
-      "description": "The adversarial substitute reviewer. Not a coding class: it rides its own harness alias (fable) so a profile can give it a different model from code-high, and its model is gated by routing/policies/review-grade.json \u2014 chosen there by architect-cto, never by a profile layer alone."
+      "description": "The adversarial substitute reviewer. Not a coding class: it rides its own harness alias (fable) so a profile can give it a different model from code-high, and its model is gated by routing/policies/review-grade.json — chosen there by architect-cto, never by a profile layer alone."
     }
   },
   "providers": {
     "anthropic": {
       "resolution": "harness",
-      "description": "Plain `claude`, Anthropic by construction. Values are harness tier aliases (haiku, sonnet, opus, fable) the harness binds to its current Claude model of that tier; the Agent tool accepts nothing else. The review class rides `fable`, the alias no coding class uses, so that on the broker path it never shares code-high's export. No shim applies to a native Claude model.",
+      "description": "Plain `claude`, Anthropic by construction. A value is either a harness tier alias (haiku, sonnet, opus, fable) — the harness binds it to its current Claude model of that tier and the fabric leaves it there — or a native Claude id (claude-…), which the launcher (`runtime/openrouter/launch --provider anthropic`) pins as that tier's ANTHROPIC_DEFAULT_*_MODEL so the fabric decides the model rather than the harness's week. The review class rides `fable`, the alias no coding class uses, and is pinned to claude-opus-5[1m] (architect-cto, 2026-09-15): a vanilla review is never on a tier the fabric has not named, and the pin is gated by routing/policies/review-grade.json like every other review model. No shim applies to a native Claude model.",
       "models": {
         "code-low": "haiku",
         "code-medium": "sonnet",
         "code-high": "opus",
-        "review": "fable"
+        "review": "claude-opus-5[1m]"
       }
     },
     "openrouter": {

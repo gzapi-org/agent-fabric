@@ -4,7 +4,8 @@
 # Launch this agent's Claude Code session through OpenRouter, with the
 # capability classes resolved from agent-fabric's routing files.
 #
-#   runtime/openrouter/launch [claude args...]     # resolve, export, exec
+#   runtime/openrouter/launch [claude args...]     # resolve, export, exec (broker)
+#   runtime/openrouter/launch --provider anthropic # the same, on plain claude
 #   runtime/openrouter/launch --print              # resolve and print; no exec
 #
 # WHY THIS EXISTS. Launching is a decision no session can make for itself:
@@ -92,12 +93,26 @@ die() { echo "launch: $*" >&2; exit 1; }
 
 # --print may sit anywhere in the arguments; as $1 only, `launch --verbose
 # --print` passed it through to claude and exec'd a real session.
+# --provider openrouter (default) | anthropic: the same resolution and the
+# same refusals, then `ori claude` with every class exported as a
+# composite, or plain `claude` with only the classes the anthropic column
+# pins (a native Claude id) exported — a tier alias there is left to the
+# harness. Either way the session is the fabric's: bound role, gated
+# review model, no pin outside the profile.
 PRINT_ONLY=0
+PROVIDER="openrouter"
 ARGS=()
+prev_arg=""
 for arg in "$@"; do
-    if [[ "$arg" == "--print" ]]; then PRINT_ONLY=1; else ARGS+=("$arg"); fi
+    if [[ "$arg" == "--print" ]]; then PRINT_ONLY=1
+    elif [[ "$prev_arg" == "--provider" ]]; then PROVIDER="$arg"
+    elif [[ "$arg" == --provider=* ]]; then PROVIDER="${arg#--provider=}"
+    elif [[ "$arg" == "--provider" ]]; then :
+    else ARGS+=("$arg"); fi
+    prev_arg="$arg"
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
+[[ "$PROVIDER" == openrouter || "$PROVIDER" == anthropic ]] || { echo "launch: --provider must be openrouter or anthropic, not '$PROVIDER'" >&2; exit 1; }
 
 # ── who is launching ────────────────────────────────────────────────
 [[ -f "$IDENTITY" ]] || die "$IDENTITY is missing — is AGENT_FABRIC_ROOT right?"
@@ -113,7 +128,11 @@ LOCAL_OVERRIDE="$STATE_DIR/model-profile.local.json"
   /role <role> first, then re-run."
 [[ -f "$CAPABILITIES" ]] || die "$CAPABILITIES is missing."
 [[ -f "$ALIASES" ]] || die "$ALIASES is missing."
-command -v ori >/dev/null 2>&1 || die "the ori CLI is not on PATH."
+if [[ "$PROVIDER" == openrouter ]]; then
+    command -v ori >/dev/null 2>&1 || die "the ori CLI is not on PATH."
+else
+    command -v claude >/dev/null 2>&1 || die "claude is not on PATH."
+fi
 
 # Pass-through args must not be able to fence ori out of OpenRouter.
 for arg in "$@"; do
@@ -165,9 +184,9 @@ done
     die "CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set; it discards every dispatch's own model. Unset it."
 
 # ── resolve ─────────────────────────────────────────────────────────
-RESOLVED="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 - "$ROUTING" "$ALIASES" "$LOCAL_OVERRIDE" "$ROLE" "$AGENT" <<'PY'
+RESOLVED="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 - "$ROUTING" "$ALIASES" "$LOCAL_OVERRIDE" "$ROLE" "$AGENT" "$PROVIDER" <<'PY'
 import importlib.util, json, os, re, sys
-routing_path, aliases_path, local_path, role, agent = sys.argv[1:6]
+routing_path, aliases_path, local_path, role, agent, provider = sys.argv[1:7]
 spec = importlib.util.spec_from_file_location("fabric_routing", routing_path)
 routing = importlib.util.module_from_spec(spec); spec.loader.exec_module(routing)
 local = {}
@@ -186,14 +205,21 @@ merged = routing.merged_profile(role, agent, local)
 valid("session", merged.get("session"))
 for klass, val in (merged.get("capabilities") or {}).items():
     valid("capabilities." + klass, val)
-out = {"role": role, "agent": agent, "exports": {}, "classes": {}}
+out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}}
 for klass, alias in aliases["aliases"].items():
-    res = routing.resolve(klass, "openrouter", role, agent, local)
-    if not routing.COMPOSITE.fullmatch(res["composite"]):
-        sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
+    res = routing.resolve(klass, provider, role, agent, local)
+    if provider == "openrouter":
+        if not routing.COMPOSITE.fullmatch(res["composite"]):
+            sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
+        out["exports"][aliases["env"][alias]] = res["composite"]
+    elif res.get("pinned"):
+        # A native id pins the alias; an alias leaves the harness's default.
+        out["exports"][aliases["env"][alias]] = res["model"]
     out["classes"][klass] = res
-    out["exports"][aliases["env"][alias]] = res["composite"]
-session = routing.resolve_session(role, agent, local)
+try:
+    session = routing.resolve_session(role, agent, local, provider=provider)
+except KeyError as exc:
+    sys.exit(str(exc))
 out["session"] = session
 grade = routing.load_review_grade()
 review = out["classes"].get(grade.get("capability", "review"))
@@ -221,7 +247,8 @@ done < <(python3 -c 'import json,sys; [print(f"{k}={v}") for k, v in sorted(json
 # prompt at this point would come after we already exported the pins.
 # The check is a CONJUNCTION on the documented shape — {"ok":true,"data":
 # {"authenticated":true,"source":{"kind":"environment",...}}} — and keeps
-# ori's exit status.
+# ori's exit status. Plain claude carries its own login; nothing to check.
+if [[ "$PROVIDER" == openrouter ]]; then
 AUTH="$(ori auth --json 2>/dev/null)"; AUTH_RC=$?
 if [[ $AUTH_RC -ne 0 ]] || ! python3 - "$AUTH" <<'PY'
 import json, sys
@@ -236,6 +263,7 @@ sys.exit(0 if data.get("authenticated") is True and src.get("kind") == "environm
 PY
 then
     die "ori is not authenticated from the environment (ori auth exit $AUTH_RC). This account needs OPENROUTER_API_KEY in its environment (~/.config/agent-fabric/secrets.env via fabric-secrets sync) — a stored \`ori login\` credential is deliberately not accepted, because per-agent spend follows the key (ori auth --json to inspect)."
+fi
 fi
 
 LABEL="$ROLE/$AGENT"
@@ -256,23 +284,37 @@ done
 export AGENT_FABRIC_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
 export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"
 export AGENT_FABRIC_LAUNCH_AGENT="$AGENT"
+export AGENT_FABRIC_LAUNCH_PROVIDER="$PROVIDER"
 
 if (( PRINT_ONLY )); then
-    echo "# resolved profile for $LABEL (agent $AGENT, role $ROLE)"
+    echo "# resolved profile for $LABEL (agent $AGENT, role $ROLE, provider $PROVIDER)"
     echo "  session : $SESSION"
+    SKIPPED="$(python3 -c 'import json,sys; s=json.load(sys.stdin)["session"]; print(s.get("skipped") or "")' <<<"$RESOLVED")"
+    [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
     [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
     python3 - "$RESOLVED" <<'PY'
 import json, sys
 d = json.loads(sys.argv[1])
 for klass, res in d["classes"].items():
-    print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
+    if d.get("provider") == "anthropic":
+        print("  %-12s: %s  %s" % (klass, res["model"], "(pinned)" if res.get("pinned") else "(harness default for the alias)"))
+    else:
+        print("  %-12s: %s  shim %s  => %s" % (klass, res["model"], res["shim"] or "-", res["composite"]))
 print()
 for k, v in sorted(d["exports"].items()):
     print("  export %s=%s" % (k, v))
 PY
     echo "  export AGENT_FABRIC_LAUNCH_SESSION_MODEL=$AGENT_FABRIC_LAUNCH_SESSION_MODEL"
     echo "  export AGENT_FABRIC_LAUNCH_PROFILE=$AGENT_FABRIC_LAUNCH_PROFILE"
+    echo "  export AGENT_FABRIC_LAUNCH_PROVIDER=$AGENT_FABRIC_LAUNCH_PROVIDER"
     exit 0
+fi
+
+# Plain claude: no broker, no shim, the pins above are what the fabric
+# decided; everything else is the harness's own.
+if [[ "$PROVIDER" == anthropic ]]; then
+    if (( CALLER_MODEL )); then exec claude "$@"; fi
+    exec claude --model "$SESSION" "$@"
 fi
 
 # When the caller supplied --model, the launcher's own is OMITTED rather

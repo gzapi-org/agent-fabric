@@ -78,7 +78,7 @@ echo "launch: --print resolves the capability classes through model -> family sh
 mkfabric
 out="$(run --print)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$out"
-grep -q "resolved profile for backend-dev/$LOGIN (agent $LOGIN, role backend-dev)" <<<"$out" && ok "the label is role/agent, agent = login" || bad "label wrong" "$out"
+grep -q "resolved profile for backend-dev/$LOGIN (agent $LOGIN, role backend-dev, provider openrouter)" <<<"$out" && ok "the label is role/agent, agent = login" || bad "label wrong" "$out"
 grep -q "session : anthropic/claude-sonnet-5" <<<"$out" && ok "default session" || bad "session wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
@@ -171,7 +171,7 @@ rm -rf "$SANDBOX/other"
 echo "launch: identity comes from the OS, not from the directory or the environment"
 mkfabric; rm -rf "$SANDBOX/repo"; mkdir -p "$SANDBOX/architect-cto-01"; git init -q "$SANDBOX/architect-cto-01"
 out="$(cd "$SANDBOX/architect-cto-01" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" USER=architect-cto-01 LOGNAME=architect-cto-01 bash "$LAUNCHER" --print 2>&1)"
-grep -q "(agent $LOGIN, role backend-dev)" <<<"$out" && ok "launched from a directory named for another agent, with USER forged: still agent $LOGIN" || bad "identity taken from directory or env" "$out"
+grep -q "(agent $LOGIN, role backend-dev, provider openrouter)" <<<"$out" && ok "launched from a directory named for another agent, with USER forged: still agent $LOGIN" || bad "identity taken from directory or env" "$out"
 mkdir -p "$SANDBOX/repo"; git init -q "$SANDBOX/repo"
 
 # A malformed LOCAL override is refused, not exported as "None".
@@ -207,6 +207,57 @@ run_err --print; [[ $? -eq 1 ]] && ok "authenticated from a stored credential: r
 mkfabric; fake_auth '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment"}}}' 3
 run_err --print; [[ $? -eq 1 ]] && ok "ori auth exit status is kept" || bad "non-zero ori auth ignored"
 write_fake_ori
+
+echo "launch: --provider anthropic execs plain claude with only the pinned tiers exported"
+# A fake claude that records its argv and the four tier variables.
+cat > "$SANDBOX/bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+echo "CLAUDE-EXECCED:$*"
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE; do
+    echo "CLAUDE-ENV:$v=${!v:-}"
+done
+FAKE
+chmod +x "$SANDBOX/bin/claude"
+mkfabric
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && ok "--print exits 0" || bad "rc=$rc" "$out"
+grep -q "provider anthropic)" <<<"$out" && ok "the header names the provider" || bad "provider not in header" "$out"
+grep -q "session : claude-sonnet-5$" <<<"$out" && ok "the session is the profile's model spoken natively (anthropic/ dropped)" || bad "session not native" "$out"
+grep -q "review      : claude-opus-5\[1m\]  (pinned)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id)" || bad "review not pinned" "$out"
+grep -q "code-high   : opus  (harness default for the alias)" <<<"$out" && ok "a tier alias in the column is left to the harness" || bad "alias treated as a pin" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "only the pinned tier is exported" || bad "fable export missing" "$out"
+! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "…and an alias tier is not" || bad "opus exported on vanilla" "$out"
+out="$(run --provider=anthropic --version 2>&1)"
+grep -q "CLAUDE-EXECCED:--model claude-sonnet-5 --version" <<<"$out" && ok "execs plain claude with the native session model" || bad "no plain-claude exec" "$out"
+! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "FABLE pin reaches the child" || bad "fable pin not in child env" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=$" <<<"$out" && ok "OPUS left unset for the harness" || bad "opus set on vanilla" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=$" <<<"$out" && ok "no base URL: Anthropic direct" || bad "base URL set" "$out"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROVIDER=anthropic" <<<"$out" && ok "provider stamped" || bad "no provider stamp" "$out"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped on vanilla too" || bad "no profile stamp" "$out"
+mkfabric
+rm -f "$STATE/agents/$LOGIN/binding.json"
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "no active role binding" <<<"$out" && ok "vanilla through the launcher still needs a bound role" || bad "unbound vanilla launch admitted" "$out"
+mkfabric
+profile defaults '{"session": "z-ai/glm-5.3"}'
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "not an Anthropic model and no profile layer names one" <<<"$out" && ok "a non-Anthropic session with no Anthropic layer is refused on vanilla, not mistranslated" || bad "foreign session admitted" "$out"
+mkfabric
+profile agents "$LOGIN" '{"session": "z-ai/glm-5.3"}'
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "session : claude-sonnet-5" <<<"$out" && grep -q "merged session z-ai/glm-5.3 is not an Anthropic model; the defaults layer's is used" <<<"$out" && ok "a broker-only agent override is skipped on vanilla and the skip is shown" || bad "broker override blocked the vanilla launch" "$out"
+mkfabric
+python3 - "$FABRIC/routing/capabilities.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["providers"]["anthropic"]["models"]["review"] = "claude-haiku-4-5"
+json.dump(d, open(sys.argv[1], "w"))
+PY
+out="$(run --provider anthropic --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "not in routing/policies/review-grade.json" <<<"$out" && ok "a pinned review model outside the grade is refused on vanilla too" || bad "ungraded vanilla review admitted" "$out"
+out="$(run --provider nowhere --print 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "must be openrouter or anthropic" <<<"$out" && ok "an unknown provider is refused" || bad "unknown provider admitted" "$out"
+rm -f "$SANDBOX/bin/claude"
 
 echo "launch: the exec carries the pins to the child"
 mkfabric

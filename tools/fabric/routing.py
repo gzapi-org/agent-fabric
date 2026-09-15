@@ -34,6 +34,10 @@ MODEL_ID = re.compile(r"^~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\[1m\])?$")
 # A harness model reference: a tier alias (`opus`, `fable`) — the only form
 # the Agent tool's `model` field accepts.
 HARNESS_REF = re.compile(r"^(haiku|sonnet|opus|fable)$")
+# A native Anthropic model id, as `claude` itself names it: what the harness
+# provider's column holds when the fabric decides a tier's model on the
+# vanilla path rather than leaving it to the harness's own default.
+NATIVE_ID = re.compile(r"^claude-[a-z0-9.-]+(\[1m\])?$")
 PRESET = re.compile(r"^@preset/[a-z0-9-]+$")
 COMPOSITE = re.compile(r"^~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\[1m\])?(@preset/[a-z0-9-]+)?$")
 
@@ -127,8 +131,11 @@ def resolve(capability: str, provider: str = "openrouter", role: str | None = No
     if not model:
         raise KeyError(f"provider {provider!r} binds no model to {capability!r}")
     if prov["resolution"] == "harness":
+        # An alias leaves the tier to the harness; a native id pins it —
+        # exported as the alias's ANTHROPIC_DEFAULT_*_MODEL by the launcher.
         return {"capability": capability, "provider": provider, "model": model, "shim": None,
-                "composite": model, "resolution": "harness", "source": source}
+                "composite": model, "resolution": "harness", "source": source,
+                "pinned": bool(NATIVE_ID.match(model))}
     shim = shim_for(model, load_shims(root), harness)
     return {"capability": capability, "provider": provider, "model": model, "shim": shim,
             "composite": composite(model, shim), "resolution": "model-id", "source": source}
@@ -136,17 +143,43 @@ def resolve(capability: str, provider: str = "openrouter", role: str | None = No
 
 def resolve_session(role: str | None = None, agent: str | None = None,
                     local: dict[str, Any] | None = None, root: str | None = None,
-                    harness: str = "claude-code") -> dict[str, Any]:
-    """The main agent's model on the broker path, with its family shim.
-    Separate from capability resolution: the session is not a class."""
+                    harness: str = "claude-code", provider: str = "openrouter") -> dict[str, Any]:
+    """The main agent's model, with its family shim on the broker path.
+    Separate from capability resolution: the session is not a class. The
+    profile names the session as an OpenRouter id; on the anthropic
+    provider (plain `claude`) the same value is spoken natively — the
+    `anthropic/` prefix dropped — and a model of any other vendor cannot
+    run there, so it is refused rather than mistranslated."""
     model = merged_profile(role, agent, local, root).get("session")
     if not model:
         raise KeyError("no session model: routing/profiles.json defaults must carry one")
+    if provider == "anthropic":
+        # A layer's session is usually a broker choice (an agent's local
+        # override to GLM says nothing about what it wants on plain claude),
+        # so the nearest layer naming an Anthropic model wins: local, agent,
+        # role, defaults. None at all is refused, not mistranslated.
+        profiles = load_profiles(root)
+        layers = [("local", local or {}),
+                  ("agent", (profiles.get("agents") or {}).get(agent) or {} if agent else {}),
+                  ("role", (profiles.get("roles") or {}).get(role) or {} if role else {}),
+                  ("defaults", profiles.get("defaults") or {})]
+        for layer, body in layers:
+            candidate = body.get("session")
+            if isinstance(candidate, str) and candidate.startswith("anthropic/"):
+                native = candidate[len("anthropic/"):]
+                return {"model": native, "shim": None, "composite": native, "openrouter_id": candidate,
+                        "source": layer, "skipped": model if candidate != model else None}
+        raise KeyError(f"session model {model!r} is not an Anthropic model and no profile layer names one; plain claude cannot run it")
     shim = shim_for(model, load_shims(root), harness)
     return {"model": model, "shim": shim, "composite": composite(model, shim)}
 
 
 def review_grade_ok(model: str, root: str | None = None) -> bool:
+    """Admitted by routing/policies/review-grade.json, whose entries are
+    OpenRouter ids; a native id (claude-…) is the same model spelled as
+    plain claude names it, so it is compared under `anthropic/`."""
+    if NATIVE_ID.match(model):
+        model = "anthropic/" + model
     return model in (load_review_grade(root).get("models") or [])
 
 
@@ -164,8 +197,8 @@ def check(root: str | None = None) -> list[str]:
                                 "a preset is a shim (routing/shims.json), not a model")
             if prov.get("resolution") == "model-id" and not MODEL_ID.match(model or ""):
                 findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is not a model id")
-            if prov.get("resolution") == "harness" and not HARNESS_REF.match(model or ""):
-                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is not a harness model reference")
+            if prov.get("resolution") == "harness" and not (HARNESS_REF.match(model or "") or NATIVE_ID.match(model or "")):
+                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is neither a harness tier alias nor a native Claude id")
         for klass in classes:
             if klass not in (prov.get("models") or {}):
                 findings.append(f"capabilities.json: providers.{name} binds no model to {klass!r}")
@@ -178,11 +211,13 @@ def check(root: str | None = None) -> list[str]:
     for model in grade.get("models") or []:
         if not MODEL_ID.match(model):
             findings.append(f"review-grade.json: {model!r} is not a model id")
-    # The review class on every model-id provider must be review-grade.
+    # The review class must be review-grade wherever the fabric names its
+    # model: on every model-id provider, and on the harness provider when
+    # the column pins a native id (an alias is the harness's choice, ungated).
     for name, prov in (caps.get("providers") or {}).items():
-        if prov.get("resolution") == "model-id":
-            model = (prov.get("models") or {}).get(grade.get("capability"))
-            if model and not review_grade_ok(model, root):
+        model = (prov.get("models") or {}).get(grade.get("capability"))
+        if model and (prov.get("resolution") == "model-id" or NATIVE_ID.match(model)):
+            if not review_grade_ok(model, root):
                 findings.append(f"capabilities.json: providers.{name}.{grade.get('capability')} {model!r} "
                                 "is not in routing/policies/review-grade.json")
     # The Claude Code binding: every class rides a harness tier alias (the
@@ -206,7 +241,7 @@ def check(root: str | None = None) -> list[str]:
                 findings.append(f"runtime/claude-code/aliases.json: alias {alias!r} has no export variable")
         native = ((caps.get("providers") or {}).get("anthropic") or {}).get("models") or {}
         for klass, ref in aliases.items():
-            if native.get(klass) not in (None, ref):
+            if native.get(klass) not in (None, ref) and not NATIVE_ID.match(native.get(klass) or ""):
                 findings.append(f"aliases.json binds {klass} to {ref!r} but capabilities.providers.anthropic "
                                 f"says {native.get(klass)!r}")
     return findings

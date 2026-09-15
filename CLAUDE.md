@@ -82,7 +82,10 @@ directory, the repository, the branch or the session.
   `code-medium`, `code-high`, or the review class `blind-reviewer` — and
   a harness tier alias in `model` (`haiku`, `sonnet`, `opus`; `fable`
   for a review), never a vendor model: what an alias resolves to is
-  `routing/`, decided at launch. **The class decides the alias**
+  `routing/`, decided at launch — on the broker path and, with
+  `runtime/openrouter/launch --provider anthropic`, on plain `claude`
+  too (the review class is pinned to `claude-opus-5[1m]` there).
+  **The class decides the alias**
   (`runtime/claude-code/aliases.json`): the dispatch guard
   (`runtime/claude-code/hooks/agent-dispatch-guard.sh`) refuses a class
   dispatch whose `model` is not its alias — unset included — a review

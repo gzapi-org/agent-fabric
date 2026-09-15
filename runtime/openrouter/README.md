@@ -4,16 +4,26 @@ How a Claude Code session starts through OpenRouter, and which model each
 capability class gets there. One decision per launch: the provider chosen
 at launch applies to everything under the session, subagents included.
 
-| | vanilla (`claude`) | broker (`runtime/openrouter/launch`) |
-|---|---|---|
-| provider | Anthropic, by construction | OpenRouter (`ori claude`) |
-| who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding |
-| session model | harness default | `session` from `routing/profiles.json` (+ family shim) |
-| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | `routing/capabilities.json` → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
-| review class | the `fable` alias, bound by the harness to its Fable tier | `review` → `z-ai/glm-5.3` (+ shim) → `ANTHROPIC_DEFAULT_FABLE_MODEL`; the launcher refuses a profile that resolves review outside review-grade |
-| per-role / per-agent choice | none | `routing/profiles.json` (`roles.<role>`, `agents.<login>`) + the agent's gitignored `model-profile.local.json` |
-| review-grade floor | the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch |
-| how to inspect | `model-audit.sh` | same, plus `ori auth --json` |
+| | unlaunched vanilla (`claude`) | fabric vanilla (`launch --provider anthropic`) | broker (`launch`) |
+|---|---|---|---|
+| provider | Anthropic, by construction | Anthropic, plain `claude` | OpenRouter (`ori claude`) |
+| who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding | same |
+| session model | harness default | `session` from `routing/profiles.json`, spoken natively (`anthropic/` dropped; another vendor's id is refused) | `session` (+ family shim) |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`) | the `anthropic` column of `routing/capabilities.json`: an alias is left to the harness, a native id (`claude-…`) is exported as that tier's `ANTHROPIC_DEFAULT_*_MODEL` | `openrouter` column → model → `routing/shims.json` → `ANTHROPIC_DEFAULT_*_MODEL` |
+| review class | the `fable` alias, whatever the harness binds it to this week | pinned: `review` → `claude-opus-5[1m]` → `ANTHROPIC_DEFAULT_FABLE_MODEL` (architect-cto, 2026-09-15), gated by review-grade | `review` → `z-ai/glm-5.3` (+ shim), gated by review-grade |
+| per-role / per-agent choice | none | the profile's `session`; class pins are the column's (fabric-wide) | `routing/profiles.json` layers + the agent's `model-profile.local.json` |
+| review-grade floor | none — the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch | same |
+| refusals | none | no bound role, model pins in any settings scope, an ungraded review pin, a non-Anthropic session | the same, plus `ori` not authenticated from the environment |
+| how to inspect | `bin/fabric-status` says "not launched by the fabric" | `bin/fabric-status` says "launched by the fabric" with the pins; `AGENT_FABRIC_LAUNCH_PROVIDER=anthropic` | same, plus `ori auth --json` |
+
+The middle column exists so that the fabric decides the review model on
+the vanilla path too. Plain `claude` honours the same
+`ANTHROPIC_DEFAULT_*_MODEL` variables the broker path uses — they are
+Claude Code's, not ori's — so the one launcher serves both: the same
+resolution, the same refusals, then `claude` instead of `ori claude`,
+with only the tiers the column pins exported. A tier alias in the column
+means "the harness's current model of that tier", which is right for the
+coding classes; the review class is a policy, so it is pinned.
 
 ## The three steps, and where each lives
 
@@ -99,8 +109,10 @@ Every class therefore rides an alias, and one alias carries one export.
 the launcher exports the review model under
 `ANTHROPIC_DEFAULT_FABLE_MODEL`, the dispatch guard requires `model: fable`
 on a review dispatch (and denies `opus`, which is code-high's), and the
-review gate guards exactly that export. On vanilla `claude`, `fable`
-binds to the harness's current Fable tier.
+review gate guards exactly that export. On unlaunched vanilla `claude`,
+`fable` binds to the harness's current Fable tier; launched by the fabric
+(`--provider anthropic`), it is pinned to `claude-opus-5[1m]` — the
+review model is the fabric's on both paths.
 
 Which model rides the export is `routing/capabilities.json`, gated by
 `routing/policies/review-grade.json`. The read-back on the new binding

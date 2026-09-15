@@ -52,11 +52,26 @@ def test_current_glm_policy() -> None:
         assert (res["model"], res["shim"], res["composite"]) == (model, shim, comp), res
 
 
-def test_native_fallback_is_harness_references() -> None:
-    got = {k: routing.resolve(k, "anthropic")["composite"] for k in ("code-low", "code-medium", "code-high", "review")}
-    assert got == {"code-low": "haiku", "code-medium": "sonnet", "code-high": "opus",
-                   "review": "fable"}, got
-    assert all(routing.resolve(k, "anthropic")["shim"] is None for k in got), "no shim on the native path"
+def test_native_path_is_aliases_except_the_review_pin() -> None:
+    """On plain claude a coding class is a tier alias the harness binds; the
+    review class is pinned to a native id (architect-cto, 2026-09-15), so a
+    vanilla review is never on a tier the fabric has not named. No shim."""
+    got = {k: routing.resolve(k, "anthropic") for k in ("code-low", "code-medium", "code-high", "review")}
+    assert {k: v["composite"] for k, v in got.items()} == {
+        "code-low": "haiku", "code-medium": "sonnet", "code-high": "opus", "review": "claude-opus-5[1m]"}, got
+    assert [k for k, v in got.items() if v["pinned"]] == ["review"], got
+    assert all(v["shim"] is None for v in got.values()), "no shim on the native path"
+    assert routing.review_grade_ok("claude-opus-5[1m]"), "the native spelling is graded under anthropic/"
+    assert not routing.review_grade_ok("claude-haiku-4-5")
+    s = routing.resolve_session(provider="anthropic")
+    assert (s["model"], s["composite"], s["openrouter_id"], s["source"], s["skipped"]) == \
+        ("claude-sonnet-5", "claude-sonnet-5", "anthropic/claude-sonnet-5", "defaults", None), s
+    # A broker-only local override (GLM) says nothing about plain claude: the
+    # nearest layer naming an Anthropic model wins, and the skip is reported.
+    s = routing.resolve_session(local={"session": "z-ai/glm-5.3"}, provider="anthropic")
+    assert (s["model"], s["source"], s["skipped"]) == ("claude-sonnet-5", "defaults", "z-ai/glm-5.3"), s
+    s = routing.resolve_session(local={"session": "anthropic/claude-opus-5[1m]"}, provider="anthropic")
+    assert (s["model"], s["source"]) == ("claude-opus-5[1m]", "local"), s
 
 
 def test_composite_is_derived_not_stored() -> None:
@@ -158,10 +173,16 @@ def test_every_class_rides_its_own_alias(tmp: str) -> None:
     json.dump(d, open(path, "w"))
     findings = routing.check(root)
     assert any("declared" in f and "retired" in f for f in findings), findings
+    # The harness column may pin a native id — graded like any review model —
+    # but never a foreign vendor's id or a composite.
     root2 = scratch_root(os.path.join(tmp, "b"))
-    set_model(root2, "anthropic", "review", "claude-opus-5[1m]")
+    set_model(root2, "anthropic", "review", "claude-haiku-4-5")
     findings = routing.check(root2)
-    assert any("not a harness model reference" in f for f in findings), findings
+    assert any("review" in f and "review-grade" in f for f in findings), findings
+    root3 = scratch_root(os.path.join(tmp, "c"))
+    set_model(root3, "anthropic", "review", "z-ai/glm-5.3")
+    findings = routing.check(root3)
+    assert any("neither a harness tier alias nor a native Claude id" in f for f in findings), findings
 
 
 def test_real_files_are_clean() -> None:
@@ -174,7 +195,7 @@ def test_real_files_are_clean() -> None:
 def main() -> int:
     cases = [
         test_current_glm_policy,
-        test_native_fallback_is_harness_references,
+        test_native_path_is_aliases_except_the_review_pin,
         test_composite_is_derived_not_stored,
         test_a_non_glm_model_gets_no_shim,
         test_shim_follows_the_family_of_the_merged_model,

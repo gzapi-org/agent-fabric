@@ -37,8 +37,11 @@ arm:**
   `persistent: true` and the watch runs for the whole session — armed
   once, never re-armed, no timer; `timeout_ms` is then ignored.
 - **It has only `command`/`description`/`timeout_ms`/`ws`, no
-  `persistent`, and `timeout_ms` caps at 30 min** (Claude Code 2.1.271,
-  the agent build): then *every* Monitor expires at that cap — no command
+  `persistent`, and `timeout_ms` caps at 30 min** (seen in a launched /
+  headless session — e.g. 2.1.271 through the broker; it does not track
+  the version, an interactive 2.1.272 has `persistent`, so it is most
+  likely the launched vs interactive Monitor, not the build): then
+  *every* Monitor expires at that cap — no command
   survives it, `--follow` included — and the tool's own notice says
   "Re-arm it if you still need the watch". Arm with `timeout_ms` at the
   cap and **re-arm on that notice**. `--follow` still earns its place:

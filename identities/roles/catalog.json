@@ -41,6 +41,11 @@
       "candidate": true
     },
     {
+      "id": "brand-comms",
+      "title": "Brand and communications",
+      "candidate": true
+    },
+    {
       "id": "fabric-coordinator",
       "title": "Control-plane coordinator (agent-fabric, and the GZCoord protocol)"
     }

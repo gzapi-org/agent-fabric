@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# bin/fabric-model — this agent's model choices, per provider: list what
+# each launch path resolves to and where each choice comes from, set or
+# unset one in the login's own layer, seed that layer from the repo
+# defaults. Writes only $STATE_DIR/model-profile.local.json (and the
+# account's agent files, for the review pin); never a committed file.
+#
+#   agent-fabric/bin/fabric-model list [--provider openrouter|anthropic]
+#   agent-fabric/bin/fabric-model set --provider anthropic opus claude-opus-5[1m]
+#   agent-fabric/bin/fabric-model set --provider openrouter session z-ai/glm-5.3
+#   agent-fabric/bin/fabric-model unset --provider anthropic opus
+#   agent-fabric/bin/fabric-model seed [--provider P]
+#
+# The full account is in tools/fabric/model_profile.py.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
+exec python3 "$ROOT/tools/fabric/model_profile.py" "$@"

@@ -35,6 +35,8 @@ agent-fabric/bin/fabric-whoami          # the agent name (== id -un)
 agent-fabric/bin/fabric-whoami --json   # agent, host, role, project, working copy
 agent-fabric/bin/fabric-status          # all of that plus the API path, model pins,
                                         # capability resolution and routing health — ONE call
+agent-fabric/bin/fabric-model list      # every model choice per provider, with its source layer;
+                                        # `set --provider <p> <target> <model>` writes your own layer
 ```
 
 When asked who you are, what you are bound to, or which API or model

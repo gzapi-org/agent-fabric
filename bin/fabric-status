@@ -51,13 +51,26 @@ present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("O
 credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BASE_URL"}
 
 # --- how the classes resolve on that provider --------------------------
+# The merge includes this login's own layer (bin/fabric-model writes it);
+# a malformed one is reported per class rather than hidden.
 classes = {}
+try:
+    local = routing.load_local(ctx["agent"])
+    routing.normalize_layer(local, "local")
+except ValueError as exc:
+    local, local_error = {}, str(exc)
+else:
+    local_error = None
+alias_env = routing.load_aliases(root)["env"]
 for klass in routing.load_capabilities(root)["classes"]:
     try:
-        r = routing.resolve(klass, provider, binding.get("role"), ctx["agent"], root=root)
-        classes[klass] = r["composite"] + (" (exported)" if pins.get(routing._load(os.path.join(root, "runtime", "claude-code", "aliases.json"))["env"].get(r["model"], "")) else "")
-    except KeyError as exc:
+        r = routing.resolve(klass, provider, binding.get("role"), ctx["agent"], local, root=root)
+        exported = pins.get(alias_env.get(r.get("alias") or r["model"], ""))
+        classes[klass] = r["composite"] + (" (exported)" if exported else "") + " (from %s)" % r["source"]
+    except (KeyError, ValueError) as exc:
         classes[klass] = "unresolved: %s" % exc
+    if local_error:
+        classes[klass] += " (local layer ignored: %s)" % local_error
 checks = routing.check(root)
 
 report = {
@@ -87,7 +100,7 @@ if report['api']['launch_profile']: print(f"launch profile {report['api']['launc
 print(f"pins         {report['api']['pins'] if isinstance(report['api']['pins'], str) else ', '.join(f'{k}={v}' for k, v in report['api']['pins'].items())}")
 print(f"credentials  {report['api']['credentials'] if isinstance(report['api']['credentials'], str) else ', '.join(f'{k}: set' for k in report['api']['credentials'])}")
 print()
-print(f"capabilities on {provider}:")
+print(f"capabilities on {provider} (bin/fabric-model list for every choice, per provider, with its source):")
 for k, v in classes.items(): print(f"  {k:12} {v}")
 print(f"routing      {report['routing_check'] if isinstance(report['routing_check'], str) else str(len(checks)) + ' finding(s): ' + '; '.join(checks)}")
 print(f"control plane {root}")

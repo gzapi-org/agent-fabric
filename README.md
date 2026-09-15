@@ -60,7 +60,8 @@ composites, and execs `ori claude` — see `runtime/openrouter/README.md`.
 Never in this repository. Per agent, under
 `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`:
 `binding.json` (role, project, working copy, session),
-`role-history.jsonl`, `model-profile.local.json`. Credentials stay in
+`role-history.jsonl`, `model-profile.local.json` (the agent's own model
+choices per provider; `bin/fabric-model`). Credentials stay in
 each account's shell environment.
 
 ## Provenance

@@ -24,6 +24,18 @@
 #                             OPENROUTER_PROVISIONING_KEY (dashboard →
 #                             Settings → Provisioning Keys). Key values
 #                             go API → doppler, never through a terminal.
+#   enroll.sh issue-openai-keys <login>...
+#                             give each login an OpenAI API key of its own:
+#                             a service account agent-fabric-<login> in
+#                             the organisation's project (the only way to
+#                             mint a project key programmatically; the key
+#                             is returned once), set as OPENAI_API_KEY in
+#                             its config. Needs the coordinator's OpenAI
+#                             ADMIN key in the coordinator's own config as
+#                             OPENAI_ADMIN_KEY (dashboard -> Organization ->
+#                             Admin keys) and, with several projects,
+#                             OPENAI_PROJECT_ID there too. The Usage API
+#                             then reports per api_key_id.
 #   enroll.sh set-shared <NAME> <file>
 #                             set NAME in EVERY enrolled config to the value
 #                             read from <file> (a rotation of a shared
@@ -78,6 +90,7 @@ for a in "$@"; do
     fill-from) MODE=fill-from ;;
     set-shared) MODE=set-shared ;;
     issue-openrouter-keys) MODE=issue-openrouter-keys ;;
+    issue-openai-keys) MODE=issue-openai-keys ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     -*) echo "enroll: unknown flag $a" >&2; exit 2 ;;
     *) LOGINS+=("$a") ;;
@@ -385,6 +398,60 @@ json.dump({n: vals[n] for n in names if n in vals}, open(out, "w"))' "$missing" 
   done
 }
 
+# ---- issue-openai-keys: one service-account key per agent ----------------
+issue_openai_keys() {
+  local me_cfg; me_cfg="$(config_of "$(id -un)")"
+  [[ -n "$me_cfg" ]] || die "no config for $(id -un)"
+  local login tgt_cfg
+  for login in "$@"; do
+    tgt_cfg="$(config_of "$login")"
+    [[ -n "$tgt_cfg" ]] || { say "$login: not enrolled, skipped"; continue; }
+    if (( DRY )); then say "would: create OpenAI service account agent-fabric-$login and set OPENAI_API_KEY in $tgt_cfg"; continue; fi
+    local upload="$TMP/$login.oaikey.json"; ( umask 077; : > "$upload" )
+    python3 - "$PROJECT" "$me_cfg" "$login" "$upload" <<'PY' || die "$login: key creation failed"
+import json, subprocess, sys, urllib.request
+project, me_cfg, login, out = sys.argv[1:5]
+def secret(name):
+    r = subprocess.run(["doppler", "secrets", "get", name, "--plain", "--project", project, "--config", me_cfg], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+adm = secret("OPENAI_ADMIN_KEY")
+if not adm: print("enroll: OPENAI_ADMIN_KEY is not in the coordinator's config", file=sys.stderr); sys.exit(1)
+H = {"Authorization": f"Bearer {adm}", "Content-Type": "application/json"}
+def call(path, data=None):
+    req = urllib.request.Request("https://api.openai.com/v1/" + path, data=json.dumps(data).encode() if data is not None else None, headers=H)
+    try:
+        with urllib.request.urlopen(req) as resp: return json.load(resp)
+    except urllib.error.HTTPError as e:
+        print(f"enroll: OpenAI refused ({e.code}) on {path}: {e.read()[:160].decode(errors='replace')}", file=sys.stderr); sys.exit(1)
+pid = secret("OPENAI_PROJECT_ID")
+if not pid:
+    projs = [p for p in call("organization/projects?limit=50")["data"] if p.get("status") == "active"]
+    if len(projs) != 1:
+        print(f"enroll: {len(projs)} active projects; set OPENAI_PROJECT_ID in the coordinator's config", file=sys.stderr); sys.exit(1)
+    pid = projs[0]["id"]
+# Named for what it is: this control plane's key for that login. A key is
+# returned only at creation, so an account already there under this name
+# (or the bare login, an earlier spelling) is replaced, never reused.
+name = f"agent-fabric-{login}"
+existing = {s["name"]: s["id"] for s in call(f"organization/projects/{pid}/service_accounts?limit=100")["data"]}
+for old in (name, login):
+    if old in existing:
+        req = urllib.request.Request(f"https://api.openai.com/v1/organization/projects/{pid}/service_accounts/{existing[old]}", headers=H, method="DELETE")
+        urllib.request.urlopen(req).read()
+        print(f"enroll: {login}: replaced the existing service account {old}", file=sys.stderr)
+sa = call(f"organization/projects/{pid}/service_accounts", {"name": name})
+key = (sa.get("api_key") or {}).get("value")
+if not key: print("enroll: OpenAI returned no key with the service account", file=sys.stderr); sys.exit(1)
+json.dump({"OPENAI_API_KEY": key}, open(out, "w"))
+print(f"enroll: created OpenAI service account {name} (key id {(sa.get('api_key') or {}).get('id', '?')})", file=sys.stderr)
+PY
+    doppler secrets upload "$upload" --project "$PROJECT" --config "$tgt_cfg" --silent >/dev/null || die "$login: upload failed"
+    shred -u "$upload" 2>/dev/null || rm -f "$upload"
+    say "$login: OPENAI_API_KEY set in $tgt_cfg"
+    as_login "$login" "$(fabric_secrets_of "$login")" sync --quiet || true
+  done
+}
+
 # ---- set-shared: one value into every config (a rotation) ----------------
 set_shared() {
   local name="$1" file="$2"
@@ -457,6 +524,9 @@ case "$MODE" in
   issue-openrouter-keys)
     (( ${#LOGINS[@]} )) || die "issue-openrouter-keys needs the logins"
     issue_openrouter_keys "${LOGINS[@]}" ;;
+  issue-openai-keys)
+    (( ${#LOGINS[@]} )) || die "issue-openai-keys needs the logins"
+    issue_openai_keys "${LOGINS[@]}" ;;
   set-shared)
     (( ${#LOGINS[@]} == 2 )) || die "set-shared needs <NAME> <file>"
     set_shared "${LOGINS[0]}" "${LOGINS[1]}" ;;

@@ -83,6 +83,12 @@ everything else is derived from it:
   the clone's `settings.local.json` entry, the `gh` stored login).
 - Rotation: change the value in the Doppler dashboard, then
   `secrets/enroll.sh sync-all`. Revoking an agent is revoking one token.
+- Keys of a login's own: `secrets/enroll.sh issue-openrouter-keys <login>…`
+  (OpenRouter, with the coordinator's provisioning key in its config as
+  `OPENROUTER_PROVISIONING_KEY`) and `issue-openai-keys <login>…` (OpenAI: a
+  service account `agent-fabric-<login>`, with the coordinator's admin key
+  as `OPENAI_ADMIN_KEY`; the key is minted once and goes API → Doppler).
+  Both providers then report spend per key, i.e. per agent.
 - A login enrolled with names missing (an account that never had a key)
   is completed with `secrets/enroll.sh fill-from <login> [targets…]`:
   copies into each target only the names it lacks and the source has,

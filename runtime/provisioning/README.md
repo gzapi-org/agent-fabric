@@ -22,6 +22,39 @@ directory it stands in identifies context, never identity.
 
 ## The steps, per account
 
+**One command does all of it** (fabric-coordinator, from its own login;
+the account steps go through `sudo`, the Doppler steps use the
+coordinator's CLI token):
+
+```sh
+runtime/provisioning/new-agent.sh <login> <role> [--project <id>]... [--dry-run]
+runtime/provisioning/new-agent.sh brand-comms-01 brand-comms --project gzapi.ge --project gzapp.decks
+```
+
+Idempotent — every step is checked before it is done, so it is also how
+an account that came out short is completed. In order: the Linux account
+(home 700, the shared-cache group); the home skeleton with `claude` and
+`ori` copied from the coordinator's installs; GitHub's host key in
+`known_hosts`; `~/projects/agent-fabric` over https (the fabric is
+public; the account has no key yet); Doppler enrolment — `enroll.sh
+<login>`, `fill-from <coordinator>`, then `issue-openrouter-keys` and
+`issue-openai-keys` **once each** (a key of the account's own on each
+API; presence in its config is the check) — and the first sync; every
+`--project` cloned as the account over SSH from the remote the registry
+names; `bootstrap.sh`; `bin/fabric-role bind <role>`; the toolchain each
+project's lockfile declares (pnpm under `~/.local`, `pnpm install`,
+`npm ci`, a venv); then verification (`fabric-secrets status`, `gh`, SSH
+to every origin, the git identity, `launch --print` on both providers)
+and the short list of what only a person at a terminal can do: the GPG
+secret key (a passphrase prompt), `~/.claude/.credentials.json` for the
+plain-claude path (a credential copy a classifier refuses an agent), and
+the workspace-trust dialog at the first interactive launch. It was
+written on 2026-09-15 after two accounts walked by hand came out short —
+a missing binary, a root-owned `~/.local/bin`, an untrusted host key, no
+toolchain, and a `fill-from` that copied the coordinator's admin keys.
+
+What the steps are, when done by hand:
+
 1. **Clone agent-fabric** beside the working copies:
    `git clone git@github.com:gzapi-org/agent-fabric.git ~/projects/agent-fabric`.
 2. **Run bootstrap** as the account:
@@ -39,13 +72,18 @@ directory it stands in identifies context, never identity.
    the launcher refuses to run without one and renders the role into the
    session's system prompt. A different role later is a rebind here and a
    relaunch.
-4. **Enrol the identity's secrets** (fabric-coordinator, as root):
-   `runtime/provisioning/secrets/enroll.sh <login>` — see "Secrets" below.
-   After it, `OPENROUTER_API_KEY`, `GH_TOKEN` and the GZCoord token are in
-   the account's environment from `~/.config/agent-fabric/secrets.env`,
-   git identity and signing are set, and `runtime/openrouter/launch`
-   (with the `ori` CLI on `PATH`) runs from the working copy
-   (`runtime/openrouter/README.md`).
+4. **Enrol the identity's secrets** (fabric-coordinator, from its own
+   login): `runtime/provisioning/secrets/enroll.sh <login>` — see
+   "Secrets" below. After it, `OPENROUTER_API_KEY`, `GH_TOKEN`,
+   `OPENAI_API_KEY` and the GZCoord token are in the account's
+   environment from `~/.config/agent-fabric/secrets.env`, git identity
+   and signing are set, and `runtime/openrouter/launch` (with the `ori`
+   CLI on `PATH`) runs from the working copy
+   (`runtime/openrouter/README.md`). `fill-from` never copies the
+   coordinator's own credentials (`*_ADMIN_KEY`, `*_PROVISIONING_KEY`,
+   `AGENT_FABRIC_READ_TOKEN`) nor a per-login name the registry declares
+   under `agent_env` (the API keys, a port offset): those have their own
+   steps.
 
 `runtime/claude-code/provision-capability-classes.sh` does step 2's
 agent-file part for every account at once, as root, when the class files

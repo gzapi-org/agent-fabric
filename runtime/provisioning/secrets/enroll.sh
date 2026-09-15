@@ -11,8 +11,14 @@
 #   enroll.sh fill-from <login> [<target>...]
 #                             copy into each target config (default: every
 #                             enrolled login) the names it lacks and <login>'s
-#                             config has — never a name already present;
-#                             then sync the targets. Values stay inside
+#                             config has — never a name already present,
+#                             never the identity names, never the
+#                             coordinator's own credentials (*_ADMIN_KEY,
+#                             *_PROVISIONING_KEY, AGENT_FABRIC_READ_TOKEN),
+#                             never a per-login name from the registry's
+#                             agent_env (a port offset, OPENAI_API_KEY —
+#                             those have their own steps); then sync the
+#                             targets. Values stay inside
 #                             doppler calls, never on a terminal.
 #   enroll.sh issue-openrouter-keys <login>...
 #                             give each login an OpenRouter API key of its
@@ -375,14 +381,30 @@ fill_from() {
 import json, sys
 try: print(" ".join(json.load(sys.stdin).keys()))
 except ValueError: pass')"
-    # Names the source has and the target lacks; identity names are never copied.
+    # Names the source has and the target lacks. Never copied: the identity
+    # names; the coordinator's own credentials — the provisioning and admin
+    # keys the issue-* commands use, and the fabric's read token — which the
+    # source config holds precisely because it is the coordinator's (copying
+    # them handed a fresh agent account the power to mint keys for every
+    # other: brand-comms-01, 2026-09-15, deleted the same hour); and every
+    # name projects/registry.json declares under `agent_env`, which is
+    # per login by definition (a port offset, an OpenAI key of its own) and
+    # is set by its own step, never inherited from another account.
+    per_login="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+names = set(d.get("agent_env") or {})
+for p in (d.get("projects") or {}).values(): names |= set(p.get("agent_env") or {})
+print(" ".join(sorted(names)))' "$ROOT/projects/registry.json" 2>/dev/null)"
     missing="$(doppler secrets --only-names --json --project "$PROJECT" --config "$src_cfg" 2>/dev/null | python3 -c '
 import json, sys
 have = set(sys.argv[1].split())
-skip = {"AGENT_LOGIN", "AGENT_HOST"}
-try: names = [n for n in json.load(sys.stdin) if not n.startswith("DOPPLER_") and n not in skip and n not in have]
+skip = {"AGENT_LOGIN", "AGENT_HOST"} | set(sys.argv[2].split())
+coordinator_only = ("_ADMIN_KEY", "_PROVISIONING_KEY", "AGENT_FABRIC_READ_TOKEN")
+try: names = [n for n in json.load(sys.stdin) if not n.startswith("DOPPLER_") and n not in skip and n not in have
+              and not any(n.endswith(c) or n == c for c in coordinator_only)]
 except ValueError: names = []
-print(" ".join(sorted(names)))' "$have")"
+print(" ".join(sorted(names)))' "$have" "$per_login")"
     if [[ -z "$missing" ]]; then say "$login: nothing missing"; continue; fi
     if (( DRY )); then say "would: copy $missing from $src_cfg into $tgt_cfg"; continue; fi
     local upload="$TMP/$login.fill.json"; ( umask 077; : > "$upload" )

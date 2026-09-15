@@ -164,6 +164,19 @@ repository — so a drain lands as a branch in the project's repository,
 opened by a fabric-coordinator holder under that project's contribution
 rules, plus a commit here.
 
+**When a drain runs** (stated 2026-09-15; there was no cadence before,
+and the roles' own accounts of their work named facts "reconstructed
+from transcripts more than once"): an agent harvests after a change to
+how its role works has landed — a merged pull request that changed a
+workflow, or a `solution` fact that cost a day — and at least weekly
+while it is active; a fabric-coordinator holder assembles and commits
+what arrived, with the agent's name in each slice's `origin`. A slice an
+agent finds wrong is not raised by hand: the agent writes the correction
+as a memory of the same class naming the slice and the contradicting
+fact, and the next drain merges it (`identities/prompt/memory.md` tells
+every session so). `bin/fabric-status` counts what an agent has written
+and not yet drained.
+
 **Merge mode is the default from cycle two onward.** New claims fold into
 existing slices; the existing file is the calibration anchor for what
 counts as good enough; **an empty delta is a correct outcome.** Never

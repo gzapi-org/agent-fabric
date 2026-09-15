@@ -74,6 +74,43 @@ for klass in routing.load_capabilities(root)["classes"]:
         classes[klass] += " (local layer ignored: %s)" % local_error
 checks = routing.check(root)
 
+# --- memory: what this agent wrote that no drain has taken yet -----------
+# The drain reads ~/.claude/projects/<launch-dir-slug>/memory/ and takes a
+# file only if it carries metadata.roles_class; the project's last drain
+# report records the watermark (ms since the epoch, per host). Counting
+# what is newer than it, with and without the class, is the one number
+# that says whether a drain is owed — a rule (memory/README.md, "When a
+# drain runs") that nothing else makes visible. Best effort: no working
+# copy, no report or no memory directory is "n/a", never a failure.
+undrained = None
+try:
+    if ctx["working_copy"] and ctx["project"]:
+        harvest = load("fabric_harvest", os.path.join(root, "tools", "fabric", "harvest_memory.py"))
+        mem_dir = harvest.default_memory_dir(ctx["working_copy"])
+        report_path = os.path.join(ctx["working_copy"], ".agent-fabric", "memory", "last-drain-report.json")
+        watermark_ms = 0
+        try:
+            with open(report_path, encoding="utf-8") as fh:
+                watermark_ms = int((json.load(fh).get("watermarks") or {}).get(ctx["host"], 0))
+        except (OSError, ValueError):
+            pass
+        drainable, private = 0, 0
+        if os.path.isdir(mem_dir):
+            for name in os.listdir(mem_dir):
+                if not name.endswith(".md") or name == "MEMORY.md":
+                    continue
+                rec = harvest.parse_memory(os.path.join(mem_dir, name))
+                if not rec or rec["mtime"] * 1000 <= watermark_ms:
+                    continue
+                if rec["roles_class"]:
+                    drainable += 1
+                else:
+                    private += 1
+        undrained = {"drainable": drainable, "no_roles_class": private,
+                     "since": "the last drain" if watermark_ms else "ever (no drain report)", "dir": mem_dir}
+except Exception:  # noqa: BLE001 — a status line, not a guard
+    undrained = None
+
 # --- drift: what this session was launched with vs. what is bound now ---
 # A rebind from a login shell, or a new default in routing/, does not
 # reach a running session (its prompt and --model are fixed at exec);
@@ -109,6 +146,7 @@ report = {
     "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
     "launch_prompt_digest": digest,
     "drift": [d for d in (role_drift, model_drift, prompt_drift) if d] or None,
+    "undrained_memories": undrained,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",
             "launch_profile": os.environ.get("AGENT_FABRIC_LAUNCH_PROFILE"),
@@ -139,5 +177,8 @@ print()
 print(f"capabilities on {provider} (bin/fabric-model list for every choice, per provider, with its source):")
 for k, v in classes.items(): print(f"  {k:12} {v}")
 print(f"routing      {report['routing_check'] if isinstance(report['routing_check'], str) else str(len(checks)) + ' finding(s): ' + '; '.join(checks)}")
+if undrained:
+    print(f"memory       {undrained['drainable']} drainable (roles_class set) and {undrained['no_roles_class']} private "
+          f"(none) written since {undrained['since']} — {undrained['dir']}")
 print(f"control plane {root}")
 PY

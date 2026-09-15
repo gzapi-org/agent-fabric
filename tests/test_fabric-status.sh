@@ -52,5 +52,20 @@ current="$(grep "the anthropic session now resolves to" <<<"$out" | sed 's/.*res
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_SESSION_MODEL="$current" 2>&1)"
 ! grep -q "launched on" <<<"$out" && ok "launched on what now resolves: no drift" || bad "false session drift" "$out"
 
+echo "fabric-status: memories written and not yet drained"
+WC="$SANDBOX/gzapp"; git init -q "$WC"; git -C "$WC" remote add origin git@github.com:gzapi-org/gzapp.git
+MEM="$SANDBOX/home/.claude/projects/$(printf '%s' "$WC" | tr / -)/memory"; mkdir -p "$MEM" "$WC/.agent-fabric/memory"
+printf '{"watermarks":{"%s":1000}}\n' "$(hostname -s)" > "$WC/.agent-fabric/memory/last-drain-report.json"
+printf -- '---\nname: a\ndescription: d\nmetadata:\n  type: project\n  roles_class: solution\n---\nfact\n' > "$MEM/a.md"
+printf -- '---\nname: b\ndescription: d\nmetadata:\n  type: user\n---\nmine\n' > "$MEM/b.md"
+printf '# index\n' > "$MEM/MEMORY.md"
+out="$(cd "$WC" && HOME="$SANDBOX/home" status 2>&1)"
+grep -q "^memory       1 drainable (roles_class set) and 1 private (none) written since the last drain" <<<"$out" && ok "counts drainable and private memories newer than the watermark; MEMORY.md is not a memory" || bad "memory line wrong" "$out"
+rm "$WC/.agent-fabric/memory/last-drain-report.json"
+out="$(cd "$WC" && HOME="$SANDBOX/home" status 2>&1)"
+grep -q "written since ever (no drain report)" <<<"$out" && ok "no report: counted since ever, said so" || bad "no-report case" "$out"
+out="$(cd "$SANDBOX" && status 2>&1)"
+! grep -q "^memory " <<<"$out" && ok "outside a working copy: no memory line" || bad "memory line without a working copy" "$out"
+
 echo
 if [[ $FAIL -eq 0 ]]; then echo "test_fabric-status: OK — $PASS assertion(s) passed."; else echo "test_fabric-status: FAILED — $FAIL assertion(s) failed."; exit 1; fi

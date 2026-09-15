@@ -140,6 +140,25 @@ out="$("$UNDER_TEST" status 2>&1)"; rc=$?
 assert_eq "status exits 1 when a name is missing in Doppler" "$rc" "1"
 assert_contains "and names it" "$out" "missing: GH_TOKEN"
 
+echo "== a project's declared per-agent env is exported when present, never missing"
+mkdir -p "$SANDBOX/fabric/projects" "$SANDBOX/fabric/runtime/provisioning/secrets"
+cp "$UNDER_TEST" "$SANDBOX/fabric/runtime/provisioning/secrets/fabric-secrets"
+printf '{"projects":{"demo":{"agent_env":{"DEMO_PORT_OFFSET":"the login stack offset"}}}}\n' > "$SANDBOX/fabric/projects/registry.json"
+UT2="$SANDBOX/fabric/runtime/provisioning/secrets/fabric-secrets"
+fixture "$ME"
+out="$("$UT2" sync 2>&1)"; rc=$?
+assert_eq "without the optional name: exit 0" "$rc" "0"
+assert_lacks "…and it is not reported missing" "$out" "DEMO_PORT_OFFSET"
+python3 - "$FIXTURE" <<'PY'
+import json,sys; d=json.load(open(sys.argv[1])); d["DEMO_PORT_OFFSET"]="640"; json.dump(d, open(sys.argv[1],"w"))
+PY
+out="$("$UT2" sync 2>&1)"; rc=$?
+assert_eq "with it: exit 0" "$rc" "0"
+assert_contains "the env file exports it" "$(cat "$ENV_FILE")" "export DEMO_PORT_OFFSET=640"
+assert_contains "sync lists it as applied" "$out" "DEMO_PORT_OFFSET"
+out="$("$UT2" status 2>&1)"
+assert_lacks "status does not call it unexpected" "$out" "unexpected"
+
 echo "== --quiet"
 fixture "$ME"
 out="$("$UNDER_TEST" sync --quiet 2>&1)"; rc=$?

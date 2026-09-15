@@ -73,6 +73,7 @@ everything else is derived from it:
 | `OPENROUTER_API_KEY`, `GH_TOKEN`, `CLAUDE_BRIDGE_AUTH_TOKEN` | exported from `~/.config/agent-fabric/secrets.env` (0600), sourced by `~/.bashrc` |
 | `GIT_USER_NAME`, `GIT_USER_EMAIL`, `GIT_SIGNING_KEY`, `GIT_GPG_PROGRAM` | `git config --global` (strings; the signing key material stays in the keyring) |
 | `SSH_PRIVATE_KEY`, `SSH_PUBLIC_KEY` | `~/.ssh/id_ed25519(.pub)`, written only when absent (`--force` replaces) |
+| a project's `agent_env` names (`projects/registry.json`; gzapp: `GZAPP_PORT_OFFSET`) | exported from `secrets.env` when the config has them — per-login values that are not secrets but belong to the identity, never reported missing |
 
 - `bin/fabric-secrets sync` (as the account) pulls and applies; `status`
   reports presence, modes and ages — neither prints a value.

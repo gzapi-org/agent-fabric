@@ -108,6 +108,7 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "session-start.sh" in hooks and "agent-dispatch-guard.sh" in hooks and ROOT in hooks
     assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
     assert "statusline.sh" in settings["statusLine"]["command"]
+    assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"
     assert os.path.isfile(os.path.join(home, ".claude", "commands", "role.md"))
     for skill in ("subagent-dispatch", "gzcoord-send", "gzcoord-receive"):
         assert os.path.isfile(os.path.join(home, ".claude", "skills", skill, "SKILL.md")), skill
@@ -119,9 +120,10 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "0 written" in proc.stdout, proc.stdout
     # An existing settings file keeps its own entries.
     with open(os.path.join(projects, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
-        json.dump({"permissions": {"allow": ["Bash(ls:*)"]}, "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}, fh)
+        json.dump({"permissions": {"allow": ["Bash(ls:*)"]}, "env": {"MY_OWN": "x"}, "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}, fh)
     proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
     settings = json.load(open(os.path.join(projects, ".claude", "settings.json"), encoding="utf-8"))
+    assert settings["env"] == {"MY_OWN": "x", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}, settings["env"]
     assert settings["permissions"] == {"allow": ["Bash(ls:*)"]}
     assert any("echo mine" in json.dumps(g) for g in settings["hooks"]["SessionStart"])
     assert any("session-start.sh" in json.dumps(g) for g in settings["hooks"]["SessionStart"])

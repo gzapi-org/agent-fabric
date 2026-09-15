@@ -88,6 +88,10 @@ if os.path.exists(existing_path):
     try: doc = json.load(open(existing_path)) or {}
     except ValueError: doc = {}
 doc["statusLine"] = tpl["statusLine"]
+# env: the template's keys are set, an existing file's other keys kept.
+if tpl.get("env"):
+    env = doc.get("env") if isinstance(doc.get("env"), dict) else {}
+    env.update(tpl["env"]); doc["env"] = env
 hooks = doc.setdefault("hooks", {})
 for event, groups in tpl["hooks"].items():
     kept = [g for g in hooks.get(event, []) if not any(o in json.dumps(g) for o in OWNED)]

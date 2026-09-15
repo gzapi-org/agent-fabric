@@ -1,5 +1,8 @@
 {
-  "_comment": "Template for <projects>/.claude/settings.json, written by runtime/claude-code/bootstrap.sh with $AGENT_FABRIC_ROOT substituted. Hooks resolve the agent from the OS and show the working copy as context; nothing here names an agent or a project. The GZCoord inbox drains here too: started in the workspace, a session is outside any checkout, and the inbox reads the project and its token from the binding.",
+  "_comment": "Template for <projects>/.claude/settings.json, written by runtime/claude-code/bootstrap.sh with $AGENT_FABRIC_ROOT substituted. Hooks resolve the agent from the OS and show the working copy as context; nothing here names an agent or a project. The GZCoord inbox drains here too: started in the workspace, a session is outside any checkout, and the inbox reads the project and its token from the binding. env disables the harness's own tab-title writer: it writes a prompt-derived topic after every turn, on top of what hooks/tab-title.sh set, so the tab named a conversation instead of the agent (db-admin, 2026-09-15); with it off the hook is the only writer.",
+  "env": {
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
+  },
   "statusLine": {
     "type": "command",
     "command": "bash \"$AGENT_FABRIC_ROOT/runtime/claude-code/hooks/statusline.sh\""

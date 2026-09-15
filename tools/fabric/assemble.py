@@ -950,8 +950,9 @@ def main() -> int:
             # start and became load-bearing once `workflow` joined it: a
             # session that believes workflow is cued will not read it until
             # something has already gone wrong.
-            "Tier 1 — the charter, this index, and every `workflow` slice —",
-            "loads at activation. Every other section waits for a cue: open a",
+            "Tier 1 — the charter and brief (in the launch prompt), this index",
+            "and every `workflow` slice (from the session-start hook) — is given",
+            "to a session at start. Every other section waits for a cue: open a",
             "slice when its description matches what you are working on.",
             "Paths are relative to this working copy; `../agent-fabric/` is the",
             "control plane checked out beside it.",
@@ -960,7 +961,7 @@ def main() -> int:
         by_class_index: dict[str, list[dict[str, str]]] = defaultdict(list)
         for entry in index_entries[role]:
             by_class_index[entry["class"]].append(entry)
-        for klass in ("charter", "domain", "solution", "intersection", "rationale",
+        for klass in ("charter", "brief", "domain", "solution", "intersection", "rationale",
                       "workflow", "threads", "recall"):
             entries = by_class_index.get(klass)
             if not entries:

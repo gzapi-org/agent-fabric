@@ -31,6 +31,19 @@
       "memory": ".agent-fabric/memory",
       "integration": null,
       "license": "Apache-2.0"
+    },
+    "kutaisi-shop-transit": {
+      "title": "Kutaisi shop-to-transit matching (OSM shops against bus/marshrutka lines)",
+      "remotes": [
+        "git@github.com:andreabenetton/kutaisi-shop-transit.git",
+        "https://github.com/andreabenetton/kutaisi-shop-transit"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": null,
+      "license": "LicenseRef-kutaisi-shop-transit-Proprietary",
+      "note": "A private repository whose tree carries no license file: all rights reserved by default. One role, domain-transit; its working copy is that account's (moved there 2026-09-15)."
     }
   }
 }

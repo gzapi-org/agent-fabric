@@ -44,9 +44,26 @@
 # review gate guards that model.
 #
 # WHO IS LAUNCHING. The agent is the Linux login (runtime/identity.py);
-# the role comes from that agent's runtime binding (tools/fabric/role.py).
-# The launch DIRECTORY decides which settings scopes are fenced and which
-# working copy the child starts in; it never decides who the agent is.
+# the role comes from that agent's runtime binding, written from a login
+# shell by bin/fabric-role (tools/fabric/role.py) — never from inside a
+# session. The launch DIRECTORY decides which settings scopes are fenced
+# and which working copy the child starts in; it never decides who the
+# agent is.
+#
+# THE ROLE RIDES IN THE SYSTEM PROMPT. tools/fabric/launch_prompt.py
+# renders, for the bound role, the identity header, the charter, the
+# brief and the shared team/memory sections into $STATE_DIR/launch-
+# prompt.md, and every exec below passes it as --append-system-prompt-file
+# (read back live on both paths, print and interactive:
+# docs/live-checks/2026-09-15-append-system-prompt.md). The session holds
+# its role from its first request, through every compaction, and cannot
+# edit it; the old /role command asked the model to Read a charter after
+# the fact. The project layer (the remit, the INDEX) is NOT in that file —
+# it follows the cwd and reaches the session from the SessionStart hook.
+# The role, and the prompt's sha256, are stamped into the child's
+# environment (AGENT_FABRIC_LAUNCH_ROLE, _PROMPT_DIGEST) so fabric-status
+# can say what this session was launched as and see a rebind under it.
+# HELLO is sent here, just before exec: a HELLO means a session exists.
 #
 # The merged REVIEW model MUST be in routing/policies/review-grade.json:
 # a review's failure mode is a green PR that merges, so the reviewer's
@@ -56,7 +73,10 @@
 # The coding classes are not gated.
 #
 # REFUSES, fail-closed, before spawning anything:
-#   - no runtime binding for this agent      -> "run /role first"
+#   - no runtime binding for this agent      -> "bin/fabric-role bind first"
+#   - pass-through args carrying --system-prompt, --system-prompt-file,
+#     --append-system-prompt or --append-system-prompt-file: the role's
+#     prompt is the launcher's, and claude refuses two of them anyway
 #   - routing/capabilities.json missing
 #   - merged review model not review-grade
 #   - pass-through args carrying --settings or --setting-sources
@@ -134,8 +154,8 @@ LOCAL_OVERRIDE="$STATE_DIR/model-profile.local.json"
 
 # ── refusals ────────────────────────────────────────────────────────
 [[ -n "$ROLE" ]] || die "agent '$AGENT' has no active role binding ($STATE_DIR/binding.json).
-  The launcher resolves the profile from the agent's role. Run
-  /role <role> first, then re-run."
+  The launcher resolves the profile and the system prompt from the agent's
+  role. From a login shell run: bin/fabric-role bind <role>; then re-run."
 [[ -f "$CAPABILITIES" ]] || die "$CAPABILITIES is missing."
 [[ -f "$ALIASES" ]] || die "$ALIASES is missing."
 if [[ "$PROVIDER" == openrouter ]]; then
@@ -153,6 +173,17 @@ for arg in "$@"; do
   profile layers, not the CLI."
     [[ "$arg" == --setting-sources || "$arg" == --setting-sources=* ]] &&
         die "passing --setting-sources would disable ori's provider fence."
+    # The role reaches the session through the launcher's own
+    # --append-system-prompt-file; a caller's --system-prompt* would replace
+    # or shadow it (and claude itself refuses --append-system-prompt beside
+    # the -file form). Nothing a session needs is passed this way.
+    case "$arg" in
+        --system-prompt|--system-prompt=*|--system-prompt-file|--system-prompt-file=*|\
+        --append-system-prompt|--append-system-prompt=*|--append-system-prompt-file|--append-system-prompt-file=*)
+            die "passing ${arg%%=*} is refused: the role's system prompt is the
+  launcher's (tools/fabric/launch_prompt.py -> --append-system-prompt-file);
+  a second one would replace or shadow it." ;;
+    esac
 done
 
 # A settings-scope pin outranks the profile's exports (ori composes the
@@ -299,6 +330,17 @@ export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"
 export AGENT_FABRIC_LAUNCH_AGENT="$AGENT"
 export AGENT_FABRIC_LAUNCH_PROVIDER="$PROVIDER"
 
+# The role's system prompt, rendered for THIS binding from the OS and the
+# state directory (nothing about who is passed in), written atomically so
+# a launch that dies mid-write leaves the previous prompt whole. The
+# digest is stamped so a session can say what it was launched with and
+# fabric-status can see the file change under it.
+PROMPT_FILE="$STATE_DIR/launch-prompt.md"
+PROMPT_DIGEST="$(python3 "$FABRIC_ROOT/tools/fabric/launch_prompt.py" --out "$PROMPT_FILE")" ||
+    die "could not render the role's system prompt (tools/fabric/launch_prompt.py)."
+export AGENT_FABRIC_LAUNCH_ROLE="$ROLE"
+export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST="$PROMPT_DIGEST"
+
 if (( PRINT_ONLY )); then
     echo "# resolved profile for $LABEL (agent $AGENT, role $ROLE, provider $PROVIDER)"
     echo "  session : $SESSION$(python3 -c 'import json,sys; c=json.load(sys.stdin)["session"].get("capability"); print(f"  (the {c} class)" if c else "")' <<<"$RESOLVED")"
@@ -327,6 +369,10 @@ PY
     echo "  export AGENT_FABRIC_LAUNCH_SESSION_MODEL=$AGENT_FABRIC_LAUNCH_SESSION_MODEL"
     echo "  export AGENT_FABRIC_LAUNCH_PROFILE=$AGENT_FABRIC_LAUNCH_PROFILE"
     echo "  export AGENT_FABRIC_LAUNCH_PROVIDER=$AGENT_FABRIC_LAUNCH_PROVIDER"
+    echo "  export AGENT_FABRIC_LAUNCH_ROLE=$AGENT_FABRIC_LAUNCH_ROLE"
+    echo "  export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST=$AGENT_FABRIC_LAUNCH_PROMPT_DIGEST"
+    echo "  prompt  : $PROMPT_FILE ($(wc -c <"$PROMPT_FILE") bytes; --append-system-prompt-file)"
+    echo "            $(head -n 1 "$PROMPT_FILE")"
     exit 0
 fi
 
@@ -339,13 +385,21 @@ fi
 bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --provider "$PROVIDER" >/dev/null ||
     die "could not install the capability-class agent files for $PROVIDER (runtime/claude-code/install-agent-files.sh)."
 
+# HELLO, now that a session is about to exist: derived from the binding
+# (role, project) by gzmsg.mjs, posted as this login by send.mjs. Best
+# effort — no relay, no project, no node is one line and no refusal; the
+# role activator no longer sends it (it runs with no session behind it).
+PROJECT="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("project") or "")' <<<"$CONTEXT")"
+[[ -z "$PROJECT" ]] || python3 "$FABRIC_ROOT/tools/fabric/announce.py" hello --role "$ROLE" --project "$PROJECT" || true
+
 # Plain claude: no broker, no shim; the exports above are the column's
 # and the profile's native pins, the review pin is served by its agent
-# file under the dispatch guard; the session model and the refusals are
-# what the launcher contributed.
+# file under the dispatch guard; the session model, the role's system
+# prompt and the refusals are what the launcher contributed.
+PROMPT_ARGS=(--append-system-prompt-file "$PROMPT_FILE")
 if [[ "$PROVIDER" == anthropic ]]; then
-    if (( CALLER_MODEL )); then exec claude "$@"; fi
-    exec claude --model "$SESSION" "$@"
+    if (( CALLER_MODEL )); then exec claude "${PROMPT_ARGS[@]}" "$@"; fi
+    exec claude --model "$SESSION" "${PROMPT_ARGS[@]}" "$@"
 fi
 
 # When the caller supplied --model, the launcher's own is OMITTED rather
@@ -353,6 +407,6 @@ fi
 # argv handling, and the stamp above must not be able to disagree with
 # what the child actually applies.
 if (( CALLER_MODEL )); then
-    exec ori claude "$@"
+    exec ori claude "${PROMPT_ARGS[@]}" "$@"
 fi
-exec ori claude --model "$SESSION" "$@"
+exec ori claude --model "$SESSION" "${PROMPT_ARGS[@]}" "$@"

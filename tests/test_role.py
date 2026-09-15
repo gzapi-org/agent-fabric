@@ -66,6 +66,7 @@ def build_fabric(root: str) -> None:
                 fh.write("---\ndescription: x\n---\n\nbody\n")
     # The real modules, reachable from the fixture root.
     for rel in ("tools/fabric/layout.py", "tools/fabric/workingcopy.py", "tools/fabric/role.py",
+                "tools/fabric/announce.py",
                 "runtime/identity.py"):
         os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
         shutil.copy2(os.path.join(ROOT, rel), os.path.join(root, rel))
@@ -289,10 +290,11 @@ def test_deactivate_clears_role_keeps_agent(f: Fixture) -> None:
     f.run("flutter-dev")
 
 
-def test_a_role_change_says_goodbye_then_hello(f: Fixture, tmp: str) -> None:
-    """A HELLO tells peers what role an address holds (SPEC §4); a GOODBYE
-    from the role being left closes it for TO-ROLE routing. Both ride
-    send.mjs, best effort. The fixture stands in a stub `node` that records
+def test_a_role_change_says_goodbye_and_never_hello(f: Fixture, tmp: str) -> None:
+    """A GOODBYE from the role being left closes it for TO-ROLE routing
+    (SPEC §4). HELLO is the launcher's — it means a session exists — so
+    binding a role from the shell announces nothing but the GOODBYE on a
+    change or a drop. The fixture stands in a stub `node` that records
     every invocation, so the order and the roles are what is asserted."""
     # Own fixture: the shared one has no gzcoord scripts and the stub node must not leak into other cases.
     own = os.path.join(tmp, "announce"); os.makedirs(own, exist_ok=True); f = Fixture(own)
@@ -316,11 +318,10 @@ esac
     assert f.run("deactivate").returncode == 0
     lines = open(log, encoding="utf-8").read().splitlines()
     sends = [l for l in lines if l.startswith("SEND")]
-    assert len(sends) == 4, lines
-    assert "HELLO" in sends[0] and "backend-dev" in sends[0], sends            # initial activation: HELLO only
-    assert "GOODBYE" in sends[1] and "ROLE: backend-dev" in sends[1], sends    # change: GOODBYE as the old role…
-    assert "HELLO" in sends[2] and "flutter-dev" in sends[2], sends            # …then HELLO as the new one
-    assert "GOODBYE" in sends[3] and "ROLE: flutter-dev" in sends[3], sends    # deactivate: GOODBYE only
+    assert len(sends) == 2, lines
+    assert not any("HELLO" in l for l in sends), sends                         # initial activation: nothing
+    assert "GOODBYE" in sends[0] and "ROLE: backend-dev" in sends[0], sends    # change: GOODBYE as the old role only
+    assert "GOODBYE" in sends[1] and "ROLE: flutter-dev" in sends[1], sends    # deactivate: GOODBYE only
     # Re-activating the same role announces nothing.
     assert f.run("flutter-dev").returncode == 0
     n = len(open(log, encoding="utf-8").read().splitlines())
@@ -383,7 +384,7 @@ def main() -> int:
             test_explicit_project_binds_even_without_a_working_copy,
             test_status_reports_agent_and_role,
             test_deactivate_clears_role_keeps_agent,
-            test_a_role_change_says_goodbye_then_hello,
+            test_a_role_change_says_goodbye_and_never_hello,
             test_unknown_role_is_a_usage_error,
             test_activation_works_inside_a_linked_worktree,
         ]

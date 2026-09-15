@@ -34,7 +34,7 @@ fi
 echo "ORI-EXECCED:$*"
 # The child's ENVIRONMENT, not only its argv: a pin that lost its `export`
 # would still print under --print and still be absent here.
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST; do
     echo "ORI-ENV:$v=${!v:-}"
 done
 FAKE
@@ -54,6 +54,11 @@ mkfabric() {
     cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
     cp "$REAL_ROOT/runtime/identity.py" "$FABRIC/runtime/"
     cp "$REAL_ROOT/tools/fabric/routing.py" "$REAL_ROOT/tools/fabric/workingcopy.py" "$FABRIC/tools/fabric/"
+    # The role's system prompt: the assembler, the shared sections, and a
+    # fixture charter for the bound role (no brief — the placeholder path).
+    cp "$REAL_ROOT/tools/fabric/layout.py" "$REAL_ROOT/tools/fabric/launch_prompt.py" "$REAL_ROOT/tools/fabric/announce.py" "$FABRIC/tools/fabric/"
+    mkdir -p "$FABRIC/identities/roles/backend-dev"; cp -r "$REAL_ROOT/identities/prompt" "$FABRIC/identities/prompt"
+    printf -- '---\nrole: backend-dev\nclass: charter\ndescription: "x"\ntier: 1\ndistilled_at: 2026-09-15\n---\n\n# backend-dev — charter\n\nFIXTURE-CHARTER-LINE: the backend that owns meaning.\n' > "$FABRIC/identities/roles/backend-dev/charter.md"
     cp "$REAL_ROOT/projects/registry.json" "$FABRIC/projects/"
     mkdir -p "$STATE/agents/$LOGIN"
     printf '{"agent":"%s","host":"testhost","role":"backend-dev","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
@@ -72,7 +77,7 @@ else:
 json.dump(d, open(path, "w"), indent=1)
 PY
 }
-run() { (cd "$SANDBOX/repo" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" bash "$LAUNCHER" "$@"); }
+run() { (cd "$SANDBOX/repo" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_NO_ANNOUNCE=1 bash "$LAUNCHER" "$@"); }
 run_err() { run "$@" >/dev/null 2>&1; }
 
 echo "launch: --print resolves the capability classes through model -> family shim"
@@ -122,7 +127,7 @@ out="$(run --print 2>&1)"; rc=$?
 echo "launch: the refusals"
 mkfabric; rm "$STATE/agents/$LOGIN/binding.json"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 1 ]] && grep -q "no active role binding" <<<"$out" && ok "no binding: refused, names /role" || bad "ran without a role" "$out"
+[[ $rc -eq 1 ]] && grep -q "no active role binding" <<<"$out" && grep -q "bin/fabric-role bind" <<<"$out" && ok "no binding: refused, names bin/fabric-role" || bad "ran without a role" "$out"
 mkfabric; printf '{"agent":"%s","host":"h","role":null,"updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 run_err --print; [[ $? -eq 1 ]] && ok "binding with no role: refused" || bad "ran with a null role"
 mkfabric; rm "$FABRIC/routing/capabilities.json"
@@ -131,6 +136,11 @@ mkfabric
 out="$(run --settings foo.json)"; [[ $? -ne 0 ]] && ok "--settings passthrough refused" || bad "fence bypass allowed" "$out"
 mkfabric; run_err --setting-sources user,project
 [[ $? -ne 0 ]] && ok "--setting-sources passthrough refused" || bad "fence bypass allowed"
+for flag in --system-prompt --system-prompt-file --append-system-prompt --append-system-prompt-file; do
+    mkfabric; out="$(run $flag x.md 2>&1)"; rc=$?
+    [[ $rc -ne 0 ]] && grep -q "role's system prompt is the" <<<"$out" && ok "$flag passthrough refused: the role's prompt is the launcher's" || bad "$flag admitted" "$out"
+    mkfabric; run_err "$flag=x.md"; [[ $? -ne 0 ]] && ok "$flag=… refused too" || bad "$flag=… admitted"
+done
 mkfabric
 mkdir -p "$HOME/.claude"
 printf '%s\n' '{"env":{"ANTHROPIC_DEFAULT_OPUS_MODEL":"vendor/sneaky"}}' > "$HOME/.claude/settings.json"
@@ -215,7 +225,7 @@ echo "launch: --provider anthropic execs plain claude with only the pinned tiers
 cat > "$SANDBOX/bin/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo "CLAUDE-EXECCED:$*"
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST; do
     echo "CLAUDE-ENV:$v=${!v:-}"
 done
 FAKE
@@ -237,7 +247,8 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 grep -q "code-high   : opus  (harness default for its tier)" <<<"$out" && ! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "a null in the column is the harness's own tier: nothing exported for it" || bad "null column not the harness's" "$out"
 mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
-grep -q "CLAUDE-EXECCED:--model claude-opus-5 --version" <<<"$out" && ok "execs plain claude with the native session model" || bad "no plain-claude exec" "$out"
+grep -q "CLAUDE-EXECCED:--model claude-opus-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
@@ -310,13 +321,33 @@ grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_AGENT=$LOGIN" <<<"$out" && ok "agent stampe
 mkfabric
 out="$(run --model vendor/override --version 2>&1)"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=vendor/override" <<<"$out" && ok "a caller's --model is what gets stamped" || bad "stamp disagrees with argv" "$out"
-grep -q "ORI-EXECCED:claude --model vendor/override --version" <<<"$out" && ! grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "…and the launcher's own --model is omitted, so the child sees one" || bad "two --model flags reached the child" "$out"
+grep -q "ORI-EXECCED:claude --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --model vendor/override --version" <<<"$out" && ! grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "…and the launcher's own --model is omitted, so the child sees one; the prompt file still rides" || bad "two --model flags reached the child, or no prompt file" "$out"
 mkfabric
 out="$(run --print --model=vendor/override2 2>&1)"
 grep -q "overridden by --model on the command line: vendor/override2" <<<"$out" && ok "--print shows the override" || bad "--print hides the override" "$out"
 mkfabric
 out="$(run -p hi 2>&1)"
-grep -q "ORI-EXECCED:claude --model anthropic/claude-sonnet-5 -p hi" <<<"$out" && ok "-p passes through to claude untouched" || bad "-p swallowed by the launcher" "$out"
+grep -q "ORI-EXECCED:claude --model anthropic/claude-sonnet-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
+
+echo "launch: the role rides in the system prompt file"
+mkfabric
+out="$(run --version 2>&1)"; rc=$?
+[[ -f "$STATE/agents/$LOGIN/launch-prompt.md" ]] && ok "the prompt file is written under the agent's state dir" || bad "no prompt file" "$(ls -la "$STATE/agents/$LOGIN" 2>&1)"
+grep -q "FIXTURE-CHARTER-LINE" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "…and carries the bound role's charter body" || bad "charter not in the prompt" "$(head -40 "$STATE/agents/$LOGIN/launch-prompt.md")"
+grep -q "^You are agent \`$LOGIN\` on host" "$STATE/agents/$LOGIN/launch-prompt.md" && grep -q "the role \*\*backend-dev\*\*" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "…the identity header names agent and role" || bad "header wrong" "$(head -5 "$STATE/agents/$LOGIN/launch-prompt.md")"
+grep -q "No brief has been distilled" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "…a missing brief is a placeholder, not a refusal" || bad "no placeholder" "$(grep -n brief "$STATE/agents/$LOGIN/launch-prompt.md")"
+grep -q "REPLY-EXPECTED: yes" "$STATE/agents/$LOGIN/launch-prompt.md" && grep -q "memory/domains/backend-dev/" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "…the team and memory sections are rendered for the role" || bad "shared sections missing" ""
+! grep -q "class: charter" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "…without frontmatter" || bad "frontmatter leaked" ""
+digest="sha256:$(sha256sum "$STATE/agents/$LOGIN/launch-prompt.md" | cut -d' ' -f1)"
+grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped in the child env" || bad "no role stamp" "$out"
+grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_PROMPT_DIGEST=$digest$" <<<"$out" && ok "the prompt's sha256 stamped, and it is the file's" || bad "digest stamp wrong" "$out"
+mkfabric
+out="$(run --print 2>&1)"
+grep -q "export AGENT_FABRIC_LAUNCH_ROLE=backend-dev" <<<"$out" && grep -q "export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST=sha256:" <<<"$out" && grep -q "prompt  : $STATE/agents/$LOGIN/launch-prompt.md (" <<<"$out" && ok "--print shows the role, the digest and the prompt path" || bad "--print hides the prompt" "$out"
+! grep -q "EXECCED" <<<"$out" && ok "…and execs nothing" || bad "--print exec'd" "$out"
+mkfabric; rm "$FABRIC/identities/roles/backend-dev/charter.md"
+out="$(run --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "could not render the role's system prompt" <<<"$out" && ! grep -q "EXECCED" <<<"$out" && ok "a role with no charter cannot launch: refused before exec" || bad "launched without a charter" "$out"
 
 echo "model-audit: provider values are allowlisted, never echoed by default"
 out="$(env -i PATH="$PATH" HOME="$HOME" ANTHROPIC_CUSTOM_HEADERS='Authorization: Bearer test-secret' ANTHROPIC_BASE_URL='https://key-secret@proxy.example/api' ANTHROPIC_DEFAULT_OPUS_MODEL='anthropic/claude-opus-5' bash "$HERE/model-audit.sh" 2>&1)"

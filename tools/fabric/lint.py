@@ -28,6 +28,8 @@ Checks:
              every role row names a catalogued role
   hygiene    no city or country names, no external project names, no
              credentials, no non-English prose
+  prompt     the launch-prompt sections (identities/prompt/) exist, carry
+             the {role} placeholder, are hygiene-clean and within budget
 
 Exit 0 clean, 1 on findings, 2 on usage error. Uses jsonschema when it is
 importable and falls back to a built-in structural check otherwise, so a
@@ -75,6 +77,34 @@ FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
 
 
 PAYLOAD_DIRS = frozenset({"skills", "commands"})
+
+
+def prompt_template_findings() -> list[str]:
+    """The sections every launch prompt appends after the role's own files
+    (tools/fabric/launch_prompt.py): each must exist, carry `{role}` so it
+    is rendered for a role rather than read generically, pass hygiene, and
+    the set must fit its budget — every session pays for these bytes."""
+    findings: list[str] = []
+    total = 0
+    for name in layout.PROMPT_TEMPLATES:
+        path = layout.prompt_template_path(name)
+        rel = os.path.join(layout.PROMPT_DIR_NAME, name)
+        if not os.path.isfile(path):
+            findings.append(f"{rel}: missing — every launch prompt appends it")
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        if not text.strip():
+            findings.append(f"{rel}: empty")
+        if "{role}" not in text:
+            findings.append(f"{rel}: no {{role}} placeholder — it would read the same for every role")
+        findings += hygiene_findings(rel, text)
+        total += len(text)
+    approx = total // CHARS_PER_TOKEN
+    if approx > layout.PROMPT_TEMPLATE_BUDGET_TOKENS:
+        findings.append(f"{layout.PROMPT_DIR_NAME}: ~{approx} tokens across {', '.join(layout.PROMPT_TEMPLATES)} "
+                        f"exceeds the {layout.PROMPT_TEMPLATE_BUDGET_TOKENS} budget every session pays")
+    return findings
 
 
 def hygiene_findings(where: str, text: str) -> list[str]:
@@ -740,6 +770,9 @@ def main() -> int:
         if len(owners) < 2:
             findings.append(f"{where}: shared slice owned by {len(owners)} role(s); "
                             "fold it back into its single owner")
+
+    # --- launch prompt sections --------------------------------------------
+    findings += prompt_template_findings()
 
     if findings:
         print(f"corpus lint: {len(findings)} finding(s)\n", file=sys.stderr)

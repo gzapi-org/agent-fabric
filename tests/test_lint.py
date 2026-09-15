@@ -50,6 +50,7 @@ LINT = os.path.join(ROOT, "tools", "fabric", "lint.py")
 REAL_SCHEMAS = os.path.join(ROOT, "identities", "schemas")
 REAL_PROJECT_SCHEMAS = os.path.join(ROOT, "projects", "schemas")
 REAL_ROUTING = os.path.join(ROOT, "routing")
+REAL_PROMPT = os.path.join(ROOT, "identities", "prompt")
 REAL_ALIASES = os.path.join(ROOT, "runtime", "claude-code", "aliases.json")
 PROJECT = "demo"
 
@@ -133,6 +134,8 @@ def make_base(root: str) -> str:
                     ignore=shutil.ignore_patterns("profiles.json"))
     os.makedirs(os.path.join(fabric, "runtime", "claude-code"))
     shutil.copy2(REAL_ALIASES, os.path.join(fabric, "runtime", "claude-code", "aliases.json"))
+    # The launch-prompt sections every session appends; lint requires them.
+    shutil.copytree(REAL_PROMPT, os.path.join(fabric, "identities", "prompt"))
     write(os.path.join(fabric, "identities", "roles", "catalog.json"), json.dumps(CATALOG))
     write(os.path.join(fabric, "projects", PROJECT, "taxonomy.json"), json.dumps(TAXONOMY))
     write(os.path.join(fabric, "identities", "roles", "web-dev", "charter.md"), CHARTER)
@@ -335,6 +338,26 @@ def case_brief_is_identity_too() -> None:
         assert code == 1 and "belongs under identities/roles/" in out, out
 
 
+def case_prompt_templates_are_linted() -> None:
+    """The launch-prompt sections are not slices, so they are checked by
+    name: present, carrying {role}, hygiene-clean, within one budget."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        os.remove(os.path.join(fabric, "identities", "prompt", "team.md"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "identities/prompt/team.md: missing" in out, out
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(os.path.join(fabric, "identities", "prompt", "memory.md"), "# Memory\n\nGeneric text, no placeholder.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "no {role} placeholder" in out, out
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(os.path.join(fabric, "identities", "prompt", "memory.md"), "{role} " + "padding words " * 2000)
+        code, out = run_lint(fabric)
+        assert code == 1 and "exceeds the" in out and "budget every session pays" in out, out
+
+
 def case_knowledge_not_in_identities() -> None:
     """A distilled slice beside the charter is knowledge nothing indexes."""
     with tempfile.TemporaryDirectory() as root:
@@ -492,6 +515,7 @@ def main() -> int:
         case_index_need_not_list_payload,
         case_authored_classes_only_in_identities,
         case_brief_is_identity_too,
+        case_prompt_templates_are_linted,
         case_knowledge_not_in_identities,
         case_taxonomy_roles_are_catalogued,
         case_model_profiles_layered_file_passes,

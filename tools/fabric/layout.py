@@ -70,6 +70,13 @@ FABRIC_PROJECT_ID = "agent-fabric"
 # 2026-09-15, and read to every session in its launch prompt); recall:
 # where its knowledge lives. All three are authored, never distilled.
 IDENTITY_CLASSES = ("charter", "brief", "recall")
+# The sections every launch prompt carries after the role's own files:
+# identities/prompt/<name>.md, plain markdown with `{role}` substituted.
+# Not slices — no frontmatter, no provenance, no index line — so lint
+# checks them by name (`prompt_template_findings`).
+PROMPT_DIR_NAME = os.path.join("identities", "prompt")
+PROMPT_TEMPLATES = ("team.md", "memory.md")
+PROMPT_TEMPLATE_BUDGET_TOKENS = 1500  # both together: every session pays for them
 DOMAIN_CLASSES = ("domain",)
 PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads")
 # Tier-1 knowledge, in load order: the charter, the project index, the
@@ -81,6 +88,14 @@ _WORKING_COPIES: dict[str, str] = {}
 
 def roles_dir() -> str:
     return os.path.join(FABRIC_ROOT, "identities", "roles")
+
+
+def prompt_dir() -> str:
+    return os.path.join(FABRIC_ROOT, PROMPT_DIR_NAME)
+
+
+def prompt_template_path(name: str) -> str:
+    return os.path.join(prompt_dir(), name)
 
 
 def role_dir(role: str) -> str:

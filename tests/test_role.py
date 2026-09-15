@@ -95,6 +95,11 @@ class Fixture:
         build_workspace(self.ws)
         self.env = {**os.environ, "AGENT_FABRIC_ROOT": self.root, "AGENT_FABRIC_STATE_DIR": self.state}
         self.env.pop("CLAUDE_PROJECT_DIR", None)
+        # This suite may itself run inside a session; the activator under
+        # test is a login-shell tool and refuses the harness's environment
+        # (test_binding_is_refused_inside_a_session puts it back).
+        for name in ("CLAUDECODE", "CLAUDE_ENV_FILE", "AGENT_FABRIC_LAUNCH_PROFILE"):
+            self.env.pop(name, None)
 
     def run(self, *argv: str, workspace: str | None = None) -> subprocess.CompletedProcess:
         ws = workspace or self.ws
@@ -115,15 +120,23 @@ class Fixture:
             return fh.read()
 
 
-def _load_now(stdout: str) -> list[str]:
-    lines = stdout.splitlines()
-    start = lines.index("load now:") + 1
-    out = []
-    for line in lines[start:]:
-        if not line.startswith("  ") or line.strip().startswith("("):
-            break
-        out.append(line.strip())
-    return out
+def _tier1(f: "Fixture", role: str, project: str | None) -> list[str]:
+    """layout.tier1_paths as the session-start hook will consult it, run in
+    the fixture root. The activator no longer prints a "load now" list —
+    the launcher and the hook deliver these — so the layout is asked
+    directly, from the binding the activator wrote."""
+    code = (
+        "import importlib.util, json, os, sys\n"
+        "spec = importlib.util.spec_from_file_location('l', os.path.join(os.environ['AGENT_FABRIC_ROOT'], 'tools/fabric/layout.py'))\n"
+        "l = importlib.util.module_from_spec(spec); spec.loader.exec_module(l)\n"
+        "role, project, wc = sys.argv[1], sys.argv[2] or None, sys.argv[3] or None\n"
+        "if project and wc: l.set_working_copy(project, wc)\n"
+        "print(json.dumps(l.tier1_paths(role, project)))\n")
+    b = f.binding()
+    r = subprocess.run([sys.executable, "-c", code, role, project or "", b.get("working_copy") or ""],
+                       env=f.env, capture_output=True, text=True, cwd=f.ws)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
 
 
 def test_install_places_copies_under_exact_names(f: Fixture) -> None:
@@ -217,30 +230,44 @@ def test_collision_with_a_committed_skill_is_refused_and_leaves_role_intact(f: F
         shutil.rmtree(clash)
 
 
-def test_activation_lists_tier1_from_project_memory(f: Fixture) -> None:
+def test_activation_says_where_the_role_reaches_the_session(f: Fixture) -> None:
+    """Nothing to "load now": the activator says the launcher puts the
+    charter (and brief, when one exists) into the prompt and the hook
+    delivers the project's remit."""
     proc = f.run("flutter-dev", "--force")
     assert proc.returncode == 0, proc.stderr
-    listed = _load_now(proc.stdout)
+    assert "bound." in proc.stdout and "system prompt" in proc.stdout, proc.stdout
+    assert "(no brief yet)" in proc.stdout and "session-start hook" in proc.stdout, proc.stdout
+    assert "load now" not in proc.stdout
+    with open(os.path.join(f.root, "identities", "roles", "flutter-dev", "brief.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: flutter-dev\nclass: brief\n---\n\n# flutter-dev — brief\n")
+    proc = f.run("flutter-dev")
+    assert "charter and brief of flutter-dev" in proc.stdout, proc.stdout
+
+
+def test_tier1_lists_charter_index_and_workflow_from_project_memory(f: Fixture) -> None:
+    assert f.run("flutter-dev", "--force").returncode == 0
+    listed = _tier1(f, "flutter-dev", "demo")
     assert listed[0].endswith("identities/roles/flutter-dev/charter.md"), listed
     assert listed[1].endswith("memory/projects/demo/flutter-dev/INDEX.md"), listed
     assert listed[2].endswith("workflow/apk-signing.md") and listed[3].endswith("workflow/hot-reload-traps.md"), listed
-    assert "notes.txt" not in proc.stdout
+    assert not any(p.endswith("notes.txt") for p in listed), listed
 
 
-def test_activation_omits_a_tier1_class_the_role_does_not_have(f: Fixture) -> None:
-    proc = f.run("backend-dev")
-    listed = _load_now(proc.stdout)
+def test_tier1_omits_a_class_the_role_does_not_have(f: Fixture) -> None:
+    assert f.run("backend-dev").returncode == 0
+    listed = _tier1(f, "backend-dev", "demo")
     assert [os.path.basename(p) for p in listed] == ["charter.md", "INDEX.md"], listed
     f.run("flutter-dev")
 
 
-def test_activation_accepts_the_single_file_workflow_shape(f: Fixture) -> None:
+def test_tier1_accepts_the_single_file_workflow_shape(f: Fixture) -> None:
     path = os.path.join(f.root, "memory/projects/demo/backend-dev/workflow.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("---\nrole: backend-dev\nclass: workflow\ntier: 1\n---\n\nbody\n")
     try:
-        proc = f.run("backend-dev")
-        assert any(p.endswith("backend-dev/workflow.md") for p in _load_now(proc.stdout)), proc.stdout
+        assert f.run("backend-dev").returncode == 0
+        assert any(p.endswith("backend-dev/workflow.md") for p in _tier1(f, "backend-dev", "demo"))
     finally:
         os.remove(path)
         f.run("flutter-dev")
@@ -254,8 +281,8 @@ def test_outside_a_working_copy_only_the_charter_loads(f: Fixture, tmp: str) -> 
     proc = f.run("backend-dev", workspace=parent)
     assert proc.returncode == 0, proc.stderr
     assert f.binding()["agent"] == id_un() and f.binding()["project"] is None
-    assert [os.path.basename(p) for p in _load_now(proc.stdout)] == ["charter.md"]
-    assert "no project context" in proc.stdout
+    assert [os.path.basename(p) for p in _tier1(f, "backend-dev", None)] == ["charter.md"]
+    assert "no project is bound" in proc.stdout
     assert os.path.isfile(os.path.join(parent, ".claude/skills/migration-check/SKILL.md"))
     # Moving back to the repo workspace removes the copies from the parent.
     f.run("flutter-dev")
@@ -268,7 +295,8 @@ def test_explicit_project_binds_even_without_a_working_copy(f: Fixture, tmp: str
     proc = f.run("backend-dev", "--project", "demo", workspace=parent)
     assert proc.returncode == 0, proc.stderr
     assert f.binding()["project"] == "demo"
-    assert any(p.endswith("demo/backend-dev/INDEX.md") for p in _load_now(proc.stdout))
+    assert "remit" in proc.stdout and "session-start hook" in proc.stdout, proc.stdout
+    assert any(p.endswith("demo/backend-dev/INDEX.md") for p in _tier1(f, "backend-dev", "demo"))
     f.run("flutter-dev")
 
 
@@ -288,6 +316,26 @@ def test_deactivate_clears_role_keeps_agent(f: Fixture) -> None:
     assert not os.path.exists(os.path.join(f.ws, ".claude/skills/widget-testing"))
     assert f.history()[-1]["reason"] == "deactivate"
     f.run("flutter-dev")
+
+
+def test_binding_is_refused_inside_a_session(f: Fixture, tmp: str) -> None:
+    """A role is bound from a login shell; under a running session the
+    prompt already carries the launched role, so activate and deactivate
+    refuse (each harness variable on its own), status and list do not."""
+    assert f.run("backend-dev").returncode == 0
+    for name in ("CLAUDECODE", "CLAUDE_ENV_FILE", "AGENT_FABRIC_LAUNCH_PROFILE"):
+        env = {**f.env, name: "1"}
+        r = subprocess.run([sys.executable, os.path.join(f.root, "tools", "fabric", "role.py"), "flutter-dev"],
+                           cwd=f.ws, env=env, capture_output=True, text=True)
+        assert r.returncode == 1 and f"${name} is set" in r.stderr and "relaunch" in r.stderr, (name, r.stderr)
+        r = subprocess.run([sys.executable, os.path.join(f.root, "tools", "fabric", "role.py"), "deactivate"],
+                           cwd=f.ws, env=env, capture_output=True, text=True)
+        assert r.returncode == 1 and "refusing to drop the role" in r.stderr, (name, r.stderr)
+        for harmless in ("status", "list"):
+            r = subprocess.run([sys.executable, os.path.join(f.root, "tools", "fabric", "role.py"), harmless],
+                               cwd=f.ws, env=env, capture_output=True, text=True)
+            assert r.returncode == 0, (name, harmless, r.stderr)
+    assert f.binding()["role"] == "backend-dev", "a refused rebind changed the binding"
 
 
 def test_a_role_change_says_goodbye_and_never_hello(f: Fixture, tmp: str) -> None:
@@ -377,13 +425,15 @@ def main() -> int:
             test_locally_adapted_copy_blocks_a_switch,
             test_force_stashes_before_replacing,
             test_collision_with_a_committed_skill_is_refused_and_leaves_role_intact,
-            test_activation_lists_tier1_from_project_memory,
-            test_activation_omits_a_tier1_class_the_role_does_not_have,
-            test_activation_accepts_the_single_file_workflow_shape,
+            test_activation_says_where_the_role_reaches_the_session,
+            test_tier1_lists_charter_index_and_workflow_from_project_memory,
+            test_tier1_omits_a_class_the_role_does_not_have,
+            test_tier1_accepts_the_single_file_workflow_shape,
             test_outside_a_working_copy_only_the_charter_loads,
             test_explicit_project_binds_even_without_a_working_copy,
             test_status_reports_agent_and_role,
             test_deactivate_clears_role_keeps_agent,
+            test_binding_is_refused_inside_a_session,
             test_a_role_change_says_goodbye_and_never_hello,
             test_unknown_role_is_a_usage_error,
             test_activation_works_inside_a_linked_worktree,

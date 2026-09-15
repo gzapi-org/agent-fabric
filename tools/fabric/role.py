@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/fabric/role.py — activate a role for the current agent.
+"""tools/fabric/role.py — bind a role to the current agent (bin/fabric-role).
 
 >>> help
     role.py activate <role> [--project ID] [--workspace DIR] [--force]
@@ -12,8 +12,19 @@ Activation binds a ROLE to that agent — recorded in the agent's runtime
 binding outside the repository — and installs the role's skills and
 commands into the WORKSPACE's `.claude/`, where the harness discovers them.
 The workspace is `--workspace`, else $CLAUDE_PROJECT_DIR, else the current
-directory: the place Claude Code was launched from, which may be the
+directory: the place Claude Code will be launched from, which may be the
 parent `projects/` directory or one working copy.
+
+FROM A LOGIN SHELL, NEVER INSIDE A SESSION (owner, 2026-09-15). The
+launcher reads the binding and renders the role into the session's
+system prompt (tools/fabric/launch_prompt.py); a session's role is fixed
+for its life, and a rebind under a running session would leave its
+prompt and its binding disagreeing until a relaunch. So activate and
+deactivate refuse when the environment says a session is running
+(CLAUDECODE, CLAUDE_ENV_FILE, AGENT_FABRIC_LAUNCH_PROFILE); status and
+list change nothing and run anywhere. bin/fabric-role is the front door
+and refuses first; this is the backstop for a Bash tool call that names
+the file directly. The old /role command is gone.
 
 Why copies rather than symlinks: an agent that lives as one role for weeks
 adapts its own tools. A copy lets that happen and survives; a link would
@@ -186,7 +197,33 @@ def cmd_status(ctx: dict) -> int:
     return 0
 
 
+HARNESS_ENV = ("CLAUDECODE", "CLAUDE_ENV_FILE", "AGENT_FABRIC_LAUNCH_PROFILE")
+
+
+def harness_env_reason() -> str | None:
+    """The variable that says a session is running, or None. One place,
+    matching bin/fabric-role's own check."""
+    for name in HARNESS_ENV:
+        if os.environ.get(name):
+            return name
+    return None
+
+
+def refuse_inside_session(what: str) -> int:
+    name = harness_env_reason()
+    if not name:
+        return 0
+    print(f"role: refusing to {what} inside a harness session (${name} is set).\n"
+          "A role is bound from a login shell, never inside a session: the session's\n"
+          "prompt already carries the role it was launched with, and a rebind under it\n"
+          "would disagree with that prompt until a relaunch. Open a terminal, run\n"
+          "bin/fabric-role there, then relaunch.", file=sys.stderr)
+    return 1
+
+
 def cmd_deactivate(ctx: dict) -> int:
+    if refuse_inside_session("drop the role"):
+        return 1
     binding = identity.read_binding(ctx["agent"])
     workspace = binding.get("workspace")
     if not binding.get("role"):
@@ -217,6 +254,8 @@ def cmd_deactivate(ctx: dict) -> int:
 
 
 def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str | None) -> int:
+    if refuse_inside_session("bind a role"):
+        return 1
     role_dir = layout.role_dir(role)
     if not os.path.isfile(os.path.join(role_dir, "charter.md")):
         print(f"role: no role '{role}' under {layout.roles_dir()}", file=sys.stderr)
@@ -340,20 +379,19 @@ def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str
             print(f"  installed {item['kind']:8} {os.path.join(workspace, item['path'])}")
     else:
         print("  (this role ships no skills or commands yet)")
-    print("\nload now:")
-    if project and ctx.get("working_copy"):
-        layout.set_working_copy(project, ctx["working_copy"])
-    for path in layout.tier1_paths(role, project):
-        print(f"  {path}")
-    if not project:
-        print("  (no project context: only the charter loads; activate from inside a "
-              "registered working copy, or pass --project, for its index and workflow)")
-    elif not layout.project_is_legacy(project) and not layout.working_copy_for(project):
-        print(f"  (project {project}: its memory lives in its repository under "
-              f"{layout.PROJECT_MEMORY_SUBDIR}/; activate from inside the working copy to load it)")
-    print("\nEverything else loads on demand — consult INDEX.md when its cue matches.")
-    print("The charter is the role's function; the project's .agent-fabric/roles/<role>.md,")
-    print("when listed above, is what that function covers in this project.")
+    # 5. Where the role reaches the session: nothing to "load now". The
+    #    launcher renders charter, brief and the shared sections into the
+    #    system prompt; the project's remit and index arrive from the
+    #    session-start hook, following the working copy.
+    brief = os.path.join(role_dir, "brief.md")
+    print(f"\nbound. The next launch (runtime/openrouter/launch) puts the charter"
+          f"{' and brief' if os.path.isfile(brief) else ' (no brief yet)'} of {role}"
+          " into the session's system prompt;")
+    if project:
+        print(f"the project's remit ({layout.PROJECT_ROLES_SUBDIR}/{role}.md) and index reach it "
+              "from the session-start hook.")
+    else:
+        print("no project is bound: launch from inside a registered working copy for its remit.")
     return 0
 
 

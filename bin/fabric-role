@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# bin/fabric-role — bind a role to this agent, from a login shell, before
+# the session that will carry it. The launcher (runtime/openrouter/launch)
+# reads the binding and puts the role into the session's system prompt;
+# a running session never changes its role — a different role is a
+# rebind here and a relaunch.
+#
+#   agent-fabric/bin/fabric-role bind <role> [--project ID] [--workspace DIR] [--force]
+#   agent-fabric/bin/fabric-role status         what is this agent right now?
+#   agent-fabric/bin/fabric-role unbind         drop the role (GOODBYE)
+#   agent-fabric/bin/fabric-role list           the roles available
+#
+# bind and unbind refuse inside a harness session (the environment a Claude Code
+# session, or a fabric launch, carries): the binding would change under a
+# session whose prompt still says the old role, and the two would disagree
+# until a relaunch. The same refusal sits in tools/fabric/role.py itself,
+# so a Bash tool call that bypasses this script is refused too.
+#
+# The full account is in tools/fabric/role.py (bind = activate, unbind =
+# deactivate — the Python names are unchanged).
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
+
+refuse_inside_session() {  # bind and unbind only; status and list change nothing
+    for v in CLAUDECODE CLAUDE_ENV_FILE AGENT_FABRIC_LAUNCH_PROFILE; do
+        if [[ -n "${!v:-}" ]]; then
+            echo "fabric-role: this is a harness session (\$$v is set). A role is bound from a" >&2
+            echo "  login shell, never inside a session: the session's prompt already carries the" >&2
+            echo "  role it was launched with. Open a terminal, run fabric-role there, then relaunch." >&2
+            exit 1
+        fi
+    done
+}
+
+cmd="${1:-status}"; shift || true
+case "$cmd" in
+    bind)   refuse_inside_session; exec python3 "$ROOT/tools/fabric/role.py" activate "$@" ;;
+    unbind) refuse_inside_session; exec python3 "$ROOT/tools/fabric/role.py" deactivate "$@" ;;
+    status|list) exec python3 "$ROOT/tools/fabric/role.py" "$cmd" "$@" ;;
+    -h|--help|help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "fabric-role: unknown command '$cmd' (bind <role> | status | unbind | list)" >&2; exit 2 ;;
+esac

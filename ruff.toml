@@ -1,0 +1,9 @@
+# ruff.toml — the minimal rule set CI holds every Python file to: syntax
+# errors, undefined and unused names, redefinitions. Style is not linted;
+# these are the classes that turn a green suite into a broken tool on the
+# path the suite did not take.
+line-length = 200
+exclude = ["node_modules", "communication/gzcoord/history"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82", "F401", "F811", "F821", "F841"]

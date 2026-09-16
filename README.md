@@ -96,8 +96,15 @@ agent-fabric/bin/fabric-status        # agent, binding, API path, pins, capabili
 ## Tests
 
 ```sh
-tests/run.sh
+tests/run.sh            # static checks, python suites, GZCoord, bash suites and guards
+tests/run.sh static     # bash -n over every script, shellcheck (errors), ruff (ruff.toml)
 ```
+
+CI (`.github/workflows/ci.yml`) runs the static checks once and the whole
+of `tests/run.sh` on Python 3.12, 3.13 and 3.14 with Node 22, and once
+more on Python 3.12 with Node 20 — the oldest interpreters the tools
+promise to run on. Locally a missing shellcheck or ruff is said, not
+passed over.
 
 ## License
 

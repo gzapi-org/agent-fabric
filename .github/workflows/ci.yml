@@ -8,8 +8,32 @@ on:
   workflow_dispatch:
 
 jobs:
-  guards-and-suites:
+  static:
+    # Every bash script parses, shellcheck at error severity, ruff on the
+    # rule set in ruff.toml — before any suite, on one interpreter.
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get install -y --no-install-recommends shellcheck && python3 -m pip install --quiet --disable-pip-version-check ruff
+      - run: bash tests/static.sh
+
+  guards-and-suites:
+    # The suites on every interpreter an agent host runs: the oldest
+    # Python the tools promise (3.12) up to the one the hosts have, and
+    # the Node the GZCoord runtime is developed on beside the oldest it
+    # must still start on.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+        node: ['22']
+        include:
+          - python: '3.12'
+            node: '20'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,10 +42,10 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python }}
       - name: the schema validator lint prefers (its structural fallback covers a clean machine)
         run: python3 -m pip install --quiet --disable-pip-version-check jsonschema
       - name: no machine attribution in commits or the PR description

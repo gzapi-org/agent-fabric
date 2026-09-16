@@ -5,6 +5,7 @@
 #   tests/run.sh python     # only the python suites
 #   tests/run.sh gzcoord    # only the GZCoord protocol/runtime suite
 #   tests/run.sh bash       # only the bash suites (launcher, guards, hooks)
+#   tests/run.sh static     # only the static checks (bash -n, shellcheck, ruff)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -12,6 +13,9 @@ what="${1:-all}"
 fail=0
 run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 
+if [[ "$what" == all || "$what" == static ]]; then
+    run "static (bash -n, shellcheck, ruff)" bash tests/static.sh
+fi
 if [[ "$what" == all || "$what" == python ]]; then
     for t in tests/test_*.py; do run "$t" python3 "$t"; done
     run "corpus lint" python3 tools/fabric/lint.py

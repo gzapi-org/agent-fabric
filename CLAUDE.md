@@ -167,7 +167,7 @@ runtime/        identity.py (the resolver), claude-code/ openrouter/ github/ pro
 projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
 tools/fabric/   role.py, assemble.py, lint.py, routing.py, shim.py, harvest*, query.sh
-tests/          python suites; tests/run.sh runs everything
+tests/          python suites, static.sh; tests/run.sh runs everything
 docs/           a note when a concept changes meaning; live-checks/ — what was
                 verified live, with the read-backs behind design decisions
 ```

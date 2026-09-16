@@ -38,6 +38,15 @@ someone's finding, the branch or PR name you send back is the
 acknowledgement. A shared command or default changes only when its docs
 and the relay both say so.
 
+**A change whose pieces only make sense together lands as one PR.**
+When a partial landing is a defect — a contract status against the wire
+served, a migration against its reader — the role that owns the concern
+integrates: contributors push branches and open no PR; the integrator
+merges them unrebased into one branch, opens the one PR naming whose
+range is which, and arms it. One blind review covers the range; a
+finding goes to the lane that owns the hunk. Independent work stays
+separate PRs (the CEO, 2026-09-16).
+
 **A review finding is judged before it is answered** — with the review
 class, so the assessment is not made by the session that wrote the code —
 and when it is real you fix the rule, not the instance.

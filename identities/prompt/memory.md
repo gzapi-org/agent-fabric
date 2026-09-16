@@ -40,10 +40,9 @@ by the drain. Only your own home is read; nothing drains another
 account's memory. Drain after a change to how the role works lands, and
 at least weekly while you are active; a fabric-coordinator holder commits
 what it distils, with your name in the slice's `origin`. **Name people by
-role, never by name** — the CEO, the owner, a reviewer, an agent by its
-login: a slice travels into every project's repository, so a person's
-name in it is a privacy matter, and the drain refuses a memory that
-carries one (`policies/hygiene.json`).
+role, never by name** — the CEO, the owner, an agent by its login: a
+slice travels into every repository, and the drain substitutes what it
+finds (`policies/hygiene.json`). Never a secret of any shape.
 
 **When a slice is wrong**, write the correction as a memory of the same
 class, naming the slice and the fact that contradicts it: the next drain

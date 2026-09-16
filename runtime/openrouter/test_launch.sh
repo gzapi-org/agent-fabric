@@ -34,7 +34,7 @@ fi
 echo "ORI-EXECCED:$*"
 # The child's ENVIRONMENT, not only its argv: a pin that lost its `export`
 # would still print under --print and still be absent here.
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST CLAUDE_CODE_DISABLE_TERMINAL_TITLE; do
     echo "ORI-ENV:$v=${!v:-}"
 done
 FAKE
@@ -225,7 +225,7 @@ echo "launch: --provider anthropic execs plain claude with only the pinned tiers
 cat > "$SANDBOX/bin/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo "CLAUDE-EXECCED:$*"
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST CLAUDE_CODE_DISABLE_TERMINAL_TITLE; do
     echo "CLAUDE-ENV:$v=${!v:-}"
 done
 FAKE
@@ -249,6 +249,7 @@ mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-EXECCED:--model claude-opus-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
+grep -q "CLAUDE-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "tab-title writer off on plain claude too" || bad "terminal-title switch missing on plain claude" "$out"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
@@ -318,6 +319,7 @@ grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=z-ai/glm-5.3@preset/glm2claude-sh
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=anthropic/claude-sonnet-5" <<<"$out" && ok "session model stamped in the child env" || bad "no session stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped as role/agent" || bad "no profile stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_AGENT=$LOGIN" <<<"$out" && ok "agent stamped" || bad "no agent stamp" "$out"
+grep -q "ORI-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "the harness's tab-title writer is off in the child: the hook is the only writer" || bad "terminal-title switch not in the child's env" "$out"
 mkfabric
 out="$(run --model vendor/override --version 2>&1)"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=vendor/override" <<<"$out" && ok "a caller's --model is what gets stamped" || bad "stamp disagrees with argv" "$out"

@@ -341,6 +341,17 @@ PROMPT_DIGEST="$(python3 "$FABRIC_ROOT/tools/fabric/launch_prompt.py" --out "$PR
 export AGENT_FABRIC_LAUNCH_ROLE="$ROLE"
 export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST="$PROMPT_DIGEST"
 
+# The tab title is the hook's (runtime/claude-code/hooks/tab-title.sh:
+# "<agent> <working copy>/<branch>", so a pane is told apart by who is in
+# it), and the harness's own writer must be off or it overwrites that
+# with a prompt-derived topic after every turn. The workspace settings
+# template carries the switch, but that scope applies only to a session
+# started from ~/projects — every agent starts inside its clone, whose
+# .claude/settings.json is the project's, and the switch never reached
+# the process (read on two live sessions, 2026-09-16). The launcher
+# decides the child's environment on every path, so it is exported here.
+export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
+
 if (( PRINT_ONLY )); then
     echo "# resolved profile for $LABEL (agent $AGENT, role $ROLE, provider $PROVIDER)"
     echo "  session : $SESSION$(python3 -c 'import json,sys; c=json.load(sys.stdin)["session"].get("capability"); print(f"  (the {c} class)" if c else "")' <<<"$RESOLVED")"

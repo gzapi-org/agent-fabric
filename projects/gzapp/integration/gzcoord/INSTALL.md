@@ -21,6 +21,23 @@ Do not create a nested Git repository, and do not vendor the subsystem.
    `$CLAUDE_PROJECT_DIR/../agent-fabric/…` — hook commands run before
    the fabric hook has exported `AGENT_FABRIC_ROOT` into the session
    shell, so a hook line never relies on the variable).
+   The same file wires the **inbox hold** (2026-09-16,
+   `agent-fabric/docs/inbox-hold-while-planning.md`): three hook groups
+   running `agent-fabric/runtime/claude-code/hooks/plan-hold.sh` — on
+   `PreToolUse` with no matcher, on `UserPromptSubmit` and on
+   `SessionEnd` — so a session that plans inside the working copy holds
+   its account's inbox until the plan is approved. The shape is the
+   workspace template's (`runtime/claude-code/workspace/settings.json`)
+   with the `$CLAUDE_PROJECT_DIR/../agent-fabric` prefix:
+
+   ```json
+   {"hooks": [{"type": "command", "timeout": 5,
+     "command": "f=\"$CLAUDE_PROJECT_DIR/../agent-fabric/runtime/claude-code/hooks/plan-hold.sh\"; [ -f \"$f\" ] && bash \"$f\"; true"}]}
+   ```
+
+   A session launched inside a clone takes its hooks from the clone's
+   own settings, never from the workspace's, so until this is wired
+   the hold reaches only sessions started from `~/projects`.
 3. Nothing to configure by hand: the session's identity is its OS login
    and runtime binding (the role `bin/fabric-role` bound from a login
    shell; slugs from agent-fabric's `identities/roles/catalog.json`), the

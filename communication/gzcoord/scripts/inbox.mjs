@@ -69,10 +69,11 @@
 // notifications, but a delivery is a notification only because this
 // watch polls and prints — so while the session plans, the watch does not
 // poll. The session says so through a marker the plan-hold hook writes
-// (runtime/claude-code/hooks/plan-hold.sh: /tmp/agent-fabric-hold-<uid>/
-// <login>.json, naming the harness pid); the watch honours it while that
-// pid is alive and checks it before every slice, cutting a slice already
-// in flight the moment it appears. Nothing is consumed while held — the
+// (runtime/claude-code/hooks/plan-hold.sh: ~/.cache/agent-fabric/hold/
+// <pid>.json, one per planning session, naming the harness pid and its
+// start time); the watch honours a marker while that harness is alive and
+// checks before every slice, cutting a slice already in flight the moment
+// one appears. Nothing is consumed while held — the
 // relay keeps the cursor and re-shows what was not acknowledged — and the
 // first poll after the marker clears delivers everything at once, at the
 // session's next turn boundary. Held is a line on stderr, never stdout:
@@ -332,28 +333,55 @@ export function keywordHit(text, keywords, ownAddress) {
   return keywords.some(k => tokens.has(k.toLowerCase()));
 }
 
-// The hold marker: written by the plan-hold hook, read here. Live iff the
-// file parses and the pid it names is alive; anything else is not a hold
-// (a session that died planning, a reboot that emptied /tmp, a hand-made
-// file) and the reason says which.
-export function holdPath(login = os.userInfo().username, uid = process.getuid()) {
-  return path.join(process.env.AGENT_FABRIC_HOLD_DIR ?? `/tmp/agent-fabric-hold-${uid}`, `${login}.json`);
+// The hold markers: written by the plan-hold hook (one per planning
+// session, <pid>.json under the login's own hold directory), read here.
+// The account is held while ANY marker names a live harness of this
+// login: the pid answers a signal as this uid (EPERM is another login's
+// process, never our harness) and, when both sides know it, has the
+// start time the marker recorded (a reused pid is not the harness). The
+// directory and each file must be this login's, or nothing there is a
+// hold — another login must not be able to hold or release this inbox.
+export function holdDir(home = os.homedir()) {
+  return process.env.AGENT_FABRIC_HOLD_DIR ?? path.join(home, '.cache', 'agent-fabric', 'hold');
 }
-export function holdStatus(file = holdPath(), isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }) {
-  let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { held: false, reason: 'no marker' }; }
-  let m;
-  try { m = JSON.parse(raw); } catch { return { held: false, reason: 'marker unreadable' }; }
-  if (!Number.isInteger(m.pid) || m.pid <= 0) return { held: false, reason: 'marker names no pid' };
-  if (!isAlive(m.pid)) return { held: false, reason: `session ${m.pid} is gone`, pid: m.pid };
-  return { held: true, pid: m.pid, session_id: m.session_id, since: m.since };
+export function pidStart(pid) {
+  try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/.*\) /s, '').split(' ')[19] ?? ''; } catch { return ''; }
+}
+export function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+export function holdStatus(dir = holdDir(), { isAlive = pidAlive, startOf = pidStart, uid = process.getuid() } = {}) {
+  let st;
+  try { st = fs.lstatSync(dir); } catch { return { held: false, reason: 'no hold directory', sessions: [] }; }
+  if (st.isSymbolicLink() || !st.isDirectory()) return { held: false, reason: 'hold directory is not a directory', sessions: [] };
+  if (st.uid !== uid) return { held: false, reason: 'hold directory is not this login\'s', sessions: [] };
+  const sessions = [], stale = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!/^\d+\.json$/.test(name)) continue;
+    const file = path.join(dir, name);
+    let m;
+    try {
+      if (fs.lstatSync(file).uid !== uid) { stale.push(`${name}: not this login's`); continue; }
+      m = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch { stale.push(`${name}: unreadable`); continue; }
+    if (!Number.isInteger(m.pid) || m.pid <= 0) { stale.push(`${name}: names no pid`); continue; }
+    if (!isAlive(m.pid)) { stale.push(`${name}: session ${m.pid} is gone`); continue; }
+    const now = startOf(m.pid);
+    if (m.start && now && String(m.start) !== String(now)) { stale.push(`${name}: pid ${m.pid} reused`); continue; }
+    sessions.push({ pid: m.pid, session_id: m.session_id, since: m.since });
+  }
+  if (!sessions.length) return { held: false, reason: stale.length ? stale.join('; ') : 'no marker', sessions };
+  return { held: true, sessions };
 }
 
 export const HOLD_POLL_MS = 1000;
-// `held` is consulted before every slice and once a second during one:
-// a hold that begins mid-slice aborts the fetch (nothing was acknowledged,
-// so nothing is lost) and the loop waits, polling nothing, until the hold
-// clears. `onHold` is told once per transition, for the stderr line.
+// `held` is consulted before every slice, once a second during one, and
+// once more when the slice returns: a hold that begins mid-slice aborts
+// the fetch, and a page that landed in the same second as the hold is
+// dropped unread (nothing was acknowledged, so the relay re-shows it);
+// the loop then waits, polling nothing, until the hold clears. `onHold`
+// is told once per transition, for the stderr line. The guard's own
+// sleep is cut when the slice ends, so a delivery waits for no tick.
 export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, keywords = [], ownAddress,
                                  held = () => false, onHold = () => {}, holdPollMs = HOLD_POLL_MS, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
   let waited = 0;
@@ -369,10 +397,12 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
     const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
     const ctl = new AbortController();
     let page;
-    const guard = (async () => { for (;;) { await sleep(holdPollMs); if (ctl.signal.aborted) return; if (held()) { ctl.abort(); return; } } })();
+    const tick = () => new Promise(r => { const t = setTimeout(() => { ctl.signal.removeEventListener('abort', done); r(); }, holdPollMs); const done = () => { clearTimeout(t); r(); }; ctl.signal.addEventListener('abort', done, { once: true }); });
+    const guard = (async () => { for (;;) { await tick(); if (ctl.signal.aborted) return; if (held()) { ctl.abort(); return; } } })();
     try { page = await fetchPage(slice, ctl.signal); }
     catch (e) { if (ctl.signal.aborted) page = { messages: [] }; else { ctl.abort(); throw e; } }
     finally { ctl.abort(); await guard; }
+    if (held()) page = { messages: [] };   // landed as the hold began: unread, unacknowledged, re-shown later
     waited += slice;
     const classified = [];
     let delivered = false;
@@ -440,8 +470,8 @@ export async function main(argv = process.argv.slice(2)) {
   // binding names is the root, not the current directory.
   const who = whoami();
   if (argv.includes('--held')) {
-    const h = holdStatus(holdPath(who.agent));
-    console.log(h.held ? `held: ${who.agent}'s inbox is held by session ${h.session_id ?? '?'} (pid ${h.pid}) since ${h.since ?? '?'}` : `not held: ${h.reason}`);
+    const h = holdStatus();
+    console.log(h.held ? `held: ${who.agent}'s inbox is held by ${h.sessions.map(x => `session ${x.session_id ?? '?'} (pid ${x.pid}) since ${x.since ?? '?'}`).join(', ')}` : `not held: ${h.reason}`);
     return h.held ? 0 : 1;
   }
   const root = inboxRoot(who);
@@ -482,7 +512,7 @@ export async function main(argv = process.argv.slice(2)) {
   const CHANNEL = channel;
   const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
   const fetchPage = async (slice, signal) => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl, signal });
-  const held = () => holdStatus(holdPath(who.agent)).held;
+  const held = () => holdStatus().held;
   const onHold = h => console.error(h ? `gzcoord watch: inbox held — the session is planning; nothing is polled until the plan is approved` : 'gzcoord watch: hold released; polling again');
 
   if (follow) {

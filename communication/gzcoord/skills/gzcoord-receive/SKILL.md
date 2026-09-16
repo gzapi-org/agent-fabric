@@ -97,7 +97,10 @@ span to arrive together, and read them before acting on the plan — the
 tree may have moved. `node "$AGENT_FABRIC_ROOT/communication/gzcoord/
 scripts/inbox.mjs" --held` says whether your inbox is held right now
 and by which session. The hold is per address: a second session under
-the same login is held with you, as it shares your cursor. A sender
+the same login is held with you, as it shares your cursor, and the
+account is released when the last planning session leaves plan mode.
+A session started inside a clone is held only if that project's
+`.claude/settings.json` wires the hook (the workspace's does). A sender
 with `REPLY-EXPECTED: yes` waits until your plan is approved; the
 protocol already says a delivery is late, and a plan is bounded by an
 approval. A hold whose session has died is not a hold (the marker names

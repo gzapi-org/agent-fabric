@@ -685,7 +685,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdPath, holdStatus } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1063,22 +1063,44 @@ test('inbox --follow prints a delivery and keeps running', async () => {
 });
 
 // The hold: while the session plans, the watch polls nothing.
-test('holdStatus: a marker is a hold only while the pid it names is alive', () => {
+test('holdStatus: held iff some marker names a live harness of this login', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
-  const f = path.join(dir, 'me.json');
-  assert.equal(holdStatus(f).held, false, 'no marker');
-  fs.writeFileSync(f, 'not json');
-  assert.deepEqual(holdStatus(f), { held: false, reason: 'marker unreadable' });
-  fs.writeFileSync(f, JSON.stringify({ session_id: 's', since: 't' }));
-  assert.equal(holdStatus(f).reason, 'marker names no pid');
-  fs.writeFileSync(f, JSON.stringify({ session_id: 's', pid: process.pid, since: 't' }));
-  assert.equal(holdStatus(f).held, true, 'our own pid is alive');
-  assert.equal(holdStatus(f, () => false).held, false, 'a dead pid is not a hold');
-  assert.match(holdStatus(f, () => false).reason, /is gone/);
-  // the path is per login, under the per-uid dir, overridable for tests
-  assert.equal(holdPath('db-admin', 1000), '/tmp/agent-fabric-hold-1000/db-admin.json');
+  const f = pid => path.join(dir, `${pid}.json`);
+  const uid = process.getuid();
+  assert.equal(holdStatus(path.join(dir, 'none')).held, false, 'no directory');
+  assert.equal(holdStatus(dir).held, false, 'empty directory');
+  fs.writeFileSync(f(11), 'not json');
+  assert.match(holdStatus(dir).reason, /11\.json: unreadable/);
+  fs.writeFileSync(f(12), JSON.stringify({ session_id: 's' }));
+  assert.match(holdStatus(dir).reason, /12\.json: names no pid/);
+  fs.writeFileSync(f(process.pid), JSON.stringify({ session_id: 'me', pid: process.pid, start: pidStart(process.pid), since: 't' }));
+  const h = holdStatus(dir);
+  assert.equal(h.held, true, 'our own pid, alive, same start time');
+  assert.deepEqual(h.sessions.map(x => x.pid), [process.pid]);
+  // liveness is "answers a signal as this login": EPERM (another login's process) is not a hold
+  assert.equal(holdStatus(dir, { isAlive: () => false }).held, false, 'a dead pid is not a hold');
+  assert.match(holdStatus(dir, { isAlive: () => false }).reason, /is gone/);
+  fs.writeFileSync(f(1), JSON.stringify({ session_id: 'forged', pid: 1, start: '' }));
+  assert.equal(holdStatus(dir, { isAlive: pid => pid !== process.pid && pid !== 1 ? false : pid === process.pid }).sessions.length, 1, 'pid 1 (EPERM for an unprivileged login) does not hold');
+  fs.unlinkSync(f(1));
+  // a reused pid: the start time differs
+  assert.equal(holdStatus(dir, { startOf: () => 'other' }).held, false, 'a pid with another start time is not the harness');
+  assert.match(holdStatus(dir, { startOf: () => 'other' }).reason, /reused/);
+  assert.equal(holdStatus(dir, { startOf: () => '' }).held, true, 'an unknown start time (off Linux) falls back to the pid');
+  // two sessions: held while either is live
+  fs.writeFileSync(f(4194304000), JSON.stringify({ session_id: 'gone', pid: 4194304000 }));
+  assert.equal(holdStatus(dir).held, true, 'one live marker among dead ones holds');
+  // ownership: the directory and each file must be this login's
+  assert.equal(holdStatus(dir, { uid: uid + 1 }).held, false);
+  assert.match(holdStatus(dir, { uid: uid + 1 }).reason, /not this login's/);
+  const link = path.join(os.tmpdir(), `hold-link-${process.pid}`);
+  fs.symlinkSync(dir, link);
+  assert.match(holdStatus(link).reason, /not a directory/, 'a symlinked directory is refused');
+  fs.unlinkSync(link);
+  // the path is under the login's home, overridable for tests
+  assert.equal(holdDir('/h'), '/h/.cache/agent-fabric/hold');
   process.env.AGENT_FABRIC_HOLD_DIR = dir;
-  assert.equal(holdPath('x'), path.join(dir, 'x.json'));
+  assert.equal(holdDir(), dir);
   delete process.env.AGENT_FABRIC_HOLD_DIR;
 });
 
@@ -1119,7 +1141,17 @@ test('waitLoop: held polls nothing, a hold mid-slice cuts the slice, release del
   assert.equal(r2.delivered, true);
   assert.equal(served, 2, 'the cut slice was retried after release');
   assert.deepEqual(acked, ['m2'], 'nothing was acknowledged for the cut slice');
-  // 3. A fetch that fails for its own reason still throws (the watch reports the relay).
+  // 3. A page that resolves in the same tick the hold begins is dropped unread: nothing acked, re-shown after release.
+  let calls = 0, checksAfterFirst = 0;
+  const acked3 = [];
+  // held: false before the first fetch; true for the four checks after it returns (the
+  // post-fetch check, the loop-top check and two sleeps); false from then on.
+  const r3 = await waitLoop({ fetchPage: async () => { calls += 1; return { messages: [rec('m3')] }; }, ack: async id => { acked3.push(id); }, waitTotal: 1800,
+                              forMeFn: msg => forMe(msg, me), held: () => calls >= 1 && ++checksAfterFirst <= 4, holdPollMs: 1, sleep });
+  assert.equal(r3.delivered, true);
+  assert.deepEqual(acked3, ['m3'], 'the page that landed with the hold was not acknowledged; the retry was');
+  assert.ok(calls >= 2, 'fetched again after release');
+  // 4. A fetch that fails for its own reason still throws (the watch reports the relay).
   await assert.rejects(waitLoop({ fetchPage: async () => { throw new Error('relay down'); }, ack: async () => {}, waitTotal: 4, forMeFn: () => false }), /relay down/);
 });
 
@@ -1138,8 +1170,9 @@ test('inbox --follow polls nothing while the hold marker names a live pid', asyn
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
-  const marker = path.join(holdDir, `${os.userInfo().username}.json`);
-  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, since: 'T' }));
+  fs.chmodSync(holdDir, 0o700);
+  const marker = path.join(holdDir, `${process.pid}.json`);
+  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, start: pidStart(process.pid), since: 'T' }));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
   const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), AGENT_FABRIC_HOLD_DIR: holdDir,
                 CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
@@ -1158,10 +1191,11 @@ test('inbox --follow polls nothing while the hold marker names a live pid', asyn
   assert.match(err, /inbox held/, 'the hold is said on stderr');
   assert.match(out, /HELD-BODY/, 'delivered once the marker was gone');
   // --held answers from the same marker
-  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, since: 'T' }));
+  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, start: pidStart(process.pid), since: 'T' }));
   const h = spawnSync('node', [INBOX, '--held'], { env, encoding: 'utf8' });
   assert.equal(h.status, 0); assert.match(h.stdout, /^held: .* session plan \(pid \d+\)/);
-  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: 4194304000, since: 'T' }));
+  fs.unlinkSync(marker);
+  fs.writeFileSync(path.join(holdDir, '4194304000.json'), JSON.stringify({ session_id: 'plan', pid: 4194304000, since: 'T' }));
   const n = spawnSync('node', [INBOX, '--held'], { env, encoding: 'utf8' });
-  assert.equal(n.status, 1); assert.match(n.stdout, /^not held: session 4194304000 is gone/);
+  assert.equal(n.status, 1); assert.match(n.stdout, /^not held: 4194304000\.json: session 4194304000 is gone/);
 });

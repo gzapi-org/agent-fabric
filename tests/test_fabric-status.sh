@@ -52,6 +52,21 @@ current="$(grep "the anthropic session now resolves to" <<<"$out" | sed 's/.*res
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_SESSION_MODEL="$current" 2>&1)"
 ! grep -q "launched on" <<<"$out" && ok "launched on what now resolves: no drift" || bad "false session drift" "$out"
 
+echo "fabric-status: moveto installed from this repository, or behind it"
+PREFIX="$SANDBOX/usr-local"
+MOVETO_PREFIX="$PREFIX" sh "$ROOT/runtime/provisioning/moveto/install.sh" >/dev/null && ok "install.sh installs under \$MOVETO_PREFIX" || bad "install.sh failed"
+[[ -s "$PREFIX/share/moveto/installed.sha256" ]] && ( cd "$PREFIX" && sha256sum -c --quiet share/moveto/installed.sha256 ) && ok "…and records a manifest that checks out" || bad "no manifest, or it does not check out"
+out="$(status MOVETO_PREFIX="$PREFIX" 2>&1)"
+grep -q "^moveto       in sync" <<<"$out" && ok "a fresh install is in sync" || bad "fresh install reported otherwise" "$out"
+printf '\n# local edit\n' >> "$PREFIX/share/moveto/enter"
+out="$(status MOVETO_PREFIX="$PREFIX" 2>&1)"
+grep -q "^moveto       drift: behind the repository: share/moveto/enter" <<<"$out" && grep -q "edited in place since install: share/moveto/enter" <<<"$out" \
+  && grep -q "install.sh" <<<"$out" && ok "an installed copy that differs is said, with the file, the cause and the fix" || bad "moveto drift not said" "$out"
+MODE=(--json); out="$(status MOVETO_PREFIX="$PREFIX" 2>&1)"; MODE=()
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["host_tools"]["moveto"]["status"]=="drift"' <<<"$out" && ok "…and in the JSON report" || bad "json lacks host_tools" "$out"
+out="$(status MOVETO_PREFIX="$SANDBOX/nowhere" 2>&1)"
+! grep -q "^moveto" <<<"$out" && ok "no moveto under the prefix: no line" || bad "a line for an absent tool" "$out"
+
 echo "fabric-status: memories written and not yet drained"
 WC="$SANDBOX/gzapp"; git init -q "$WC"; git -C "$WC" remote add origin git@github.com:gzapi-org/gzapp.git
 MEM="$SANDBOX/home/.claude/projects/$(printf '%s' "$WC" | tr / -)/memory"; mkdir -p "$MEM" "$WC/.agent-fabric/memory"

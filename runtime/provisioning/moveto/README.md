@@ -30,12 +30,18 @@ source, and `install.sh` is how it gets there.
 ## Install
 
 ```sh
-sudo tools/moveto/install.sh
+sudo runtime/provisioning/moveto/install.sh
 ```
 
 Three files land: `/usr/local/bin/moveto`, `/usr/local/share/moveto/enter`, and
-`/usr/local/share/moveto/rc`. The copy under `/usr/local` can drift from this
-directory and nothing detects it — re-run the installer after any change here.
+`/usr/local/share/moveto/rc`, and a manifest of what was installed,
+`/usr/local/share/moveto/installed.sha256`. The copy under `/usr/local`
+can drift from this directory, and `bin/fabric-status` says so on every
+call — `moveto       drift: behind the repository: share/moveto/enter …`
+when this directory moved on and the installer was not re-run, `edited
+in place since install` when a copy differs from the manifest; `in sync`
+otherwise (`tools/fabric/hosttools.py` is the check). Re-run the
+installer after any change here.
 
 ## What it assumes
 
@@ -120,7 +126,7 @@ means "both" and is honoured inconsistently.
 ## Tests
 
 ```sh
-bash tools/moveto/test_moveto.sh
+bash runtime/provisioning/moveto/test_moveto.sh
 ```
 
 Covers the resolution matrix through `--print`, which runs the whole resolution

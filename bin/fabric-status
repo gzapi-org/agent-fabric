@@ -21,6 +21,7 @@ def load(name, path):
 
 identity = load("fabric_identity", os.path.join(root, "runtime", "identity.py"))
 routing = load("fabric_routing", os.path.join(root, "tools", "fabric", "routing.py"))
+hosttools = load("fabric_hosttools", os.path.join(root, "tools", "fabric", "hosttools.py"))
 
 ctx = identity.resolve_context()
 binding = identity.read_binding(ctx["agent"])
@@ -139,6 +140,11 @@ if digest:
     except OSError:
         prompt_drift = f"the launched prompt file is gone ({prompt_path})"
 
+# --- host tooling installed from this repository ------------------------
+# moveto is a copy under /usr/local; the source moved on and nobody re-ran
+# install.sh is invisible anywhere else (review, 2026-09-16).
+moveto = hosttools.moveto_drift(root=root)
+
 report = {
     "agent": ctx["agent"], "host": ctx["host"],
     "role": binding.get("role"), "project": ctx["project"], "working_copy": ctx["working_copy"],
@@ -154,6 +160,7 @@ report = {
             "credentials": credentials or "none visible in the environment"},
     "capabilities": classes,
     "routing_check": "clean" if not checks else checks,
+    "host_tools": {"moveto": moveto},
     "control_plane": root,
 }
 if mode == "--json":
@@ -180,5 +187,7 @@ print(f"routing      {report['routing_check'] if isinstance(report['routing_chec
 if undrained:
     print(f"memory       {undrained['drainable']} drainable (roles_class set) and {undrained['no_roles_class']} private "
           f"(none) written since {undrained['since']} — {undrained['dir']}")
+if moveto["installed"]:
+    print(f"moveto       {moveto['status']}: {moveto['detail']}" if moveto["status"] == "drift" else f"moveto       {moveto['status']}")
 print(f"control plane {root}")
 PY

@@ -145,3 +145,14 @@ by clone basename passes every other assertion — under the template layout the
 account name and the clone name are the same string, so nothing can tell the two
 rules apart. Both that mutation and "silently pick the first clone" were checked
 to fail the suite.
+
+## Tab completion
+
+`install.sh` also installs `completion.bash` where bash-completion loads
+it on first use (`<prefix>/share/bash-completion/completions/moveto`):
+`moveto <TAB>` proposes the accounts the host registry places on this
+host, read from the fabric checkout in the operator's workspace with no
+sudo; `moveto <account> <TAB>` proposes that account's clones through
+`moveto <account> --list`, plus `--print` and `--list`. When the
+registry cannot be read the first word falls back to `moveto --list`.
+The file is in the drift manifest like the other three.

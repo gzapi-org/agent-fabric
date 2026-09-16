@@ -20,9 +20,14 @@ install -d -m 755 "$prefix/bin" "$prefix/share/moveto"
 install -m 755 "$here/moveto" "$prefix/bin/moveto"
 install -m 755 "$here/enter"  "$prefix/share/moveto/enter"
 install -m 644 "$here/rc"     "$prefix/share/moveto/rc"
+# Tab completion, where bash-completion loads it on first use (XDG_DATA_DIRS
+# lists /usr/local/share before /usr/share): accounts from the host
+# registry, clones from `moveto <account> --list`.
+install -d -m 755 "$prefix/share/bash-completion/completions"
+install -m 644 "$here/completion.bash" "$prefix/share/bash-completion/completions/moveto"
 # The manifest names the installed paths relative to the prefix, so the
 # same sha256sum line checks the copy wherever the prefix is.
-( cd "$prefix" && sha256sum bin/moveto share/moveto/enter share/moveto/rc ) > "$prefix/share/moveto/installed.sha256.tmp"
+( cd "$prefix" && sha256sum bin/moveto share/moveto/enter share/moveto/rc share/bash-completion/completions/moveto ) > "$prefix/share/moveto/installed.sha256.tmp"
 mv "$prefix/share/moveto/installed.sha256.tmp" "$prefix/share/moveto/installed.sha256"
 chmod 644 "$prefix/share/moveto/installed.sha256"
 

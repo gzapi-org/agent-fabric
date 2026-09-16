@@ -198,6 +198,40 @@ out=$(SUDO_DENY=1 "$UNDER_TEST" solo --print 2>&1); st=$?
 check_status "exits 1" 1 "$st"
 check "says it cannot become the account" "cannot become 'solo'" "$out"
 
+echo "12. tab completion: accounts from the host registry, clones from the tool"
+# A fabric checkout whose registry places two accounts on this host and one
+# elsewhere; the completion reads it with no sudo and proposes only ours.
+COMP_ROOT="$(mktemp -d)"; mkdir -p "$COMP_ROOT/runtime/hosts"
+printf '{"placement":{"alpha-01":"%s","beta-01":"%s","gamma-01":"elsewhere"}}\n' "$(hostname -s)" "$(hostname -s)" > "$COMP_ROOT/runtime/hosts/registry.json"
+# The completion calls `moveto` by name for clones: the tool under test,
+# through the same mocked getent/sudo the rest of this suite uses.
+ln -sf "$UNDER_TEST" "$BIN/moveto"
+complete_words() {  # complete_words <words...> -> COMPREPLY lines; the cursor is on the last word
+    ( export AGENT_FABRIC_ROOT="$COMP_ROOT"
+      # shellcheck disable=SC1090
+      source "$SCRIPT_DIR/completion.bash"
+      COMP_WORDS=("$@"); COMP_CWORD=$(( $# - 1 )); _moveto; printf '%s\n' "${COMPREPLY[@]}" )
+}
+out=$(complete_words moveto "")
+check "proposes the accounts placed on this host" "alpha-01" "$out"
+check "and the other one" "beta-01" "$out"
+check_absent "not an account placed elsewhere" "gamma-01" "$out"
+out=$(complete_words moveto "be")
+check "narrows on the prefix" "beta-01" "$out"
+check_absent "and drops the rest" "alpha-01" "$out"
+out=$(complete_words moveto "--")
+check "a dash completes the flag" "--list" "$out"
+# the second word: --print / --list, or the account's clones through the tool's own listing
+out=$(complete_words moveto alpha-01 "--")
+check "second-word flags" "--print" "$out"
+# `moveto <account> --list` runs the tool: the fixture account "many" has three clones
+out=$(complete_words moveto many "")
+check "clones come from moveto <account> --list" "beta" "$out"
+out=$(complete_words moveto many "ga")
+check "and narrow on the prefix" "gamma" "$out"
+check_absent "dropping the rest" "alpha" "$out"
+rm -rf "$COMP_ROOT"
+
 echo
 if [[ $failures -eq 0 ]]; then echo "test_moveto: all assertions passed"; exit 0; fi
 echo "test_moveto: $failures assertion(s) failed"

@@ -92,8 +92,12 @@ time; the directory must be the login's, mode 700, not a symlink; a pid
 that answers EPERM is nobody's harness on both sides; the slice's page
 is dropped unread when the hold began while it was in flight; and the
 guard's tick is cut when the slice ends, so a delivery waits for no
-tick. What was not re-measured live: the end-to-end timeline above,
-which the mechanism reproduces unchanged except for the marker's path.
+tick. The end-to-end run was repeated with the reworked mechanism:
+marker `~/.cache/agent-fabric/hold/1611500.json` (directory `user 700`)
+written at 12:07:08 on the plan session's first prompt, carrying pid
+and start time; probe seq 430 sent 12:07:09; still held 12:07:17;
+session ended 12:07:30, marker swept, and the probe delivered to this
+session's watch at once.
 
 Two risks the review named stay open as risks: a permission mode
 changed with the keyboard while the session is idle fires no hook, so

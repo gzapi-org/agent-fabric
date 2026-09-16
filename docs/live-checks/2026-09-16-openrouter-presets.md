@@ -75,6 +75,10 @@ a failure.
   `docs/live-checks/`, then the `shims.json` family entry by hand — the
   note there is the admission record — and admission to a class stays
   architect-cto's under `routing/policies/review-grade.json`.
-- Not read back: whether a preset's `config` can carry parameters beyond
-  `provider` on this endpoint (the spec says any overlapping field
-  persists; `temperature` is sent when a source names it, unverified).
+- A preset's `config` carries parameters beyond `provider`: version 3 of
+  the throwaway slug was pushed with `temperature: 0.2`, `max_tokens:
+  4096` and `top_p: 0.9` beside the routing, and `GET /presets/{slug}`
+  returned all three in the designated version's `config`; `shim.py diff`
+  read them back byte-identical to the source. So a shim's
+  `config.json` may pin sampling as well as routing, and `push` sends
+  every key it holds.

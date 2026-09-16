@@ -24,7 +24,9 @@ WHAT THIS TOOL IS FOR (owner, 2026-09-16): the next shim is built, checked
 and recorded through the API, from sources under version control:
 
   routing/shims/<slug>/system_prompt.md   the prepended text
-  routing/shims/<slug>/config.json        the provider config ({} for none)
+  routing/shims/<slug>/config.json        the provider routing, and any sampling
+                                          parameter to pin (temperature, max_tokens,
+                                          top_p — verified persisted 2026-09-16); {} for none
 
     shim.py push <slug>       creates the preset or adds a version (POST
                               /presets/<slug>/messages: `system` becomes

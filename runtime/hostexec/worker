@@ -17,9 +17,12 @@
 # stderr and the exit status are the command's: a token piped in and a
 # bundle streamed out pass through untouched and never appear in argv.
 #
-# An argument beginning `@fabric/` names a path under THIS host's fabric
-# checkout (the one this worker sits in): the caller need not know where
-# the operator keeps it, and nothing expands ~ on the far side.
+# An argument beginning `@fabric/` names a path under a fabric checkout
+# on THIS host: the operator's (the one this worker sits in) when the
+# command runs as the operator, the ACCOUNT's own (~/projects/
+# agent-fabric, which provisioning clones first) when it runs as another
+# account — the operator's home is not readable to it. The caller need
+# not know where either is, and nothing expands ~ on the far side.
 #
 # $SUDO names the sudo to use (a test puts a fake here); the real one is
 # `sudo -n`: a password prompt is a failure, never a wait.
@@ -38,16 +41,21 @@ while (( $# )); do
     esac
 done
 (( $# )) || { echo "worker: no command after --" >&2; exit 2; }
-cmd=(); for a in "$@"; do cmd+=("${a/#@fabric\//$ROOT/}"); done; set -- "${cmd[@]}"
 me="$(id -un)"
 if [[ -z "$as" || "$as" == "$me" ]]; then
+    cmd=(); for a in "$@"; do cmd+=("${a/#@fabric\//$ROOT/}"); done; set -- "${cmd[@]}"
     [[ -n "$cwd" ]] && { cd "$cwd" || exit 1; }
     exec "$@"
 fi
 home="$(getent passwd "$as" | cut -d: -f6)"
 [[ -n "$home" ]] || { echo "worker: no such login on $(hostname -s): $as" >&2; exit 2; }
+# The account's home is 700: whether its checkout exists is checked from
+# inside its own shell, not from the operator's view of the path.
+fabric="$home/projects/agent-fabric"; needs_fabric=0
+cmd=(); for a in "$@"; do [[ "$a" == @fabric/* ]] && needs_fabric=1; cmd+=("${a/#@fabric\//$fabric/}"); done; set -- "${cmd[@]}"
 SUDO="${SUDO:-sudo}"
 # The command is handed to the account's shell as ARGUMENTS ("$@"), never
 # re-parsed: a value with a space or a quote reaches it whole.
 exec $SUDO -n -u "$as" -H env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin:$home/.local/bin" \
-    bash -c 'cd "${1:-$HOME}" && shift && exec "$@"' -- "$cwd" "$@"
+    bash -c 'if [ "$1" = 1 ] && [ ! -d "$2" ]; then echo "worker: $(id -un) has no fabric checkout at $2 on $(hostname -s) (provision it first)" >&2; exit 2; fi
+             cd "${3:-$HOME}" && shift 3 && exec "$@"' -- "$needs_fabric" "$fabric" "$cwd" "$@"

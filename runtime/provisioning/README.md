@@ -24,7 +24,12 @@ directory it stands in identifies context, never identity.
 
 **One command does all of it** (fabric-coordinator, from its own login;
 the account steps go through `sudo`, the Doppler steps use the
-coordinator's CLI token):
+coordinator's CLI token). It starts with a host audit: a Qubes AppVM
+keeps only `/home` and `/usr/local` across a reboot, so the rpm tools
+(git, gh, node, npm, python3, jq, gpg, podman, ImageMagick) are checked
+and a missing one is named with its package for the TemplateVM; doppler
+goes to `/usr/local/bin` once; the account's own tools go under its
+`~/.local`:
 
 ```sh
 runtime/provisioning/new-agent.sh <login> <role> [--project <id>]... [--dry-run]
@@ -33,8 +38,12 @@ runtime/provisioning/new-agent.sh brand-comms-01 brand-comms --project gzapi.ge 
 
 Idempotent — every step is checked before it is done, so it is also how
 an account that came out short is completed. In order: the Linux account
-(home 700, the shared-cache group); the home skeleton with `claude` and
-`ori` copied from the coordinator's installs; GitHub's host key in
+(home 700, the shared-cache group); the home skeleton, then `claude` and `ori`
+installed as the account the way their vendors say (`claude.ai/install.sh`
+on the vendor's latest — every account runs latest, the coordinator
+included, and the fabric is fixed where latest breaks it; `--claude`
+pins — and `openrouter.ai/labs/ori/install.sh`; an installer that fails
+fails the script, nothing is copied from another account); GitHub's host key in
 `known_hosts`; `~/projects/agent-fabric` over https (the fabric is
 public; the account has no key yet); Doppler enrolment — `enroll.sh
 <login>`, `fill-from <coordinator>`, then `issue-openrouter-keys` and

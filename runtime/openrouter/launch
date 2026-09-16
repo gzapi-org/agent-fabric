@@ -144,6 +144,38 @@ done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 [[ "$PROVIDER" == openrouter || "$PROVIDER" == anthropic ]] || { echo "launch: --provider must be openrouter or anthropic, not '$PROVIDER'" >&2; exit 1; }
 
+# ── the fabric itself must be current ───────────────────────────────
+# A session is fixed at exec: it runs on the launcher, hooks, prompt
+# sections and routing of the checkout it was launched from. "Pull, then
+# relaunch" was the rule, and moveto pulls on entry — but an account
+# that keeps its moveto shell open for a day relaunches from it without
+# a pull, and on 2026-09-16 two accounts came back on the previous
+# launcher (no GOODBYE, two HELLOs) after a DECISION told everyone to
+# pull. So the launcher checks: a fetch, and a checkout behind
+# origin/main is refused with the one command that fixes it. Offline
+# (the fetch fails) it launches on what is checked out and says so.
+# AGENT_FABRIC_ALLOW_STALE=1 overrides, loudly, for the case where the
+# push itself is what a session is about to do.
+if git -C "$FABRIC_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+   && git -C "$FABRIC_ROOT" remote get-url origin >/dev/null 2>&1; then
+    if timeout 20 git -C "$FABRIC_ROOT" fetch -q origin main 2>/dev/null; then
+        BEHIND="$(git -C "$FABRIC_ROOT" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+        if (( BEHIND > 0 )); then
+            if [[ "${AGENT_FABRIC_ALLOW_STALE:-}" == 1 ]]; then
+                echo "launch: WARNING — agent-fabric is $BEHIND commit(s) behind origin/main; launching anyway (AGENT_FABRIC_ALLOW_STALE=1)." >&2
+            else
+                die "agent-fabric at $FABRIC_ROOT is $BEHIND commit(s) behind origin/main.
+  A session runs on the launcher, hooks, prompt and routing of this checkout,
+  so it must be current. Run:
+    git -C \"$FABRIC_ROOT\" pull --ff-only origin main
+  then relaunch (moveto <account> does the pull only on entry, not on launch)."
+            fi
+        fi
+    else
+        echo "launch: could not fetch origin/main for $FABRIC_ROOT (offline?); launching on what is checked out." >&2
+    fi
+fi
+
 # ── who is launching ────────────────────────────────────────────────
 [[ -f "$IDENTITY" ]] || die "$IDENTITY is missing — is AGENT_FABRIC_ROOT right?"
 CONTEXT="$(python3 "$IDENTITY" --json --cwd "$PWD")" || die "could not resolve the agent identity."

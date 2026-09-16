@@ -25,12 +25,16 @@ out="$(run some-login backend-dev --bogus --dry-run)"; [[ $? -eq 2 ]] && ok "an 
 echo "new-agent: the dry run names every step and touches nothing"
 out="$(run zz-fixture-login backend-dev --project gzapp --project agent-fabric --dry-run)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$out"
-for step in "useradd" "chmod 700" "mkdir -p" "ssh-keyscan github.com" "git clone -q https://github.com/gzapi-org/agent-fabric.git" "enroll.sh zz-fixture-login; fill-from" "issue-openrouter-keys and issue-openai-keys" "git clone -q 'git@github.com:gzapi-org/gzapp.git'" "bootstrap.sh" "fabric-role bind 'backend-dev'"; do
+for step in "useradd" "chmod 700" "mkdir -p" "curl -fsSL https://claude.ai/install.sh | bash -s -- " "curl -fsSL https://openrouter.ai/labs/ori/install.sh | bash" "ssh-keyscan github.com" "git clone -q https://github.com/gzapi-org/agent-fabric.git" "enroll.sh zz-fixture-login; fill-from" "issue-openrouter-keys and issue-openai-keys" "git clone -q 'git@github.com:gzapi-org/gzapp.git'" "bootstrap.sh" "fabric-role bind 'backend-dev'"; do
     grep -qF "$step" <<<"$out" && ok "plans: $step" || bad "missing step: $step" "$out"
 done
 grep -q "dry run: nothing verified" <<<"$out" && ok "…and verifies nothing" || bad "verified in dry run" "$out"
 ! getent passwd zz-fixture-login >/dev/null && ok "no account was created" || bad "an account was created by a dry run"
 grep -q "git@github.com" <<<"$out" && ok "a project clone uses the registry's SSH remote" || bad "remote" "$out"
+! grep -qi "copied\|copy from" <<<"$out" && ok "no binary is ever copied from another account" || bad "a copy fallback is planned" "$out"
+grep -q "^new-agent: 0\. " <<<"$out" && ok "the host audit runs first" || bad "no host audit" "$out"
+out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok "--claude takes stable, latest or a full version" || bad "bad --claude accepted" "$out"
+out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"
 
 echo
 if [[ $FAIL -eq 0 ]]; then echo "test_new-agent: OK — $PASS assertion(s) passed."; else echo "test_new-agent: FAILED — $FAIL assertion(s) failed."; exit 1; fi

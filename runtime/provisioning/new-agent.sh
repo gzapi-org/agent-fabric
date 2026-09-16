@@ -6,7 +6,7 @@
 # (the account steps go through sudo; the Doppler steps use the
 # coordinator's own CLI token).
 #
-#   runtime/provisioning/new-agent.sh <login> <role> [--project <id>]... [--dry-run]
+#   runtime/provisioning/new-agent.sh <login> <role> [--project <id>]... [--claude VERSION|stable|latest] [--dry-run]
 #
 #   new-agent.sh brand-comms-01 brand-comms --project gzapi.ge --project gzapp.decks
 #
@@ -21,9 +21,26 @@
 # before it is done, so the second account costs what the first did.
 #
 # WHAT IT DOES, in order (each step is skipped when already true):
+#   0. the host: what this AppVM must already have and what it can hold.
+#      A Qubes AppVM keeps only /home and /usr/local across a reboot; a
+#      package is the TemplateVM's (dnf there, not here). So: the rpm
+#      tools the fabric and the projects use (git, gh, node, npm,
+#      python3, jq, gpg, podman, magick) are audited and a missing one is
+#      named with its package for the template; doppler goes to
+#      /usr/local/bin once (persistent), the account's own tools go under
+#      its ~/.local; gzapp's gpg wrapper in /usr/local/bin is checked and
+#      named as devex-tooling's to install when absent.
 #   1. the Linux account (useradd), home 700, the shared-cache group
 #   2. ~/.ssh ~/.claude ~/.config/gh ~/.local/{bin,share}, owned by the
-#      account; claude and ori copied from the coordinator's own installs
+#      account; claude and ori installed AS THE ACCOUNT the way their
+#      vendors say — `curl -fsSL https://claude.ai/install.sh | bash -s --
+#      latest` — every account, the coordinator included, runs the
+#      vendor's latest and the fabric is fixed where latest breaks it
+#      (owner, 2026-09-16); --claude pins a version or stable — and `curl -fsSL
+#      https://openrouter.ai/labs/ori/install.sh | bash` (stable channel;
+#      it has no version pin) — both land in ~/.local/bin. An installer
+#      that fails fails the script: nothing is copied from another
+#      account in its place (owner, 2026-09-16).
 #   3. github.com's host key in the account's known_hosts (public data)
 #   4. ~/projects/agent-fabric cloned over https (the fabric is public;
 #      the account has no key yet) — enrolment reads the account's own
@@ -56,10 +73,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 REGISTRY="$ROOT/projects/registry.json"
 ENROLL="$ROOT/runtime/provisioning/secrets/enroll.sh"
-DRY=0; LOGIN=""; ROLE=""; PROJECTS=()
+DRY=0; LOGIN=""; ROLE=""; PROJECTS=(); CLAUDE_TARGET=""
 while (( $# )); do
     case "$1" in
         --dry-run) DRY=1 ;;
+        --claude) CLAUDE_TARGET="$2"; shift ;;
+        --claude=*) CLAUDE_TARGET="${1#--claude=}" ;;
         --project) PROJECTS+=("$2"); shift ;;
         --project=*) PROJECTS+=("${1#--project=}") ;;
         -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -68,7 +87,8 @@ while (( $# )); do
     esac
     shift
 done
-[[ -n "$LOGIN" && -n "$ROLE" ]] || { echo "usage: new-agent.sh <login> <role> [--project <id>]... [--dry-run]" >&2; exit 2; }
+[[ -n "$LOGIN" && -n "$ROLE" ]] || { echo "usage: new-agent.sh <login> <role> [--project <id>]... [--claude VERSION|stable|latest] [--dry-run]" >&2; exit 2; }
+[[ -z "$CLAUDE_TARGET" || "$CLAUDE_TARGET" =~ ^(stable|latest|[0-9]+\.[0-9]+\.[0-9]+([-.][^[:space:]]+)?)$ ]] || { echo "new-agent: --claude takes stable, latest or a version" >&2; exit 2; }
 
 say() { printf 'new-agent: %s\n' "$*" >&2; }
 die() { printf 'new-agent: %s\n' "$*" >&2; exit 1; }
@@ -88,8 +108,34 @@ print(next((x for x in p["remotes"] if x.startswith("git@")), p["remotes"][0]))'
     REMOTE["$pid"]="$r"
 done
 
+LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
 as_login() { sudo -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="/usr/local/bin:/usr/bin:/bin:$HOME_DIR/.local/bin" bash -lc "cd \"\$HOME\" && $*"; }
 (( DRY )) || sudo -n true 2>/dev/null || die "sudo without a password is needed for the account steps (this login has none)."
+
+# ---- 0. the host ----------------------------------------------------------------
+# tool:package — what the fabric's hooks and scripts and the managed
+# projects' toolchains call; the package is the TemplateVM's (Fedora).
+HOST_TOOLS=(git:git-core gh:gh node:nodejs npm:nodejs-npm python3:python3 jq:jq gpg:gnupg2 podman:podman magick:ImageMagick curl:curl)
+missing_pkgs=()
+for spec in "${HOST_TOOLS[@]}"; do
+    tool="${spec%%:*}"; pkg="${spec##*:}"
+    command -v "$tool" >/dev/null 2>&1 || missing_pkgs+=("$pkg")
+done
+if (( ${#missing_pkgs[@]} )); then
+    say "0. TEMPLATE: this AppVM lacks ${missing_pkgs[*]} — a package does not survive a reboot here;"
+    say "   in the TemplateVM: sudo dnf install ${missing_pkgs[*]}   (then restart this AppVM)"
+else say "0. host tools present (${#HOST_TOOLS[@]} from the template)"; fi
+# doppler: a static binary; /usr/local persists in an AppVM, and enroll.sh
+# reads it from there for every account.
+if [[ -x /usr/local/bin/doppler ]]; then say "   doppler: /usr/local/bin/doppler"
+elif command -v doppler >/dev/null 2>&1; then
+    run sudo -n install -m 755 "$(command -v doppler)" /usr/local/bin/doppler; say "   doppler: copied to /usr/local/bin (persistent)"
+else
+    if (( DRY )); then say "would: install doppler to /usr/local/bin with its vendor script (curl -Ls https://cli.doppler.com/install.sh | sudo sh)"
+    else curl -Ls -m 60 https://cli.doppler.com/install.sh | sudo -n sh >/dev/null 2>&1 && say "   doppler: installed to /usr/local/bin" || say "   doppler: NOT installed (vendor script failed; enroll.sh needs it)"; fi
+fi
+[[ -x /usr/local/bin/ots-git-gpg-wrapper.sh ]] && say "   gpg wrapper: /usr/local/bin/ots-git-gpg-wrapper.sh" \
+    || say "   gpg wrapper: MISSING — commit signing needs it; devex-tooling installs it (gzapp infra/signing/install-shim.sh)"
 
 # ---- 1. the account ---------------------------------------------------------
 if getent passwd "$LOGIN" >/dev/null; then say "1. account $LOGIN exists"
@@ -103,15 +149,40 @@ if getent group otscache >/dev/null && ! id -nG "$LOGIN" 2>/dev/null | tr ' ' '\
 run sudo -n -u "$LOGIN" mkdir -p "$HOME_DIR"/{projects,.ssh,.claude,.config/gh,.local/bin,.local/share/claude/versions}
 run sudo -n -u "$LOGIN" chmod 700 "$HOME_DIR/.ssh"
 run sudo -n chown "$LOGIN:$LOGIN" "$HOME_DIR/.local" "$HOME_DIR/.local/bin" "$HOME_DIR/.local/share"
-CLAUDE_BIN="$(readlink -f "$HOME/.local/bin/claude" 2>/dev/null || true)"
-[[ -n "$CLAUDE_BIN" && -x "$CLAUDE_BIN" ]] || die "no claude binary at $HOME/.local/bin/claude to copy from."
-if sudo -n test -x "$HOME_DIR/.local/share/claude/versions/$(basename "$CLAUDE_BIN")"; then say "2. claude $(basename "$CLAUDE_BIN") present"
-else run sudo -n install -o "$LOGIN" -g "$LOGIN" -m 755 "$CLAUDE_BIN" "$HOME_DIR/.local/share/claude/versions/"
-     run sudo -n -u "$LOGIN" ln -sfn "$HOME_DIR/.local/share/claude/versions/$(basename "$CLAUDE_BIN")" "$HOME_DIR/.local/bin/claude"
-     say "2. claude $(basename "$CLAUDE_BIN") installed"; fi
-ORI_BIN="$(command -v ori || true)"
-if [[ -n "$ORI_BIN" ]] && ! sudo -n test -x "$HOME_DIR/.local/bin/ori"; then
-    run sudo -n install -o "$LOGIN" -g "$LOGIN" -m 711 "$ORI_BIN" "$HOME_DIR/.local/bin/ori"; say "   ori installed"; fi
+# claude: the vendor's installer, as the account, on the vendor's latest —
+# resolved against the release pointer so a re-run upgrades an account
+# that fell behind — unless --claude pins a version or stable. Its layout
+# is the one this script and the runbook assume:
+# ~/.local/bin/claude -> ~/.local/share/claude/versions/<v>.
+want="${CLAUDE_TARGET:-latest}"
+resolved="$want"
+if [[ "$want" == latest ]]; then
+    resolved="$(curl -fsSL -m 20 https://downloads.claude.ai/claude-code-releases/latest 2>/dev/null | tr -d '[:space:]')"
+    [[ "$resolved" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || resolved=""
+fi
+have="$(as_login 'readlink -f ~/.local/bin/claude 2>/dev/null | xargs -r basename' 2>/dev/null || true)"
+if [[ -n "$have" && -n "$resolved" && "$have" == "$resolved" ]]; then say "2. claude $have present (= $want)"
+else
+    if (( DRY )); then say "would: as $LOGIN: curl -fsSL https://claude.ai/install.sh | bash -s -- $want"
+    else
+        as_login "curl -fsSL --proto '=https' -m 120 https://claude.ai/install.sh | bash -s -- '$want'" >"$LOG" 2>&1 \
+            && as_login "claude --version" >/dev/null 2>&1 \
+            || { tail -5 "$LOG" >&2; die "claude: the vendor's installer failed for $LOGIN (target $want)."; }
+        say "2. claude $(as_login 'claude --version' | cut -d' ' -f1) installed by the vendor's installer ($want${have:+, was $have})"
+    fi
+fi
+# ori: the vendor's installer (stable channel; no version pin exists), into
+# ~/.local/bin as it does by default.
+if as_login "test -x ~/.local/bin/ori" 2>/dev/null; then say "   ori $(as_login 'ori --version 2>/dev/null | head -1' | tr -d '\n' | cut -c1-24) present"
+else
+    if (( DRY )); then say "would: as $LOGIN: curl -fsSL https://openrouter.ai/labs/ori/install.sh | bash"
+    else
+        as_login "curl -fsSL --proto '=https' -m 120 https://openrouter.ai/labs/ori/install.sh | bash" >"$LOG" 2>&1 \
+            && as_login "test -x ~/.local/bin/ori" \
+            || { tail -5 "$LOG" >&2; die "ori: the vendor's installer failed for $LOGIN."; }
+        say "   ori installed by the vendor's installer"
+    fi
+fi
 
 # ---- 3. GitHub's host key --------------------------------------------------
 if sudo -n grep -qs "^github.com " "$HOME_DIR/.ssh/known_hosts" 2>/dev/null; then say "3. github.com host key trusted"

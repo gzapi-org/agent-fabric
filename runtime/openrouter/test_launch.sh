@@ -372,6 +372,27 @@ out="$(runa --version 2>&1)"; rc=$?
 grep -q "^goodbye .*--note session ended by signal 15" "$ALOG" && ok "…and the GOODBYE names the signal" || bad "goodbye note" "$(cat "$ALOG")"
 write_fake_ori
 
+echo "launch: a fabric checkout behind origin/main is refused"
+# The fixture fabric becomes a git checkout with a bare origin one commit ahead.
+mkfabric
+G() { git -C "$FABRIC" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+G init -q -b main >/dev/null 2>&1; G add -A >/dev/null; G commit -q -m base >/dev/null
+rm -rf "$SANDBOX/origin.git"; git init -q --bare -b main "$SANDBOX/origin.git"
+G remote add origin "$SANDBOX/origin.git"; G push -q origin main 2>/dev/null
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && ok "current: the fetch finds nothing behind, launch proceeds" || bad "current checkout refused" "$out"
+# origin gains a commit the checkout lacks
+rm -rf "$SANDBOX/other"; git clone -q "$SANDBOX/origin.git" "$SANDBOX/other"
+git -C "$SANDBOX/other" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m newer; git -C "$SANDBOX/other" push -q origin main
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 1 ]] && grep -q "1 commit(s) behind origin/main" <<<"$out" && grep -q "pull --ff-only origin main" <<<"$out" && ok "behind: refused, with the pull command" || bad "stale checkout admitted" "$out"
+! grep -q "resolved profile" <<<"$out" && ok "…before resolving anything" || bad "resolved on a stale checkout" "$out"
+out="$(AGENT_FABRIC_ALLOW_STALE=1 run --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "WARNING — agent-fabric is 1 commit(s) behind" <<<"$out" && ok "AGENT_FABRIC_ALLOW_STALE=1: launches, loudly" || bad "override" "$out"
+G remote set-url origin /nonexistent/origin.git
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "could not fetch origin/main" <<<"$out" && ok "origin unreachable: launches on what is checked out, and says so" || bad "offline refused" "$out"
+
 echo "launch: the role rides in the system prompt file"
 mkfabric
 out="$(run --version 2>&1)"; rc=$?

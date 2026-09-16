@@ -117,8 +117,10 @@ def test_project_is_matched_by_remote_not_by_directory_name(tmp: str) -> None:
     root = fabric_fixture(tmp)
     registry = workingcopy.load_registry(os.path.join(root, "projects", "registry.json"))
     for url in ("git@example.com:org/demo.git", "https://example.com/org/demo/",
-                "ssh://git@example.com/org/demo.git", "EXAMPLE.com/Org/Demo"):
+                "ssh://git@example.com/org/demo.git", "EXAMPLE.com/org/demo"):
         assert workingcopy.project_for_remote(url, registry) == "demo", url
+    # example.com is not a host known to fold path case (tests/test_workingcopy.py)
+    assert workingcopy.project_for_remote("example.com/Org/Demo", registry) is None
     assert workingcopy.project_for_remote("git@example.com:org/other.git", registry) is None
     lookalike = os.path.join(tmp, "demo")          # named like the project, but not it
     git_repo(lookalike, "git@example.com:org/other.git")

@@ -46,20 +46,74 @@ def remote_url(top: str, name: str = "origin") -> str | None:
     return _git(["remote", "get-url", name], top)
 
 
-def normalize_remote(url: str) -> str:
-    """`git@github.com:org/repo.git`, `https://github.com/org/repo/` and
-    `ssh://git@github.com/org/repo.git` all become `github.com/org/repo`."""
+# The two shapes git itself accepts for a remote (git-fetch(1), "GIT URLS"):
+# a URL with a scheme, and the scp-like `[user@]host:path` — which git only
+# reads as such when no slash precedes the first colon. Anything else (a
+# local path, `file://`, a bare word) is not a remote this fabric matches.
+_URL_RE = re.compile(
+    r"^(?P<scheme>[a-z][a-z0-9+.-]*)://(?:(?P<user>[^@/]+)@)?"
+    r"(?P<host>\[[^\]]+\]|[^:/\[\]]+)(?::(?P<port>\d+))?(?P<path>/.*)?$", re.I)
+_SCP_RE = re.compile(r"^(?:(?P<user>[^@/]+)@)?(?P<host>\[[^\]]+\]|[^:/\[\]]+):(?P<path>.+)$")
+_BARE_RE = re.compile(r"^(?P<host>[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?P<path>/.+)$", re.I)   # `github.com/org/repo`, the registry's shorthand: a hostname, then the path
+_DEFAULT_PORT = {"ssh": 22, "git+ssh": 22, "ssh+git": 22, "https": 443, "http": 80, "git": 9418}
+# Hosts whose repository paths are case-insensitive, so `Org/Repo` and
+# `org/repo` are one repository there. Everywhere else the path is kept as
+# written: a self-hosted forge may well tell them apart.
+CASE_INSENSITIVE_PATH_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
+
+
+def parse_remote(url: str) -> dict[str, Any] | None:
+    """{scheme, user, host, port, path} for a git remote, or None when the
+    string is not a network remote (a local path, a bare word). `host` is
+    lowercased (DNS is case-insensitive) and keeps IPv6 brackets; `port`
+    is None when it is the scheme's default; `path` has its leading slash,
+    a trailing slash and a trailing `.git` removed and its case KEPT."""
     u = url.strip()
-    u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u, flags=re.I)
-    u = re.sub(r"^[^@/]+@", "", u)
-    head, sep, tail = u.partition("/")
-    if ":" in head:
-        host, _, first = head.partition(":")
-        u = f"{host}/{first}{sep}{tail}"
-    u = u.rstrip("/")
-    if u.endswith(".git"):
-        u = u[:-4]
-    return u.lower()
+    if "://" in u:
+        m = _URL_RE.match(u)
+        if not m or m.group("scheme").lower() == "file":
+            return None                      # file:// and any URL without a host are local
+        scheme = m.group("scheme").lower()
+    elif "/" not in u.split(":", 1)[0] and ":" in u:
+        m = _SCP_RE.match(u)                 # git's rule: scp-like only when no slash precedes the first colon
+        if not m:
+            return None
+        scheme = "ssh"
+    else:
+        m = _BARE_RE.match(u)
+        if not m:
+            return None
+        scheme = None
+    host = m.group("host").lower()
+    port = int(m.group("port")) if "port" in m.groupdict() and m.group("port") else None
+    if scheme and port == _DEFAULT_PORT.get(scheme):
+        port = None
+    path = (m.group("path") or "").strip("/")
+    if path.endswith(".git"):
+        path = path[:-4].rstrip("/")
+    if not host or not path:
+        return None
+    return {"scheme": scheme, "user": m.group("user") if "user" in m.groupdict() else None,
+            "host": host, "port": port, "path": path}
+
+
+def canonical_remote(url: str) -> str | None:
+    """The repository a remote names, as one comparable string: host, a
+    non-default port, and the path — the path lowercased only on hosts
+    that treat it so (CASE_INSENSITIVE_PATH_HOSTS). Scheme and user are
+    not part of it: `git@github.com:org/repo.git` and
+    `https://github.com/org/repo` are one repository."""
+    r = parse_remote(url)
+    if r is None:
+        return None
+    path = r["path"].lower() if r["host"] in CASE_INSENSITIVE_PATH_HOSTS else r["path"]
+    return f"{r['host']}{':' + str(r['port']) if r['port'] else ''}/{path}"
+
+
+def normalize_remote(url: str) -> str:
+    """Kept for callers that want a string for any input: canonical_remote,
+    or the trimmed input when it is not a remote at all."""
+    return canonical_remote(url) or url.strip()
 
 
 def load_registry(path: str | None = None) -> dict[str, Any]:
@@ -71,11 +125,11 @@ def load_registry(path: str | None = None) -> dict[str, Any]:
 
 
 def project_for_remote(url: str | None, registry: dict[str, Any]) -> str | None:
-    if not url:
+    wanted = canonical_remote(url) if url else None
+    if not wanted:
         return None
-    wanted = normalize_remote(url)
     for pid, entry in (registry.get("projects") or {}).items():
-        if any(normalize_remote(r) == wanted for r in entry.get("remotes") or []):
+        if any(canonical_remote(r) == wanted for r in entry.get("remotes") or []):
             return pid
     return None
 

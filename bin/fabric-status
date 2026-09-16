@@ -145,13 +145,29 @@ if digest:
 # install.sh is invisible anywhere else (review, 2026-09-16).
 moveto = hosttools.moveto_drift(root=root)
 
+# --- placement: is this account on the host the registry says? ----------
+# The registry records where an account was provisioned; a session on
+# another host is either a moved account or a stale registry, and either
+# is said here rather than left for a message addressed to the wrong host.
+placement = None
+placement_drift = None
+try:
+    reg = json.load(open(os.environ.get("AGENT_FABRIC_HOSTS_REGISTRY") or os.path.join(root, "runtime", "hosts", "registry.json"), encoding="utf-8"))
+    placement = (reg.get("placement") or {}).get(ctx["agent"])
+    if placement and placement != ctx["host"]:
+        placement_drift = f"registered on {placement}, running on {ctx['host']} — update runtime/hosts/registry.json placement, or the account was moved"
+    elif not placement:
+        placement_drift = f"not placed in runtime/hosts/registry.json (running on {ctx['host']}); add the placement"
+except (OSError, ValueError):
+    pass
+
 report = {
-    "agent": ctx["agent"], "host": ctx["host"],
+    "agent": ctx["agent"], "host": ctx["host"], "placement": placement,
     "role": binding.get("role"), "project": ctx["project"], "working_copy": ctx["working_copy"],
     "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
     "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
     "launch_prompt_digest": digest,
-    "drift": [d for d in (role_drift, model_drift, prompt_drift) if d] or None,
+    "drift": [d for d in (role_drift, model_drift, prompt_drift, placement_drift) if d] or None,
     "undrained_memories": undrained,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",

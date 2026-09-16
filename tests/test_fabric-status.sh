@@ -52,6 +52,20 @@ current="$(grep "the anthropic session now resolves to" <<<"$out" | sed 's/.*res
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_SESSION_MODEL="$current" 2>&1)"
 ! grep -q "launched on" <<<"$out" && ok "launched on what now resolves: no drift" || bad "false session drift" "$out"
 
+echo "fabric-status: the account's placement"
+HOSTS="$SANDBOX/hosts.json"
+printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operator":"%s","fabric":"x"},"other-host":{"platform":"debian","ssh":"op@other","operator":"op","fabric":"x"}},"placement":{"%s":"%s"}}\n' "$(hostname -s)" "$LOGIN" "$LOGIN" "$(hostname -s)" > "$HOSTS"
+out="$(status AGENT_FABRIC_HOSTS_REGISTRY="$HOSTS" 2>&1)"
+! grep -q "registered on\|not placed" <<<"$out" && ok "placed on this host: no drift" || bad "false placement drift" "$out"
+printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operator":"%s","fabric":"x"},"other-host":{"platform":"debian","ssh":"op@other","operator":"op","fabric":"x"}},"placement":{"%s":"other-host"}}\n' "$(hostname -s)" "$LOGIN" "$LOGIN" > "$HOSTS"
+out="$(status AGENT_FABRIC_HOSTS_REGISTRY="$HOSTS" 2>&1)"
+grep -q "^DRIFT        registered on other-host, running on $(hostname -s)" <<<"$out" && ok "placed elsewhere: one DRIFT line naming both hosts" || bad "placement drift not said" "$out"
+MODE=(--json); out="$(status AGENT_FABRIC_HOSTS_REGISTRY="$HOSTS" 2>&1)"; MODE=()
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["placement"]=="other-host" and any("registered on other-host" in x for x in d["drift"])' <<<"$out" && ok "…and in the JSON report" || bad "json lacks placement" "$out"
+printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operator":"%s","fabric":"x"}},"placement":{}}\n' "$(hostname -s)" "$LOGIN" > "$HOSTS"
+out="$(status AGENT_FABRIC_HOSTS_REGISTRY="$HOSTS" 2>&1)"
+grep -q "^DRIFT        not placed in runtime/hosts/registry.json" <<<"$out" && ok "not placed at all: said" || bad "missing placement not said" "$out"
+
 echo "fabric-status: moveto installed from this repository, or behind it"
 PREFIX="$SANDBOX/usr-local"
 MOVETO_PREFIX="$PREFIX" sh "$ROOT/runtime/provisioning/moveto/install.sh" >/dev/null && ok "install.sh installs under \$MOVETO_PREFIX" || bad "install.sh failed"

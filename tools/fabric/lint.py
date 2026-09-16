@@ -374,7 +374,7 @@ def model_profile_findings(root: str, doc: dict[str, Any], known_roles: set[str]
             except (KeyError, ValueError) as exc:
                 findings.append(f"{where}: {label} on {provider}: {exc}")
                 continue
-            if provider == "anthropic" and not routing.NATIVE_ID.match(model):
+            if not routing.ADAPTERS[provider].is_model(model):
                 continue  # an alias is the harness's choice, ungated
             if not routing.review_grade_ok(model, root):
                 findings.append(f"{where}: {label} resolves {gated} on {provider} to {model!r}, which is not in "

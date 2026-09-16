@@ -56,6 +56,85 @@ PRESET = re.compile(r"^@preset/[a-z0-9-]+$")
 COMPOSITE = re.compile(r"^~?[a-z0-9-]+/[a-z0-9.-]+(:[a-z]+)?(\[1m\])?(@preset/[a-z0-9-]+)?$")
 
 
+class ProviderAdapter:
+    """What a model reference looks like on one provider, in one place
+    (review, 2026-09-16: before this the regexes were applied inline, per
+    call site, and a provider's rule lived in whichever branch named it).
+    normalize_layer, check and the launch's composite test all ask the
+    adapter; a new provider is a new adapter, never a new branch."""
+    name: str
+    resolution: str            # "model-id": the column names a model; "harness": null means the harness's tier
+    pattern: re.Pattern        # a capability model reference
+    runtime: re.Pattern        # what the launcher may hand to --model (a composite on the broker)
+    describe: str
+
+    def is_model(self, value: Any) -> bool:
+        return isinstance(value, str) and bool(self.pattern.fullmatch(value))
+
+    def model(self, value: Any, where: str) -> str:
+        if not self.is_model(value):
+            raise ValueError(f"{where} is {value!r}, not {self.describe}")
+        return value
+
+    def session(self, value: Any, where: str, classes: set[str]) -> str:
+        """A session names a class (that class's model here) or a model."""
+        if isinstance(value, str) and value in classes:
+            return value
+        if not self.is_model(value):
+            raise ValueError(f"{where} is {value!r}, neither a capability class ({', '.join(sorted(classes))}) "
+                             f"nor {self.describe}")
+        return value
+
+    def is_runtime(self, value: str) -> bool:
+        return bool(self.runtime.fullmatch(value))
+
+    def column_findings(self, klass: str, model: Any, where: str) -> list[str]:
+        """capabilities.json's column for this provider: one finding per
+        malformed cell, in the provider's own words."""
+        if model is None:
+            return [] if self.resolution == "harness" else [f"{where}.{klass} is null; {self.name} resolves by model id"]
+        if "@preset/" in str(model):
+            return [f"{where}.{klass} {model!r} carries a preset; a preset is a shim (routing/shims.json), not a model"]
+        if not self.is_model(model):
+            return [f"{where}.{klass} {model!r} is not {self.describe}"]
+        return []
+
+    def openrouter_id(self, model: str) -> str:
+        """The model as the broker names it, for policies written in
+        OpenRouter ids (review-grade)."""
+        return model
+
+
+class OpenRouterAdapter(ProviderAdapter):
+    name, resolution = "openrouter", "model-id"
+    pattern, runtime = MODEL_ID, COMPOSITE
+    describe = f"an OpenRouter model id (vendor/model, {MODEL_ID.pattern})"
+
+
+class AnthropicAdapter(ProviderAdapter):
+    name, resolution = "anthropic", "harness"
+    pattern, runtime = NATIVE_ID, NATIVE_ID
+    describe = "a native Claude id (claude-…); a tier alias is the adapter's, never named here"
+
+    def column_findings(self, klass: str, model: Any, where: str) -> list[str]:
+        if model is not None and not self.is_model(model):
+            return [f"{where}.{klass} {model!r} is neither null (the harness's tier) nor a native Claude id; "
+                    "a tier alias is the adapter's, never named here"]
+        return super().column_findings(klass, model, where)
+
+    def openrouter_id(self, model: str) -> str:
+        return "anthropic/" + model
+
+
+ADAPTERS: dict[str, ProviderAdapter] = {a.name: a for a in (OpenRouterAdapter(), AnthropicAdapter())}
+
+
+def adapter(provider: str) -> ProviderAdapter:
+    if provider not in ADAPTERS:
+        raise KeyError(f"unknown provider {provider!r}; known: {', '.join(ADAPTERS)}")
+    return ADAPTERS[provider]
+
+
 def _load(path: str) -> Any:
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
@@ -101,7 +180,7 @@ def composite(model: str, shim: str | None) -> str:
     return f"{model}{shim}" if shim else model
 
 
-PROVIDERS = ("openrouter", "anthropic")
+PROVIDERS = tuple(ADAPTERS)
 LAYERS = ("defaults", "role", "agent", "local")
 LOCAL_OVERRIDE = "model-profile.local.json"
 
@@ -115,18 +194,6 @@ def file_pinned(root: str | None = None) -> list[str]:
     export (runtime/claude-code/aliases.json `file_pinned`): the review
     class, so that it never follows the class sharing its alias."""
     return list(load_aliases(root).get("file_pinned") or [])
-
-
-def _model_id(value: Any, where: str) -> str:
-    if not isinstance(value, str) or not MODEL_ID.fullmatch(value):
-        raise ValueError(f"{where} is {value!r}, not a model id ({MODEL_ID.pattern})")
-    return value
-
-
-def _native_id(value: Any, where: str) -> str:
-    if not isinstance(value, str) or not NATIVE_ID.fullmatch(value):
-        raise ValueError(f"{where} is {value!r}, not a native Claude id (claude-…)")
-    return value
 
 
 def _object(value: Any, where: str) -> dict[str, Any]:
@@ -158,16 +225,7 @@ def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dic
     classes = set(load_capabilities(root)["classes"])
 
     def session(provider: str, value: Any, field: str) -> str:
-        if isinstance(value, str) and value in classes:
-            return value
-        return (_model_id if provider == "openrouter" else _native_id)(value, field) if provider == "openrouter" \
-            else _native_or_class(value, field)
-
-    def _native_or_class(value: Any, field: str) -> str:
-        if not isinstance(value, str) or not NATIVE_ID.fullmatch(value):
-            raise ValueError(f"{field} is {value!r}, neither a capability class ({', '.join(sorted(classes))}) "
-                             "nor a native Claude id (claude-…)")
-        return value
+        return ADAPTERS[provider].session(value, field, classes)
 
     def klass(name: str, field: str) -> str:
         if name not in classes:
@@ -183,11 +241,12 @@ def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dic
         elif value in classes:
             out["anthropic"]["session"] = value
     for name, model in _object(layer.get("capabilities"), prefix + "capabilities").items():
-        out["openrouter"]["capabilities"][klass(name, prefix + "capabilities")] = _model_id(model, f"{prefix}capabilities.{name}")
+        out["openrouter"]["capabilities"][klass(name, prefix + "capabilities")] = \
+            ADAPTERS["openrouter"].model(model, f"{prefix}capabilities.{name}")
     for provider, body in _object(layer.get("providers"), prefix + "providers").items():
         p = f"{prefix}providers.{provider}"
-        if provider not in PROVIDERS:
-            raise ValueError(f"{p}: unknown provider; known: {', '.join(PROVIDERS)}")
+        if provider not in ADAPTERS:
+            raise ValueError(f"{p}: unknown provider; known: {', '.join(ADAPTERS)}")
         body = _object(body, p)
         for key in body:
             if key not in ("session", "capabilities"):
@@ -195,9 +254,9 @@ def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dic
                                  "a class is set under capabilities, a tier alias is never named")
         if "session" in body:
             out[provider]["session"] = session(provider, body["session"], p + ".session")
-        check = _model_id if provider == "openrouter" else _native_id
         for name, model in _object(body.get("capabilities"), p + ".capabilities").items():
-            out[provider]["capabilities"][klass(name, p + ".capabilities")] = check(model, f"{p}.capabilities.{name}")
+            out[provider]["capabilities"][klass(name, p + ".capabilities")] = \
+                ADAPTERS[provider].model(model, f"{p}.capabilities.{name}")
     return out
 
 
@@ -217,8 +276,7 @@ def merged_provider(provider: str, role: str | None = None, agent: str | None = 
     {"model", "source"}: {"session": … | None, "capabilities": {class: …}}.
     Per key, the nearest layer naming it wins. A malformed layer raises
     ValueError (normalize_layer)."""
-    if provider not in PROVIDERS:
-        raise KeyError(f"unknown provider {provider!r}; known: {list(PROVIDERS)}")
+    adapter(provider)
     out: dict[str, Any] = {"session": None, "capabilities": {}}
     for name, body in layers(role, agent, local, root):
         norm = normalize_layer(body, name, root)[provider]
@@ -339,7 +397,7 @@ def resolve_session(role: str | None = None, agent: str | None = None,
     if provider == "anthropic":
         skipped = broker["model"] if broker and LAYERS.index(broker["source"]) > LAYERS.index(entry["source"]) else None
         return {"model": model, "shim": None, "composite": model, "capability": klass,
-                "openrouter_id": "anthropic/" + model if NATIVE_ID.match(model) else None,
+                "openrouter_id": ADAPTERS["anthropic"].openrouter_id(model) if ADAPTERS["anthropic"].is_model(model) else None,
                 "source": entry["source"], "skipped": skipped}
     if klass:
         return {"model": model.split("@", 1)[0], "shim": shim_for(model.split("@", 1)[0], load_shims(root), harness),
@@ -353,8 +411,8 @@ def review_grade_ok(model: str, root: str | None = None) -> bool:
     """Admitted by routing/policies/review-grade.json, whose entries are
     OpenRouter ids; a native id (claude-…) is the same model spelled as
     plain claude names it, so it is compared under `anthropic/`."""
-    if NATIVE_ID.match(model):
-        model = "anthropic/" + model
+    if ADAPTERS["anthropic"].is_model(model):
+        model = ADAPTERS["anthropic"].openrouter_id(model)
     return model in (load_review_grade(root).get("models") or [])
 
 
@@ -364,17 +422,18 @@ def check(root: str | None = None) -> list[str]:
     caps = load_capabilities(root)
     classes = set(caps.get("classes") or {})
     for name, prov in (caps.get("providers") or {}).items():
+        if name not in ADAPTERS:
+            findings.append(f"capabilities.json: providers.{name} has no adapter (tools/fabric/routing.py ADAPTERS: "
+                            f"{', '.join(ADAPTERS)})")
+            continue
+        ad = ADAPTERS[name]
+        if prov.get("resolution") != ad.resolution:
+            findings.append(f"capabilities.json: providers.{name}.resolution is {prov.get('resolution')!r}; "
+                            f"the {name} adapter resolves by {ad.resolution!r}")
         for klass, model in (prov.get("models") or {}).items():
             if klass not in classes:
                 findings.append(f"capabilities.json: providers.{name} binds unknown class {klass!r}")
-            if PRESET.match(model or "") or "@preset/" in (model or ""):
-                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} carries a preset; "
-                                "a preset is a shim (routing/shims.json), not a model")
-            if prov.get("resolution") == "model-id" and not MODEL_ID.match(model or ""):
-                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is not a model id")
-            if prov.get("resolution") == "harness" and model is not None and not NATIVE_ID.match(model):
-                findings.append(f"capabilities.json: providers.{name}.{klass} {model!r} is neither null (the harness's "
-                                "tier) nor a native Claude id; a tier alias is the adapter's, never named here")
+            findings += ad.column_findings(klass, model, f"capabilities.json: providers.{name}")
         for klass in classes:
             if klass not in (prov.get("models") or {}):
                 findings.append(f"capabilities.json: providers.{name} binds no model to {klass!r}")
@@ -401,7 +460,7 @@ def check(root: str | None = None) -> list[str]:
     # the column pins a native id (an alias is the harness's choice, ungated).
     for name, prov in (caps.get("providers") or {}).items():
         model = (prov.get("models") or {}).get(grade.get("capability"))
-        if model and (prov.get("resolution") == "model-id" or NATIVE_ID.match(model)):
+        if model and name in ADAPTERS and ADAPTERS[name].is_model(model):
             if not review_grade_ok(model, root):
                 findings.append(f"capabilities.json: providers.{name}.{grade.get('capability')} {model!r} "
                                 "is not in routing/policies/review-grade.json")

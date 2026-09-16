@@ -147,10 +147,36 @@ def test_a_layer_is_validated_in_its_provider_vocabulary() -> None:
     refused({"providers": {"anthropic": {"capabilities": {"code-high": "opus"}}}}, "not a native Claude id")
     refused({"providers": {"anthropic": {"aliases": {"opus": "claude-opus-5"}}}}, "a tier alias is never named")
     refused({"providers": {"anthropic": {"capabilities": {"turbo": "claude-opus-5"}}}}, "not a capability class")
-    refused({"providers": {"openrouter": {"capabilities": {"code-high": "opus"}}}}, "not a model id")
+    refused({"providers": {"openrouter": {"capabilities": {"code-high": "opus"}}}}, "not an OpenRouter model id")
     refused({"providers": {"vertex": {}}}, "unknown provider")
-    refused({"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}, "not a model id")
+    refused({"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}, "not an OpenRouter model id")
     assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}}, "anthropic": {"capabilities": {}}}
+
+
+def test_each_provider_validates_a_reference_through_its_adapter(tmp: str) -> None:
+    """The rule for what a model reference is lives in one adapter per
+    provider; check() and normalize_layer() ask it, so a provider column
+    in capabilities.json with no adapter, or a resolution the adapter does
+    not have, is a finding rather than an unguarded branch."""
+    a = routing.ADAPTERS
+    assert set(a) == set(routing.PROVIDERS) == {"openrouter", "anthropic"}
+    assert a["openrouter"].is_model("z-ai/glm-5.3") and a["openrouter"].is_model("anthropic/claude-opus-5[1m]")
+    assert not a["openrouter"].is_model("claude-opus-5") and not a["openrouter"].is_model("opus")
+    assert a["anthropic"].is_model("claude-opus-5[1m]") and not a["anthropic"].is_model("anthropic/claude-opus-5")
+    assert a["openrouter"].is_runtime("z-ai/glm-5.3@preset/glm2claude-shim") and not a["anthropic"].is_runtime("claude-opus-5@preset/x")
+    assert a["anthropic"].openrouter_id("claude-opus-5") == "anthropic/claude-opus-5"
+    assert a["openrouter"].column_findings("code-low", None, "w") == ["w.code-low is null; openrouter resolves by model id"]
+    assert a["anthropic"].column_findings("code-low", None, "w") == []
+    assert any("carries a preset" in f for f in a["openrouter"].column_findings("code-low", "z-ai/glm-5.3@preset/s", "w"))
+    assert any("tier alias is the adapter" in f for f in a["anthropic"].column_findings("code-low", "opus", "w"))
+    root = scratch_root(tmp)
+    caps = json.load(open(os.path.join(root, "routing", "capabilities.json")))
+    caps["providers"]["vertex"] = {"resolution": "model-id", "models": dict.fromkeys(caps["classes"], "google/gemini")}
+    caps["providers"]["anthropic"]["resolution"] = "model-id"
+    json.dump(caps, open(os.path.join(root, "routing", "capabilities.json"), "w"))
+    findings = routing.check(root)
+    assert any("providers.vertex has no adapter" in f for f in findings), findings
+    assert any("providers.anthropic.resolution is 'model-id'" in f for f in findings), findings
 
 
 def test_composite_is_derived_not_stored() -> None:
@@ -298,6 +324,7 @@ def main() -> int:
         test_current_glm_policy,
         test_native_path_pins_the_top_of_each_class,
         test_a_null_in_the_harness_column_is_the_harness_tier,
+        test_each_provider_validates_a_reference_through_its_adapter,
         test_composite_is_derived_not_stored,
         test_a_non_glm_model_gets_no_shim,
         test_shim_follows_the_family_of_the_merged_model,

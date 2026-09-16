@@ -277,8 +277,10 @@ try:
     out = {"role": role, "agent": agent, "provider": provider, "exports": {}, "classes": {}, "files": {}}
     for klass in aliases["aliases"]:
         res = routing.resolve(klass, provider, role, agent, local)
-        if provider == "openrouter" and not routing.COMPOSITE.fullmatch(res["composite"]):
-            sys.exit("resolved %s is %r, not a composite model reference" % (klass, res["composite"]))
+        # via "harness" is the tier's alias, the harness's own choice; anything
+        # pinned must be a model reference the provider's adapter accepts.
+        if res["via"] != "harness" and not routing.ADAPTERS[provider].is_runtime(res["composite"]):
+            sys.exit("resolved %s is %r, not a model reference the %s adapter accepts" % (klass, res["composite"], provider))
         out["classes"][klass] = res
         # A file-pinned class (the review class) is never exported: its
         # alias is also code-plan's, and through the export the reviewer

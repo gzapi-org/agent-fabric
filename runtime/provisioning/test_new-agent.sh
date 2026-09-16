@@ -17,7 +17,7 @@ SANDBOX="$(mktemp -d)"; trap '[[ -n "${KEEP_SANDBOX:-}" ]] || rm -rf "$SANDBOX"'
 FAB="$SANDBOX/fabric"; mkdir -p "$FAB/runtime/provisioning/secrets" "$FAB/identities" "$FAB/projects" "$SANDBOX/home/.local/bin"
 cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"
 cp "$UNDER_TEST" "$HERE/new-agent-worker.sh" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
-cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"
+cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"; cp -r "$ROOT/runtime/provisioning/platform" "$FAB/runtime/provisioning/"
 printf '#!/bin/sh\necho fake\n' > "$SANDBOX/home/.local/bin/claude"; chmod +x "$SANDBOX/home/.local/bin/claude"
 # The host registry the orchestrator reads: this host (direct) and a far
 # one reached over a fake ssh that runs the same worker here.
@@ -49,7 +49,12 @@ grep -q "dry run: nothing verified" <<<"$out" && ok "…and verifies nothing" ||
 ! getent passwd zz-fixture-login >/dev/null && ok "no account was created" || bad "an account was created by a dry run"
 grep -q "git@github.com" <<<"$out" && ok "a project clone uses the registry's SSH remote" || bad "remote" "$out"
 ! grep -qi "copied\|copy from" <<<"$out" && ok "no binary is ever copied from another account" || bad "a copy fallback is planned" "$out"
-grep -q "^new-agent: 0\. " <<<"$out" && ok "the host audit runs first" || bad "no host audit" "$out"
+grep -q "^new-agent: 0\. [a-z-]*: host tools present\|^new-agent: 0\. [a-z-]*: this" <<<"$out" && ok "the host audit runs first, naming the platform" || bad "no host audit" "$out"
+# A PATH with everything the dry run needs except gh: the audit must name gh's Debian package and apt-get.
+mkdir -p "$SANDBOX/nogh"; for t in bash python3 getent id sudo hostname readlink dirname basename cut grep sed head tail tr sort uniq mktemp cat env cp mkdir rm ls ln chmod tee wc awk xargs curl ssh git jq gpg node npm sha256sum stat pgrep timeout flock useradd usermod shred install; do
+    src="$(command -v "$t" 2>/dev/null)"; [[ -n "$src" ]] && ln -sf "$src" "$SANDBOX/nogh/$t"; done
+out_deb="$(AGENT_FABRIC_PLATFORM=debian PATH="$SANDBOX/nogh" run zz-fixture-login backend-dev --dry-run 2>&1)"
+grep -q "^new-agent: 0\. debian: this host lacks .*gh.*: sudo apt-get install" <<<"$out_deb" && ok "the Debian profile names the missing tool's package and apt-get" || bad "debian profile" "$out_deb"
 grep -q "^new-agent: host $LOCAL (this host)" <<<"$out" && grep -q "placement: add \"zz-fixture-login\"" <<<"$out" && ok "the host is named, and a missing placement is asked for" || bad "host line" "$out"
 out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok "--claude takes stable, latest or a full version" || bad "bad --claude accepted" "$out"
 out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"

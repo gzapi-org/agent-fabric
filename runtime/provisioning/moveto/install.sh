@@ -1,5 +1,6 @@
-#!/bin/sh
-# Install moveto from this directory to /usr/local. Needs root.
+#!/usr/bin/env bash
+# Install moveto from this directory to /usr/local. Needs root. (Bash, like
+# every script here: one dialect the static checks prove, not two.)
 #
 #     sudo runtime/provisioning/moveto/install.sh
 #

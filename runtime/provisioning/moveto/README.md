@@ -54,17 +54,21 @@ clone named on the command line is the only way into one. An account with no
 in `$HOME`, because landing somewhere unexpected is worse than being told;
 an empty `~/projects` is enterable (bootstrap may still have to run there).
 
-**It goes one way.** `sudo` on this host is granted through the `qubes` group,
-and the role accounts are not in it — so an account that has sudo can become a
-role account, and a role account can become nothing. `exit` is the way back,
+**It goes one way.** On the Fedora/Qubes deployment (verified there,
+2026-09-14) `sudo` is granted through the `qubes` group, and the role
+accounts are not in it; on Debian it is the `sudo` group's, with the same
+shape (`runtime/provisioning/platform/`). Either way an account that has
+sudo can become a role account, and a role account can become nothing. `exit` is the way back,
 which is why nothing here tries to be a two-way switch.
 
 ## What it gives you, and what it does not
 
-`sudo` runs its PAM session stack — `/etc/pam.d/sudo` includes `system-auth`,
-which carries `pam_systemd` — so a `moveto` shell gets its own
-`/run/user/<uid>`, which is what rootless podman needs. Verified by watching
-the directory appear for an account that had none. (`-H` only sets `HOME`; it
+On Fedora/Qubes `sudo` runs its PAM session stack — `/etc/pam.d/sudo`
+includes `system-auth`, which carries `pam_systemd` — so a `moveto` shell
+gets its own `/run/user/<uid>`, which is what rootless containers need.
+Verified there by watching the directory appear for an account that had
+none (2026-09-14); on Debian the stack is `common-session` and the same
+result is expected but has not been read back on a live host. (`-H` only sets `HOME`; it
 is not what creates the session.) What it does **not** give
 you is persistence: that directory is removed when the account's last session
 ends, so anything expected to outlive the shell needs
@@ -106,12 +110,14 @@ form put the whole script — 156 characters of it — on the process command li
 and a terminal that titles from the running command showed *that* instead of
 the session name.
 
-**`PROMPT_COMMAND` already has a title write in it.** `/etc/bashrc` rewrites
+**`PROMPT_COMMAND` already has a title write in it.** On Fedora `/etc/bashrc` rewrites
 the title as `user@host:cwd` at every prompt, so a one-shot title is
 overwritten within a second — `enter` sets the title before the first prompt
 *and* `rc` re-sets it at each one.
 
-On Fedora that variable is an **array**: `/etc/bashrc` does `declare -a
+On Fedora that variable is an **array** (Debian's `/etc/bash.bashrc` sets
+no title write, and `rc` falls back to it when there is no `/etc/bashrc`):
+`/etc/bashrc` does `declare -a
 PROMPT_COMMAND` and sets element 0, then vte.sh and the systemd OSC-context
 hook append further elements. A string append therefore reads and writes
 element 0 only — it neither disturbs those hooks (a plain clobber would not

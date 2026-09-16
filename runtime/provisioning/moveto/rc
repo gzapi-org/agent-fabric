@@ -4,7 +4,9 @@
 # /etc/bashrc puts an OSC 0 title write of its own into PROMPT_COMMAND at every
 # prompt.
 #
-# On Fedora PROMPT_COMMAND is an ARRAY — /etc/bashrc does `declare -a
+# On Fedora PROMPT_COMMAND is an ARRAY (Debian's /etc/bash.bashrc sets no
+# title write of its own, so the string form below is the whole story
+# there; verified on Fedora, a profile only on Debian — platform/README.md) — /etc/bashrc does `declare -a
 # PROMPT_COMMAND` and sets element 0; vte.sh and the systemd OSC-context hook
 # then APPEND further elements. A string assignment like the one below reads
 # and writes element 0 only, so it neither disturbs those hooks nor runs after
@@ -16,7 +18,9 @@
 if [ -f "$HOME/.bashrc" ]; then
     . "$HOME/.bashrc"
 elif [ -f /etc/bashrc ]; then
-    . /etc/bashrc
+    . /etc/bashrc                 # Fedora
+elif [ -f /etc/bash.bashrc ]; then
+    . /etc/bash.bashrc            # Debian
 fi
 
 if [ -n "${MOVETO_TITLE:-}" ]; then

@@ -104,8 +104,11 @@ tests/run.sh static     # bash -n over every script, shellcheck (errors), ruff (
 CI (`.github/workflows/ci.yml`) runs the static checks once and the whole
 of `tests/run.sh` on Python 3.12, 3.13 and 3.14 with Node 22, and once
 more on Python 3.12 with Node 20 — the oldest interpreters the tools
-promise to run on. Locally a missing shellcheck or ruff is said, not
-passed over.
+promise to run on — and the static, python and bash suites in a Fedora
+and a Debian container that install the fabric's host contract from the
+platform profile's own package map (`runtime/provisioning/platform/`),
+so the map is proven by being used. Locally a missing shellcheck or ruff
+is said, not passed over.
 
 ## License
 

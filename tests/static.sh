@@ -14,6 +14,11 @@ fail=0
 mapfile -t scripts < <({ git ls-files '*.sh'; git ls-files | while read -r f; do
     [[ -f "$f" && "$f" != *.sh ]] && head -c 64 "$f" 2>/dev/null | head -1 | grep -qE '^#!.*\b(ba)?sh\b' && echo "$f"; done; } | sort -u)
 echo "static: ${#scripts[@]} bash script(s)"
+# One dialect: a #!/bin/sh script would be checked here as bash and run
+# by dash on Debian — every script is bash (runtime/provisioning/platform/README.md).
+if grep -lE '^#!/bin/sh|^#!/usr/bin/env sh' "${scripts[@]}" 2>/dev/null | grep -v "^$"; then
+    echo "  ✗ a #!/bin/sh script: the repository's scripts are bash"; fail=1
+fi
 for f in "${scripts[@]}"; do
     bash -n "$f" || { echo "  ✗ bash -n $f"; fail=1; }
 done

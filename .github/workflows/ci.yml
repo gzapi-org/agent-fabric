@@ -52,3 +52,50 @@ jobs:
         run: bash policies/ban_generated_by_attribution.sh
       - name: every suite, every guard
         run: bash tests/run.sh
+
+  platform-smoke:
+    # The platform profiles are proven by being used: each container
+    # installs the fabric's host contract from runtime/provisioning/
+    # platform/packages.sh for its platform and runs the suites there.
+    # (The Fedora container is plain Fedora — the Qubes profile differs
+    # from it only in where a package persists and who holds sudo.)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: fedora
+            image: fedora:latest
+            install: dnf install -y --setopt=install_weak_deps=False
+            extra: ShellCheck python3-pip hostname
+          - platform: debian
+            image: debian:stable-slim
+            install: apt-get install -y --no-install-recommends
+            extra: shellcheck python3-pip ca-certificates hostname
+    container: ${{ matrix.image }}
+    steps:
+      - name: the host contract, from the profile's own package map
+        run: |
+          set -e
+          if command -v apt-get >/dev/null; then apt-get update; fi
+          ${{ matrix.install }} bash git   # enough to read the map from the checkout
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install what the profile names, and the static-check tools
+        run: |
+          set -e
+          pkgs="$(bash runtime/provisioning/platform/packages.sh ${{ matrix.platform }} | tr '\n' ' ')"
+          echo "installing: $pkgs"
+          ${{ matrix.install }} $pkgs ${{ matrix.extra }}
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 -m pip install --quiet --disable-pip-version-check --break-system-packages ruff jsonschema || python3 -m pip install --quiet --disable-pip-version-check ruff jsonschema
+      - name: every tool of the contract answers
+        run: |
+          set -e
+          . runtime/provisioning/platform/detect.sh
+          [ "$PLATFORM_ID" = "${{ matrix.platform }}" ] || { echo "detected $PLATFORM_ID, expected ${{ matrix.platform }}"; exit 1; }
+          for t in "${FABRIC_HOST_TOOLS[@]}"; do command -v "$t" >/dev/null || { echo "missing after install: $t"; exit 1; }; done
+      - run: bash tests/run.sh static
+      - run: bash tests/run.sh python
+      - run: bash tests/run.sh bash

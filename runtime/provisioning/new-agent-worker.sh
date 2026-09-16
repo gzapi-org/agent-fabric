@@ -67,20 +67,22 @@ fi
 
 if [[ "$PHASE" == prepare ]]; then
     # ---- 0. the host ----------------------------------------------------------------
-    # tool:package — what the fabric's hooks and scripts and the managed
-    # projects' toolchains call; the package is the TemplateVM's (Fedora).
-    # The fabric's own contract: what its hooks, scripts and provisioning
-    # call. A project's extra needs are its own host-check (finish, below).
-    HOST_TOOLS=(git:git-core gh:gh node:nodejs npm:nodejs-npm python3:python3 jq:jq gpg:gnupg2 curl:curl)
+    # The fabric's host contract (platform/detect.sh: FABRIC_HOST_TOOLS) —
+    # what its hooks, scripts and provisioning call; the package each comes
+    # from, and where a package persists, is the platform profile's. A
+    # project's extra needs are its own host-check (finish, below).
+    # shellcheck source=runtime/provisioning/platform/detect.sh
+    . "$ROOT/runtime/provisioning/platform/detect.sh"
     missing_pkgs=()
-    for spec in "${HOST_TOOLS[@]}"; do
-        tool="${spec%%:*}"; pkg="${spec##*:}"
-        command -v "$tool" >/dev/null 2>&1 || missing_pkgs+=("$pkg")
+    for tool in "${FABRIC_HOST_TOOLS[@]}"; do
+        command -v "$tool" >/dev/null 2>&1 || missing_pkgs+=("$(pkg_for "$tool")")
     done
     if (( ${#missing_pkgs[@]} )); then
-        say "0. TEMPLATE: this AppVM lacks ${missing_pkgs[*]} — a package does not survive a reboot here;"
-        say "   in the TemplateVM: sudo dnf install ${missing_pkgs[*]}   (then restart this AppVM)"
-    else say "0. host tools present (${#HOST_TOOLS[@]} from the template)"; fi
+        mapfile -t missing_pkgs < <(printf '%s\n' "${missing_pkgs[@]}" | sort -u)
+        if (( PERSISTS_ACROSS_REBOOT )); then say "0. $PLATFORM_ID: this host lacks ${missing_pkgs[*]}: $PKG_INSTALL_HINT ${missing_pkgs[*]}"
+        else say "0. $PLATFORM_ID: this AppVM lacks ${missing_pkgs[*]} — a package does not survive a reboot here;"
+             say "   $PKG_INSTALL_HINT ${missing_pkgs[*]}   (then restart this AppVM)"; fi
+    else say "0. $PLATFORM_ID: host tools present (${#FABRIC_HOST_TOOLS[@]}, the fabric's contract)"; fi
     # doppler: a static binary; /usr/local persists in an AppVM, and enroll.sh
     # reads it from there for every account.
     if [[ -x /usr/local/bin/doppler ]]; then say "   doppler: /usr/local/bin/doppler"

@@ -1,8 +1,12 @@
 # Transport candidate — Claude Bridge
 
+> Historical (2026-09-16): this candidate was selected and is the
+> current transport; see `README.md` beside this file. The text below is
+> the evaluation as written before the selection.
+
 **Status: candidate, evaluated, not selected.** This records one
 candidate against
-[`TRANSPORT-ADAPTER-CONTRACT.md`](TRANSPORT-ADAPTER-CONTRACT.md) so the
+[`TRANSPORT-ADAPTER-CONTRACT.md`](../../docs/TRANSPORT-ADAPTER-CONTRACT.md) so the
 decision has something to stand on. Selecting a transport, and building
 the adapter, belong to whoever owns the runtime surface — not to the
 fabric-coordinator role (formerly gzcoord-coordinator), which owns the protocol the adapter carries.
@@ -100,7 +104,7 @@ of its bootstrap validations passed without ever exercising that leg. No
 amount of documentation substitutes for running it.
 
 Until that is demonstrated, the current transport is the human relay
-([`HUMAN-RELAY-TRANSPORT.md`](HUMAN-RELAY-TRANSPORT.md)), and the three
+([`HUMAN-RELAY-TRANSPORT.md`](../../docs/HUMAN-RELAY-TRANSPORT.md)), and the three
 activity claims named in [`../CLAUDE.md`](../CLAUDE.md) stay as they are.
 
 ## Not verified

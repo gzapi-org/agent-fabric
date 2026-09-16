@@ -1,5 +1,9 @@
 # Layout
 
+> Historical (2026-09-16): the tree under the human relay; see
+> `README.md` beside this file. `communication/gzcoord/README.md` is the
+> current map.
+
 GZCoord lives in agent-fabric, the control plane every managed repository
 shares. The core — protocol, runtime, tests, transport-neutral docs — is
 here; what one project does with it is under that project.

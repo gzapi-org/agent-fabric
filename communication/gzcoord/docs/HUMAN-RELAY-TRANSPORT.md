@@ -1,13 +1,16 @@
 # Human-relay transport
 
-**Status:** the current transport (since 2026-09-08). A person carries
-GZCOORD/1 messages between sessions: the sending session prints a message
-in its terminal, the person copies it and pastes it into the receiving
-session's prompt. The person is the adapter.
+**Status:** the fallback transport. It was the only transport from
+2026-09-08 until the Claude-Bridge relay was selected (the evaluation is
+in `../history/claude-bridge-selection/`); today the relay carries
+GZCOORD/1 on the developer host and this is what a person does when the
+relay is down. A person carries messages between sessions: the sending
+session prints a message in its terminal, the person copies it and
+pastes it into the receiving session's prompt. The person is the adapter.
 
-It exists to carry real traffic — and so produce real evidence about the
-protocol — before the purpose-built agent-to-agent transport exists. The
-messages carried here are the corpus that transport is designed against.
+It carried real traffic — and so produced real evidence about the
+protocol — before the automated transport existed; the messages carried
+here are the corpus that transport was designed against.
 Nothing in the wire grammar or semantics changes for it (`../protocol/SPEC.md`
 §14): no field below becomes a protocol field.
 
@@ -181,9 +184,8 @@ carries — so use that.
 
 ## What replaces it
 
-An automated transport, when it demonstrably delivers a message from one
-instance to another — the bar in
-[`CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md`](CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md).
+The Claude-Bridge relay did, on the developer host — the bar set in
+[`CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md`](../history/claude-bridge-selection/CLAUDE-CODE-HOST-INTEGRATION-PROMPT.md).
 The first thing it should do that the person does by hand is the
 addressee check above: a transport that drops a misaddressed message
 before delivery is the same rule enforced where it costs nobody's

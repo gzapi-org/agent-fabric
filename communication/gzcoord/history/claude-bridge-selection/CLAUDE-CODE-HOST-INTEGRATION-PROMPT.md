@@ -1,10 +1,13 @@
 # Claude Code Host Integration Prompt
 
+> Historical (2026-09-16): the transport this prompt asked for exists
+> (the Claude-Bridge relay); see `README.md` beside this file.
+
 Use this prompt on a real host after cloning this repository.
 
 > **GZCoord is active over a human relay; no automated transport exists**
-> (see [`../CLAUDE.md`](../CLAUDE.md) and
-> [`HUMAN-RELAY-TRANSPORT.md`](HUMAN-RELAY-TRANSPORT.md)). This prompt is
+> (see [`../../CLAUDE.md`](../../CLAUDE.md) and
+> [`HUMAN-RELAY-TRANSPORT.md`](../../docs/HUMAN-RELAY-TRANSPORT.md)). This prompt is
 > therefore the brief for whoever builds the automated transport, not a task
 > anyone can complete today: step 3 of the goal and the whole live-validation
 > section need an adapter that does not yet exist. The first automated

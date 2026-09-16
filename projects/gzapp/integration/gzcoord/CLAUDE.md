@@ -91,7 +91,7 @@ The protocol is the contract; the relay is only how it travels:
 - `communication/gzcoord/docs/TRANSPORT-ADAPTER-CONTRACT.md` is the
   transport-independent interface an automated adapter must satisfy. The
   relay is evaluated against it in
-  `docs/TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`: it delivers, and it does
+  `history/claude-bridge-selection/TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`: it delivers, and it does
   not authenticate — every instance holds the same bearer token, so a
   sender name on the relay is a claim like `FROM` is.
 

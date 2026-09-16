@@ -18,7 +18,7 @@ This directory is agent-fabric's communication subsystem (`communication/gzcoord
   on the channel is a decision nobody can hold.
 - **Repository `CLAUDE.md`** governs how agents operate on the repository.
 - **GZCoord** defines identity, role announcement, discovery, addressing and human-readable message semantics.
-- **Transport adapters** deliver messages. **The current transport is a Claude-Bridge relay** hosted on the developer host by the fabric-coordinator's working copy (a project's integration says where: `projects/<id>/integration/gzcoord/`), drained at session start by `scripts/inbox.mjs`; when the relay is down, a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). The first automated attempt before the relay is retired (`history/telegram-transport/`). The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
+- **Transport adapters** deliver messages. **The current transport is a Claude-Bridge relay** hosted on the developer host by the fabric-coordinator's working copy (a project's integration says where: `projects/<id>/integration/gzcoord/`), drained at session start by `scripts/inbox.mjs`; when the relay is down, a person copies messages between session terminals (`docs/HUMAN-RELAY-TRANSPORT.md`). The first automated attempt before the relay is retired (`history/telegram-transport/`); how the relay was selected is `history/claude-bridge-selection/`. The interface an automated adapter must satisfy is `docs/TRANSPORT-ADAPTER-CONTRACT.md`.
 - **Local runtime config** contains model/provider and subagent policy; those values are not sent in messages.
 
 ## Identity
@@ -111,8 +111,8 @@ limits are the launcher's (`runtime/openrouter/`), not part of GZCOORD/1.
 
 1. Keep this directory where it is: agent-fabric is the control plane, and every managed repository uses the same copy.
 2. Add the project's snippet to its root `CLAUDE.md` — gzapp's is `projects/gzapp/integration/gzcoord/CLAUDE.snippet.md`.
-3. Configure the concrete instance outside Git.
-4. Configure the selected transport adapter (gzapp's relay: `projects/gzapp/integration/gzcoord/BRIDGE-RELAY-SETUP.md`).
-5. Validate messages with `node communication/gzcoord/scripts/gzmsg.mjs validate <file>`.
+3. Configure the project's transport (gzapp's relay: `projects/gzapp/integration/gzcoord/BRIDGE-RELAY-SETUP.md`); a project with no integration joins nothing.
+4. Validate messages with `node communication/gzcoord/scripts/gzmsg.mjs validate <file>`.
 
-See `docs/PROJECT-TREE.md` for the layout and `protocol/SPEC.md` for the normative protocol.
+`protocol/SPEC.md` is the normative protocol; the layout is the section
+above. How the relay was chosen is `history/claude-bridge-selection/`.

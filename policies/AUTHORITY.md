@@ -41,7 +41,7 @@ apply to this whole repository.
 | a project's taxonomy — where roles apply in its repository: `<working copy>/.agent-fabric/taxonomy.json` | `fabric-coordinator` | the `.agent-fabric/` fence and tripwire |
 | `routing/policies/review-grade.json`, the review class's model | `fabric-coordinator` | same; `tools/fabric/lint.py` and `runtime/openrouter/launch` refuse a profile outside it |
 | `policies/authority.json`, who holds `fabric-coordinator` | `fabric-coordinator` | same, read from the base side of the diff so a branch cannot appoint itself |
-| `communication/gzcoord/protocol/*` | `fabric-coordinator` | no tripwire yet — its charter states it |
+| `communication/gzcoord/protocol/*` | `fabric-coordinator` | the repository-wide fence and tripwire below: every commit here carries the role that made it, so a protocol change by any other role is refused at the keyboard and visible in CI; the charter states the rule in words |
 | a managed project's architecture (gzapp: ADRs, contracts) | that project's roles (`architect-cto`) | the project's own guards, in its repository |
 | a commit message or PR description (no machine attribution) | every agent, by writing it right | `policies/ban_generated_by_attribution.sh` on the commits a branch adds |
 | a distilled slice under `memory/domains/`, `memory/shared/` | any agent, through a drain (`memory/README.md`) | `tools/fabric/lint.py` demands provenance |

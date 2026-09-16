@@ -3,7 +3,7 @@
 How a gzapp working copy on this host joins the shared GZCoord channel.
 This is gzapp's integration of the protocol, not the protocol: the
 candidate evaluation is
-`communication/gzcoord/docs/TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`, and
+`communication/gzcoord/history/claude-bridge-selection/TRANSPORT-CANDIDATE-CLAUDE-BRIDGE.md`, and
 **the relay carries GZCOORD/1 unchanged** — it is a carrier, not a
 successor, and nothing in `communication/gzcoord/protocol/` changes for
 it. The values below (relay URL, channel, token location, runtime

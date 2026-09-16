@@ -20,7 +20,7 @@ agent-fabric contains agent infrastructure
 | dimension | the question | where the answer lives |
 |---|---|---|
 | **AGENT IDENTITY** | Which Linux user is this agent? | `runtime/identity.py` — `pwd.getpwuid(os.geteuid())`, nothing else; `bin/fabric-whoami` |
-| **ROLE** | What function is this agent currently performing? | `identities/roles/<role>/` (charter, recall, skills); the catalogue `identities/roles/catalog.json`; bound at runtime by `tools/fabric/role.py` (`/role`) |
+| **ROLE** | What function is this agent currently performing? | `identities/roles/<role>/` (charter, recall, skills); the catalogue `identities/roles/catalog.json`; bound before launch by `bin/fabric-role bind <role>`, from a login shell, and rendered into the session's system prompt |
 | **MEMORY** | What durable knowledge can it retrieve? | `memory/domains/`, `memory/agents/<login>/`, `memory/shared/` here; `<working copy>/.agent-fabric/memory/<role>/` in each project — generated indexes, provenance, tiered loading (`memory/README.md`) |
 | **PROJECT** | Which logical system is it working on? | `projects/registry.json`, matched from a working copy's remote by `tools/fabric/workingcopy.py` |
 | **WORKING COPY** | Which filesystem/Git checkout is being used? | the cwd's git toplevel, recorded in the agent's runtime binding as a path and a label |

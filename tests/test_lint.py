@@ -222,6 +222,44 @@ def case_hygiene_still_runs_over_payload() -> None:
         assert code == 1 and "city name" in out, f"the banned place name went unreported:\n{out}"
 
 
+def case_secrets_are_refused_by_shape() -> None:
+    """Passwords, keys and tokens assigned a value, key material and known
+    token shapes are refused wherever they appear; a sentence about a
+    token, a placeholder and an environment variable's name are not."""
+    leaks = ["password=hunter2hunter2", "api_key: 0123456789abcdef", 'ANTHROPIC_API_KEY="sk-ant-api03-abcdefghijklmnopqrstuvwxyz"',
+             "token = ZmFrZS10b2tlbi12YWx1ZQ", "AKIAIOSFODNN7EXAMPLE", "-----BEGIN RSA PRIVATE KEY-----",
+             "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+             "dp.st.dev.abcdefghijklmnop", "client_secret: q1w2e3r4t5y6u7i8"]
+    fine = ["the token arrives with fabric-secrets sync", "export CLAUDE_BRIDGE_AUTH_TOKEN=<value>", "token_env_file: infra/local/.env.local",
+            "password: (redacted)", "api_key: ${OPENROUTER_API_KEY}", "secret: none", "A bearer token is sent on every call."]
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        for leak in leaks:
+            write(dom(fabric, "domain", "leak.md"), SLICE.replace("A claim with provenance.", f"Set {leak} and retry."))
+            code, out = run_lint(fabric)
+            assert code == 1 and "credential" in out, f"a secret passed: {leak!r}\n{out}"
+        for text in fine:
+            write(dom(fabric, "domain", "leak.md"), SLICE.replace("A claim with provenance.", text))
+            code, out = run_lint(fabric)
+            assert code == 0, f"a harmless line was refused: {text!r}\n{out}"
+
+
+def case_a_persons_name_is_refused_everywhere() -> None:
+    """The fabric's own hygiene list (policies/hygiene.json) applies with no
+    project list in sight: a person is named by role. Kills: dropping the
+    fabric list from load_hygiene_patterns."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        os.makedirs(os.path.join(fabric, "policies"), exist_ok=True)
+        shutil.copy(os.path.join(ROOT, "policies", "hygiene.json"), os.path.join(fabric, "policies", "hygiene.json"))
+        write(dom(fabric, "domain", "named.md"), SLICE.replace("A claim with provenance.", "Andrea Benetton asked for it; Andrea caught the workaround."))
+        code, out = run_lint(fabric)
+        assert code == 1 and "person's name" in out and "the CEO" in out, f"a person's name passed, or the finding does not say what to write instead:\n{out}"
+        write(dom(fabric, "domain", "named.md"), SLICE.replace("A claim with provenance.", "The CEO asked for it; the CEO caught the workaround."))
+        code, out = run_lint(fabric)
+        assert code == 0, f"naming the role tripped the linter:\n{out}"
+
+
 def case_slices_are_still_linted() -> None:
     """Kills: widening PAYLOAD_DIRS to swallow a slice directory."""
     with tempfile.TemporaryDirectory() as root:
@@ -632,6 +670,8 @@ def main() -> int:
         case_quoted_description_round_trips,
         case_payload_is_exempt,
         case_hygiene_still_runs_over_payload,
+        case_secrets_are_refused_by_shape,
+        case_a_persons_name_is_refused_everywhere,
         case_slices_are_still_linted,
         case_exemption_is_anchored_at_the_role_root,
         case_payload_shape_is_asserted,

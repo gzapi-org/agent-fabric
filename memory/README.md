@@ -226,11 +226,28 @@ the property that matters most: a drain is reviewable as a diff. If
 multi-hop queries ever become routine, the next step is a *generated*
 SQLite edge cache — derived, never authoritative.
 
-## Language
+## Language, and who is named
 
 English, always, whatever the source was in. Translate rather than quote;
 mark a translated quote as translated. `lint.py` flags a slice that reads
 as non-English.
+
+**A person is named by role, never by name.** The CEO, the owner, a
+reviewer, an agent by its login (`architect-cto-01`): a slice travels
+into every project's repository and outlives the session that wrote
+it, so a person's name in it is a privacy matter, not a style one
+(decided 2026-09-16). The same holds for the memory an agent writes for
+itself, since a drain carries it verbatim; and for a secret of any
+shape — a password, an API key, a token, key material — which is never
+knowledge. `policies/hygiene.json` (people) and the credential shapes
+in `tools/fabric/layout.py` are the fence, together with each project's
+`.agent-fabric/hygiene.json` for its own names — its city, its country,
+the sibling projects. **The assembler substitutes, it does not refuse:**
+a hit becomes what the entry says instead (`refer_as`: a person becomes
+"the CEO") or `[redacted]`, in the title, the description, the body and
+the file name alike, and every substitution is named in the drain
+report so the memory's owner fixes the source. Lint refuses a committed
+slice that still carries a hit, so nothing reaches `main` unsubstituted.
 
 ## What is not here yet
 

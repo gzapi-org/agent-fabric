@@ -26,8 +26,11 @@ Checks:
   shared     a shared slice really is shared (two or more owners)
   profiles   every review-grade gate in routing/profiles.json holds, and
              every role row names a catalogued role
-  hygiene    no city or country names, no external project names, no
-             credentials, no non-English prose
+  hygiene    no person's name (people by role: the CEO, the owner, an
+             agent by its login — policies/hygiene.json), no city or
+             country names, no external project names (each project's
+             .agent-fabric/hygiene.json), no credentials, no non-English
+             prose
   prompt     the launch-prompt sections (identities/prompt/) exist, carry
              the {role} placeholder, are hygiene-clean and within budget
 
@@ -116,7 +119,7 @@ def hygiene_findings(where: str, text: str) -> list[str]:
     this is the only thing between a pasted credential and every one of them.
     """
     out: list[str] = []
-    for pattern, label in BANNED_PATTERNS:
+    for pattern, label, _refer_as in BANNED_PATTERNS:
         hit = pattern.search(text)
         if hit:
             out.append(f"{where}: {label} -- {hit.group(0)!r}")

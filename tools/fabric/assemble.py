@@ -253,9 +253,12 @@ def render_frontmatter(meta: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+REDACTED = "[redacted]"
+
+
 def hygiene_check(text: str, where: str) -> list[str]:
     problems = []
-    for pattern, label in BANNED_PATTERNS:
+    for pattern, label, _refer_as in BANNED_PATTERNS:
         hit = pattern.search(text)
         if hit:
             problems.append(f"{where}: {label} -- {hit.group(0)!r}")
@@ -263,6 +266,26 @@ def hygiene_check(text: str, where: str) -> list[str]:
     if len(set(w.lower() for w in italian)) >= 3:
         problems.append(f"{where}: reads as non-English (markers: {sorted(set(italian))[:5]})")
     return problems
+
+
+def hygiene_substitute(text: str, where: str) -> tuple[str, list[str]]:
+    """Replace every banned hit: with the entry's refer_as (a person becomes
+    "the CEO"), else with "[redacted]" (a secret, a deployment's name).
+    The knowledge stays; what must not travel does not (decided
+    2026-09-16: substitute in place rather than refuse the claim). Every
+    substitution is named, so the memory's owner fixes the source."""
+    notes: list[str] = []
+    for pattern, label, refer_as in BANNED_PATTERNS:
+        replacement = refer_as or REDACTED
+        def sub(m, label=label, replacement=replacement):
+            notes.append(f"{where}: {label} -- {m.group(0)!r} -> {replacement!r}")
+            # "the CEO" opens a sentence as "The CEO".
+            before = text[:m.start()].rstrip()
+            if not before or before[-1] in ".!?:" or text[:m.start()].endswith("\n\n") or before.endswith("#"):
+                return replacement[:1].upper() + replacement[1:]
+            return replacement
+        text = pattern.sub(sub, text)
+    return text, notes
 
 
 def scan_collisions(dirs: list[str]) -> list[str]:
@@ -532,11 +555,25 @@ def main() -> int:
     # the text in the tree first and asked for a fix second — and lint then
     # failed the drain's branch on exactly that text. The author fixes the
     # memory; the corpus never receives the claim.
+    # Banned text is SUBSTITUTED in every text field of the claim — title,
+    # description, body, and the topic that names the file — and each
+    # substitution is reported; only non-English prose is still refused.
     rejected_hygiene: list[str] = []
+    redactions: list[str] = []
     for role, claims in list(all_claims.items()):
         kept = []
         for claim in claims:
-            issues = hygiene_check(claim.get("body") or "", f"{role}/{claim['class']}:{claim['topic']}")
+            where = f"{role}/{claim['class']}:{claim['topic']}"
+            for field in ("title", "description", "body"):
+                if isinstance(claim.get(field), str):
+                    claim[field], notes = hygiene_substitute(claim[field], f"{where} {field}")
+                    redactions.extend(notes)
+            if isinstance(claim.get("topic"), str):
+                topic, notes = hygiene_substitute(claim["topic"], f"{where} topic")
+                if notes:
+                    claim["topic"] = slugify(topic.replace(REDACTED, "redacted")) or "redacted"
+                    redactions.extend(notes)
+            issues = hygiene_check(claim.get("body") or "", where)
             if issues:
                 rejected_hygiene.extend(issues)
                 telemetry.setdefault(role, {}).setdefault("rejected_hygiene", 0)
@@ -714,6 +751,13 @@ def main() -> int:
             meta["collisions"] = sorted(outstanding)
 
         body = "\n\n".join(f"## {h}\n\n{blocks[h]}" for h in order) + "\n"
+        # Carried text (a slice written before a pattern existed) is
+        # substituted the same way, and named.
+        body, notes = hygiene_substitute(body, layout.root_rel(path))
+        redactions.extend(notes)
+        if isinstance(meta.get("description"), str):
+            meta["description"], notes = hygiene_substitute(meta["description"], layout.root_rel(path) + " description")
+            redactions.extend(notes)
         text = render_frontmatter(meta) + "\n\n" + body
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.rstrip() + "\n")
@@ -1105,6 +1149,7 @@ def main() -> int:
         "telemetry": telemetry,
         "hygiene_problems": problems,
         "rejected_hygiene": rejected_hygiene,
+        "redactions": redactions,
         "oversized_claims": oversized,
         "clipped_descriptions": clipped_descriptions,
         "migrated": migrated,
@@ -1126,6 +1171,10 @@ def main() -> int:
             f"admitted={counts.get('admitted', '?')} rejected={counts.get('rejected', '?')}"
         )
     print(f"\n{len(written)} files, {len(shared)} shared slices")
+    if redactions:
+        print("\nREDACTED (hygiene — the slice carries the substitute; fix the memory so the next drain needs none):", file=sys.stderr)
+        for note in redactions:
+            print(f"  {note}", file=sys.stderr)
     if rejected_hygiene:
         print("\nREJECTED (hygiene — fix the memory, the corpus did not receive it; this run exits 1):", file=sys.stderr)
         for note in rejected_hygiene:

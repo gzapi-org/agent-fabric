@@ -1,0 +1,6 @@
+{
+  "description": "The fabric's own hygiene list, applied to every slice, skill and prompt section in every project, beside the credential and language checks in tools/fabric/layout.py and each project's .agent-fabric/hygiene.json. A person is named by role, never by name — the CEO, the owner, an agent by its login: a distilled slice travels into every project's repository and a name in it is a privacy matter, not a style one (decided 2026-09-16). refer_as says what the corpus says instead. Written by fabric-coordinator.",
+  "patterns": [
+    {"pattern": "\\bAndrea(\\s+Benetton)?\\b", "label": "person's name -- refer to the CEO by role", "refer_as": "the CEO"}
+  ]
+}

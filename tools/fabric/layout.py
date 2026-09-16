@@ -229,20 +229,41 @@ def project_hygiene_path(project: str) -> str | None:
 
 
 def load_hygiene_patterns(projects: list[str] | None = None) -> list[tuple]:
-    """Compiled (pattern, label) pairs: the generic ones, plus every listed
-    project's own (from <working copy>/.agent-fabric/hygiene.json, when that
-    working copy is known). Entries: {"pattern": <regex>, "label": <what it
-    is>, "flags": "i"?}."""
+    """Compiled (pattern, label, refer_as) triples: the generic ones, the
+    fabric's own list (policies/hygiene.json), then every listed project's
+    (from <working copy>/.agent-fabric/hygiene.json, when that working copy
+    is known). Entries: {"pattern": <regex>, "label": <what it is>,
+    "flags": "i"?, "refer_as": <what the corpus says instead>?}. The
+    assembler replaces a hit with refer_as, or "[redacted]" without one;
+    lint refuses a committed hit either way."""
     import re
+    # Secrets by shape: known token prefixes, key material, and any
+    # password / api key / token ASSIGNED a value that looks like one (a
+    # sentence about a token is fine; `token=abc123…` is not). A finding
+    # here is a leak into every clone that installs the payload.
     out: list[tuple] = [
-        (re.compile(r"\bghp_[A-Za-z0-9]{10,}"), "credential"),
-        (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "credential"),
-        (re.compile(r"\bsk-[A-Za-z0-9-]{20,}"), "credential"),
-        (re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"), "credential"),
+        (re.compile(r"\bghp_[A-Za-z0-9]{10,}"), "credential", None),
+        (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "credential", None),
+        (re.compile(r"\bsk-[A-Za-z0-9-]{20,}"), "credential", None),
+        (re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"), "credential", None),
+        (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "credential (AWS access key)", None),
+        (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "credential (private key)", None),
+        (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), "credential (JWT)", None),
+        (re.compile(r"\bdp\.(?:st|pt|sa|ct|scim|audit)\.[A-Za-z0-9_.-]{10,}"), "credential (Doppler token)", None),
+        (re.compile(r"\bBearer\s+[A-Za-z0-9_\-.=]{20,}"), "credential (bearer token)", None),
+        (re.compile(r"(?i)\b(?:api[_-]?key|secret[_-]?key|client[_-]?secret|password|passwd|auth[_-]?token|access[_-]?token|api[_-]?token|token|secret)\s*[:=]\s*[\"']?(?![\"']?[<$%{]|[\"']?(?:redacted|none|null|\.\.\.|xxx+))[A-Za-z0-9_\-./+]{8,}"),
+         "credential (a password, key or token assigned a value)", None),
     ]
+    # The fabric's own list first (policies/hygiene.json: people by role,
+    # never by name — a privacy rule, so it holds in every project), then
+    # each project's.
+    sources = [(os.path.join(FABRIC_ROOT, "policies", "hygiene.json"), "fabric hygiene")]
     for pid in projects or []:
         path = project_hygiene_path(pid)
-        if not path or not os.path.isfile(path):
+        if path:
+            sources.append((path, f"{pid} hygiene"))
+    for path, default_label in sources:
+        if not os.path.isfile(path):
             continue
         try:
             doc = json.load(open(path, encoding="utf-8"))
@@ -251,7 +272,7 @@ def load_hygiene_patterns(projects: list[str] | None = None) -> list[tuple]:
         for entry in doc.get("patterns") or []:
             flags = re.I if "i" in (entry.get("flags") or "") else 0
             try:
-                out.append((re.compile(entry["pattern"], flags), entry.get("label") or f"{pid} hygiene"))
+                out.append((re.compile(entry["pattern"], flags), entry.get("label") or default_label, entry.get("refer_as")))
             except (re.error, KeyError):
                 continue
     return out

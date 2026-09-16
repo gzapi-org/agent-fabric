@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -950,15 +951,24 @@ def test_domain_only_evidence_is_accepted_on_a_domain_claim(tmp: str) -> None:
     assert os.path.exists(dom(out, "alpha", "domain.md"))
 
 
-def test_hygiene_violation_fails_the_run(tmp: str) -> None:
+def test_hygiene_violation_is_redacted_in_place(tmp: str) -> None:
+    """A banned term is replaced where it stands — "[redacted]" — and the
+    knowledge around it lands; the run says what it replaced and stays
+    clean (decided 2026-09-16: substitute, never refuse)."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "leak", "title": "T",
-         "body": "This mentions Springfield, which must never reach a committed role file.",
+         "body": "This mentions Springfield, which must never reach a committed role file. Set password=hunter2hunter2 too.",
          "evidence": ["h1"]},
     ])})
     proc = run_assemble(drain, claims_dir, out)
-    assert proc.returncode == 1, "a banned term must fail the assembly"
-    assert "city name" in proc.stderr
+    assert proc.returncode == 0, proc.stderr
+    text = read(dom(out, "alpha", "domain.md"))
+    assert "Springfield" not in text and "hunter2" not in text, text
+    assert "This mentions [redacted], which must never" in text and "Set [redacted] too." in text, text
+    assert "REDACTED (hygiene" in proc.stderr and "city name" in proc.stderr and "credential" in proc.stderr, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert any("Springfield" in r and "[redacted]" in r for r in report["redactions"]), report["redactions"]
+    assert report["rejected_hygiene"] == [] and "rejected_hygiene" not in report["telemetry"]["alpha"]
 
 
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
@@ -1106,23 +1116,39 @@ def run_lint_wc(out: str) -> subprocess.CompletedProcess:
                           capture_output=True, text=True)
 
 
-def test_a_hygiene_failure_rejects_the_claim_instead_of_writing_it(tmp: str) -> None:
-    """A body naming a deployment city fails RUBRIC hygiene. It must not
-    reach the tree and then fail lint there; it is rejected, named in the
-    report, and the drain's other claims land."""
+def test_a_banned_term_in_title_or_topic_is_redacted_too_and_a_person_becomes_the_role(tmp: str) -> None:
+    """The first drain that met this: the city sat in the TITLE, the body
+    check passed, the written slice failed lint. Every text field is
+    substituted, the topic that names the file included; a person's name
+    (the fabric's own list, policies/hygiene.json) becomes the role it
+    names, and lint accepts what the assembler wrote."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "workflow", "topic": "clean", "title": "Clean", "body": "fine", "evidence": ["h1"]},
-        {"class": "workflow", "topic": "dirty", "title": "Dirty", "body": "the Springfield line", "evidence": ["h2"]},
+        {"class": "workflow", "topic": "springfield-seed", "title": "The Springfield seed drops names",
+         "body": "Andrea Benetton asked twice; Andrea caught it in the Springfield seed.", "evidence": ["h2"]},
     ])})
+    os.makedirs(os.path.join(out, "policies"), exist_ok=True)
+    shutil.copy(os.path.join(ROOT, "policies", "hygiene.json"), os.path.join(out, "policies", "hygiene.json"))
     proc = run_assemble(drain, claims_dir, out)
-    assert proc.returncode == 1, "a rejection is loud: the run exits non-zero so nobody commits without reading the report"
-    text = read(proj(out, "alpha", "workflow.md"))   # one surviving topic: the flat shape
-    assert "Clean" in text, "the clean claim must still land"
-    assert "Springfield" not in text and "Dirty" not in text, "a hygiene failure was written"
-    assert "REJECTED (hygiene" in proc.stderr and "Springfield" in proc.stderr, proc.stderr
+    assert proc.returncode == 0, proc.stderr
+    files = sorted(os.listdir(proj(out, "alpha", "workflow")))
+    assert files == ["clean.md", "redacted-seed.md"], files
+    text = read(proj(out, "alpha", "workflow", "redacted-seed.md"))
+    assert "Springfield" not in text and "Andrea" not in text, text
+    assert "The [redacted] seed drops names" in text, text
+    assert "The CEO asked twice; the CEO caught it in the [redacted] seed." in text, text
     report = json.loads(read(report_path(out)))
-    assert any("Springfield" in r for r in report["rejected_hygiene"]), report
-    assert report["telemetry"]["alpha"]["rejected_hygiene"] == 1
+    assert any("person's name" in r and "'the CEO'" in r for r in report["redactions"]), report["redactions"]
+    assert any("topic" in r for r in report["redactions"]), report["redactions"]
+    lint_inputs(out)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+    run_assemble(drain, claims_dir, out)          # re-index with the charter present
+    lint = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+    assert lint.returncode == 0, f"lint refused what the assembler wrote:\n{lint.stdout}{lint.stderr}"
 
 
 def test_an_overlong_description_is_clipped_everywhere_it_appears(tmp: str) -> None:
@@ -1199,7 +1225,7 @@ def main() -> int:
         test_index_banner_names_which_sections_load_when,
         test_committed_indexes_carry_the_banner_the_assembler_emits,
         test_fabric_links_use_the_sibling_prefix_even_when_the_checkout_is_nested,
-        test_a_hygiene_failure_rejects_the_claim_instead_of_writing_it,
+        test_a_banned_term_in_title_or_topic_is_redacted_too_and_a_person_becomes_the_role,
         test_an_overlong_description_is_clipped_everywhere_it_appears,
         test_a_flat_class_file_moves_into_the_directory_when_the_class_splits,
         test_an_oversized_single_claim_is_written_whole_and_reported,
@@ -1233,7 +1259,7 @@ def main() -> int:
         test_carried_evidence_keeps_its_origin,
         test_domain_only_evidence_may_only_support_a_domain_claim,
         test_domain_only_evidence_is_accepted_on_a_domain_claim,
-        test_hygiene_violation_fails_the_run,
+        test_hygiene_violation_is_redacted_in_place,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

@@ -685,7 +685,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1080,9 +1080,16 @@ test('holdStatus: held iff some marker names a live harness of this login', () =
   // liveness is "answers a signal as this login": EPERM (another login's process) is not a hold
   assert.equal(holdStatus(dir, { isAlive: () => false }).held, false, 'a dead pid is not a hold');
   assert.match(holdStatus(dir, { isAlive: () => false }).reason, /is gone/);
-  fs.writeFileSync(f(1), JSON.stringify({ session_id: 'forged', pid: 1, start: '' }));
-  assert.equal(holdStatus(dir, { isAlive: pid => pid !== process.pid && pid !== 1 ? false : pid === process.pid }).sessions.length, 1, 'pid 1 (EPERM for an unprivileged login) does not hold');
-  fs.unlinkSync(f(1));
+  // the production liveness: pid 1 answers EPERM to an unprivileged login and is nobody's harness
+  if (process.getuid() !== 0) {
+    assert.equal(pidAlive(1), false, 'EPERM is not alive');
+    fs.writeFileSync(f(1), JSON.stringify({ session_id: 'forged', pid: 1, start: '' }));
+    const forged = holdStatus(dir);
+    assert.deepEqual(forged.sessions.map(x => x.pid), [process.pid], 'a forged marker naming pid 1 does not hold, with the default isAlive');
+    fs.unlinkSync(f(1));
+  }
+  assert.equal(pidAlive(4194304000), false, 'ESRCH is not alive');
+  assert.equal(pidAlive(process.pid), true);
   // a reused pid: the start time differs
   assert.equal(holdStatus(dir, { startOf: () => 'other' }).held, false, 'a pid with another start time is not the harness');
   assert.match(holdStatus(dir, { startOf: () => 'other' }).reason, /reused/);

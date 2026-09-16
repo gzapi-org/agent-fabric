@@ -53,17 +53,18 @@ session="${CLAUDE_CODE_SESSION_ID:-}"
 [[ -n "${event:-}" ]] || exit 0
 [[ -z "${agent_id:-}" ]] || exit 0          # a subagent's mode is not the session's
 [[ -n "$session" ]] || session="${sid:-}"
-[[ "$pid" =~ ^[0-9]+$ ]] || exit 0
+[[ "$pid" =~ ^[1-9][0-9]*$ ]] || exit 0
 
 # The start time of a pid (clock ticks since boot; /proc/<pid>/stat field
 # 22, read after the ')' that ends the command name). Empty off Linux.
 start_of() { [[ -r "/proc/$1/stat" ]] && sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'; }
-# Live: the pid answers kill -0 as THIS login (EPERM is another login's
+# Live: a positive pid (0 would signal the hook's own process group and
+# succeed) that answers kill -0 as THIS login (EPERM is another login's
 # process, never our harness) and, when both sides know it, was started
 # when the marker says.
 alive() {
   local p="$1" s="$2" now
-  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  [[ "$p" =~ ^[1-9][0-9]*$ ]] || return 1
   kill -0 "$p" 2>/dev/null || return 1
   now="$(start_of "$p")"
   [[ -z "$s" || -z "$now" || "$s" == "$now" ]]

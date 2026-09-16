@@ -93,6 +93,10 @@ kill "$OTHER" 2>/dev/null; wait "$OTHER" 2>/dev/null
 printf '{"pid":1,"session_id":"forged","start":""}\n' > "$AGENT_FABRIC_HOLD_DIR/1.json"
 fire PreToolUse plan - >/dev/null
 if [[ ! -f "$AGENT_FABRIC_HOLD_DIR/1.json" ]]; then pass "a marker naming another login's process is swept"; else fail "a marker naming another login's process is swept"; fi
+# pid 0 would signal the hook's own process group and succeed: a marker naming no harness is swept
+printf '{"session_id":"nopid"}\n' > "$AGENT_FABRIC_HOLD_DIR/7.json"; printf '{"pid":0}\n' > "$AGENT_FABRIC_HOLD_DIR/8.json"
+fire PreToolUse plan - >/dev/null
+if [[ ! -f "$AGENT_FABRIC_HOLD_DIR/7.json" && ! -f "$AGENT_FABRIC_HOLD_DIR/8.json" ]]; then pass "a marker naming no pid, or pid 0, is swept"; else fail "a marker naming no pid, or pid 0, is swept" "$(ls "$AGENT_FABRIC_HOLD_DIR")"; fi
 
 echo "plan hold: the directory must be the login's own"
 fire UserPromptSubmit default - >/dev/null

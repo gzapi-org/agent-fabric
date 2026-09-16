@@ -196,6 +196,22 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     for f in ("code-low.md", "code-medium.md", "code-high.md"):
         assert os.path.isfile(os.path.join(home, ".claude", "agents", f))
     assert not os.path.exists(os.path.join(projects, ".git")), "projects/ must not become a repository"
+    # A registered working copy beside the fabric gets the hooks — also
+    # when it is a LINKED WORKTREE, whose .git is a file, not a directory.
+    main_repo = os.path.join(tmp, "main-repo")
+    subprocess.run(["git", "init", "-q", "-b", "main", main_repo], check=True)
+    subprocess.run(["git", "-C", main_repo, "remote", "add", "origin", "git@github.com:gzapi-org/gzapp.git"], check=True)
+    gitenv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    open(os.path.join(main_repo, "seed"), "w").write("s\n")
+    subprocess.run(["git", "-C", main_repo, "add", "seed"], check=True)
+    subprocess.run(["git", "-C", main_repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "seed"], check=True, env=gitenv)
+    linked = os.path.join(projects, "gzapp-linked")
+    subprocess.run(["git", "-C", main_repo, "worktree", "add", "-q", "--detach", linked, "HEAD"], check=True)
+    assert os.path.isfile(os.path.join(linked, ".git")), "a linked worktree's .git is a file"
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    hooks_path = subprocess.run(["git", "-C", linked, "config", "--get", "core.hooksPath"], capture_output=True, text=True).stdout.strip()
+    assert hooks_path == os.path.join(ROOT, "policies", "githooks"), f"the linked worktree got no hooks: {hooks_path!r}\n{proc.stdout}"
     # Idempotent: a second run changes nothing.
     proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
     assert "0 written" in proc.stdout, proc.stdout

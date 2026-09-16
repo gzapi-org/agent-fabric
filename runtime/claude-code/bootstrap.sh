@@ -153,7 +153,9 @@ fi
 HOOKS_ABS="$FABRIC_ROOT/policies/githooks"
 for wc in "$PROJECTS"/*/; do
     wc="${wc%/}"
-    [[ "$wc" != "$FABRIC_ROOT" && -d "$wc/.git" ]] || continue
+    # git's own answer, not a test for a .git DIRECTORY: a linked worktree
+    # carries a .git file and is a working copy like any other.
+    [[ "$wc" != "$FABRIC_ROOT" ]] && [[ "$(git -C "$wc" rev-parse --is-inside-work-tree 2>/dev/null)" == true ]] || continue
     pid="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/workingcopy.py" "$wc" 2>/dev/null \
         | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("project") or "")

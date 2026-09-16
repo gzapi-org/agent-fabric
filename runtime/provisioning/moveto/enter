@@ -21,7 +21,7 @@ export MOVETO_TITLE="$2"
 #   3. the account's secrets, from its Doppler config into
 #      ~/.config/agent-fabric/secrets.env, before the shell sources it.
 fabric="$HOME/projects/agent-fabric"
-if [ -d "$fabric/.git" ]; then
+if [ "$(git -C "$fabric" rev-parse --is-inside-work-tree 2>/dev/null)" = true ]; then
     if ! timeout 30 git -C "$fabric" pull -q --ff-only origin main 2>/dev/null; then
         echo "moveto: agent-fabric not fast-forwarded (offline, or the clone is not on main); using it as is" >&2
     fi

@@ -32,6 +32,22 @@ only host in `runtime/hosts/registry.json`), as the coordinator login:
    line caught `enter` behind the repository after the worktree fix and
    was reinstalled.
 
+7. After the push, every placed account pulled the fabric through the
+   executor — `bin/fabric-host develop-qzapp run --as <login> -- git -C
+   projects/agent-fabric pull --ff-only origin main`, fourteen accounts,
+   all at the pushed head — and the enrolment dry run of item 4 then
+   reached the account's own `enroll-worker.sh`: `prepare-home` as the
+   operator, `gather` as the account, the token check through the
+   account, its config found (`agents2_brand-comms-01`).
+8. The platform smoke jobs, run first under podman on this host
+   (`fedora:latest`, `debian:stable-slim`, as an unprivileged login),
+   found two host facts before CI did: a Fedora container has no `cmp`
+   (bootstrap rewrote every file on every run — `cmp` joined the host
+   contract), and Debian's `/etc/profile` assigns PATH outright for a
+   non-root login shell (an as-login command lost the PATH the worker
+   set — now carried as `AGENT_FABRIC_PATH` and restored inside the
+   shell).
+
 **Not read back.** The ssh backend on a real second host: none exists,
 and `sshd` is inactive on this AppVM, so `ssh localhost` was not
 available either without a host change. The ssh backend is exercised by

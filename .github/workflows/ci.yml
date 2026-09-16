@@ -73,6 +73,9 @@ jobs:
             install: apt-get install -y --no-install-recommends
             extra: shellcheck python3-pip ca-certificates hostname
     container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash   # a container's default `sh` is dash on Debian; the profiles are bash
     steps:
       - name: the host contract, from the profile's own package map
         run: |

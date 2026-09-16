@@ -1,9 +1,10 @@
 ## Agent coordination
 
 **GZCoord is active.** The protocol is specified and implemented in
-agent-fabric under `communication/gzcoord/`; gzapp's integration — the
-relay it hosts, the channel, the session-start drain — is
-`projects/gzapp/integration/gzcoord/` there. Messages travel over the
+agent-fabric under `communication/gzcoord/`; gzapi.ge's integration — the
+relay, the channel, the session-start drain — is
+`projects/gzapi.ge/integration/gzcoord/` there, on the same relay and
+channel as every other project of the fleet. Messages travel over the
 Claude-Bridge relay the fabric-coordinator hosts
 (`BRIDGE-RELAY-SETUP.md`), with a person as the fallback carrier
 (`communication/gzcoord/docs/HUMAN-RELAY-TRANSPORT.md`). GZCoord is
@@ -17,7 +18,7 @@ The procedures are two skills every account has: `gzcoord-send` and
 `gzcoord-receive`. When coordinating with another agent:
 
 - your address is `<host>/<login>` — the Linux account this session runs under, as `../agent-fabric/bin/fabric-whoami` from the working copy reports it (SPEC §3.1); the working copy you are in is context, never identity;
-- as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `backend-dev`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
+- as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `brand-comms`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
 - send no `HELLO` yourself: the launcher sent it just before your session started; a role change is a rebind from a login shell (`bin/fabric-role`, which sends the `GOODBYE`) and a relaunch (which sends the new `HELLO` — SPEC §4);
 - watch your inbox for the whole session, not only while waiting on a reply: one watch, `inbox.mjs --follow` under Monitor, started first, never a second one — the cursor is per address and a second consumer swallows deliveries;
 - send with `communication/gzcoord/scripts/send.mjs`, which validates as the last step before posting; for the human relay print the message in a fenced text block;

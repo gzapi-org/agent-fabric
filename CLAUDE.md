@@ -104,7 +104,10 @@ directory, the repository, the branch or the session.
   (`runtime/claude-code/hooks/agent-dispatch-guard.sh`) refuses a class
   dispatch whose `model` is not its alias — unset included — a review
   on anything but `fable`, and a writing dispatch without worktree
-  isolation; `code-high` and `code-plan` ask. Decided 2026-09-13; a
+  isolation; `code-high` and `code-plan` ask. The read-only harness
+  types (`Explore`, `Plan`, `claude-code-guide`) name a model and no
+  isolation: they cannot write, and a worktree would hide the
+  uncommitted work they are asked about. Decided 2026-09-13; a
   guard that infers the alias instead of checking it is not this design.
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Two skills carry the procedure and are

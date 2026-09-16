@@ -191,6 +191,12 @@ Two properties of the guard matter and are pinned by the test file:
 - It is the ONLY type that passes without a prompt; `general-purpose`
   with `opus` or `fable` still asks exactly as before, and every
   writing agent still needs `model` and `isolation: "worktree"`.
+- The read-only harness types — `Explore`, `Plan`, `claude-code-guide`
+  — need `model` and must NOT set isolation: they have no writing tool,
+  the clone guard fences their Bash in the session clone, and a
+  worktree (`baseRef: head`) would hide the uncommitted work a search
+  is usually about. Added 2026-09-16, after every Explore dispatch of a
+  planning session was denied and the research done by hand.
 
 Pass `model: "opus"` explicitly anyway, even though the agent
 definition's frontmatter already pins it: the class REQUIRES that value

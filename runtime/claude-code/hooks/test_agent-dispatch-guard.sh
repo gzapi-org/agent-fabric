@@ -62,6 +62,15 @@ expect "review type with opus is denied (opus is code-high's alias on the broker
 expect "review type WITH isolation is denied" deny '{"subagent_type":"code-review","model":"fable","isolation":"worktree","description":"Review PR 626"}'
 expect "the review prefix on a general agent is denied" deny '{"subagent_type":"general-purpose","model":"sonnet","isolation":"worktree","description":"Review the diff"}'
 
+echo "read-only types: model required, no worktree, premium asks"
+expect "Explore on sonnet without isolation is allowed" allow '{"subagent_type":"Explore","model":"sonnet","description":"Explore the provisioning scripts"}'
+expect "Plan on haiku without isolation is allowed" allow '{"subagent_type":"Plan","model":"haiku","description":"Plan the split"}'
+expect "claude-code-guide on haiku is allowed" allow '{"subagent_type":"claude-code-guide","model":"haiku","description":"How do hooks work"}'
+expect "Explore with model unset is denied (the tier is still a choice)" deny '{"subagent_type":"Explore","description":"Explore the provisioning scripts"}'
+expect "Explore WITH worktree isolation is denied (it would hide uncommitted work)" deny '{"subagent_type":"Explore","model":"sonnet","isolation":"worktree","description":"Explore the provisioning scripts"}'
+expect "Explore on fable asks" ask '{"subagent_type":"Explore","model":"fable","description":"Explore the provisioning scripts"}'
+expect "a read-only type whose description begins with review is still denied (reviews use the class)" deny '{"subagent_type":"Explore","model":"sonnet","description":"Review the diff"}'
+
 echo "everything else: model and worktree required, premium asks"
 expect "sonnet + worktree is allowed" allow '{"subagent_type":"general-purpose","model":"sonnet","isolation":"worktree","description":"Extract the table"}'
 expect "haiku + worktree is allowed" allow '{"model":"haiku","isolation":"worktree","description":"Rename the field"}'

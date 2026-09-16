@@ -44,6 +44,16 @@
 #                      launcher exports per session; the class is the
 #                      vocabulary, the alias its binding, and the two
 #                      must agree. code-high asks (premium).
+#   READ-ONLY types -> Explore, Plan, claude-code-guide: no writing
+#                      tool in their definition, and the clone guard
+#                      (subagent-clone-guard.sh) fences their Bash in
+#                      the session clone. Model required (the tier is
+#                      still a choice); isolation NOT required — a
+#                      worktree at baseRef=head would hide the
+#                      uncommitted work a search or a plan is asked
+#                      about, as it would for a review. Found
+#                      2026-09-16: every Explore dispatch was denied
+#                      and the research was done by hand.
 #   everything else -> model required; isolation "worktree" required;
 #                      opus/fable ask (per-dispatch authorisation).
 #
@@ -144,6 +154,14 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
         elif $type == "code-high" or $type == "code-plan" then
           ask("Agent dispatch names " + $type + ", a premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
         else empty end
+    elif ($type | test("^(Explore|Plan|claude-code-guide)$")) then
+      if ($model | length) == 0 then
+        deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")
+      elif $iso == "worktree" then
+        deny("Read-only dispatch (" + $type + ") sets isolation worktree. That type has no writing tool and its Bash is fenced in the clone (subagent-clone-guard.sh); a worktree protects nothing and hides the uncommitted work it is asked about (worktree.baseRef is head). Omit isolation. See CLAUDE.md - Subagent dispatch.")
+      elif ($model | test("opus|fable")) then
+        ask("Agent dispatch requests the premium model \"" + ($t.model // "") + "\" for a read-only " + $type + ". Per CLAUDE.md, opus/fable are forbidden for subagents unless you explicitly asked for that tier. Approve only if you did.")
+      else empty end
     elif ($model | length) == 0 then
       deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")
     elif $iso != "worktree" then

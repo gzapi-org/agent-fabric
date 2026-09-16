@@ -1,6 +1,6 @@
 ---
 name: general
-description: The ordinary correctness review, always on; every other lens biases where it starts.
+description: The ordinary correctness review, on for every review (a re-review carries only named lenses); others bias the start.
 ---
 Look, in this order, for what the range changes and for what it should
 have changed: correctness of the new behaviour against the brief's

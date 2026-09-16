@@ -171,7 +171,7 @@ def test_the_rationale_lint_refuses_verdicts_and_passes_facts(tmp: str) -> None:
 def test_re_review_inlines_the_previous_report_and_names_the_new_range(tmp: str) -> None:
     repo = os.path.join(tmp, "repo4"); os.makedirs(os.path.join(repo, ".git"))
     prev = os.path.join(tmp, "findings.md")
-    open(prev, "w").write("## Findings on the change\n1. P2 likely — apps/x.py:10 ...\n")
+    open(prev, "w").write("## Findings on the change\n1. P2 likely — apps/x.py:10 ...\n```\n+hunk\n```\nafter the hunk\n")
     req = {"mode": "re-review", "repository": repo, "range": "3f2c1a0..9b7e44d", "previous_findings": prev}
     out = rb.render(req)
     assert "## Mode\nre-review\n" in out and "## Range\n3f2c1a0..9b7e44d\n" in out
@@ -182,8 +182,9 @@ def test_re_review_inlines_the_previous_report_and_names_the_new_range(tmp: str)
     out = rb.render({**req, "lenses": ["security"]})
     assert out.count("### ") == 1 and "### security\n" in out, "a named lens is inlined on a re-review; general is not added"
     # 11: the inlined report is fenced, so its headings do not read as the brief's
-    assert "## Previous findings\nVerify only the hunks of the range above against these, answering each by number.\n```markdown\n## Findings on the change\n1. P2 likely" in out
-    assert out.count("\n## Findings on the change") == 1 and "\n```\n## Lenses" in out
+    # re-review finding B: the fence is longer than any backtick run in the report, so a quoted hunk does not close it
+    assert "## Previous findings\nVerify only the hunks of the range above against these, answering each by number.\n````markdown\n## Findings on the change\n1. P2 likely" in out
+    assert out.count("\n## Findings on the change") == 1 and "\nafter the hunk\n````\n## Lenses" in out
 
 
 def test_the_yaml_subset_and_the_cli(tmp: str) -> None:
@@ -199,14 +200,14 @@ objective: >-
 requirements:
   - "A malformed engine response is an error."
   - Plain item
-compatibility: [ "Contracts 1.1.0 clients keep working (#746)", 'quoted' ]
+compatibility: [ "Contracts 1.1.0 clients keep working, PR #746", 'quoted' ]
 threat_model: []
 lenses: [protocol, security]
 """)
     doc = rb.parse_request(open(req).read())
     assert doc["objective"] == "An itinerary's times are the engine's." and doc["requirements"] == ["A malformed engine response is an error.", "Plain item"]
     assert doc["mode"] == "review", "a trailing comment is not part of the value"
-    assert doc["compatibility"] == ["Contracts 1.1.0 clients keep working (#746)", "quoted"], "a # inside a quoted string is text (a PR number)"
+    assert doc["compatibility"] == ["Contracts 1.1.0 clients keep working, PR #746", "quoted"], "a # inside a quoted string is text (a PR number)"
     assert doc["threat_model"] == [], "an empty inline list is empty"
     assert doc["lenses"] == ["protocol", "security"], "an inline list keeps its order"
     r = subprocess.run([BIN, "check", req], capture_output=True, text=True)
@@ -240,6 +241,10 @@ def test_the_parser_refuses_what_it_cannot_keep(tmp: str) -> None:
     assert doc["lenses"] == ["it's late", "b, c"], doc
     doc = parse("requirements:\n  - The engine's clock # note\n")
     assert doc["requirements"] == ["The engine's clock"], doc
+    # re-review finding A: a quoted # in any item of an inline list is text, whatever its position
+    assert parse('compatibility: ["fix #746", x]\n')["compatibility"] == ["fix #746", "x"]
+    assert parse('compatibility: [x, "fix #746"] # c\n')["compatibility"] == ["x", "fix #746"]
+    assert parse("compatibility: [x, 'it #1', \"a, b\"]\n")["compatibility"] == ["x", "it #1", "a, b"]
     def refused(text: str) -> str:
         try:
             parse(text)

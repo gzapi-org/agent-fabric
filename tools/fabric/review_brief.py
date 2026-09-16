@@ -130,13 +130,16 @@ def _strip_comment(line: str, value_at: int = 0) -> str:
     opens a string only where a value starts (`value_at`, or after a
     `- `): an apostrophe inside a plain value is text."""
     quote = None
-    body_start = value_at
+    since = value_at                      # where the current value or item began
+    inline_list = line[value_at:].lstrip().startswith("[")
     for i, ch in enumerate(line):
         if quote:
             if ch == quote:
                 quote = None
-        elif ch in "\"'" and line[body_start:i].strip() == "":
+        elif ch in "\"'" and line[since:i].strip() in ("", "["):
             quote = ch
+        elif inline_list and ch in "[,":
+            since = i + 1                 # an item of an inline list starts after `[` or `,`
         elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i].rstrip()
     return line.rstrip()
@@ -328,9 +331,13 @@ def render(req: dict, lenses_dir: str | None = None, allow_rationale: bool = Fal
         out += [f"## {heading}", _items(req.get(key))]
     if mode == "re-review":
         # Fenced: the previous report carries headings at the brief's own
-        # level, and verbatim inside a fence is still verbatim.
+        # level, and verbatim inside a fence is still verbatim. The fence
+        # is longer than any backtick run in the report (every conforming
+        # report quotes hunks in ``` blocks), so it closes where we close it.
+        report = open(req["previous_findings"], encoding="utf-8").read().rstrip()
+        fence = "`" * max(3, max((len(m) for m in re.findall(r"`+", report)), default=0) + 1)
         out += ["## Previous findings", "Verify only the hunks of the range above against these, answering each by number.",
-                "```markdown", open(req["previous_findings"], encoding="utf-8").read().rstrip(), "```"]
+                fence + "markdown", report, fence]
     out.append("## Lenses")
     if not names:
         out.append("(none named; the constitution's method applies)")

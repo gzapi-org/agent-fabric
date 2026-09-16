@@ -43,7 +43,10 @@ marker="$dir/$login.json"
 pid="${CLAUDE_PID:-$PPID}"
 session="${CLAUDE_CODE_SESSION_ID:-}"
 
-read -r event mode agent_id sid < <(printf '%s' "$input" | jq -r '[.hook_event_name // "", .permission_mode // "", .agent_id // "", .session_id // ""] | @tsv' 2>/dev/null | tr '\t' ' ')
+# One field per line: an empty field must stay empty (the harness sends
+# agent_id: null for the session itself; a whitespace-split read would
+# slide session_id into it and take the session for a subagent).
+{ read -r event; read -r mode; read -r agent_id; read -r sid; } < <(printf '%s' "$input" | jq -r '.hook_event_name // "", .permission_mode // "", .agent_id // "", .session_id // ""' 2>/dev/null)
 [[ -n "${event:-}" ]] || exit 0
 [[ -z "${agent_id:-}" ]] || exit 0          # a subagent's mode is not the session's
 [[ -n "$session" ]] || session="${sid:-}"

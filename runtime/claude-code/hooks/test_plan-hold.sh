@@ -27,7 +27,9 @@ MARKER="$AGENT_FABRIC_HOLD_DIR/$(id -un).json"
 # fire <event> <mode|-> <agent_id|-> [pid] [session] -> stdout of the hook (must be empty)
 fire() {
   local event="$1" mode="$2" agent="$3" pid="${4:-$$}" session="${5:-sess-1}" payload
-  payload="$(jq -nc --arg e "$event" --arg m "$mode" --arg a "$agent" '{hook_event_name:$e} + (if $m != "-" then {permission_mode:$m} else {} end) + (if $a != "-" then {agent_id:$a, agent_type:"code-low"} else {} end)')"
+  # The shape the harness sends (2.1.273): session_id present, agent_id
+  # null for the session itself — an empty field in the middle.
+  payload="$(jq -nc --arg e "$event" --arg m "$mode" --arg a "$agent" --arg s "$session" '{hook_event_name:$e, session_id:$s, agent_id:null, transcript_path:"/t", cwd:"/"} + (if $m != "-" then {permission_mode:$m} else {} end) + (if $a != "-" then {agent_id:$a, agent_type:"code-low"} else {} end)')"
   printf '%s' "$payload" | CLAUDE_PID="$pid" CLAUDE_CODE_SESSION_ID="$session" bash "$UNDER_TEST"
   echo "rc=$?"
 }

@@ -46,6 +46,29 @@ else:
     else:
         path += ", not launched by the fabric (harness defaults for every tier)"
 stamp = os.environ.get("AGENT_FABRIC_LAUNCH_SESSION_MODEL")
+# A safeguard flagged a request and the harness switched this session's
+# model on its own (runtime/claude-code/hooks/model-fallback-note.sh
+# leaves the marker, per harness pid): the session runs on a tier it was
+# not launched with, until /model. Said here as drift.
+def fallback_marker():
+    d = os.environ.get("AGENT_FABRIC_FALLBACK_DIR") or os.path.join(os.path.expanduser("~"), ".cache", "agent-fabric", "fallback")
+    pid = os.environ.get("CLAUDE_PID")
+    names = [f"{pid}.json"] if pid and os.path.isfile(os.path.join(d, f"{pid}.json")) else (sorted(os.listdir(d)) if os.path.isdir(d) else [])
+    for n in names:
+        f = os.path.join(d, n)
+        try:
+            if os.lstat(f).st_uid != os.getuid(): continue
+            m = json.load(open(f, encoding="utf-8"))
+            p = int(m.get("pid") or 0)
+            if p <= 0: continue
+            os.kill(p, 0)
+            return m
+        except Exception:
+            continue
+    return None
+fallback = fallback_marker()
+fallback_drift = (f"session model fell back from {fallback.get('from_model') or '?'} to {fallback.get('to_model') or '?'} at {fallback.get('at') or '?'} "
+                  "after a safeguard flagged a request (sticky until /model; nothing from that exchange travels)") if fallback else None
 pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                                        "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")}
 present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL"))
@@ -167,7 +190,7 @@ report = {
     "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
     "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
     "launch_prompt_digest": digest,
-    "drift": [d for d in (role_drift, model_drift, prompt_drift, placement_drift) if d] or None,
+    "drift": [d for d in (role_drift, model_drift, prompt_drift, placement_drift, fallback_drift) if d] or None,
     "undrained_memories": undrained,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",

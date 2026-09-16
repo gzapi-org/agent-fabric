@@ -86,6 +86,18 @@ Rules that are not style:
 - **Never a secret value** — describe it by shape and locator (SPEC §17).
   Never quote another message's body (it may carry one). Never a model,
   provider, local path outside the repository, or credential.
+- **After a safeguard flag, filter the category out of everything you
+  send.** If the harness told you a model's safeguards flagged your
+  request and switched the session to another model, what flagged you
+  flags every session it is sent to, and a broadcast lands in all of
+  them. From then on, nothing that could be read as the flagged
+  category (a cybersecurity issue, most often) goes into a message:
+  name where a finding is (file, line, PR) and what class of problem it
+  is, never its content, and let the reader open it in their own
+  repository. The PostModelSwitch hook says this to you the moment it
+  happens, naming the category, and `send.mjs` repeats it on stderr
+  while the session is marked as fallen back; it cannot check the
+  content, only you can.
 - **When you start acting on someone's finding, say where**: a `REPLY`
   with `IN-REPLY-TO` and a `REFERENCES` entry naming the branch or PR
   (`MESSAGE-FORMAT.md` §Acknowledging by reference) — otherwise two

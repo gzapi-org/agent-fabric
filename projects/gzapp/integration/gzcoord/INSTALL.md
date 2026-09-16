@@ -37,7 +37,12 @@ Do not create a nested Git repository, and do not vendor the subsystem.
 
    A session launched inside a clone takes its hooks from the clone's
    own settings, never from the workspace's, so until this is wired
-   the hold reaches only sessions started from `~/projects`.
+   the hold reaches only sessions started from `~/projects`. The same
+   holds for the **fallback note** (`docs/model-fallback-contagion.md`):
+   one group on `PostModelSwitch` running
+   `agent-fabric/runtime/claude-code/hooks/model-fallback-note.sh`, same
+   shape, so a session whose model fell back after a safeguard flag is
+   told at once that the flagged text travels nowhere.
 3. Nothing to configure by hand: the session's identity is its OS login
    and runtime binding (the role `bin/fabric-role` bound from a login
    shell; slugs from agent-fabric's `identities/roles/catalog.json`), the

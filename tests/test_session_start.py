@@ -186,6 +186,7 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
     for event in ("PreToolUse", "UserPromptSubmit", "SessionEnd"):
         assert "plan-hold.sh" in json.dumps(settings["hooks"][event]), f"the plan hold follows the mode on {event}"
+    assert "model-fallback-note.sh" in json.dumps(settings["hooks"]["PostModelSwitch"]), "an automatic fallback is announced to the session"
     assert any("plan-hold.sh" in json.dumps(g) and "matcher" not in g for g in settings["hooks"]["PreToolUse"]), "the plan hold sees every tool call"
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"

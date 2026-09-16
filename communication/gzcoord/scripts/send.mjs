@@ -20,10 +20,31 @@
 // Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
 // FROM is not this session; 3 no token or relay unreachable.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken } from './inbox.mjs';
+
+// The fallback marker for this harness session (CLAUDE_PID), if any, from
+// the login's own directory; a marker naming a dead pid is not one.
+export function fallbackMarker(dir = process.env.AGENT_FABRIC_FALLBACK_DIR ?? path.join(os.homedir(), '.cache', 'agent-fabric', 'fallback'), pid = Number(process.env.CLAUDE_PID) || 0) {
+  const candidates = [];
+  try {
+    if (pid > 0 && fs.existsSync(path.join(dir, `${pid}.json`))) candidates.push(path.join(dir, `${pid}.json`));
+    else for (const n of fs.readdirSync(dir)) if (/^\d+\.json$/.test(n)) candidates.push(path.join(dir, n));
+  } catch { return null; }
+  for (const f of candidates) {
+    try {
+      if (fs.lstatSync(f).uid !== process.getuid()) continue;
+      const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (!Number.isInteger(m.pid) || m.pid <= 0) continue;
+      try { process.kill(m.pid, 0); } catch { continue; }
+      return m;
+    } catch { /* unreadable: not a marker */ }
+  }
+  return null;
+}
 
 export async function main(argv = process.argv.slice(2)) {
   const dry = argv.includes('--dry-run');
@@ -57,6 +78,13 @@ export async function main(argv = process.argv.slice(2)) {
     return 2;
   }
   const id = msg.metadata?.['MESSAGE-ID'] ?? '(none)';
+  // This session's model fell back after a safeguard flagged a request
+  // (runtime/claude-code/hooks/model-fallback-note.sh leaves the marker):
+  // the flagged text is contagious, so the reminder is repeated here, at
+  // the moment of sending. A reminder, never a content check — nothing
+  // can tell flagged text from any other.
+  const fb = fallbackMarker();
+  if (fb) console.error(`send: reminder — this session fell back from ${fb.from_model || 'its model'} to ${fb.to_model || 'a fallback model'} at ${fb.at || '?'} after a safeguard flagged a request as ${fb.topic || 'the flagged category'}; filter anything that could be read as ${fb.topic || 'that'} out of this message — name where a finding is and what class of problem it is, never its content.`);
   if (dry) { console.error(`send: would post ${msg.type} ${id} from ${me.address} to ${channel} at ${relayUrl}`); return 0; }
 
   let tok = token(root, cfg);

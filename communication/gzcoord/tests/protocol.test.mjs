@@ -873,10 +873,10 @@ function withRelay(fn) {
 }
 // Asynchronous on purpose: the stub relay lives in this process, and a
 // synchronous exec would block the event loop the server answers on.
-function sendWith(relay, text, extra = []) {
+function sendWith(relay, text, extra = [], moreEnv = {}) {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, text);
   // HOME is a scratch dir: the runner's own synced secrets.env must not be the token here.
-  const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan', ...moreEnv };
   return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
     (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
 }
@@ -966,6 +966,22 @@ test('send carries a long line as written, with no width warning (the bridge doe
     assert.equal(r.code, 0, r.err);
     assert.ok(!/columns wide/.test(r.err), `no width warning on the send path: ${r.err}`);
     assert.equal(posts[0].body.content, wide, 'the line is posted as written');
+  });
+});
+
+test('send reminds a session that fell back that the flagged text must not travel', async () => {
+  await withRelay(async (relay, posts) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fallback-'));
+    fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ session_id: 's', pid: process.pid, from_model: 'claude-opus-5[1m]', to_model: 'claude-opus-4-8', at: '2026-09-16T11:46:21Z', category: 'cyber', topic: 'a cybersecurity issue' }));
+    const r = await sendWith(relay, valid, [], { AGENT_FABRIC_FALLBACK_DIR: dir, CLAUDE_PID: String(process.pid) });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /send: reminder — this session fell back from claude-opus-5\[1m\] to claude-opus-4-8 at 2026-09-16T11:46:21Z/, 'the reminder names the switch');
+    assert.match(r.err, /flagged a request as a cybersecurity issue; filter anything that could be read as a cybersecurity issue out of this message/);
+    assert.equal(posts.length, 1, 'a reminder, not a refusal: the message is posted');
+    // a marker whose session is gone is not a fallback
+    fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ session_id: 's', pid: 4194304000, from_model: 'a', to_model: 'b' }));
+    const r2 = await sendWith(relay, valid, [], { AGENT_FABRIC_FALLBACK_DIR: dir, CLAUDE_PID: String(process.pid) });
+    assert.equal(r2.code, 0); assert.ok(!/reminder/.test(r2.err), r2.err);
   });
 });
 

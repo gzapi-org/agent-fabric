@@ -8,9 +8,10 @@ all copies of one project), and neither of them is the agent using it.
 
 Resolution is by the checkout's origin remote against projects/registry.json,
 or by a `.agent-fabric-project` marker file at the toplevel naming the
-project id. A directory basename is never used to guess a project: names
-are conveniences, and the old system's `legacy-family` bucket is what
-guessing from them produced.
+project id — and a marker that names an unknown project is an error, not
+a fall-through. A directory basename is never used to guess a project:
+names are conveniences, and the old system's `legacy-family` bucket is
+what guessing from them produced.
 """
 from __future__ import annotations
 
@@ -90,10 +91,22 @@ def resolve(path: str, registry: dict[str, Any] | None = None) -> dict[str, Any]
     project, source = None, None
     marker = os.path.join(top, MARKER)
     if os.path.isfile(marker):
+        # A marker is a declaration, not a hint: one that names nothing the
+        # registry knows is an error the human sees, never a silent fall
+        # back to the remote (review, 2026-09-16 — before this, a typo in
+        # the marker resolved to whatever the remote said, or to nothing).
         with open(marker, encoding="utf-8") as fh:
             declared = fh.read().strip()
-        if declared and declared in (registry.get("projects") or {}):
-            project, source = declared, "marker"
+        known = registry.get("projects") or {}
+        if not declared:
+            raise SystemExit(f"workingcopy: {marker} is empty; it must name a project id from "
+                             f"projects/registry.json ({', '.join(sorted(known)) or 'none registered'}), "
+                             "or be removed so the remote decides")
+        if declared not in known:
+            raise SystemExit(f"workingcopy: {marker} names project {declared!r}, which projects/registry.json "
+                             f"does not know ({', '.join(sorted(known)) or 'none registered'}). Fix the marker, "
+                             "register the project, or remove the marker so the remote decides")
+        project, source = declared, "marker"
     if project is None:
         project = project_for_remote(remote, registry)
         source = "remote" if project else None

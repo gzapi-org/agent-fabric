@@ -122,6 +122,23 @@ def test_hook_from_the_parent_directory_has_no_project(tmp: str) -> None:
     assert "role=(none" in proc.stdout, proc.stdout
 
 
+def test_hook_reports_a_bad_marker_and_still_starts(tmp: str) -> None:
+    """An invalid .agent-fabric-project is a hard error in the resolver
+    (workingcopy.resolve); the hook turns it into context the session
+    reads, never a blocked start."""
+    state = os.path.join(tmp, "state")
+    wc = os.path.join(tmp, "typo")
+    git_repo(wc, "git@github.com:gzapi-org/gzapp.git")
+    with open(os.path.join(wc, ".agent-fabric-project"), "w", encoding="utf-8") as fh:
+        fh.write("gzap\n")
+    env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state}
+    proc = run_hook({"cwd": wc, "session_id": "sess-9"}, env)
+    assert proc.returncode == 0, proc.stderr
+    ctx = context_of(proc)
+    assert ".agent-fabric-project" in ctx and "'gzap'" in ctx, ctx
+    assert "project=gzapp" not in ctx, "the marker was ignored and the remote decided"
+
+
 def test_hook_never_blocks(tmp: str) -> None:
     env = {**os.environ, "AGENT_FABRIC_ROOT": os.path.join(tmp, "nowhere"),
            "AGENT_FABRIC_STATE_DIR": os.path.join(tmp, "state")}
@@ -227,6 +244,7 @@ def main() -> int:
     cases = [test_hook_records_context_not_identity, test_hook_gives_the_project_layer_from_the_working_copy,
              test_hook_says_when_the_binding_drifted_from_the_launch,
              test_hook_from_the_parent_directory_has_no_project,
+             test_hook_reports_a_bad_marker_and_still_starts,
              test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
              test_bootstrap_writes_only_the_workspace_and_home_files]
     failures = 0

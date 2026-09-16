@@ -137,6 +137,22 @@ def test_marker_file_declares_the_project(tmp: str) -> None:
     assert got["project"] == "demo" and got["project_source"] == "marker", got
 
 
+def test_a_marker_naming_an_unknown_project_is_an_error_not_a_fallthrough(tmp: str) -> None:
+    root = fabric_fixture(tmp)
+    registry = workingcopy.load_registry(os.path.join(root, "projects", "registry.json"))
+    repo = os.path.join(tmp, "bad-marker")
+    git_repo(repo, "git@example.com:org/demo.git")     # the remote alone would resolve to demo
+    for content, word in (("dmeo\n", "'dmeo'"), ("", "empty")):
+        with open(os.path.join(repo, workingcopy.MARKER), "w", encoding="utf-8") as fh:
+            fh.write(content)
+        try:
+            workingcopy.resolve(repo, registry)
+        except SystemExit as exc:
+            assert word in str(exc) and "demo" in str(exc) and workingcopy.MARKER in str(exc), str(exc)
+        else:
+            raise AssertionError(f"a marker reading {content!r} was accepted (or fell through to the remote)")
+
+
 def test_binding_round_trip_is_stamped_by_the_os(tmp: str) -> None:
     os.environ["AGENT_FABRIC_STATE_DIR"] = os.path.join(tmp, "state")
     try:
@@ -260,6 +276,7 @@ def main() -> int:
         test_renaming_the_working_copy_keeps_project_and_agent,
         test_project_is_matched_by_remote_not_by_directory_name,
         test_marker_file_declares_the_project,
+        test_a_marker_naming_an_unknown_project_is_an_error_not_a_fallthrough,
         test_binding_round_trip_is_stamped_by_the_os,
     ]
     failures = 0

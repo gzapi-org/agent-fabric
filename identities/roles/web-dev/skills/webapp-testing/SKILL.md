@@ -1,6 +1,6 @@
 ---
 name: webapp-testing
-description: Drive a running Gzapp web sub-app (admin_web, advertiser_web, operator_web, status_web) with Playwright to verify frontend behaviour a type-check and Vitest run cannot — rendered state, real interaction, console errors, screenshots. Use when a change needs seeing in a browser before it is called done, or when debugging UI behaviour that only appears against a live server.
+description: Drive a running browser sub-app of the project you are in with Playwright to verify frontend behaviour a type-check and Vitest run cannot — rendered state, real interaction, console errors, screenshots. Use when a change needs seeing in a browser before it is called done, or when debugging UI behaviour that only appears against a live server.
 license: Apache-2.0. Complete terms in LICENSE.txt.
 ---
 
@@ -12,39 +12,30 @@ license: Apache-2.0. Complete terms in LICENSE.txt.
 > `scripts/with_server.py` is **not** vendored and its server-lifecycle
 > guidance is replaced by the Makefile rules below, because this repo owns
 > server lifecycle and port allocation itself. The three `examples/` are
-> upstream's with two substitutions each: `localhost:5173` → a base port
-> plus a `make ports` pointer, and `/mnt/user-data/outputs/` → `/tmp/
+> upstream's with two substitutions each: `localhost:5173` → the port the
+> project's port table gives this clone, and `/mnt/user-data/outputs/` → `/tmp/
 > webapp-testing/` (which does not exist on these hosts), plus the
 > `os.makedirs` that path needs. The reconnaissance patterns and the
 > `networkidle` rule are upstream's, unchanged. Upstream ships no `NOTICE`
 > file, so §4(d) does not apply.
 
-## In this repo, read this first
+## In a managed project, read this first
 
-**Never let a script start a server.** The root `Makefile` owns server
-lifecycle here — one target per app, all four of them:
-
-| app | target |
-|---|---|
-| `admin_web` | `make admin-web` (see the `run-admin-web` skill) |
-| `advertiser_web` | `make advertiser-web` |
-| `operator_web` | `make operator-web` |
-| `status_web` | `make status-web` — starts **two** processes (a worker on its own port) |
-
-plus `make up` for the APIs and `make down` to stop everything. CLAUDE.md is
-explicit: one dev server per app, and never a second instance of a server
-already listening — host memory is constrained and clones run in parallel.
-Upstream's `with_server.py` exists to spawn servers, which is why it is not
-vendored. If your app has no target listed above, that is a gap to fix in the
-Makefile, not a reason to hand-roll `pnpm dev`.
+**Never let a script start a server.** The project's own tooling owns
+server lifecycle — one target per app, named in your remit for that
+project (`.agent-fabric/roles/web-dev.md`), with a target that brings
+the APIs up and one that stops everything. Never a second instance of a
+server already listening: host memory is constrained and clones run in
+parallel. Upstream's `with_server.py` exists to spawn servers, which is
+why it is not vendored. An app with no target is a gap to fix in the
+project's tooling, not a reason to hand-roll the dev server.
 
 **Never hardcode a port.** Every local port is a base plus this clone's
-`GZAPP_PORT_OFFSET` (gitignored `infra/local/.env.local`), so `5173` is
-wrong in every clone and silently wrong in most. Read the port first:
-
-```bash
-make ports          # authoritative for THIS clone
-```
+offset — a per-login value the project declares under `agent_env` in
+`projects/registry.json` and `fabric-secrets sync` exports — so the
+upstream `5173` is wrong in every clone and silently wrong in most. Read
+the port first, from the command the remit names as authoritative for
+THIS clone (a port table target), never from a file you remember.
 
 **Prefer the Playwright MCP server for interactive work.** `.mcp.json`
 registers `playwright`, and its `browser_*` tools need no Python, no
@@ -76,7 +67,7 @@ Task → Is it static HTML?
     │
     └─ No (dynamic webapp) → Is the server already running?
         ├─ No → Start it with the Makefile target for that app, then
-        │        `make ports` for its port. Do NOT script the startup.
+        │        the project's port table for its port. Do NOT script the startup.
         │
         └─ Yes → Reconnaissance-then-action:
             1. Navigate and wait for networkidle
@@ -90,9 +81,10 @@ Task → Is it static HTML?
 Servers are already running and are not this script's business:
 
 ```python
+import os
 from playwright.sync_api import sync_playwright
 
-PORT = 5174  # from `make ports` — never assume, never hardcode across clones
+PORT = int(os.environ["APP_PORT"])  # from the project's port table — never assume, never hardcode across clones
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)  # always headless

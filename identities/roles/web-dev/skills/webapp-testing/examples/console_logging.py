@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 OUT = '/tmp/webapp-testing'
 os.makedirs(OUT, exist_ok=True)  # the write at the end fails without this
 
-url = 'http://localhost:5174'  # admin_web BASE — real port is base + GZAPP_PORT_OFFSET, see `make ports`
+url = f"http://localhost:{os.environ['APP_PORT']}"  # the port the project's port table gives THIS clone — never a literal
 
 console_logs = []
 

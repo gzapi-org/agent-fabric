@@ -1,3 +1,5 @@
+import os
+
 from playwright.sync_api import sync_playwright
 
 # Example: Discovering buttons and other elements on a page
@@ -7,7 +9,7 @@ with sync_playwright() as p:
     page = browser.new_page()
 
     # Navigate to page and wait for it to fully load
-    page.goto('http://localhost:5174')  # base port — see `make ports`
+    page.goto(f"http://localhost:{os.environ['APP_PORT']}")  # the project's port table gives this clone's port
     page.wait_for_load_state('networkidle')
 
     # Discover all buttons on the page

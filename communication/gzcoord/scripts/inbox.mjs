@@ -72,9 +72,9 @@ import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recorde
 // working copy's project (whoami().project) — or from the environment
 // (CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL together). Nothing else: a
 // project with neither is NOT configured, and both entry points say so
-// and stop. Until 2026-09-16 the defaults here were gzapp's, so a working
-// copy of any other project silently joined gzapp's channel with gzapp's
-// token file — project truth in generic code (review, 2026-09-16).
+// and stop. Until 2026-09-16 the defaults here were one project's, so a
+// working copy of any other project silently joined that project's channel
+// with its token file — project truth in generic code (review, 2026-09-16).
 // token_env_file is relative to the working copy (a clone carries its
 // own token); relay_runtime_dir is relative to the WORKSPACE — the
 // projects/ directory the fabric checkout sits in — because the relay's

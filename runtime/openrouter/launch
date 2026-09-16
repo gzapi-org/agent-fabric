@@ -116,7 +116,7 @@ ALIASES="$FABRIC_ROOT/runtime/claude-code/aliases.json"
 # fence inspects must be the scopes the child loads, and the child starts
 # in $PWD: an inherited REPO_ROOT pointing at another clone let the fence
 # pass on that clone's clean .claude/ while exec'ing in this one, pinned
-# (review on gzapp PR #679, judged CONFIRMED).
+# (a review finding on a managed project's PR #679, judged CONFIRMED).
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 die() { echo "launch: $*" >&2; exit 1; }

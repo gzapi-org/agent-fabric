@@ -6,7 +6,7 @@ title set to the session.
 
 ```
 moveto architect-cto-01        # shell as that account, in ~/projects
-moveto architect-cto-01 gzapp  # …in a named clone under it instead
+moveto architect-cto-01 <clone>  # …in a named clone under it instead
 moveto --list                  # accounts that have at least one clone
 moveto <account> --list        # that account's clones
 moveto <account> --print       # resolve only — print path and title, spawn nothing
@@ -48,7 +48,7 @@ installer after any change here.
 **The destination is the workspace, not a clone.** `~/projects` is where
 `bootstrap.sh` writes the account's `CLAUDE.md` and hooks and where `claude`
 is started; the session-start hook records whichever clone the session then
-enters. Since 2026-09-14 every account's clone is `~/projects/gzapp`, so a
+enters. Every account's clones are named after their projects, so a
 clone named on the command line is the only way into one. An account with no
 `~/projects` at all is reported as not provisioned rather than dropping you
 in `$HOME`, because landing somewhere unexpected is worse than being told;

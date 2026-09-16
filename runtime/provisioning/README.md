@@ -32,15 +32,18 @@ registries, the Doppler administration, the API keys; the host half,
 two phases around the Doppler steps. The host names itself and is
 refused if it answers as anything but its registry id. The host half
 starts with a host audit: a Qubes AppVM keeps only `/home` and
-`/usr/local` across a reboot, so the rpm tools (git, gh, node, npm,
-python3, jq, gpg, podman, ImageMagick) are checked and a missing one is
+`/usr/local` across a reboot, so the rpm tools the fabric itself calls
+(git, gh, node, npm, python3, jq, gpg) are checked and a missing one is
 named with its package for the TemplateVM; doppler goes to
-`/usr/local/bin` once; the account's own tools go under its `~/.local`:
+`/usr/local/bin` once; the account's own tools go under its `~/.local`.
+What a project needs beyond that is the project's to say —
+`projects/<id>/integration/provisioning/host-check.sh`, run on the host
+for each `--project`:
 
 ```sh
 runtime/provisioning/new-agent.sh <login> <role> [--host <id>] [--project <id>]... [--dry-run]
-runtime/provisioning/new-agent.sh brand-comms-01 brand-comms --project gzapi.ge --project gzapp.decks
-runtime/provisioning/new-agent.sh web-dev-03 web-dev --host develop-02 --project gzapp   # on another host
+runtime/provisioning/new-agent.sh <login> <role> --project <id> --project <id>
+runtime/provisioning/new-agent.sh <login> <role> --host <host-id> --project <id>   # on another host
 ```
 
 Every step is `must` (a failure stops the run, named; nothing after it

@@ -18,14 +18,10 @@ schema. This is for testing the schema.
 ## Match the major version, or get a wrong answer
 
 Pin the probe to what CI and prod actually run. **Do not trust this
-file for the number — grep the two pin sites**, which have drifted before:
-
-```bash
-grep -n 'image:.*postgres' infra/local/docker-compose.yml
-grep -rn 'PostgreSqlBuilder' apps/backend_dotnet/tests/Gzapp.IntegrationTests.Common/PostgresFixture.cs
-```
-
-Both said `postgres:18-alpine` as of 2026-09-10.
+file for the number — grep the project's pin sites**, which have drifted
+before: the local compose file's `image:` line, and the integration-test
+fixture that builds the database container. Your remit for the project
+names both files; the major they agree on is the one to probe with.
 
 This is not a detail. A probe run against 16 once reported that a
 driver-keyed predicate on an operator-keyed table had **no index able to

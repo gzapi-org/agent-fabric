@@ -8,8 +8,8 @@
 #
 #   runtime/provisioning/new-agent.sh <login> <role> [--host <id>] [--project <id>]... [--claude VERSION|stable|latest] [--dry-run]
 #
-#   new-agent.sh brand-comms-01 brand-comms --project gzapi.ge --project gzapp.decks
-#   new-agent.sh web-dev-03 web-dev --host develop-02 --project gzapp
+#   new-agent.sh <login> <role> --project <id> --project <id>
+#   new-agent.sh <login> <role> --host <host-id> --project <id>      # on another host
 #
 # TWO HALVES (review, 2026-09-16). This script is the ORCHESTRATOR: it
 # runs on the coordinator's host and keeps what only the coordinator
@@ -37,11 +37,11 @@
 #      A Qubes AppVM keeps only /home and /usr/local across a reboot; a
 #      package is the TemplateVM's (dnf there, not here). So: the rpm
 #      tools the fabric and the projects use (git, gh, node, npm,
-#      python3, jq, gpg, podman, magick) are audited and a missing one is
-#      named with its package for the template; doppler goes to
-#      /usr/local/bin once (persistent), the account's own tools go under
-#      its ~/.local; gzapp's gpg wrapper in /usr/local/bin is checked and
-#      named as devex-tooling's to install when absent.   [worker: prepare]
+#      python3, jq, gpg) are audited and a missing one is named with its
+#      package for the template; doppler goes to /usr/local/bin once
+#      (persistent), the account's own tools go under its ~/.local. What
+#      a PROJECT needs of the host beyond that is the project's own
+#      integration/provisioning/host-check.sh, run in finish. [worker: prepare]
 #   1. the Linux account (useradd), home 700, the shared-cache group
 #   2. ~/.ssh ~/.claude ~/.config/gh ~/.local/{bin,share}, owned by the
 #      account; claude and ori installed AS THE ACCOUNT the way their

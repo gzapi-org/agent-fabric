@@ -476,6 +476,65 @@ def class_doc_findings(root: str) -> list[str]:
     return findings
 
 
+# Generic surfaces: what every managed project shares. A project's name
+# there is project truth in the control plane — the review of 2026-09-16
+# found one project's port variable in a role skill, its gpg wrapper in
+# the provisioner, its channel as a GZCoord default.
+GENERIC_DIRS = ("identities/roles", "runtime/provisioning", "runtime/claude-code", "runtime/hostexec",
+                "runtime/openrouter", "runtime/github", "tools/fabric", "bin", "communication/gzcoord/scripts",
+                "communication/gzcoord/skills")
+GENERIC_SKIP = ("history/", "/test_", "/tests/", "README.md")
+# The fabric's own remote is not a managed project's name.
+FABRIC_SELF = ("gzapi-org/agent-fabric",)
+
+
+def project_name_findings(root: str) -> list[str]:
+    """A managed project's id (projects/registry.json) must not appear in
+    a generic file: a role's skills, the provisioning, the harness
+    adapters, the tools, the GZCoord runtime. What a project needs said
+    goes in its own integration (projects/<id>/) or its working copy's
+    .agent-fabric/ remit. The fabric's own id and remote are exempt; so
+    are tests, READMEs and history."""
+    findings: list[str] = []
+    try:
+        ids = sorted((json.load(open(os.path.join(root, "projects", "registry.json"), encoding="utf-8")).get("projects") or {}).keys())
+    except (OSError, ValueError):
+        return findings
+    ids = [i for i in ids if i != layout.FABRIC_PROJECT_ID]
+    if not ids:
+        return findings
+    pats = []
+    for pid in ids:
+        pats.append(re.compile(r"(?<![A-Za-z0-9])" + re.escape(pid) + r"(?![A-Za-z0-9.])", re.I))
+        pats.append(re.compile(r"\b" + re.escape(re.sub(r"[^A-Za-z0-9]", "_", pid).upper()) + r"_"))
+    for rel in GENERIC_DIRS:
+        base = os.path.join(root, rel)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(d for d in dirnames if d not in ("node_modules", "__pycache__", ".git"))
+            for name in sorted(filenames):
+                full = os.path.join(dirpath, name)
+                relpath = os.path.relpath(full, root)
+                if any(x in relpath + ("/" if os.path.isdir(full) else "") for x in GENERIC_SKIP) or name.startswith("test_") or name.endswith((".png", ".jpg", ".txt", ".lock")):
+                    continue
+                try:
+                    with open(full, encoding="utf-8") as fh:
+                        for n, line in enumerate(fh, 1):
+                            probe = line
+                            for exempt in FABRIC_SELF:
+                                probe = probe.replace(exempt, "")
+                            for pat in pats:
+                                m = pat.search(probe)
+                                if m:
+                                    findings.append(f"{relpath}:{n}: names a managed project ({m.group(0)!r}) in a generic file; "
+                                                    "project truth goes in projects/<id>/ or the project's .agent-fabric/ remit")
+                                    break
+                except (OSError, UnicodeDecodeError):
+                    continue
+    return findings
+
+
 def host_registry_findings(root: str) -> list[str]:
     """runtime/hosts/registry.json: a host id is its short hostname, so ids
     are unique by construction and an ssh destination reaches one host;
@@ -694,6 +753,9 @@ def main() -> int:
 
     # --- the hosts and where each account lives -----------------------------
     findings += host_registry_findings(root)
+
+    # --- no project's name in a generic file --------------------------------
+    findings += project_name_findings(root)
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

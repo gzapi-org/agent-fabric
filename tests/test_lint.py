@@ -569,6 +569,36 @@ def case_the_host_registry_is_one_host_per_id_and_placements_are_known() -> None
         assert code == 1 and "role" in out, f"a role in a host entry passed (placement is never identity):\n{out}"
 
 
+def case_a_managed_projects_name_stays_out_of_generic_files() -> None:
+    """A project id from the registry in a role skill, the provisioning,
+    a tool or the GZCoord runtime is a finding; the fabric's own remote,
+    tests, READMEs and history are not."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        _write_license_layout(fabric, {"projects": {
+            "agent-fabric": {"license": "Apache-2.0", "remotes": ["git@github.com:gzapi-org/agent-fabric.git"]},
+            "acme.shop": {"license": "Apache-2.0", "remotes": ["git@github.com:acme/acme.shop.git"]}}}, REUSE_OK)
+        code, out = run_lint(fabric)
+        assert code == 0, f"the base was refused:\n{out}"
+        write(ident(fabric, "skills", "probe", "SKILL.md"), SKILL + "\nRead ACME_SHOP_PORT_OFFSET first.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "identities/roles/web-dev/skills/probe/SKILL.md" in out and "'ACME_SHOP_'" in out, f"a project's variable in a skill passed:\n{out}"
+        write(ident(fabric, "skills", "probe", "SKILL.md"), SKILL + "\nThe acme.shop checkout is under ~/projects.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "'acme.shop'" in out, f"a project's id in a skill passed:\n{out}"
+        write(ident(fabric, "skills", "probe", "SKILL.md"), SKILL + "\nClone gzapi-org/agent-fabric first; see the README.\n")
+        code, out = run_lint(fabric)
+        assert code == 0, f"the fabric's own remote was taken for a project:\n{out}"
+        os.makedirs(os.path.join(fabric, "runtime", "provisioning"), exist_ok=True)
+        write(os.path.join(fabric, "runtime", "provisioning", "test_x.sh"), "# acme.shop in a test is fine\n")
+        write(os.path.join(fabric, "runtime", "provisioning", "README.md"), "# acme.shop in a README is fine\n")
+        code, out = run_lint(fabric)
+        assert code == 0, f"a test or README was linted as generic code:\n{out}"
+        write(os.path.join(fabric, "runtime", "provisioning", "x.sh"), "echo acme.shop\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "runtime/provisioning/x.sh:1" in out, f"provisioning naming a project passed:\n{out}"
+
+
 def main() -> int:
     cases = [
         case_clean_base_passes,
@@ -594,6 +624,7 @@ def main() -> int:
         case_the_repository_is_one_license,
         case_the_class_list_a_reader_sees_is_the_real_one,
         case_the_host_registry_is_one_host_per_id_and_placements_are_known,
+        case_a_managed_projects_name_stays_out_of_generic_files,
     ]
     failures = 0
     for case in cases:

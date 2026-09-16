@@ -69,7 +69,9 @@ if [[ "$PHASE" == prepare ]]; then
     # ---- 0. the host ----------------------------------------------------------------
     # tool:package — what the fabric's hooks and scripts and the managed
     # projects' toolchains call; the package is the TemplateVM's (Fedora).
-    HOST_TOOLS=(git:git-core gh:gh node:nodejs npm:nodejs-npm python3:python3 jq:jq gpg:gnupg2 podman:podman magick:ImageMagick curl:curl)
+    # The fabric's own contract: what its hooks, scripts and provisioning
+    # call. A project's extra needs are its own host-check (finish, below).
+    HOST_TOOLS=(git:git-core gh:gh node:nodejs npm:nodejs-npm python3:python3 jq:jq gpg:gnupg2 curl:curl)
     missing_pkgs=()
     for spec in "${HOST_TOOLS[@]}"; do
         tool="${spec%%:*}"; pkg="${spec##*:}"
@@ -88,8 +90,6 @@ if [[ "$PHASE" == prepare ]]; then
         if (( DRY )); then say "would: install doppler to /usr/local/bin with its vendor script (curl -Ls https://cli.doppler.com/install.sh | sudo sh)"
         else curl -Ls -m 60 https://cli.doppler.com/install.sh | $SUDO -n sh >/dev/null 2>&1 && say "   doppler: installed to /usr/local/bin" || say "   warning: doppler NOT installed (vendor script failed); step 5 will stop there"; fi
     fi
-    [[ -x /usr/local/bin/ots-git-gpg-wrapper.sh ]] && say "   gpg wrapper: /usr/local/bin/ots-git-gpg-wrapper.sh" \
-        || say "   gpg wrapper: MISSING — commit signing needs it; devex-tooling installs it (gzapp infra/signing/install-shim.sh)"
 
 
     # ---- 1. the account ---------------------------------------------------------
@@ -171,6 +171,13 @@ if [[ "$PHASE" == prepare ]]; then
 fi
 
 # ---- finish: after the coordinator's Doppler steps --------------------------
+# What a project needs of the host beyond the fabric's contract is the
+# project's to say: projects/<id>/integration/provisioning/host-check.sh,
+# run here for each project, names what is missing for the person.
+for pid in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
+    hc="$ROOT/projects/$pid/integration/provisioning/host-check.sh"
+    [[ -x "$hc" ]] && { probe bash "$hc" 2>&1 | sed 's/^/   /' >&2; }
+done
 # ---- 6. the project clones, as the account, over SSH -----------------------
 for pid in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
     if $SUDO -n test -d "$HOME_DIR/projects/$pid/.git"; then say "6. ~/projects/$pid present"

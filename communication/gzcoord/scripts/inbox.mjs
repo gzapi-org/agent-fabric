@@ -448,10 +448,24 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
 export const NOTIFICATION_CAP = 2800;
 export const REPLAY_CMD = 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay';
 function cutAtLine(text, max) {
+  // Always at a line boundary: a body whose first line alone is longer
+  // than the budget keeps nothing of it (the notice says where to read).
   if (text.length <= max) return text;
   const nl = text.lastIndexOf('\n', max);
-  return text.slice(0, nl > max / 2 ? nl : max);
+  return nl < 0 ? '' : text.slice(0, nl);
 }
+const SECTION_RE = /^[A-Z][A-Z0-9-]*:$/;
+// The metadata block ends at the first section marker (SPEC §6: the
+// blank line before it MAY be absent), not at a blank line.
+export function splitMessage(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
+  const at = lines.findIndex((l, k) => k > 0 && SECTION_RE.test(l));
+  if (at < 0) return { meta: lines.join('\n').replace(/\n+$/, ''), body: '' };
+  let metaEnd = at;
+  while (metaEnd > 0 && lines[metaEnd - 1] === '') metaEnd -= 1;
+  return { meta: lines.slice(0, metaEnd).join('\n'), body: lines.slice(at).join('\n') };
+}
+const MAX_FLAG_LINES = 4;
 export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
   const mine = [], others = [];
   for (const { rec, msg, isMine } of res.classified) {
@@ -460,31 +474,39 @@ export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
   }
   const head = `gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${channel}`;
   const parts = mine.map(({ rec }) => {
-    const v = validate(rec.content, { taxonomy });
-    const flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
+    // The message has arrived: the terminal-copy width warning does not apply.
+    const v = validate(rec.content, { taxonomy, maxColumns: 0 });
+    let flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
+    if (flags.length > MAX_FLAG_LINES) flags = [...flags.slice(0, MAX_FLAG_LINES), `… and ${flags.length - MAX_FLAG_LINES} more validator lines`];
     const title = `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`;
     const text = rec.content.replace(/\n$/, '');
-    // metadata is everything up to the first blank line; the body follows
-    const blank = text.indexOf('\n\n');
-    const meta = blank >= 0 ? text.slice(0, blank) : text;
-    const body = blank >= 0 ? text.slice(blank + 2) : '';
-    return { rec, title, meta, body };
+    return { rec, title, text, ...splitMessage(text) };
   });
   const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg)}`);
-  const whole = [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta + (p.body ? '\n\n' + p.body : ''), '```']),
-                 ...(others.length ? ['', 'Not addressed to you — listed, bodies not read (SPEC §17):', ...otherLines] : [])].join('\n');
+  const othersBlock = others.length ? ['', 'Not addressed to you — listed, bodies not read (SPEC §17):', ...otherLines] : [];
+  const whole = [head, ...parts.flatMap(p => ['', p.title, '```text', p.text, '```']), ...othersBlock].join('\n');
   if (whole.length <= cap) return whole;
 
-  // Over the cap: metadata whole, bodies share what is left, others by count.
+  // Over the cap. Metadata whole and others listed if that fits; the
+  // bodies share what is left, each cut at a line and ending with the
+  // replay command for its seq. Nothing is claimed to be elsewhere.
+  const seqs = list => list.length ? `seq ${list[0].rec.seq}–${list[list.length - 1].rec.seq}` : '';
   const notice = p => `[gzcoord: body cut here to fit one notification — the whole message: ${REPLAY_CMD} ${p.rec.seq}]`;
-  const othersNote = others.length ? `\n\n${others.length} not addressed to you, not listed here (over the notification cap); their metadata lines are in the watch's output file.` : '';
-  const fixed = [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta, '', notice(p), '```'])].join('\n').length + othersNote.length;
+  const othersCount = others.length ? ['', `${others.length} not addressed to you (${seqs(others)}), not listed here: over the notification cap.`] : [];
+  const layout = othersTail => [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta, '', notice(p), '```']), ...othersTail].join('\n').length;
+  let othersTail = othersBlock;
+  if (layout(othersTail) > cap) othersTail = othersCount;
+  const fixed = layout(othersTail);
   if (fixed > cap) {
-    // Too many messages for one notification: one line each, read by seq.
+    // Too many messages for one notification: one line each, read by seq,
+    // and the tail says how many lines this listing itself dropped.
     const lines = [head, `(over the notification cap: each message by its seq, read it with: ${REPLAY_CMD} <seq>)`];
-    for (const p of parts) lines.push(`  seq ${p.rec.seq}  ${oneLine(parse(p.rec.content))}`);
-    if (others.length) lines.push(`  and ${others.length} not addressed to you`);
-    return cutAtLine(lines.join('\n'), cap);
+    const rows = parts.map(p => `  seq ${p.rec.seq}  ${oneLine(parse(p.rec.content))}`);
+    const tailFor = n => n < parts.length ? `  … and ${parts.length - n} more for you (${seqs(parts.slice(n))}), each read with --replay <seq>` : '';
+    const othersLine = others.length ? `  and ${others.length} not addressed to you (${seqs(others)})` : '';
+    let n = 0;
+    while (n < rows.length && [...lines, ...rows.slice(0, n + 1), tailFor(n + 1), othersLine].filter(Boolean).join('\n').length <= cap) n += 1;
+    return [...lines, ...rows.slice(0, n), tailFor(n), othersLine].filter(Boolean).join('\n');
   }
   let budget = cap - fixed;
   const shares = parts.map(() => 0);
@@ -495,9 +517,9 @@ export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
   for (const [i, p] of parts.entries()) {
     const cut = cutAtLine(p.body, Math.max(0, shares[i] - 2));
     const fits = cut.length >= p.body.length;
-    out.push('', p.title, '```text', p.meta + (cut ? '\n\n' + cut : ''), ...(fits ? [] : ['', notice(p)]), '```');
+    out.push('', p.title, '```text', fits ? p.text : p.meta + (cut ? '\n\n' + cut : ''), ...(fits ? [] : ['', notice(p)]), '```');
   }
-  return out.join('\n') + othersNote;
+  return [...out, ...othersTail].join('\n');
 }
 
 export async function main(argv = process.argv.slice(2)) {

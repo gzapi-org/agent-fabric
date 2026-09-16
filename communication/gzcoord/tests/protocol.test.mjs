@@ -687,7 +687,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, NOTIFICATION_CAP, REPLAY_CMD } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, splitMessage, NOTIFICATION_CAP, REPLAY_CMD } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1263,8 +1263,29 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   assert.ok(long.includes('SUBJECT: subject 05\n\nOBSERVATION:\nline 0 of a long body\n'), 'metadata whole, body from its first line');
   assert.ok(!long.includes('the ask at the very end'), 'the tail was cut');
   assert.match(long, /\nline \d+ of a long body\n\n\[gzcoord: body cut here to fit one notification — the whole message: node "\$AGENT_FABRIC_ROOT\/communication\/gzcoord\/scripts\/inbox\.mjs" --replay 405\]\n```/, 'cut at a line boundary; the replay command names the seq');
-  assert.match(long, /2 not addressed to you, not listed here \(over the notification cap\)/);
-  assert.ok(!long.includes('subject 06'), 'others are counted, not listed, when the cap is reached');
+  assert.match(long, /Not addressed to you — listed, bodies not read \(SPEC §17\):\n  01a0a9dd-e876-73e2-a329-c5b7cf28ba406  OBSERVATION  TO develop-qzapp\/z  subject 406\n  01a0a9dd-e876-73e2-a329-c5b7cf28ba407/, 'others keep their metadata lines while they fit');
+  // others fall back to a count naming their seqs only when even their lines do not fit
+  const crowded = render({ classified: [mine(405, meta('05') + '\n\n' + longBody), ...Array.from({ length: 40 }, (_, i) => other(600 + i))] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(crowded.length <= NOTIFICATION_CAP);
+  assert.match(crowded, /40 not addressed to you \(seq 600–639\), not listed here: over the notification cap\./);
+  assert.ok(!crowded.includes('output file'), 'nothing is claimed to be somewhere it is not');
+  // F1: a wide line in an arrived message is not a warning, and cannot displace the metadata
+  const wideBody = 'NOTES:\n' + Array.from({ length: 30 }, (_, i) => `line ${i} ` + 'w'.repeat(90)).join('\n') + '\n';
+  const wide = render({ classified: [mine(430, meta('30') + '\n\n' + wideBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(!wide.includes('columns wide'), 'no width warning on the receive side');
+  assert.ok(wide.includes('SUBJECT: subject 30\n\nNOTES:\nline 0 '), 'metadata whole, body from its first line');
+  // F2: no blank line after the metadata (SPEC §6 MAY), and CRLF — still split at the section marker
+  assert.deepEqual(splitMessage('A: 1\nB: 2\nNOTES:\nx\n\ny\n'), { meta: 'A: 1\nB: 2', body: 'NOTES:\nx\n\ny' });
+  assert.deepEqual(splitMessage('A: 1\r\nB: 2\r\n\r\nNOTES:\r\nx\r\n'), { meta: 'A: 1\nB: 2', body: 'NOTES:\nx' });
+  assert.deepEqual(splitMessage('A: 1\nB: 2\n'), { meta: 'A: 1\nB: 2', body: '' });
+  const noBlank = render({ classified: [mine(440, meta('40') + '\n' + longBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(noBlank.length <= NOTIFICATION_CAP);
+  assert.ok(noBlank.includes('SUBJECT: subject 40\n\nOBSERVATION:\nline 0 of a long body') && noBlank.includes('--replay 440]'), 'metadata and body head present without a blank line in the source');
+  // F5: the cut is always at a line boundary — a first line longer than the budget keeps nothing of the body
+  const oneLine = render({ classified: [mine(450, meta('50') + '\n\nNOTES:\n' + 'z'.repeat(5000) + '\n')] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(oneLine.length <= NOTIFICATION_CAP);
+  assert.ok(!oneLine.includes('zzzzzzzz'), 'no mid-line slice');
+  assert.ok(oneLine.includes('SUBJECT: subject 50\n\nNOTES:\n\n[gzcoord: body cut here'), 'metadata, the section marker that fits, then the notice');
   assert.equal(REPLAY_CMD, 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay');
   // two long messages share the budget; each carries its own replay line
   const two = render({ classified: [mine(410, meta('10') + '\n\n' + longBody), mine(411, meta('11') + '\n\n' + longBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
@@ -1277,8 +1298,14 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   assert.ok(mixed.includes('NOTES:\nwhole\n```') && !mixed.includes('--replay 420]'), 'the short message is whole and carries no cut notice');
   assert.ok(mixed.includes('--replay 421]'));
   // more messages than the metadata alone allows: one line each
-  const many = render({ classified: Array.from({ length: 30 }, (_, i) => mine(500 + i, meta(String(i).padStart(2, '0')) + '\n\n' + longBody)) }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  const many = render({ classified: Array.from({ length: 20 }, (_, i) => mine(500 + i, meta(String(i).padStart(2, '0')) + '\n\n' + longBody)) }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
   assert.ok(many.length <= NOTIFICATION_CAP);
   assert.match(many, /\(over the notification cap: each message by its seq/);
   assert.ok(many.includes('  seq 500  01a0a9dd-e876-73e2-a329-c5b7cf28ba00  OBSERVATION  TO develop-qzapp/user  subject 00'));
+  assert.ok(many.includes('  seq 519  '), 'twenty one-liners fit');
+  assert.ok(!many.includes('… and'), 'nothing was dropped from the listing');
+  // F4: when even the one-liners do not fit, the tail says how many and which seqs
+  const fifty = render({ classified: Array.from({ length: 50 }, (_, i) => mine(700 + i, meta(String(i).padStart(2, '0')) + '\n\n' + longBody)), ...[] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(fifty.length <= NOTIFICATION_CAP);
+  assert.match(fifty, /\n  … and \d+ more for you \(seq 7\d\d–749\), each read with --replay <seq>$/, `a listing that dropped lines says so: ${fifty.slice(-200)}`);
 });

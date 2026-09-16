@@ -314,7 +314,7 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
       warnings.push(`${key} has an empty value — a section marker with trailing whitespace reads as metadata`);
   // Not a grammar rule — SPEC §14 keeps carrier limits off the wire — but
   // a terminal copy re-breaks a long line, and a re-broken metadata line
-  // stops being metadata (history/telegram-transport, "Sending"). The
+  // stops being metadata (docs/HUMAN-RELAY-TRANSPORT.md, "Sending"). The
   // width is the carrier's: the bridge relay carries a line as written
   // (a 93-column line arrived whole, 2026-09-16), so send.mjs passes
   // maxColumns: 0 and the check is off on that path; the CLI keeps it for

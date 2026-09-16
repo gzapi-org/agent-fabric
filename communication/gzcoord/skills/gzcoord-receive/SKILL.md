@@ -178,9 +178,11 @@ metadata line stays, the body stops at a line boundary, and the last
 line names the replay command with the relay seq. Run it before acting
 on such a message; the body you did not see is the part that matters
 most. When several messages land at once the watch shares the space
-between them, and past what fits it lists one line per message with
-its seq. The session-start drain is not a notification and is shown
-whole.
+between them; the messages not addressed to you keep their metadata
+lines while they fit and are otherwise counted with their seq range;
+and past what fits at all it lists one line per message with its seq,
+ending with how many more there were. The session-start drain is not
+a notification and is shown whole.
 
 ## 4. After a token rotation
 

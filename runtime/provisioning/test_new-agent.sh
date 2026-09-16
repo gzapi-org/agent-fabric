@@ -15,8 +15,20 @@ bad() { FAIL=$((FAIL+1)); echo "  ✗ $1"; [[ -n "${2:-}" ]] && echo "$2" | sed 
 SANDBOX="$(mktemp -d)"; trap '[[ -n "${KEEP_SANDBOX:-}" ]] || rm -rf "$SANDBOX"' EXIT
 # A fixture fabric: the real roles and registry, a fake claude to copy from.
 FAB="$SANDBOX/fabric"; mkdir -p "$FAB/runtime/provisioning/secrets" "$FAB/identities" "$FAB/projects" "$SANDBOX/home/.local/bin"
-cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"; cp "$UNDER_TEST" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
+cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"
+cp "$UNDER_TEST" "$HERE/new-agent-worker.sh" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
+cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"
 printf '#!/bin/sh\necho fake\n' > "$SANDBOX/home/.local/bin/claude"; chmod +x "$SANDBOX/home/.local/bin/claude"
+# The host registry the orchestrator reads: this host (direct) and a far
+# one reached over a fake ssh that runs the same worker here.
+LOCAL="$(hostname -s)"; HOSTS="$SANDBOX/hosts.json"
+cat > "$HOSTS" <<EOF
+{"version": 1,
+ "hosts": {"$LOCAL": {"platform": "fedora-qubes", "ssh": null, "operator": "$(id -un)", "fabric": "$FAB"},
+           "far-host": {"platform": "debian", "ssh": "op@far.example", "operator": "op", "fabric": "$FAB"}},
+ "placement": {"placed-elsewhere": "far-host"}}
+EOF
+export AGENT_FABRIC_HOSTS_REGISTRY="$HOSTS"
 run() { HOME="$SANDBOX/home" bash "$FAB/runtime/provisioning/new-agent.sh" "$@" 2>&1; }
 
 echo "new-agent: refusals"
@@ -24,6 +36,8 @@ out="$(run 2>&1)"; [[ $? -eq 2 ]] && grep -q "^usage:" <<<"$out" && ok "no argum
 out="$(run some-login no-such-role --dry-run)"; [[ $? -eq 1 ]] && grep -q "no role 'no-such-role'" <<<"$out" && ok "an unknown role is refused before anything runs" || bad "unknown role" "$out"
 out="$(run some-login backend-dev --project not-registered --dry-run)"; [[ $? -eq 1 ]] && grep -q "not in projects/registry.json" <<<"$out" && ok "an unregistered project is refused" || bad "unregistered project" "$out"
 out="$(run some-login backend-dev --bogus --dry-run)"; [[ $? -eq 2 ]] && ok "an unknown flag is a usage error" || bad "unknown flag" "$out"
+out="$(run placed-elsewhere backend-dev --host "$LOCAL" --dry-run)"; [[ $? -eq 1 ]] && grep -q "is placed on far-host" <<<"$out" && ok "an account placed on another host is not made again here" || bad "placement not enforced" "$out"
+out="$(run some-login backend-dev --host nowhere --dry-run)"; [[ $? -eq 1 ]] && grep -q "unknown host 'nowhere'" <<<"$out" && ok "an unregistered host is refused" || bad "unknown host" "$out"
 
 echo "new-agent: the dry run names every step and touches nothing"
 out="$(run zz-fixture-login backend-dev --project gzapp --project agent-fabric --dry-run)"; rc=$?
@@ -36,6 +50,7 @@ grep -q "dry run: nothing verified" <<<"$out" && ok "…and verifies nothing" ||
 grep -q "git@github.com" <<<"$out" && ok "a project clone uses the registry's SSH remote" || bad "remote" "$out"
 ! grep -qi "copied\|copy from" <<<"$out" && ok "no binary is ever copied from another account" || bad "a copy fallback is planned" "$out"
 grep -q "^new-agent: 0\. " <<<"$out" && ok "the host audit runs first" || bad "no host audit" "$out"
+grep -q "^new-agent: host $LOCAL (this host)" <<<"$out" && grep -q "placement: add \"zz-fixture-login\"" <<<"$out" && ok "the host is named, and a missing placement is asked for" || bad "host line" "$out"
 out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok "--claude takes stable, latest or a full version" || bad "bad --claude accepted" "$out"
 out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"
 
@@ -134,10 +149,24 @@ STUB
 printf '#!/usr/bin/env bash\n[[ "$1" == ci ]] && mkdir -p node_modules; exit 0\n' > "$BIN/npm"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/gpg"
 chmod +x "$BIN"/* "$SEQ/enroll.sh"
-seq_run() { rm -f "$CALLS"; SUDO="$BIN/sudo" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" bash "$FAB/runtime/provisioning/new-agent.sh" "$@" 2>&1; }
+SSHLOG="$SEQ/ssh.log"
+# The far host is this machine behind a fake ssh, so it must answer as
+# itself: a fake hostname, first on the remote PATH, says far-host.
+mkdir -p "$SEQ/farbin"; printf '#!/usr/bin/env bash\n[[ "$1" == -s ]] && { echo far-host; exit 0; }; exec /usr/bin/hostname "$@"\n' > "$SEQ/farbin/hostname"; chmod +x "$SEQ/farbin/hostname"
+cat > "$BIN/ssh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$SSHLOG"; args=("\$@"); PATH="$SEQ/farbin:\$PATH" exec bash -c "\${args[-1]}"
+STUB
+chmod +x "$BIN/ssh"
+BACKEND=local
+seq_run() { rm -f "$CALLS"; local h=(); [[ "$BACKEND" == ssh ]] && h=(--host far-host)
+  SUDO="$BIN/sudo" SSH="$BIN/ssh" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" bash "$FAB/runtime/provisioning/new-agent.sh" "$@" "${h[@]}" 2>&1; }
 cp "$SEQ/enroll.sh" "$FAB/runtime/provisioning/secrets/enroll.sh"
 reset_seq() { rm -rf "$HOMES" "$SEQ/passwd" "$SEQ/enrolled" "$FAULT"; mkdir -p "$HOMES"; }
 
+for BACKEND in local ssh; do
+echo "new-agent: the real sequence on the $BACKEND backend"
+: > "$SSHLOG"
 reset_seq; out="$(seq_run seq-login backend-dev --project demo)"; rc=$?
 [[ $rc -eq 0 ]] && ok "the whole sequence exits 0" || bad "rc=$rc" "$out"
 H="$HOMES/seq-login"
@@ -149,6 +178,14 @@ $(cat "$CALLS")"
   && ok "the account's known_hosts carries exactly the committed fingerprints" || bad "known_hosts fingerprints differ from the committed list" "$(ssh-keygen -lf "$H/.ssh/known_hosts")"
 grep -q "chown seq-login:staff" "$CALLS" && ok "chown uses the account's primary group, not the login" || bad "chown assumed group == login" "$(grep chown "$CALLS")"
 grep -q "new-agent: done" <<<"$out" && ok "…and the person's list is printed" || bad "no closing list" "$out"
+if [[ "$BACKEND" == ssh ]]; then
+  grep -q "new-agent-worker.sh host-check seq-login" "$SSHLOG" && grep -q "new-agent-worker.sh prepare seq-login backend-dev" "$SSHLOG" && grep -q "new-agent-worker.sh finish seq-login backend-dev --clone demo=" "$SSHLOG" \
+    && ok "ssh: host-check, prepare and finish each went to the far host's worker" || bad "ssh phases" "$(cat "$SSHLOG")"
+  grep -q "^new-agent: host far-host (over ssh)" <<<"$out" && ok "…and the run says so" || bad "no ssh host line" "$out"
+  ! grep -q "enroll" "$SSHLOG" && ok "…while enrolment stayed on the coordinator" || bad "enroll went over ssh" "$(cat "$SSHLOG")"
+else
+  [[ ! -s "$SSHLOG" ]] && ok "local: ssh never called" || bad "ssh called on the local backend" "$(cat "$SSHLOG")"
+fi
 out="$(seq_run seq-login backend-dev --project demo)"
 grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude 9.9.9 present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" \
   && ok "a second run skips every step already true" || bad "not idempotent" "$out"
@@ -171,6 +208,7 @@ for fault in useradd "git" "enroll seq-login" "enroll fill-from" curl; do
   rm -f "$FAULT"; out="$(seq_run seq-login backend-dev --project demo)"; rc=$?
   [[ $rc -eq 0 ]] && [[ -d "$H/projects/demo/node_modules" ]] && ok "…and the re-run after '$fault' converges" || bad "re-run after '$fault' did not converge (rc=$rc)" "$out
 $(cat "$CALLS")"
+done
 done
 
 echo

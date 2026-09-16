@@ -22,21 +22,31 @@ directory it stands in identifies context, never identity.
 
 ## The steps, per account
 
-**One command does all of it** (fabric-coordinator, from its own login;
-the account steps go through `sudo`, the Doppler steps use the
-coordinator's CLI token). It starts with a host audit: a Qubes AppVM
-keeps only `/home` and `/usr/local` across a reboot, so the rpm tools
-(git, gh, node, npm, python3, jq, gpg, podman, ImageMagick) are checked
-and a missing one is named with its package for the TemplateVM; doppler
-goes to `/usr/local/bin` once; the account's own tools go under its
-`~/.local`:
+**One command does all of it** (fabric-coordinator, from its own login).
+It has two halves: the orchestrator, `new-agent.sh`, runs where the
+coordinator is and keeps what only the coordinator holds — the
+registries, the Doppler administration, the API keys; the host half,
+`new-agent-worker.sh`, runs on the host the account lives on
+(`runtime/hosts/registry.json`; `--host` places a new account) through
+`runtime/hostexec/` — directly on this host, over ssh to any other — in
+two phases around the Doppler steps. The host names itself and is
+refused if it answers as anything but its registry id. The host half
+starts with a host audit: a Qubes AppVM keeps only `/home` and
+`/usr/local` across a reboot, so the rpm tools (git, gh, node, npm,
+python3, jq, gpg, podman, ImageMagick) are checked and a missing one is
+named with its package for the TemplateVM; doppler goes to
+`/usr/local/bin` once; the account's own tools go under its `~/.local`:
 
 ```sh
-runtime/provisioning/new-agent.sh <login> <role> [--project <id>]... [--dry-run]
+runtime/provisioning/new-agent.sh <login> <role> [--host <id>] [--project <id>]... [--dry-run]
 runtime/provisioning/new-agent.sh brand-comms-01 brand-comms --project gzapi.ge --project gzapp.decks
+runtime/provisioning/new-agent.sh web-dev-03 web-dev --host develop-02 --project gzapp   # on another host
 ```
 
-Idempotent — every step is checked before it is done, so it is also how
+Every step is `must` (a failure stops the run, named; nothing after it
+runs), `probe` (a question) or `best_effort` (one warning) —
+`test_new-agent.sh` runs the whole sequence against fakes on both
+backends and injects a failure at each `must`. Idempotent — every step is checked before it is done, so it is also how
 an account that came out short is completed. In order: the Linux account
 (home 700, the shared-cache group); the home skeleton, then `claude` and `ori`
 installed as the account the way their vendors say (`claude.ai/install.sh`

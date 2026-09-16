@@ -54,13 +54,13 @@ def main() -> int:
         identity = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(identity)
         ctx = identity.resolve_context(cwd=cwd or os.getcwd(), session=session)
-        binding = identity.read_binding(ctx["agent"])
-        binding.update({
+        # Under the agent lock: another hook (a second session of this
+        # login) or a rebind from the shell may be writing the same file.
+        binding = identity.update_binding(lambda b: {**b,
             "working_copy": ctx["working_copy"],
-            "project": ctx["project"] if ctx["project_source"] == "working-copy" else binding.get("project"),
-            "session": session or binding.get("session"),
-        })
-        identity.write_binding(binding, ctx["agent"])
+            "project": ctx["project"] if ctx["project_source"] == "working-copy" else b.get("project"),
+            "session": session or b.get("session"),
+        }, ctx["agent"])
         role = binding.get("role")
         lines = [f"agent-fabric: agent={ctx['agent']} host={ctx['host']} "
                  f"role={role or '(none — bin/fabric-role bind <role>)'} "
@@ -76,8 +76,13 @@ def main() -> int:
         lines += project_layer(role, ctx["project"], ctx["working_copy"])
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": "\n".join(lines)}}))
-    except Exception as exc:  # noqa: BLE001 — a hook must never block a session
-        print(f"agent-fabric session-start: {exc}", file=sys.stderr)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — a hook must never block a session
+        # identity.py refuses with SystemExit (a binding from another host or
+        # agent); the session still starts, and is told what was refused.
+        msg = str(exc.code if isinstance(exc, SystemExit) else exc)
+        print(f"agent-fabric session-start: {msg}", file=sys.stderr)
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": f"agent-fabric: session-start could not resolve this session's binding — {msg}"}}))
     return 0
 
 

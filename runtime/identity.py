@@ -24,11 +24,24 @@ Every other tool in agent-fabric — the role activator, the launchers, the
 harvesters, the GZCoord runtime, the Claude Code hooks — defers to this
 module (or to `bin/fabric-whoami`, which execs it). None of them derives
 the agent name on its own.
+
+The state layer (2026-09-16, docs/state-layer.md). Every file under
+`agents/<login>/` is written by this module and by nothing else:
+`atomic_write` (a temporary beside the target, fsync, os.replace — the old
+file stays whole through a crash or a full disk), `agent_lock` (a
+re-entrant flock on `agents/<login>/.lock`; every read-modify-write of
+per-agent state holds it, across processes), `update_binding` and
+`append_history` on top of both. A binding is per (agent, host): one
+written on another machine is refused by `read_binding` the way another
+agent's is, so a shared home never carries a role from one host to the
+next.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import fcntl
 import importlib.util
 import json
 import os
@@ -77,12 +90,85 @@ def binding_path(agent: str | None = None) -> str:
     return os.path.join(agent_state_dir(agent), "binding.json")
 
 
+# ---------------------------------------------------------------------------
+# The state layer's two primitives. Every file under the agent's state
+# directory — and every file a fabric tool rewrites in an account's home
+# (transcripts, ~/.claude.json, history) — goes through these, so a crash,
+# a full disk or a kill leaves the previous file whole, and two processes
+# never interleave a read-modify-write (review, 2026-09-16: the rename tool
+# rewrote JSON in place and bypassed write_binding; nothing serialized the
+# binding, the history or the model profile).
+
+def atomic_write(path: str, data: "bytes | str", mode: int | None = None) -> None:
+    """Write `data` to `path` all-or-nothing: a temporary file beside it,
+    flushed and fsynced, then os.replace — the reader sees the old file
+    or the new one, never a torn one. The temporary is removed on any
+    failure. `mode` sets the permission bits (0o600 for a private file);
+    otherwise the existing file's bits are kept, or the umask applies."""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data.encode("utf-8") if isinstance(data, str) else data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
+        elif os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+_LOCKS: dict[str, list] = {}   # agent -> [fd, depth]: re-entrant within one process
+
+
+@contextlib.contextmanager
+def agent_lock(agent: str | None = None, *, shared: bool = False):
+    """Serialize the mutations of one agent's runtime state — the binding,
+    the role history, the model profile, a role activation — across
+    processes: an exclusive flock on agents/<login>/.lock, held for the
+    block. Re-entrant within a process (an activation appends history
+    under the lock it already holds): flock conflicts with itself across
+    two descriptors, so the lock is taken once and nested uses count. A
+    reader that wants a consistent snapshot may take it `shared`."""
+    agent = agent or current_agent()
+    held = _LOCKS.get(agent)
+    if held:
+        held[1] += 1
+        try:
+            yield
+        finally:
+            held[1] -= 1
+        return
+    directory = agent_state_dir(agent)
+    os.makedirs(directory, exist_ok=True)
+    fd = os.open(os.path.join(directory, ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    _LOCKS[agent] = [fd, 1]
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        yield
+    finally:
+        _LOCKS.pop(agent, None)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 def read_binding(agent: str | None = None) -> dict:
     """The agent's runtime binding, or {} when none has been written.
 
     A binding that names a different agent than the directory it sits in
     is refused rather than trusted: the directory is keyed by the login,
-    and a record disagreeing with it is a copied file, not a binding.
+    and a record disagreeing with it is a copied file, not a binding. So is
+    one written on another host: the login is the identity, but the state
+    is a runtime instance on one machine — a home directory shared or
+    synced between hosts would otherwise let two instances of one login
+    write over each other's binding (review, 2026-09-16). A move between
+    hosts is a rebind there.
     """
     agent = agent or current_agent()
     path = binding_path(agent)
@@ -98,25 +184,56 @@ def read_binding(agent: str | None = None) -> dict:
     if data.get("agent") not in (None, agent):
         raise SystemExit(f"identity: {path} names agent {data.get('agent')!r}, "
                          f"but this is {agent!r}'s state directory")
+    host = current_host()
+    if data.get("host") not in (None, host):
+        raise SystemExit(f"identity: {path} was written on host {data.get('host')!r}, but this is {host!r}: "
+                         "the state directory is shared between hosts. Bind here (bin/fabric-role bind <role>) "
+                         "rather than trust another machine's binding.")
     return data
 
 
 def write_binding(binding: dict, agent: str | None = None) -> str:
     """Write the agent's binding atomically. `agent` and `host` are stamped
-    from the OS, never taken from the caller's dictionary."""
+    from the OS, never taken from the caller's dictionary. Callers that
+    read first and write back go through update_binding, which holds the
+    agent lock across both."""
     agent = agent or current_agent()
     record = dict(binding)
     record["agent"] = agent
     record["host"] = current_host()
     record["updated_at"] = now_iso()
-    directory = agent_state_dir(agent)
-    os.makedirs(directory, exist_ok=True)
     path = binding_path(agent)
-    fd, tmp = tempfile.mkstemp(prefix=".binding-", dir=directory)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(record, fh, ensure_ascii=False, indent=2, sort_keys=True)
-        fh.write("\n")
-    os.replace(tmp, path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    atomic_write(path, json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def update_binding(mutate, agent: str | None = None) -> dict:
+    """Read-modify-write under the agent lock: `mutate(binding)` returns
+    the new record (or edits it in place and returns None). Two processes
+    updating at once — a session-start hook and a rebind, two hooks of
+    two sessions of one login — serialize here instead of the last writer
+    silently winning."""
+    agent = agent or current_agent()
+    with agent_lock(agent):
+        binding = read_binding(agent)
+        new = mutate(binding)
+        if new is None:
+            new = binding
+        write_binding(new, agent)
+        return new
+
+
+def append_history(record: dict, agent: str | None = None) -> str:
+    """One JSON line appended to agents/<login>/role-history.jsonl, under
+    the agent lock so two writers never interleave a line."""
+    agent = agent or current_agent()
+    path = os.path.join(agent_state_dir(agent), "role-history.jsonl")
+    with agent_lock(agent):
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
     return path
 
 

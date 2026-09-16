@@ -173,8 +173,85 @@ def test_launch_role_drift_is_one_sentence_or_none() -> None:
     assert d and "binding now (none)" in d, d
 
 
+def test_atomic_write_leaves_the_old_file_whole_on_failure(tmp: str) -> None:
+    """A write that dies after the temporary is opened leaves the target
+    untouched and no temporary behind; a completed write is the new bytes,
+    with the old file's mode kept, or the mode asked for."""
+    path = os.path.join(tmp, "aw", "state.json")
+    os.makedirs(os.path.dirname(path))
+    identity.atomic_write(path, '{"v": 1}\n', mode=0o600)
+    assert open(path).read() == '{"v": 1}\n' and (os.stat(path).st_mode & 0o777) == 0o600
+    class Boom(Exception): pass
+    real_replace = identity.os.replace
+    identity.os.replace = lambda *a, **k: (_ for _ in ()).throw(Boom())
+    try:
+        try:
+            identity.atomic_write(path, '{"v": 2}\n')
+        except Boom:
+            pass
+        else:
+            raise AssertionError("the injected failure did not propagate")
+    finally:
+        identity.os.replace = real_replace
+    assert open(path).read() == '{"v": 1}\n', "the target was torn or changed by a failed write"
+    assert not [n for n in os.listdir(os.path.dirname(path)) if n.startswith(".tmp-")], "a temporary was left behind"
+    identity.atomic_write(path, "v3\n")
+    assert open(path).read() == "v3\n" and (os.stat(path).st_mode & 0o777) == 0o600, "the mode was not kept"
+
+
+def test_agent_state_mutations_serialize_across_processes(tmp: str) -> None:
+    """Two processes doing read-modify-write on the binding under
+    update_binding never lose an increment; history lines never interleave.
+    (Without the lock, N concurrent +1s on one counter end below N.)"""
+    state = os.path.join(tmp, "state-lock")
+    code = f"""
+import importlib.util, os, sys
+os.environ["AGENT_FABRIC_STATE_DIR"] = {state!r}
+spec = importlib.util.spec_from_file_location("i", {os.path.join(ROOT, "runtime", "identity.py")!r})
+i = importlib.util.module_from_spec(spec); spec.loader.exec_module(i)
+import time
+for _ in range(25):
+    def bump(b):
+        n = b.get("counter", 0); time.sleep(0.001); return {{**b, "counter": n + 1}}
+    i.update_binding(bump)
+    i.append_history({{"pid": os.getpid()}})
+"""
+    procs = [subprocess.Popen([sys.executable, "-c", code]) for _ in range(4)]
+    assert all(p.wait(timeout=120) == 0 for p in procs)
+    os.environ["AGENT_FABRIC_STATE_DIR"] = state
+    try:
+        assert identity.read_binding()["counter"] == 100, identity.read_binding()
+        lines = open(os.path.join(identity.agent_state_dir(), "role-history.jsonl")).read().splitlines()
+        assert len(lines) == 100 and all(json.loads(l)["pid"] for l in lines), "history lines interleaved or lost"
+    finally:
+        del os.environ["AGENT_FABRIC_STATE_DIR"]
+
+
+def test_a_binding_from_another_host_is_refused(tmp: str) -> None:
+    """The login is the identity; the state is a runtime instance on one
+    machine. A binding stamped by another host — a shared or synced home —
+    is refused with the rebind command, never trusted."""
+    os.environ["AGENT_FABRIC_STATE_DIR"] = os.path.join(tmp, "state-host")
+    try:
+        path = identity.write_binding({"role": "db-admin"})
+        assert identity.read_binding()["role"] == "db-admin"
+        d = json.load(open(path)); d["host"] = "another-machine"
+        json.dump(d, open(path, "w"))
+        try:
+            identity.read_binding()
+        except SystemExit as exc:
+            assert "written on host 'another-machine'" in str(exc.code) and "bin/fabric-role bind" in str(exc.code), exc.code
+        else:
+            raise AssertionError("a binding from another host was accepted")
+    finally:
+        del os.environ["AGENT_FABRIC_STATE_DIR"]
+
+
 def main() -> int:
     cases = [
+        test_atomic_write_leaves_the_old_file_whole_on_failure,
+        test_agent_state_mutations_serialize_across_processes,
+        test_a_binding_from_another_host_is_refused,
         test_launch_role_drift_is_one_sentence_or_none,
         test_agent_is_the_effective_login,
         test_agent_is_computed_from_the_uid_not_from_names,

@@ -12,7 +12,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ✗ $1"; [[ -n "${2:-}" ]] && echo "$2" | sed 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 STATE="$SANDBOX/state"; LOGIN="$(id -un)"
 mkdir -p "$STATE/agents/$LOGIN"
-printf '{"agent":"%s","host":"h","role":"db-admin","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"db-admin","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 printf 'prompt text\n' > "$STATE/agents/$LOGIN/launch-prompt.md"
 DIGEST="sha256:$(sha256sum "$STATE/agents/$LOGIN/launch-prompt.md" | cut -d' ' -f1)"
 

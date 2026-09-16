@@ -141,9 +141,8 @@ def adapted_items(workspace: str, installed: list[dict]) -> list[dict]:
 
 
 def append_history(state_dir: str, record: dict) -> None:
-    os.makedirs(state_dir, exist_ok=True)
-    with open(os.path.join(state_dir, "role-history.jsonl"), "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    # The agent's history file, appended under the agent lock (identity.py).
+    identity.append_history(record, os.path.basename(state_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +223,11 @@ def refuse_inside_session(what: str) -> int:
 def cmd_deactivate(ctx: dict) -> int:
     if refuse_inside_session("drop the role"):
         return 1
+    with identity.agent_lock(ctx["agent"]):
+        return _deactivate_locked(ctx)
+
+
+def _deactivate_locked(ctx: dict) -> int:
     binding = identity.read_binding(ctx["agent"])
     workspace = binding.get("workspace")
     if not binding.get("role"):
@@ -256,6 +260,20 @@ def cmd_deactivate(ctx: dict) -> int:
 def cmd_activate(ctx: dict, role: str, workspace: str, force: bool, project: str | None) -> int:
     if refuse_inside_session("bind a role"):
         return 1
+    role_dir = layout.role_dir(role)
+    if not os.path.isfile(os.path.join(role_dir, "charter.md")):
+        print(f"role: no role '{role}' under {layout.roles_dir()}", file=sys.stderr)
+        available = layout.list_roles()
+        if available:
+            print("available roles: " + ", ".join(available), file=sys.stderr)
+        return 2
+    # Everything from the first read of the binding to its write happens
+    # under the agent lock: a concurrent activation, hook or rebind waits.
+    with identity.agent_lock(ctx["agent"]):
+        return _activate_locked(ctx, role, workspace, force, project)
+
+
+def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project: str | None) -> int:
     role_dir = layout.role_dir(role)
     if not os.path.isfile(os.path.join(role_dir, "charter.md")):
         print(f"role: no role '{role}' under {layout.roles_dir()}", file=sys.stderr)

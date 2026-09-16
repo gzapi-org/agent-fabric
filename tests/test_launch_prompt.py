@@ -16,6 +16,8 @@ import subprocess
 import sys
 import tempfile
 
+import socket
+HOST = socket.gethostname().split('.')[0]
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LOGIN = os.environ.get("USER") or "user"
 
@@ -51,7 +53,7 @@ class Fixture:
         # login (identity.read_binding refuses another agent's record).
         d = os.path.join(self.state, "agents", LOGIN)
         os.makedirs(d, exist_ok=True)
-        rec = {"agent": LOGIN, "host": "h", "updated_at": "2026-09-15T00:00:00Z"}
+        rec = {"agent": LOGIN, "host": HOST, "updated_at": "2026-09-15T00:00:00Z"}
         if role:
             rec["role"] = role
         write(os.path.join(d, "binding.json"), json.dumps(rec))

@@ -61,7 +61,7 @@ mkfabric() {
     printf -- '---\nrole: backend-dev\nclass: charter\ndescription: "x"\ntier: 1\ndistilled_at: 2026-09-15\n---\n\n# backend-dev — charter\n\nFIXTURE-CHARTER-LINE: the backend that owns meaning.\n' > "$FABRIC/identities/roles/backend-dev/charter.md"
     cp "$REAL_ROOT/projects/registry.json" "$FABRIC/projects/"
     mkdir -p "$STATE/agents/$LOGIN"
-    printf '{"agent":"%s","host":"testhost","role":"backend-dev","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+    printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
     mkdir -p "$SANDBOX/repo"; git init -q "$SANDBOX/repo"
 }
 # profile defaults '<json>'  |  profile roles <role> '<json>'  |  profile agents <login> '<json>'
@@ -128,7 +128,7 @@ echo "launch: the refusals"
 mkfabric; rm "$STATE/agents/$LOGIN/binding.json"
 out="$(run --print 2>&1)"; rc=$?
 [[ $rc -eq 1 ]] && grep -q "no active role binding" <<<"$out" && grep -q "bin/fabric-role bind" <<<"$out" && ok "no binding: refused, names bin/fabric-role" || bad "ran without a role" "$out"
-mkfabric; printf '{"agent":"%s","host":"h","role":null,"updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+mkfabric; printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":null,"updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 run_err --print; [[ $? -eq 1 ]] && ok "binding with no role: refused" || bad "ran with a null role"
 mkfabric; rm "$FABRIC/routing/capabilities.json"
 run_err --print; [[ $? -eq 1 ]] && ok "no capabilities.json: refused" || bad "ran without the routing files"
@@ -335,7 +335,7 @@ echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project
 # (announce sends nothing without one); NO_ANNOUNCE lifted for these cases.
 mkfabric
-printf '{"agent":"%s","host":"testhost","role":"backend-dev","project":"gzapp","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","project":"gzapp","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 cat > "$FABRIC/tools/fabric/announce.py" <<'STUB'
 import os, sys, time
 with open(os.environ["ANNOUNCE_LOG"], "a") as fh:

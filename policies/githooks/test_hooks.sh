@@ -16,8 +16,8 @@ LOGIN="$(id -un)"
 
 bind() {  # $1 = role or "" for none
   mkdir -p "$TMP/state/agents/$LOGIN"
-  printf '{"agent":"%s","host":"h","role":%s,"project":"demo","working_copy":null,"updated_at":"x"}\n' \
-    "$LOGIN" "$( [[ -n "$1" ]] && printf '"%s"' "$1" || printf null )" > "$TMP/state/agents/$LOGIN/binding.json"
+  printf '{"agent":"%s","host":"%s","role":%s,"project":"demo","working_copy":null,"updated_at":"x"}\n' \
+    "$LOGIN" "$(hostname -s)" "$( [[ -n "$1" ]] && printf '"%s"' "$1" || printf null )" > "$TMP/state/agents/$LOGIN/binding.json"
 }
 new_repo() {
   rm -rf "$TMP/repo"; mkdir -p "$TMP/repo/.agent-fabric/memory/backend-dev" "$TMP/repo/src"

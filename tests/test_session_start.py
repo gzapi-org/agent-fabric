@@ -13,6 +13,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+import socket
+HOST = socket.gethostname().split('.')[0]
 ROOT = os.path.dirname(HERE)
 HOOK = os.path.join(ROOT, "runtime", "claude-code", "hooks", "session-start.sh")
 BOOTSTRAP = os.path.join(ROOT, "runtime", "claude-code", "bootstrap.sh")
@@ -49,7 +51,7 @@ def test_hook_records_context_not_identity(tmp: str) -> None:
     # A pre-existing binding with a role: the hook must keep it.
     os.makedirs(os.path.join(state, "agents", id_un()))
     with open(os.path.join(state, "agents", id_un(), "binding.json"), "w", encoding="utf-8") as fh:
-        json.dump({"agent": id_un(), "host": "h", "role": "architect-cto", "updated_at": "x"}, fh)
+        json.dump({"agent": id_un(), "host": HOST, "role": "architect-cto", "updated_at": "x"}, fh)
     proc = run_hook({"cwd": wc, "session_id": "sess-123"}, env)
     assert proc.returncode == 0, proc.stderr
     ctx = context_of(proc)
@@ -70,7 +72,7 @@ def test_hook_gives_the_project_layer_from_the_working_copy(tmp: str) -> None:
     git_repo(wc, "git@github.com:gzapi-org/gzapp.git")
     os.makedirs(os.path.join(state, "agents", id_un()))
     with open(os.path.join(state, "agents", id_un(), "binding.json"), "w", encoding="utf-8") as fh:
-        json.dump({"agent": id_un(), "host": "h", "role": "db-admin", "updated_at": "x"}, fh)
+        json.dump({"agent": id_un(), "host": HOST, "role": "db-admin", "updated_at": "x"}, fh)
     env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state}
     ctx = context_of(run_hook({"cwd": wc}, env))
     assert "has no remit for db-admin" in ctx and "no distilled knowledge for db-admin" in ctx, ctx
@@ -96,7 +98,7 @@ def test_hook_says_when_the_binding_drifted_from_the_launch(tmp: str) -> None:
     parent = os.path.join(tmp, "projects"); os.makedirs(parent)
     os.makedirs(os.path.join(state, "agents", id_un()))
     with open(os.path.join(state, "agents", id_un(), "binding.json"), "w", encoding="utf-8") as fh:
-        json.dump({"agent": id_un(), "host": "h", "role": "db-admin", "updated_at": "x"}, fh)
+        json.dump({"agent": id_un(), "host": HOST, "role": "db-admin", "updated_at": "x"}, fh)
     env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state, "AGENT_FABRIC_LAUNCH_ROLE": "backend-dev"}
     proc = run_hook({"cwd": parent}, env)
     assert proc.returncode == 0, proc.stderr

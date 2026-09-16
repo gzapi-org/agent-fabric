@@ -85,18 +85,31 @@
 # and another issued; an OpenRouter key minted before a failed Doppler
 # write is deleted again. OPENROUTER_API_BASE points the keys API at a
 # test server.
+#
+# WHERE IT RUNS (review, 2026-09-16). This script is the coordinator's:
+# Doppler, the service tokens and the API keys never leave it. Everything
+# that touches an account's host — its home, its ~/.doppler, the sync,
+# the retirement of old sources — goes through runtime/hostexec/hostexec
+# to enroll-worker.sh on the host the account is placed on
+# (runtime/hosts/registry.json; --host <id> for a login not placed yet),
+# directly on this host or over ssh. AGENT_HOST is what that host says of
+# itself, never what this one assumes.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
 PROJECT="${AGENT_FABRIC_SECRETS_PROJECT:-agent-fabric}"
-HOST="${AGENT_FABRIC_HOST:-$(hostname -s)}"
+HOSTS="${AGENT_FABRIC_HOSTS_REGISTRY:-$ROOT/runtime/hosts/registry.json}"
+HX="$ROOT/runtime/hostexec/hostexec"
 ENVIRONMENT="${AGENT_FABRIC_SECRETS_ENVIRONMENT:-agents}"
 DOPPLER_BIN="${DOPPLER_BIN:-/usr/local/bin/doppler}"
 TEMPLATE="${AGENT_FABRIC_SECRETS_TEMPLATE:-$HOME/.config/agent-fabric/identity-template.env}"
 SUDO="${SUDO:-sudo}"
 
-DRY=0; REMIGRATE=0; MODE=enrol; LOGINS=()
-for a in "$@"; do
+DRY=0; REMIGRATE=0; MODE=enrol; LOGINS=(); HOST_FLAG=""
+while (( $# )); do
+  a="$1"; shift
   case "$a" in
+    --host) HOST_FLAG="$1"; shift; continue ;;
+    --host=*) HOST_FLAG="${a#--host=}"; continue ;;
     --dry-run) DRY=1 ;;
     --remigrate) REMIGRATE=1 ;;
     --all) MODE=all ;;
@@ -115,30 +128,40 @@ done
 say() { printf 'enroll: %s\n' "$*" >&2; }
 die() { printf 'enroll: %s\n' "$*" >&2; exit 1; }
 run() { if (( DRY )); then say "would: $*"; else "$@"; fi; }
-# As the account, from its home (the coordinator's cwd is not readable to
-# it, and git stats the cwd even for --global). The coordinator's own
-# login runs directly — its gh credential sits in the session keyring,
-# which a sudo'd shell cannot open.
+# The host an account lives on: --host, else its placement in the
+# registry, else this host. The coordinator's own login is always here.
+host_of() {
+  local login="$1"
+  if [[ "$login" == "$(id -un)" ]]; then echo "$LOCAL_HOST"; return; fi
+  if [[ -n "$HOST_FLAG" ]]; then echo "$HOST_FLAG"; return; fi
+  local placed; placed="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print((r.get("placement") or {}).get(sys.argv[2], ""))' "$HOSTS" "$login")"
+  echo "${placed:-$LOCAL_HOST}"
+}
+LOCAL_HOST="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(next((h for h,e in (r.get("hosts") or {}).items() if e.get("ssh") is None), ""))' "$HOSTS")"
+[[ -n "$LOCAL_HOST" ]] || die "runtime/hosts/registry.json names no local host (ssh null)"
+# As the account, on its host, from its home (the coordinator's cwd is not
+# readable to it, and git stats the cwd even for --global). The
+# coordinator's own login runs directly — its gh credential sits in the
+# session keyring, which a sudo'd shell cannot open. stdin flows through:
+# a token piped in is never an argument.
 as_login() {
   local login="$1"; shift
-  if [[ "$login" == "$(id -un)" ]]; then "$@"; return; fi
-  $SUDO -u "$login" -H env -i HOME="$(home_of "$login")" PATH="/usr/local/bin:/usr/bin:/bin" \
-    bash -c 'cd "$HOME" && exec "$@"' -- "$@"
+  if [[ "$login" == "$(id -un)" ]]; then "$ROOT/runtime/hostexec/worker" -- "$@"; return; fi
+  "$HX" "$(host_of "$login")" --as "$login" -- "$@"
 }
-home_of() { getent passwd "$1" | cut -d: -f6; }
-# The account's own checkout of the fabric: the coordinator's is not
-# readable to it.
+# As the host's operator (sudo there), for what the account cannot do to itself.
+as_operator() { local login="$1"; shift; "$HX" "$(host_of "$login")" -- "$@"; }
+# The account's own checkout of the fabric, relative to ITS home (the
+# worker starts there): the coordinator's is not readable to it.
+FABRIC_SECRETS_REL="projects/agent-fabric/runtime/provisioning/secrets/fabric-secrets"
 fabric_secrets_of() {
-  if [[ "$1" == "$(id -un)" ]]; then echo "$ROOT/runtime/provisioning/secrets/fabric-secrets"
-  else echo "$(home_of "$1")/projects/agent-fabric/runtime/provisioning/secrets/fabric-secrets"; fi
+  if [[ "$1" == "$(id -un)" ]]; then echo "$ROOT/runtime/provisioning/secrets/fabric-secrets"; else echo "$FABRIC_SECRETS_REL"; fi
 }
+ENROLL_WORKER="@fabric/runtime/provisioning/secrets/enroll-worker.sh"
 
 all_logins() {
-  local h
-  # Homes are not readable across accounts; ask root.
-  for h in /home/*; do
-    $SUDO test -d "$h/projects/agent-fabric" && basename "$h"
-  done
+  # The accounts the fabric knows: the registry's placements, whichever host.
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("\n".join(sorted((r.get("placement") or {}))))' "$HOSTS"
 }
 
 # ---- 1. the CLI, once -----------------------------------------------------
@@ -187,52 +210,13 @@ record_config() {  # tell the account which config is its own
 # Gathers as the account; writes NAME=value lines into $out (0600, owned by
 # root). Values never pass through this shell's stdout.
 gather() {
-  local login="$1" out="$2" home; home="$(home_of "$login")"
-  local relay_dir="$home/projects/.gzcoord"
+  local login="$1" out="$2"
   # The template (git identity strings) is the coordinator's file; its
-  # lines travel to the account's python as arguments, never as a path.
+  # lines travel to the account's worker as arguments, never as a path.
+  # AGENT_HOST comes back from the worker: the host names itself.
   local -a tpl=()
   [[ -r "$TEMPLATE" ]] && mapfile -t tpl < <(grep -E '^[A-Z_]+=' "$TEMPLATE")
-  as_login "$login" python3 - "$home" "$relay_dir" "$login" "$HOST" "${tpl[@]}" > "$out" <<'PY'
-import glob, json, os, re, shlex, subprocess, sys
-home, relay_dir, login, host = sys.argv[1:5]
-tpl = dict(a.split("=", 1) for a in sys.argv[5:])
-vals = {"AGENT_LOGIN": login, "AGENT_HOST": host}
-# OPENROUTER_API_KEY: the .bashrc export line, else the secrets.env of an earlier sync
-for f in (os.path.join(home, ".bashrc"), os.path.join(home, ".config", "agent-fabric", "secrets.env")):
-    try:
-        for line in open(f, encoding="utf-8"):
-            m = re.match(r'^\s*export\s+OPENROUTER_API_KEY=(.*?)\s*$', line)
-            if m and "OPENROUTER_API_KEY" not in vals:
-                vals["OPENROUTER_API_KEY"] = shlex.split(m.group(1))[0]
-    except (FileNotFoundError, IndexError, ValueError): pass
-clones = [d for d in glob.glob(os.path.join(home, "projects", "*", "")) if not d.rstrip("/").endswith("/agent-fabric")]
-clone = clones[0] if clones else ""
-# GH_TOKEN from gh
-r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
-if r.returncode == 0 and r.stdout.strip(): vals["GH_TOKEN"] = r.stdout.strip()
-# the bridge token: the clone's settings.local.json, else the relay host's token file
-tok = None
-if clone:
-    try: tok = json.load(open(os.path.join(clone, ".claude", "settings.local.json"))).get("env", {}).get("CLAUDE_BRIDGE_AUTH_TOKEN")
-    except (OSError, ValueError): pass
-if not tok:
-    try: tok = open(os.path.join(relay_dir, "bridge-token")).read().strip()
-    except OSError: pass
-if tok: vals["CLAUDE_BRIDGE_AUTH_TOKEN"] = tok
-# git identity + signing: strings; the template fills what the account lacks
-git = {"GIT_USER_NAME": "user.name", "GIT_USER_EMAIL": "user.email", "GIT_SIGNING_KEY": "user.signingkey", "GIT_GPG_PROGRAM": "gpg.program"}
-for name, key in git.items():
-    r = subprocess.run(["git", "config", "--global", "--get", key], capture_output=True, text=True)
-    v = r.stdout.strip() if r.returncode == 0 else ""
-    if not v: v = tpl.get(name, "")
-    if v: vals[name] = v
-# the ssh key pair
-for name, fn in (("SSH_PRIVATE_KEY", "id_ed25519"), ("SSH_PUBLIC_KEY", "id_ed25519.pub")):
-    try: vals[name] = open(os.path.join(home, ".ssh", fn)).read().rstrip("\n")
-    except OSError: pass
-json.dump(vals, sys.stdout)
-PY
+  as_login "$login" "$ENROLL_WORKER" gather "$login" "${tpl[@]}" > "$out"
 }
 
 migrate() {
@@ -272,8 +256,8 @@ PY
 
 # ---- 4. the account's token ---------------------------------------------
 issue_token() {
-  local login="$1" config="$2" home; home="$(home_of "$login")"
-  local name="$HOST/$login"
+  local login="$1" config="$2"
+  local name="$(host_of "$login")/$login"
   # The coordinator's own login reads its config with the CLI token it
   # already holds (workplace admin); a service token at scope / would
   # replace that credential and lock the coordinator out of the project.
@@ -324,49 +308,21 @@ except (ValueError, AttributeError): sys.exit(1)'; then
 
 # ---- 6. retire the old sources -------------------------------------------
 retire_old_sources() {
-  local login="$1" home; home="$(home_of "$login")"
+  local login="$1"
   if (( DRY )); then say "would: retire .bashrc export, settings.local.json entries and gh hosts.yml login for $login"; return 0; fi
-  as_login "$login" python3 - "$home" <<'PY'
-import json, os, re, sys, glob
-home = sys.argv[1]
-rc = os.path.join(home, ".bashrc")
-try:
-    lines = open(rc, encoding="utf-8").read().splitlines(keepends=True)
-    kept = [l for l in lines if not re.match(r'^\s*export\s+OPENROUTER_API_KEY=', l)]
-    if kept != lines:
-        open(rc, "w", encoding="utf-8").writelines(kept); print("retired: .bashrc OPENROUTER_API_KEY export")
-except FileNotFoundError: pass
-for f in glob.glob(os.path.join(home, "projects", "*", ".claude", "settings.local.json")):
-    try: d = json.load(open(f))
-    except (OSError, ValueError): continue
-    env = d.get("env") or {}
-    if "CLAUDE_BRIDGE_AUTH_TOKEN" in env:
-        del env["CLAUDE_BRIDGE_AUTH_TOKEN"]
-        if env: d["env"] = env
-        else: d.pop("env", None)
-        json.dump(d, open(f, "w"), indent=2); open(f, "a").write("\n")
-        print(f"retired: CLAUDE_BRIDGE_AUTH_TOKEN in {os.path.relpath(f, home)}")
-PY
-  # gh: with GH_TOKEN in the environment the stored login is a second credential; drop it.
-  # Not for the coordinator's own login: its keyring login is the session's
-  # live credential, and the exported token only reaches new shells.
-  [[ "$login" == "$(id -un)" ]] && return 0
-  if as_login "$login" bash -c 'gh auth status --hostname github.com 2>&1 | grep -q hosts.yml'; then
-    as_login "$login" bash -c 'gh auth logout --hostname github.com >/dev/null 2>&1' && say "$login: retired gh hosts.yml login"
-  fi
+  # Not the gh keyring login for the coordinator's own account: it is the
+  # session's live credential, and the exported token only reaches new
+  # shells — the worker skips it when the login is the operator's own.
+  local keep=(); [[ "$login" == "$(id -un)" ]] && keep=(keep-gh)
+  as_login "$login" "$ENROLL_WORKER" retire "$login" "${keep[@]}"
 }
 
 enrol() {
   local login="$1"
-  getent passwd "$login" >/dev/null || die "no such login: $login"
-  $SUDO test -d "$(home_of "$login")/projects/agent-fabric" || die "$login has no ~/projects/agent-fabric (bootstrap first)"
-  say "== $login"
-  local home; home="$(home_of "$login")"
-  # Provisioning left ~/.config root-owned on some accounts; the account
-  # must own what fabric-secrets writes under it.
-  if $SUDO test -d "$home/.config" && [[ "$($SUDO stat -c %U "$home/.config")" != "$login" ]]; then
-    run $SUDO chown "$login:" "$home/.config"; say "$login: ~/.config handed to the account"
-  fi
+  say "== $login on $(host_of "$login")"
+  # The account exists there, has its fabric checkout, owns ~/.config —
+  # the host's operator answers, and refuses otherwise.
+  as_operator "$login" "$ENROLL_WORKER" prepare-home "$login" >/dev/null || die "$login: not ready on $(host_of "$login") (above)"
   local config; config="$(ensure_config "$login")" || exit 1
   migrate "$login" "$config"
   issue_token "$login" "$config"

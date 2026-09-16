@@ -140,10 +140,17 @@ everything else is derived from it:
 
 - `bin/fabric-secrets sync` (as the account) pulls and applies; `status`
   reports presence, modes and ages — neither prints a value.
-- `secrets/enroll.sh <login>|--all` (coordinator) creates the config,
-  migrates what the account holds today, issues the token, runs the first
-  sync and, once verified, retires the old sources (the `.bashrc` export,
-  the clone's `settings.local.json` entry, the `gh` stored login).
+- `secrets/enroll.sh <login>|--all [--host <id>]` (coordinator) creates
+  the config, migrates what the account holds today, issues the token,
+  runs the first sync and, once verified, retires the old sources (the
+  `.bashrc` export, the clone's `settings.local.json` entry, the `gh`
+  stored login). Doppler, the token and the keys stay on the
+  coordinator; what touches the account's host — its home, its
+  `~/.doppler`, the sync, the retirement — runs there through
+  `runtime/hostexec/` as `secrets/enroll-worker.sh`, on the host the
+  account is placed on (`runtime/hosts/registry.json`; `--host` for a
+  login not placed yet). `AGENT_HOST` is what that host says of itself.
+  `--all` and `sync-all` walk the registry's placements.
 - Rotation: change the value in the Doppler dashboard, then
   `secrets/enroll.sh sync-all`. Revoking an agent is revoking one token.
 - Keys of a login's own: `secrets/enroll.sh issue-openrouter-keys <login>…`

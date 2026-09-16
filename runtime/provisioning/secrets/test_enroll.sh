@@ -11,6 +11,12 @@
 # down after a call — and every case ends with a retry that must finish
 # the enrolment without duplicating anything.
 #
+# The whole path and the failure cases run on BOTH host backends: the
+# account on this host (direct), and on a far host behind a fake ssh
+# that runs the same worker here and answers as far-host — where
+# AGENT_HOST must be what the far host said, prepare-home/gather/retire
+# must have gone over ssh, and Doppler and the token value must not.
+#
 # What this proves: no value reaches a terminal or outlives $TMP, a stop
 # at any step leaves the old sources in place, and a re-run converges.
 # What it does not: the real CLI's wire behaviour, root, or a real account.
@@ -107,7 +113,8 @@ cat > "$BIN/sudo" <<STUB
 [[ "\$1" == -n ]] && shift
 [[ "\$1" == -u ]] && shift 2; [[ "\$1" == -H ]] && shift
 [[ "\$1" == chown ]] && exit 0
-args=(); for a in "\$@"; do [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}"; args+=("\$a"); done
+# On the fake far host (FAKE_FAR, exported by the fake ssh) the far host's own hostname comes first.
+args=(); for a in "\$@"; do [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}" && [[ -n "\${FAKE_FAR:-}" ]] && a="PATH=$SANDBOX/farbin:\${a#PATH=}"; args+=("\$a"); done
 exec "\${args[@]}"
 STUB
 cat > "$BIN/getent" <<STUB
@@ -138,7 +145,26 @@ STUB
 chmod +x "$BIN"/*
 export PATH="$BIN:/usr/bin:/bin"
 export HOME="$HOME_COORD"; mkdir -p "$HOME_COORD"
-export SUDO="$BIN/sudo" DOPPLER_BIN="$BIN/doppler" AGENT_FABRIC_HOST=fixture-host AGENT_FABRIC_SECRETS_PROJECT=fixture-project
+export SUDO="$BIN/sudo" DOPPLER_BIN="$BIN/doppler" AGENT_FABRIC_SECRETS_PROJECT=fixture-project
+# The host registry: this host (direct) and a far one behind a fake ssh
+# that runs the same worker here, answering as far-host. The suite runs
+# on both; on the far one AGENT_HOST must be what the far host said.
+LOCAL="$(hostname -s)"; REG="$SANDBOX/hosts.json"
+cat > "$REG" <<EOF
+{"version": 1,
+ "hosts": {"$LOCAL": {"platform": "fedora-qubes", "ssh": null, "operator": "coordinator", "fabric": "$ROOT"},
+           "far-host": {"platform": "debian", "ssh": "op@far.example", "operator": "op", "fabric": "$ROOT"}},
+ "placement": {"coordinator": "$LOCAL"}}
+EOF
+mkdir -p "$SANDBOX/farbin"; printf '#!/usr/bin/env bash\n[[ "$1" == -s ]] && { echo far-host; exit 0; }; exec /usr/bin/hostname "$@"\n' > "$SANDBOX/farbin/hostname"; chmod +x "$SANDBOX/farbin/hostname"
+SSHLOG="$SANDBOX/ssh.log"
+cat > "$BIN/ssh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$SSHLOG"; args=("\$@"); FAKE_FAR=1 PATH="$SANDBOX/farbin:\$PATH" exec bash -c "\${args[-1]}"
+STUB
+chmod +x "$BIN/ssh"
+export AGENT_FABRIC_HOSTS_REGISTRY="$REG" SSH="$BIN/ssh"
+BACKEND=local; EXPECT_HOST="$LOCAL"
 export AGENT_FABRIC_SECRETS_TEMPLATE="$SANDBOX/template.env" AGENT_FABRIC_RELAY_TOKEN_FILE="$SANDBOX/bridge-token"
 printf 'GIT_USER_NAME=Fixture Person\nGIT_USER_EMAIL=fixture@example.invalid\nGIT_SIGNING_KEY=0123456789ABCDEF0123456789ABCDEF01234567\nGIT_GPG_PROGRAM=/usr/bin/gpg\n' > "$SANDBOX/template.env"
 printf 'bridge-FIXTURE-TOKEN\n' > "$SANDBOX/bridge-token"
@@ -152,7 +178,7 @@ reset_account() {  # the account as provisioning leaves it: old sources present,
   printf 'fixture-private-key-material NOTAKEY\n' > "$HOME_ME/.ssh/id_ed25519"; printf 'ssh-ed25519 AAAAFIXTURE fixture\n' > "$HOME_ME/.ssh/id_ed25519.pub"; chmod 600 "$HOME_ME/.ssh/id_ed25519"
   printf 'github.com:\n  user: fixture\n' > "$HOME_ME/.config/gh/hosts.yml"
 }
-enrol() { bash "$UNDER_TEST" "$@" "$ME" 2>&1; }
+enrol() { local h=(); [[ "$BACKEND" == ssh ]] && h=(--host far-host); bash "$UNDER_TEST" "$@" "${h[@]}" "$ME" 2>&1; }
 state() { python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(eval(sys.argv[2], {"s": s}))' "$STATE" "$1" 2>/dev/null; }
 no_values_leaked() {  # $1 = output; nothing from the sources may appear anywhere but Doppler
   ! grep -q "sk-or-OLD-FROM-BASHRC\|bridge-FROM-SETTINGS\|ghp_FROMKEYRING\|NOTAKEY\|dp\.st\." <<<"$1"
@@ -162,6 +188,7 @@ fully_enrolled() {  # the state a successful enrolment leaves
   [[ "$(state 'sorted(s["configs"])')" == "['agents_$ME']" ]] || return 1
   [[ "$(state 'sorted(s["configs"]["agents_'"$ME"'"]["secrets"])')" == "['AGENT_HOST', 'AGENT_LOGIN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'GH_TOKEN', 'GIT_GPG_PROGRAM', 'GIT_SIGNING_KEY', 'GIT_USER_EMAIL', 'GIT_USER_NAME', 'OPENROUTER_API_KEY', 'SSH_PRIVATE_KEY', 'SSH_PUBLIC_KEY']" ]] || return 1
   [[ "$(state 'len(s["configs"]["agents_'"$ME"'"]["tokens"])')" -ge 1 ]] || return 1
+  [[ "$(state 's["configs"]["agents_'"$ME"'"]["secrets"]["AGENT_HOST"]')" == "$EXPECT_HOST" ]] || { echo "AGENT_HOST is not what the host said ($EXPECT_HOST)"; return 1; }
   python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); assert c["token"].startswith("dp.st.") and c["enclave.config"]=="agents_"+sys.argv[2]' "$HOME_ME/.doppler/fake.json" "$ME" || return 1
   [[ -f "$HOME_ME/.config/agent-fabric/secrets.env" && "$(stat -c %a "$HOME_ME/.config/agent-fabric/secrets.env")" == 600 ]] || return 1
   ! grep -q OPENROUTER_API_KEY "$HOME_ME/.bashrc" || return 1                        # the export retired
@@ -170,13 +197,23 @@ fully_enrolled() {  # the state a successful enrolment leaves
   tmp_is_empty
 }
 
-echo "enroll: the whole path, then again"
+for BACKEND in local ssh; do
+[[ "$BACKEND" == ssh ]] && EXPECT_HOST=far-host; : > "$SSHLOG"
+echo "enroll [$BACKEND]: the whole path, then again"
 reset_account
 out="$(enrol)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exit 0" || bad "exit $rc" "$out"
 fully_enrolled && ok "config, secrets, token stored, config recorded, env file 0600, old sources retired, \$TMP gone" || bad "not fully enrolled" "$out
 $(cat "$STATE" 2>/dev/null)"
 no_values_leaked "$out" && ok "no value on the terminal" || bad "a value reached the terminal" "$out"
+if [[ "$BACKEND" == ssh ]]; then
+  grep -q "enroll-worker.sh prepare-home $ME" "$SSHLOG" && grep -q -- "--as $ME -- @fabric/runtime/provisioning/secrets/enroll-worker.sh gather $ME" "$SSHLOG" \
+    && grep -q -- "--as $ME -- @fabric/runtime/provisioning/secrets/enroll-worker.sh retire $ME" "$SSHLOG" && ok "ssh: prepare-home as the operator, gather and retire as the account, on the far host" || bad "ssh worker calls" "$(cat "$SSHLOG")"
+  ! grep -q "doppler secrets upload\|configs tokens create\|fill-from" "$SSHLOG" && ok "…and Doppler never left the coordinator" || bad "Doppler went over ssh" "$(cat "$SSHLOG")"
+  ! grep -q "dp\.st\." "$SSHLOG" && ok "…and the token went over stdin, never in argv" || bad "token in ssh argv" "$(cat "$SSHLOG")"
+else
+  [[ ! -s "$SSHLOG" ]] && ok "local: ssh never called" || bad "ssh called on the local backend" "$(cat "$SSHLOG")"
+fi
 out="$(enrol)"
 grep -q "already issued" <<<"$out" && grep -q "(nothing new)" <<<"$out" && [[ "$(state 'len(s["configs"]["agents_'"$ME"'"]["tokens"])')" == 1 ]] \
   && fully_enrolled && ok "a second run changes nothing: one config, one token, nothing re-uploaded" || bad "the re-run was not idempotent" "$out"
@@ -214,6 +251,9 @@ reset_account; printf 'fail secrets upload\n' > "$FAULT"
 out="$(enrol)"; rc=$?
 [[ $rc -ne 0 ]] && tmp_is_empty && grep -q OPENROUTER_API_KEY "$HOME_ME/.bashrc" && ok "stops, cleans \$TMP, keeps the old sources" || bad "upload failure mishandled" "$out"
 rm -f "$FAULT"; out="$(enrol)"; fully_enrolled && ok "the retry completes" || bad "retry failed" "$out"
+
+done
+BACKEND=local; EXPECT_HOST="$LOCAL"
 
 echo "enroll: no temporary directory can be made (a full or read-only \$TMPDIR)"
 reset_account; chmod 500 "$TMPDIR"

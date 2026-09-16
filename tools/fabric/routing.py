@@ -381,6 +381,15 @@ def check(root: str | None = None) -> list[str]:
     for entry in load_shims(root):
         if not PRESET.match(entry.get("shim") or ""):
             findings.append(f"shims.json: {entry.get('family')!r} -> {entry.get('shim')!r} is not a preset reference")
+        else:
+            # A shim's text is under version control (routing/shims/<slug>/,
+            # tools/fabric/shim.py pull/push); an entry with no source is a
+            # preset nobody can rebuild or diff (2026-09-16).
+            slug = entry["shim"].split("@preset/", 1)[1]
+            src = os.path.join(root or FABRIC_ROOT, "routing", "shims", slug, "system_prompt.md")
+            if not os.path.isfile(src):
+                findings.append(f"shims.json: {entry.get('shim')!r} has no source under routing/shims/{slug}/ "
+                                "(tools/fabric/shim.py pull <slug>)")
     grade = load_review_grade(root)
     if grade.get("capability") not in classes:
         findings.append(f"review-grade.json: gates unknown capability {grade.get('capability')!r}")

@@ -1,0 +1,9 @@
+{
+  "provider": {
+    "allow_fallbacks": true,
+    "sort": {
+      "by": "price",
+      "partition": null
+    }
+  }
+}

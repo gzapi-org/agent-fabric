@@ -104,7 +104,13 @@ code-plan    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT
 code-review  z-ai/glm-5.3        + @preset/glm2claude-shim  -> ~/.claude/agents/code-review.md  (review-grade.json admits it; Opus 5 stays admitted)
 ```
 
-Only the Z.ai/GLM family has a shim. A model of any other family gets none
+A shim is an OpenRouter preset whose text and routing config live in
+`routing/shims/<slug>/` and move to and from the account with
+`tools/fabric/shim.py` (`pull`, `diff`, `push`); a candidate family is
+admitted by `shim.py check <model> --shim <slug>`, the six-step
+compatibility task read back per generation
+(`docs/live-checks/2026-09-16-openrouter-presets.md`). Only the Z.ai/GLM
+and DeepSeek V4 families have a shim. A model of any other family gets none
 (`tools/fabric/routing.py table` shows it). Do not add a family until a live
 test has shown it works.
 

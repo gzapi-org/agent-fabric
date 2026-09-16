@@ -237,6 +237,24 @@ def test_check_refuses_a_preset_as_a_model(tmp: str) -> None:
     assert any("preset" in f for f in findings), findings
 
 
+def test_every_shim_has_its_source_under_version_control(tmp: str) -> None:
+    """A shim is an OpenRouter preset; its text lives in routing/shims/<slug>/
+    so it can be diffed, rebuilt and pushed (tools/fabric/shim.py). An entry
+    whose source is missing is a finding, not a silent gap."""
+    root = scratch_root(tmp)
+    assert not routing.check(root), routing.check(root)
+    shutil.rmtree(os.path.join(root, "routing", "shims", "glm2claude-shim"))
+    findings = routing.check(root)
+    assert any("no source under routing/shims/glm2claude-shim/" in f for f in findings), findings
+    path = os.path.join(root, "routing", "shims.json")
+    d = json.load(open(path, encoding="utf-8"))
+    d["shims"].append({"family": "acme/*", "shim": "@preset/acme2claude-shim", "harness": "claude-code",
+                       "tested": "never", "note": "a fixture"})
+    json.dump(d, open(path, "w", encoding="utf-8"))
+    findings = routing.check(root)
+    assert any("acme2claude-shim' has no source" in f for f in findings), findings
+
+
 def test_every_class_rides_an_alias_and_only_the_review_class_shares(tmp: str) -> None:
     """The Agent tool accepts only tier aliases, so nothing may be `declared`
     by full id; one alias carries one export, so two exporting classes
@@ -290,6 +308,7 @@ def main() -> int:
         test_a_layer_is_validated_in_its_provider_vocabulary,
         test_review_grade_gate_is_on_review_only,
         test_check_refuses_a_preset_as_a_model,
+        test_every_shim_has_its_source_under_version_control,
         test_every_class_rides_an_alias_and_only_the_review_class_shares,
         test_real_files_are_clean,
     ]

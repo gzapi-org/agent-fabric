@@ -160,12 +160,13 @@ avoid silent shell expansion.
 identities/     roles (charter, brief, recall, skills), the role catalogue, schemas,
                 prompt/ (the team and memory sections of every launch prompt)
 memory/         domains/ agents/<login>/ shared/ — field knowledge; project knowledge is in each project
-routing/        capability classes -> models; model families -> shims; review-grade policy
+routing/        capability classes -> models; model families -> shims (shims/<slug>/ their
+                sources, tools/fabric/shim.py their tool); review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
 runtime/        identity.py (the resolver), claude-code/ openrouter/ github/ provisioning/ adapters
 projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
-tools/fabric/   role.py, assemble.py, lint.py, routing.py, harvest*, query.sh
+tools/fabric/   role.py, assemble.py, lint.py, routing.py, shim.py, harvest*, query.sh
 tests/          python suites; tests/run.sh runs everything
 docs/           a note when a concept changes meaning; live-checks/ — what was
                 verified live, with the read-backs behind design decisions

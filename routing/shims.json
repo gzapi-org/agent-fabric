@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "MODEL FAMILY -> COMPATIBILITY SHIM. A shim is what a model family needs to speak a harness's wire protocol (here: Claude Code's Anthropic-compatible API through OpenRouter). It is independent of which capability class a model serves: the same family gets the same shim whether it is the code-low or the code-high model. Matched by glob against the canonical model id, first match wins; a model with no matching family gets no shim. Only families with a live-tested shim belong here — do not add speculative entries.",
+  "description": "MODEL FAMILY -> COMPATIBILITY SHIM. A shim is what a model family needs to speak a harness's wire protocol (here: Claude Code's Anthropic-compatible API through OpenRouter). It is independent of which capability class a model serves: the same family gets the same shim whether it is the code-low or the code-high model. Matched by glob against the canonical model id, first match wins; a model with no matching family gets no shim. Only families with a live-tested shim belong here — do not add speculative entries. Each shim is an OpenRouter preset whose source is routing/shims/<slug>/ (system_prompt.md, config.json), pushed, pulled, diffed and checked with tools/fabric/shim.py; routing.py check refuses an entry with no source.",
   "shims": [
     {
       "family": "z-ai/glm-*",

@@ -1,0 +1,12 @@
+{
+  "provider": {
+    "allow_fallbacks": false,
+    "only": [
+      "ionstream"
+    ],
+    "order": [
+      "ionstream"
+    ],
+    "sort": null
+  }
+}

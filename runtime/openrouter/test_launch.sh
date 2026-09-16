@@ -329,6 +329,47 @@ mkfabric
 out="$(run -p hi 2>&1)"
 grep -q "ORI-EXECCED:claude --model anthropic/claude-sonnet-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
 
+echo "launch: HELLO before the session, GOODBYE after it, however it ended"
+# A stub announce.py that records every call; the binding names a project
+# (announce sends nothing without one); NO_ANNOUNCE lifted for these cases.
+mkfabric
+printf '{"agent":"%s","host":"testhost","role":"backend-dev","project":"gzapp","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+cat > "$FABRIC/tools/fabric/announce.py" <<'STUB'
+import os, sys, time
+with open(os.environ["ANNOUNCE_LOG"], "a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + f" @{time.time():.3f}\n")
+STUB
+ALOG="$SANDBOX/announce.log"; rm -f "$ALOG"
+runa() { (cd "$SANDBOX/repo" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" ANNOUNCE_LOG="$ALOG" bash "$LAUNCHER" "$@"); }
+out="$(runa --version 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && ok "the launcher's exit status is the session's (0)" || bad "rc=$rc" "$out"
+grep -q "^hello --role backend-dev --project gzapp" "$ALOG" && ok "HELLO sent, as the bound role and project" || bad "no hello" "$(cat "$ALOG")"
+grep -q "^goodbye --role backend-dev --project gzapp --note session ended" "$ALOG" && ok "GOODBYE sent after the session returned" || bad "no goodbye" "$(cat "$ALOG")"
+[[ "$(grep -c . "$ALOG")" == 2 ]] && ok "exactly one of each" || bad "announce count" "$(cat "$ALOG")"
+h="$(grep '^hello' "$ALOG" | sed 's/.*@//')"; g="$(grep '^goodbye' "$ALOG" | sed 's/.*@//')"
+python3 -c "import sys; sys.exit(0 if float('$h') < float('$g') else 1)" && ok "…in that order" || bad "goodbye before hello" "$(cat "$ALOG")"
+# The session's failure is the launcher's failure, and still a GOODBYE.
+cat > "$SANDBOX/bin/ori" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == auth ]]; then echo '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment","location":"OPENROUTER_API_KEY"}}}'; exit 0; fi
+echo "ORI-EXECCED:$*"; exit 3
+FAKE
+chmod +x "$SANDBOX/bin/ori"; rm -f "$ALOG"
+out="$(runa --version 2>&1)"; rc=$?
+[[ $rc -eq 3 ]] && ok "a session exiting 3 makes the launcher exit 3" || bad "rc=$rc" "$out"
+grep -q "^goodbye .*--note session ended with status 3" "$ALOG" && ok "…and the GOODBYE names the status" || bad "goodbye note" "$(cat "$ALOG")"
+# A session killed by a signal — what a double Ctrl-C or a kill leaves — still ends in a GOODBYE.
+cat > "$SANDBOX/bin/ori" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == auth ]]; then echo '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment","location":"OPENROUTER_API_KEY"}}}'; exit 0; fi
+echo "ORI-EXECCED:$*"; kill -TERM $$
+FAKE
+chmod +x "$SANDBOX/bin/ori"; rm -f "$ALOG"
+out="$(runa --version 2>&1)"; rc=$?
+[[ $rc -eq 143 ]] && ok "a session ended by SIGTERM: the launcher reports 143" || bad "rc=$rc" "$out"
+grep -q "^goodbye .*--note session ended by signal 15" "$ALOG" && ok "…and the GOODBYE names the signal" || bad "goodbye note" "$(cat "$ALOG")"
+write_fake_ori
+
 echo "launch: the role rides in the system prompt file"
 mkfabric
 out="$(run --version 2>&1)"; rc=$?

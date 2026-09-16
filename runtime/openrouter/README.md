@@ -145,7 +145,11 @@ shell by `bin/fabric-role`), renders it into the session's system prompt
 (`tools/fabric/launch_prompt.py`, passed as `--append-system-prompt-file`;
 a caller's own `--system-prompt*` is refused) and stamps it
 (`AGENT_FABRIC_LAUNCH_ROLE`, `_PROMPT_DIGEST`); it also sends the GZCoord
-`HELLO` just before exec, so a `HELLO` means a session exists. The launch
+`HELLO` just before the session and the `GOODBYE` after it returns —
+whatever ended it: `/exit`, a double Ctrl-C, a crash, a kill — so a
+`HELLO` means a session exists and a `GOODBYE` that it is gone (the
+session is a child the launcher waits on, not an exec; read back in
+`docs/live-checks/2026-09-16-goodbye-from-the-launcher.md`). The launch
 directory decides which settings scopes are fenced and which working copy
 the child starts in. It never decides who the agent is: `test_launch.sh`
 launches from a directory named for another agent with `USER` forged and

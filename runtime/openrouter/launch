@@ -396,17 +396,50 @@ PROJECT="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("project"
 # and the profile's native pins, the review pin is served by its agent
 # file under the dispatch guard; the session model, the role's system
 # prompt and the refusals are what the launcher contributed.
-PROMPT_ARGS=(--append-system-prompt-file "$PROMPT_FILE")
-if [[ "$PROVIDER" == anthropic ]]; then
-    if (( CALLER_MODEL )); then exec claude "${PROMPT_ARGS[@]}" "$@"; fi
-    exec claude --model "$SESSION" "${PROMPT_ARGS[@]}" "$@"
-fi
-
+#
+# THE SESSION IS A CHILD, NOT AN EXEC (owner, 2026-09-16). The launcher
+# sent the HELLO, so the launcher sends the GOODBYE — after the session
+# returns, whatever ended it: /exit, a double Ctrl-C, a crash, a kill of
+# the child. A harness hook could not promise that (it fires on the
+# exit paths the harness chooses to run it on); the parent's wait can.
+# Signals: Ctrl-C is the session's (one interrupts a turn, two end it),
+# so this shell ignores SIGINT while the child runs; SIGTERM and SIGHUP
+# — the terminal closing — are forwarded so the child can end, and the
+# GOODBYE still goes out. The child's exit status is the launcher's.
 # When the caller supplied --model, the launcher's own is OMITTED rather
 # than placed first: "last wins" would be an assumption about claude's
 # argv handling, and the stamp above must not be able to disagree with
 # what the child actually applies.
-if (( CALLER_MODEL )); then
-    exec ori claude "${PROMPT_ARGS[@]}" "$@"
-fi
-exec ori claude --model "$SESSION" "${PROMPT_ARGS[@]}" "$@"
+PROMPT_ARGS=(--append-system-prompt-file "$PROMPT_FILE")
+CMD=()
+[[ "$PROVIDER" == anthropic ]] || CMD+=(ori)
+CMD+=(claude)
+(( CALLER_MODEL )) || CMD+=(--model "$SESSION")
+CMD+=("${PROMPT_ARGS[@]}" "$@")
+
+goodbye() {  # goodbye <note> — best effort, once; never delays the exit by more than the send
+    [[ -n "${GOODBYE_SENT:-}" ]] && return 0; GOODBYE_SENT=1
+    [[ -z "$PROJECT" ]] || timeout 20 python3 "$FABRIC_ROOT/tools/fabric/announce.py" goodbye --role "$ROLE" --project "$PROJECT" --note "$1" >/dev/null 2>&1 || true
+}
+CHILD=""
+forward() {  # forward <signal>: end the child the way we were asked to; the wait below then runs goodbye
+    [[ -n "$CHILD" ]] && kill -s "$1" "$CHILD" 2>/dev/null
+}
+trap '' INT
+trap 'forward TERM' TERM
+trap 'forward HUP' HUP
+# `<&0`: an `&` job in a script (no job control) gets /dev/null as stdin
+# unless something is redirected explicitly — and the session needs the
+# terminal. Same process group, so Ctrl-C reaches the child directly.
+"${CMD[@]}" <&0 &
+CHILD=$!
+wait "$CHILD"; STATUS=$?
+# A signal that landed here made `wait` return early; wait again for the
+# child to actually be gone, then say goodbye with how it ended.
+wait "$CHILD" 2>/dev/null; s2=$?; [[ $s2 -eq 127 ]] || STATUS=$s2
+trap - INT TERM HUP
+if (( STATUS == 0 )); then note="session ended"
+elif (( STATUS > 128 )); then note="session ended by signal $((STATUS - 128))"
+else note="session ended with status $STATUS"; fi
+goodbye "$note"
+exit "$STATUS"

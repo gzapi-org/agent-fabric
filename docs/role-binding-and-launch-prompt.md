@@ -45,8 +45,10 @@ cannot edit it. The file is byte-stable for the same (agent, host, role)
 — no timestamps, no cwd — so the harness's prompt prefix stays cacheable
 and a changed digest means changed content. The launcher stamps
 `AGENT_FABRIC_LAUNCH_ROLE` and `AGENT_FABRIC_LAUNCH_PROMPT_DIGEST`, and
-sends the GZCoord `HELLO` just before exec: a `HELLO` now means a
-session exists. A caller's own `--system-prompt*` is refused as
+sends the GZCoord `HELLO` just before the session and — since
+2026-09-16, the session being a child it waits on rather than an exec —
+the `GOODBYE` after it returns, however it ended: a `HELLO` means a
+session exists, a `GOODBYE` that it is gone. A caller's own `--system-prompt*` is refused as
 `--settings` is.
 
 **What the prompt carries, in order:** an identity header (agent, host,

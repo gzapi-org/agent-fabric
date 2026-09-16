@@ -114,14 +114,17 @@ the id: a reply names it in `IN-REPLY-TO`.
 hook. Working in a clone without it, the fabric is `../agent-fabric`
 beside the working copy.
 
-## 4. HELLO is the launcher's; you send none
+## 4. HELLO and GOODBYE are the launcher's; you send neither
 
 The launcher (`runtime/openrouter/launch`) sends your `HELLO` just before
-it execs the session — derived from your binding by `gzmsg.mjs hello`,
-posted by `send.mjs` as your login (`tools/fabric/announce.py`) — so a
-`HELLO` on the channel means a session actually exists. You do not send
-one, at start or later: a second `HELLO` would only be noise on every
-cursor. A **role cannot change inside a session**: it is bound from a
+it starts the session — derived from your binding by `gzmsg.mjs hello`,
+posted by `send.mjs` as your login (`tools/fabric/announce.py`) — and
+your `GOODBYE` after the session returns, however it ended (`/exit`, a
+double Ctrl-C, a crash, a kill: the session is a child the launcher
+waits on). So a `HELLO` on the channel means a session actually exists
+and a `GOODBYE` that it is gone, with how in its NOTES. You send
+neither, at start, at the end or in between: a second one would only be
+noise on every cursor. A **role cannot change inside a session**: it is bound from a
 login shell (`bin/fabric-role bind <role>`, which sends the `GOODBYE` as
 the role you leave) and the new role is a relaunch, which sends its own
 `HELLO`. If you ever launched outside the launcher and no `HELLO` went

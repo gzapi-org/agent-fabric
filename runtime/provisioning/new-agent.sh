@@ -41,7 +41,8 @@
 #      it has no version pin) — both land in ~/.local/bin. An installer
 #      that fails fails the script: nothing is copied from another
 #      account in its place (owner, 2026-09-16).
-#   3. github.com's host key in the account's known_hosts (public data)
+#   3. github.com's published host keys (runtime/provisioning/github-host-keys)
+#      in the account's known_hosts — never a keyscan
 #   4. ~/projects/agent-fabric cloned over https (the fabric is public;
 #      the account has no key yet) — enrolment reads the account's own
 #      checkout for fabric-secrets
@@ -207,13 +208,22 @@ else
     fi
 fi
 
-# ---- 3. GitHub's host key --------------------------------------------------
-if $SUDO -n grep -qs "^github.com " "$HOME_DIR/.ssh/known_hosts" 2>/dev/null; then say "3. github.com host key trusted"
+# ---- 3. GitHub's host keys --------------------------------------------------
+# From the committed copy of GitHub's PUBLISHED keys (github-host-keys,
+# api.github.com/meta, fingerprints checked against docs.github.com when
+# the file was written — docs/live-checks/2026-09-16-github-host-keys.md),
+# never ssh-keyscan: a scan trusts whatever answers on the network the
+# bootstrap is about to use (review, 2026-09-16). Every key line the
+# account does not hold yet is appended; a changed key at GitHub is a
+# change to the committed file, reviewed like any other.
+HOST_KEYS="$ROOT/runtime/provisioning/github-host-keys"
+[[ -s "$HOST_KEYS" ]] || die "step failed: $HOST_KEYS is missing or empty; nothing after it ran"
+missing_keys="$(while IFS= read -r line; do [[ -n "$line" ]] && ! $SUDO -n grep -qsxF "$line" "$HOME_DIR/.ssh/known_hosts" 2>/dev/null && printf '%s\n' "$line"; done < "$HOST_KEYS")"
+if [[ -z "$missing_keys" ]]; then say "3. github.com host keys trusted ($(grep -c . "$HOST_KEYS") published keys)"
 else
-    if (( DRY )); then say "would: ssh-keyscan github.com >> $HOME_DIR/.ssh/known_hosts"
-    else keys="$(ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null)"; grep -q "^github.com " <<<"$keys" || die "step failed: ssh-keyscan github.com returned no key (offline?)"
-         must bash -c 'printf "%s\n" "$1" | '"$SUDO"' -n -u "$2" tee -a "$3/.ssh/known_hosts" >/dev/null' _ "$keys" "$LOGIN" "$HOME_DIR"
-         must $SUDO -n -u "$LOGIN" chmod 600 "$HOME_DIR/.ssh/known_hosts"; say "3. github.com host key trusted (ssh-keyscan)"; fi
+    if (( DRY )); then say "would: append GitHub's published host keys (runtime/provisioning/github-host-keys) to $HOME_DIR/.ssh/known_hosts"
+    else must bash -c 'printf "%s\n" "$1" | '"$SUDO"' -n -u "$2" tee -a "$3/.ssh/known_hosts" >/dev/null' _ "$missing_keys" "$LOGIN" "$HOME_DIR"
+         must $SUDO -n -u "$LOGIN" chmod 600 "$HOME_DIR/.ssh/known_hosts"; say "3. github.com host keys trusted (from the committed published set)"; fi
 fi
 
 # ---- 4. the fabric checkout -------------------------------------------------

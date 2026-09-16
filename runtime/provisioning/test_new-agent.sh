@@ -15,7 +15,7 @@ bad() { FAIL=$((FAIL+1)); echo "  ✗ $1"; [[ -n "${2:-}" ]] && echo "$2" | sed 
 SANDBOX="$(mktemp -d)"; trap '[[ -n "${KEEP_SANDBOX:-}" ]] || rm -rf "$SANDBOX"' EXIT
 # A fixture fabric: the real roles and registry, a fake claude to copy from.
 FAB="$SANDBOX/fabric"; mkdir -p "$FAB/runtime/provisioning/secrets" "$FAB/identities" "$FAB/projects" "$SANDBOX/home/.local/bin"
-cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"; cp "$UNDER_TEST" "$FAB/runtime/provisioning/"
+cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"; cp "$UNDER_TEST" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
 printf '#!/bin/sh\necho fake\n' > "$SANDBOX/home/.local/bin/claude"; chmod +x "$SANDBOX/home/.local/bin/claude"
 run() { HOME="$SANDBOX/home" bash "$FAB/runtime/provisioning/new-agent.sh" "$@" 2>&1; }
 
@@ -28,7 +28,7 @@ out="$(run some-login backend-dev --bogus --dry-run)"; [[ $? -eq 2 ]] && ok "an 
 echo "new-agent: the dry run names every step and touches nothing"
 out="$(run zz-fixture-login backend-dev --project gzapp --project agent-fabric --dry-run)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$out"
-for step in "useradd" "chmod 700" "mkdir -p" "curl -fsSL https://claude.ai/install.sh | bash -s -- " "curl -fsSL https://openrouter.ai/labs/ori/install.sh | bash" "ssh-keyscan github.com" "git clone -q 'https://github.com/gzapi-org/agent-fabric.git'" "enroll.sh zz-fixture-login; fill-from" "issue-openrouter-keys and issue-openai-keys" "git clone -q 'git@github.com:gzapi-org/gzapp.git'" "bootstrap.sh" "fabric-role bind 'backend-dev'"; do
+for step in "useradd" "chmod 700" "mkdir -p" "curl -fsSL https://claude.ai/install.sh | bash -s -- " "curl -fsSL https://openrouter.ai/labs/ori/install.sh | bash" "append GitHub's published host keys" "git clone -q 'https://github.com/gzapi-org/agent-fabric.git'" "enroll.sh zz-fixture-login; fill-from" "issue-openrouter-keys and issue-openai-keys" "git clone -q 'git@github.com:gzapi-org/gzapp.git'" "bootstrap.sh" "fabric-role bind 'backend-dev'"; do
     grep -qF "$step" <<<"$out" && ok "plans: $step" || bad "missing step: $step" "$out"
 done
 grep -q "dry run: nothing verified" <<<"$out" && ok "…and verifies nothing" || bad "verified in dry run" "$out"
@@ -104,8 +104,7 @@ esac
 STUB
 cat > "$BIN/ssh-keyscan" <<STUB
 #!/usr/bin/env bash
-echo "ssh-keyscan \$*" >> "$CALLS"; grep -qsxF ssh-keyscan "$FAULT" && exit 0
-echo "github.com ssh-ed25519 AAAAFIXTUREKEY"
+echo "ssh-keyscan \$*" >> "$CALLS"; echo "fake: ssh-keyscan must never be called (the host keys are committed)" >&2; exit 99
 STUB
 cat > "$BIN/doppler" <<STUB
 #!/usr/bin/env bash
@@ -143,16 +142,18 @@ reset_seq; out="$(seq_run seq-login backend-dev --project demo)"; rc=$?
 [[ $rc -eq 0 ]] && ok "the whole sequence exits 0" || bad "rc=$rc" "$out"
 H="$HOMES/seq-login"
 [[ -x "$H/.local/bin/claude" && -x "$H/.local/bin/ori" && -d "$H/projects/agent-fabric/.git" && -d "$H/projects/demo/.git" && -d "$H/projects/demo/node_modules" ]] \
-  && grep -q "^github.com " "$H/.ssh/known_hosts" && grep -q "^enroll fill-from" "$CALLS" && grep -q "^enroll issue-openrouter-keys" "$CALLS" \
-  && ok "account, binaries, host key, fabric and project clones, enrolment, toolchain all there" || bad "sequence incomplete" "$out
+  && [[ "$(grep -c "^github.com " "$H/.ssh/known_hosts")" == "$(grep -c . "$ROOT/runtime/provisioning/github-host-keys")" ]] && ! grep -q "^ssh-keyscan" "$CALLS" && grep -q "^enroll fill-from" "$CALLS" && grep -q "^enroll issue-openrouter-keys" "$CALLS" \
+  && ok "account, binaries, the published host keys (no keyscan), fabric and project clones, enrolment, toolchain all there" || bad "sequence incomplete" "$out
 $(cat "$CALLS")"
+[[ "$(ssh-keygen -lf "$H/.ssh/known_hosts" | awk '{print $2, $4}' | tr -d '()' | sort)" == "$(sort "$ROOT/runtime/provisioning/github-host-keys.fingerprints")" ]] \
+  && ok "the account's known_hosts carries exactly the committed fingerprints" || bad "known_hosts fingerprints differ from the committed list" "$(ssh-keygen -lf "$H/.ssh/known_hosts")"
 grep -q "chown seq-login:staff" "$CALLS" && ok "chown uses the account's primary group, not the login" || bad "chown assumed group == login" "$(grep chown "$CALLS")"
 grep -q "new-agent: done" <<<"$out" && ok "…and the person's list is printed" || bad "no closing list" "$out"
 out="$(seq_run seq-login backend-dev --project demo)"
 grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude 9.9.9 present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" \
   && ok "a second run skips every step already true" || bad "not idempotent" "$out"
 
-for fault in useradd "git" "enroll seq-login" "enroll fill-from" curl ssh-keyscan; do
+for fault in useradd "git" "enroll seq-login" "enroll fill-from" curl; do
   reset_seq
   case "$fault" in
     git) printf 'git\n' > "$FAULT" ;;              # the fake git fails a clone

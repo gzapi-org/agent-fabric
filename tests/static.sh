@@ -30,5 +30,18 @@ fi
 for f in $(git ls-files '*.py'); do
     python3 -m py_compile "$f" || { echo "  ✗ py_compile $f"; fail=1; }
 done
+# GitHub's host keys are the committed published set, and provisioning
+# never scans for them: the fingerprints beside the file are what a
+# reviewer checks against docs.github.com, so the two must agree.
+if command -v ssh-keygen >/dev/null 2>&1; then
+    want="$(sort runtime/provisioning/github-host-keys.fingerprints)"
+    have="$(ssh-keygen -lf runtime/provisioning/github-host-keys | awk '{print $2, $4}' | tr -d '()' | sort)"
+    [[ "$want" == "$have" ]] || { echo "  ✗ runtime/provisioning/github-host-keys does not match github-host-keys.fingerprints"; fail=1; }
+else
+    echo "  ! ssh-keygen not installed: host-key fingerprints not checked here (CI checks them)"
+fi
+if grep -rn "ssh-keyscan" runtime/provisioning --include='*.sh' | grep -v "test_\|never\|# "; then
+    echo "  ✗ ssh-keyscan in provisioning: host keys come from the committed published set"; fail=1
+fi
 if (( fail )); then echo "static: FAILED"; exit 1; fi
 echo "static: all bash scripts parse, shellcheck and ruff clean"

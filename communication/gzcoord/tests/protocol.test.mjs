@@ -623,18 +623,13 @@ test('mintId: RFC 9562 v7 shape, unique across calls, time-ordered', async () =>
   for (let i = 1; i < ts.length; i++) assert.ok(ts[i] >= ts[i-1], `timestamp regressed: ${ids[i-1]} then ${ids[i]}`);
 });
 
-test('new-id CLI mints; next-id is the retired alias; --peek/--seed are refused with guidance', () => {
+test('new-id CLI mints; next-id is gone; --seed is refused', () => {
   const a = gzmsg('new-id');
   assert.equal(a.status, 0, a.stderr);
   assert.match(a.stdout.trim(), /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const b = gzmsg('next-id');
-  assert.equal(b.status, 0, b.stderr);
-  assert.match(b.stdout.trim(), /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab]/, 'the retired name still works');
-  for (const bad of [['next-id', '--instance', 'x', '--seed', '5'], ['next-id', '--instance', 'x', '--peek']]) {
-    const r = gzmsg(...bad);
-    assert.equal(r.status, 2, bad.join(' '));
-    assert.match(r.stderr, /the sequence counter is gone/, bad.join(' '));
-  }
+  assert.equal(b.status, 2, 'the counter-era name is an unknown command, not an alias');
+  assert.match(b.stderr, /usage:/);
   // new-id declares no flags at all, so the generic unknown-flag refusal
   // fires before the retired-flag message is reachable.
   {
@@ -644,9 +639,10 @@ test('new-id CLI mints; next-id is the retired alias; --peek/--seed are refused 
   }
 });
 
-// A checkout that predated --peek accepted `next-id --peek` in silence and
-// took a number: a gap nothing can fill. Every flag a command takes is now
-// declared, and an unrecognised one is refused BEFORE any side effect.
+// A checkout that predated --peek once accepted `next-id --peek` (the
+// retired counter command) in silence and took a number: a gap nothing
+// could fill. Every flag a command takes is now declared, and an
+// unrecognised one is refused BEFORE any side effect.
 test('parseArgs: unknown, valueless, repeated and surplus arguments are refused', () => {
   const spec = { valued: ['instance', 'seed'], boolean: ['peek'], positional: 0 };
   assert.deepEqual(parseArgs(['--instance', 'x', '--peek'], spec), { flags: { instance: 'x', peek: true }, positional: [] });
@@ -668,11 +664,10 @@ test('CLI: an unknown flag is refused before any side effect', () => {
     assert.equal(typo.status, 2);
     assert.match(typo.stderr, /unknown flag --seeed/);
     assert.equal(typo.stdout, '');
-    assert.equal(typo.stdout, '');
-    const peekTypo = gzmsg('next-id', '--instance', 'web', '--peek', '--typo');
-    assert.equal(peekTypo.status, 2);
-    assert.equal(peekTypo.status, 2);
-    assert.equal(peekTypo.stdout, '');
+    const peek = gzmsg('new-id', '--peek');
+    assert.equal(peek.status, 2, 'the counter-era flag is unknown on new-id');
+    assert.match(peek.stderr, /unknown flag --peek/);
+    assert.equal(peek.stdout, '');
     const hello = gzmsg('hello', '--no-taxonomy', '--from', 'develop-gzapp/web', '--role', 'R', '--project', 'p', '--bogus');
     assert.equal(hello.status, 2);
     assert.match(hello.stderr, /unknown flag --bogus/);

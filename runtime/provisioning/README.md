@@ -94,9 +94,12 @@ What the steps are, when done by hand:
    under `agent_env` (the API keys, a port offset): those have their own
    steps.
 
-`runtime/claude-code/provision-capability-classes.sh` does step 2's
-agent-file part for every account at once, as root, when the class files
-change. `moveto/` opens a shell as another account in its working copy.
+The agent files (step 2) are written per account by
+`runtime/claude-code/install-agent-files.sh`, which `bootstrap.sh` runs
+for the launch's provider, so a `moveto` (pull + bootstrap) refreshes
+them; there is no bulk installer any more (the one that existed knew
+three classes and wrote stale files). `moveto/` opens a shell as another
+account in its working copy.
 `rename-working-copy.sh <login> <old> <new>` moves a working copy and
 carries the account's Claude Code history with it — transcripts, memory,
 `~/.claude.json` project entry, prompt history, the binding — since all of

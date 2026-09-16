@@ -21,12 +21,12 @@ Do not create a nested Git repository, and do not vendor the subsystem.
    `$CLAUDE_PROJECT_DIR/../agent-fabric/…` — hook commands run before
    the fabric hook has exported `AGENT_FABRIC_ROOT` into the session
    shell, so a hook line never relies on the variable).
-3. Create the concrete instance configuration outside Git, for example
-   `~/.config/gzcoord/gzapp.yaml`, from
-   `communication/gzcoord/config/instance.example.yaml`. `role.name`
-   is the slug of the role the agent currently holds — `bin/fabric-role`
-   writes it to the agent's runtime binding, from a login shell — never authored independently of
-   agent-fabric's `identities/roles/catalog.json`.
+3. Nothing to configure by hand: the session's identity is its OS login
+   and runtime binding (the role `bin/fabric-role` bound from a login
+   shell; slugs from agent-fabric's `identities/roles/catalog.json`), the
+   relay and channel are this file's neighbour `config.json`, read by
+   `communication/gzcoord/scripts/inbox.mjs` when the working copy
+   resolves to gzapp, and the token arrives with `fabric-secrets sync`.
 4. Relay hosting: [`BRIDGE-RELAY-SETUP.md`](BRIDGE-RELAY-SETUP.md). The
    relay's runtime — venv, token, database, log — lives in the hosting
    workspace's `projects/.gzcoord/`, outside every repository. Every

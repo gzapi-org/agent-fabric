@@ -45,7 +45,7 @@ else:
         path += ", launched by the fabric"
     else:
         path += ", not launched by the fabric (harness defaults for every tier)"
-stamp = os.environ.get("AGENT_FABRIC_LAUNCH_SESSION_MODEL") or os.environ.get("GZAPP_LAUNCH_SESSION_MODEL")
+stamp = os.environ.get("AGENT_FABRIC_LAUNCH_SESSION_MODEL")
 pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                                        "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")}
 present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL"))

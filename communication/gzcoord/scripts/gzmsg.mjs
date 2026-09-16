@@ -400,17 +400,14 @@ export function mintId() {
 
 // Every flag a command accepts, declared, so an unrecognised one is an
 // error BEFORE any side effect rather than a silent no-op. A checkout that
-// predated --peek accepted `next-id --peek` in silence and took a number —
-// a gap in a sequence that nothing can fill — and a typo like --seeed does
-// the same today. On a counter-mutating command, silence is the defect.
+// predated --peek once accepted `next-id --peek` (the retired counter
+// command) in silence and took a number — a gap in a sequence that
+// nothing could fill — and a typo like --seeed does the same today. On a
+// state-mutating command, silence is the defect.
 const FLAGS = {
   validate:  { valued: ['taxonomy'], boolean: ['no-taxonomy'], positional: 1 },
   normalize: { valued: [], boolean: [], positional: 1 },
   hello:     { valued: ['from', 'role', 'project', 'message-id', 'specialties', 'capabilities', 'state-dir', 'taxonomy'], boolean: ['no-taxonomy'], positional: 0 },
-  // next-id keeps its old flag list so --peek/--seed reach the explicit
-  // "the counter is gone" message rather than a bare unknown-flag error;
-  // new-id takes nothing.
-  'next-id': { valued: ['instance', 'state-dir', 'seed'], boolean: ['peek'], positional: 0 },
   'new-id':  { valued: [], boolean: [], positional: 0 },
 };
 export function parseArgs(argv, spec) {
@@ -500,17 +497,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!file) throw new Error('usage: gzmsg.mjs normalize <file>');
     // Prints the normalised message; validate the output, not the paste.
     process.stdout.write(normalize(fs.readFileSync(file, 'utf8')));
-  } else if (cmd === 'new-id' || cmd === 'next-id') {
-    // new-id mints a fresh UUIDv7. next-id is the old name, kept so
-    // existing invocations keep working — there is no counter anymore,
-    // and "next" implies a sequence that no longer exists.
-    if (ARGS.flags.peek || ARGS.flags.seed !== undefined) {
-      console.error('gzmsg next-id: the sequence counter is gone: ids are minted UUIDv7, unique by construction — nothing to peek or seed');
-      process.exit(2);
-    }
+  } else if (cmd === 'new-id') {
+    // A fresh UUIDv7: unique by construction, no counter, nothing to
+    // peek or seed. (`next-id`, the counter-era name, was kept as an
+    // alias until 2026-09-16 and is now an unknown command.)
     console.log(mintId());
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | new-id   (--taxonomy <path> | --no-taxonomy)   [next-id is the retired name for new-id]');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | new-id   (--taxonomy <path> | --no-taxonomy)');
     process.exit(2);
   }
 }

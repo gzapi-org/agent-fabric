@@ -95,18 +95,17 @@ two skills every account has: `skills/gzcoord-send/SKILL.md` and
 
 ## Local configuration
 
-Copy `config/instance.example.yaml` outside Git, e.g. to:
-
-```text
-~/.config/gzcoord/gzapp.yaml
-```
-
-Model/provider, subagent limits and transport credentials are local execution details. They are not part of GZCOORD/1.
-
-`role.name`/`specialties` come from the role the agent currently holds
-(its runtime binding; slugs from agent-fabric's
-`identities/roles/catalog.json`) — GZCoord keeps no separate role
-catalog; see `runtime/README.md` "Identity sourcing" and "Role sourcing".
+There is none to write by hand. Who a session is comes from the OS
+login and its runtime binding (`runtime/identity.py`; `role.name` and
+`specialties` from the role it holds, slugs from agent-fabric's
+`identities/roles/catalog.json` — GZCoord keeps no separate role
+catalog; see `runtime/README.md` "Identity sourcing" and "Role
+sourcing"). Which relay and channel a session uses comes from its
+project's integration (`projects/<id>/integration/gzcoord/config.json`),
+or from `CLAUDE_BRIDGE_URL` and `GZCOORD_CHANNEL` in the environment;
+with neither, nothing is joined. The token comes from the account's
+synced secrets (`fabric-secrets sync`). Model, provider and subagent
+limits are the launcher's (`runtime/openrouter/`), not part of GZCOORD/1.
 
 ## Integration
 

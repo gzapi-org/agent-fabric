@@ -690,7 +690,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -899,6 +899,45 @@ test('send posts a valid message as this login, to the configured channel', asyn
     assert.equal(posts[0].body.sender, MY_ADDRESS);
     assert.equal(posts[0].body.channel, 'fixture:chan');
     assert.equal(posts[0].body.content, valid);
+  });
+});
+
+// A project with no integration, and no environment naming one, is NOT
+// configured: the defaults were gzapp's until 2026-09-16, so any other
+// project's working copy joined gzapp's channel with gzapp's token file.
+test('integrationConfig comes from the project or the environment, never a default of another project', () => {
+  const none = integrationConfig('no-such-project', {});
+  assert.equal(none.configured, false);
+  assert.match(none.reason, /projects\/no-such-project\/integration\/gzcoord\/config.json/);
+  assert.match(none.reason, /CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL/);
+  assert.equal(none.channel, undefined, 'no channel is ever guessed');
+  assert.equal(integrationConfig(undefined, {}).configured, false, 'no project: not configured either');
+  const fromEnv = integrationConfig('no-such-project', { CLAUDE_BRIDGE_URL: 'http://127.0.0.1:1', GZCOORD_CHANNEL: 'x:y' });
+  assert.deepEqual([fromEnv.configured, fromEnv.source, fromEnv.relay_url, fromEnv.channel, fromEnv.token_env_file], [true, 'environment', 'http://127.0.0.1:1', 'x:y', undefined]);
+  assert.equal(integrationConfig('no-such-project', { CLAUDE_BRIDGE_URL: 'http://127.0.0.1:1' }).configured, false, 'half an environment override configures nothing');
+  const gz = integrationConfig('gzapp', {});
+  assert.equal(gz.configured, true);
+  assert.match(gz.source, /projects\/gzapp\/integration\/gzcoord\/config.json$/);
+  assert.equal(gz.channel, 'gzapp:gzcoord');
+  assert.equal(integrationConfig('gzapp', { GZCOORD_CHANNEL: 'over:ride' }).channel, 'over:ride', 'the environment overrides a project file');
+});
+
+test('send stops, named, when no integration is configured — nothing is posted anywhere', async () => {
+  await withRelay(async (relay, posts) => {
+    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, valid);
+    // Outside any working copy, with no channel in the environment: whoami()
+    // reports whatever project the runner's binding names; the fixture
+    // strips the environment and points the fabric at an empty root so no
+    // project file can be found.
+    const emptyFabric = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-'));
+    const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', AGENT_FABRIC_ROOT: emptyFabric };
+    delete env.GZCOORD_CHANNEL;
+    const r = await new Promise(resolve => execFile('node', [SEND, f], { env, encoding: 'utf8', cwd: emptyFabric },
+      (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
+    assert.equal(r.code, 3, r.err);
+    assert.match(r.err, /no GZCoord integration configured/);
+    assert.match(r.err, /not sent/);
+    assert.equal(posts.length, 0);
   });
 });
 

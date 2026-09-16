@@ -37,8 +37,9 @@ export async function main(argv = process.argv.slice(2)) {
   const who = whoami();
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
-  const relayUrl = process.env.CLAUDE_BRIDGE_URL ?? cfg.relay_url;
-  const channel = process.env.GZCOORD_CHANNEL ?? cfg.channel;
+  if (!cfg.configured) { console.error(`send: ${cfg.reason} — not sent`); return 3; }
+  const relayUrl = cfg.relay_url;
+  const channel = cfg.channel;
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);

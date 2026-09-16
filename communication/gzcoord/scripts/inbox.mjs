@@ -67,10 +67,14 @@ import { execFileSync, spawn } from 'node:child_process';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
 
 // Project integration: which relay, which channel, where the token and
-// the hosted relay's runtime live. The defaults are gzapp's
-// (projects/gzapp/integration/gzcoord/config.json is the committed copy);
-// another project overrides them by environment, or by its own
-// config.json found through the working copy's project (whoami().project).
+// the hosted relay's runtime live. It comes from the PROJECT —
+// projects/<id>/integration/gzcoord/config.json, found through the
+// working copy's project (whoami().project) — or from the environment
+// (CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL together). Nothing else: a
+// project with neither is NOT configured, and both entry points say so
+// and stop. Until 2026-09-16 the defaults here were gzapp's, so a working
+// copy of any other project silently joined gzapp's channel with gzapp's
+// token file — project truth in generic code (review, 2026-09-16).
 // token_env_file is relative to the working copy (a clone carries its
 // own token); relay_runtime_dir is relative to the WORKSPACE — the
 // projects/ directory the fabric checkout sits in — because the relay's
@@ -80,12 +84,22 @@ export const WORKSPACE = path.dirname(FABRIC_ROOT);
 export function relayRuntimeDir(cfg, workspace = WORKSPACE) {
   return path.resolve(workspace, cfg.relay_runtime_dir ?? '.gzcoord');
 }
-export function integrationConfig(project) {
-  const defaults = { relay_url: 'http://127.0.0.1:8765', channel: 'gzapp:gzcoord',
-                     token_env_file: 'infra/local/.env.local', relay_runtime_dir: '.gzcoord' };
-  if (!project) return defaults;
-  const file = path.join(FABRIC_ROOT, 'projects', project, 'integration', 'gzcoord', 'config.json');
-  try { return { ...defaults, ...JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch { return defaults; }
+export function integrationConfig(project, env = process.env) {
+  const file = project ? path.join(FABRIC_ROOT, 'projects', project, 'integration', 'gzcoord', 'config.json') : null;
+  if (file) {
+    try {
+      const own = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (own.relay_url && own.channel)
+        return { configured: true, source: file, relay_runtime_dir: '.gzcoord', ...own,
+                 relay_url: env.CLAUDE_BRIDGE_URL ?? own.relay_url, channel: env.GZCOORD_CHANNEL ?? own.channel };
+    } catch { /* no file, or not JSON: the environment may still configure it */ }
+  }
+  if (env.CLAUDE_BRIDGE_URL && env.GZCOORD_CHANNEL)
+    return { configured: true, source: 'environment', relay_url: env.CLAUDE_BRIDGE_URL, channel: env.GZCOORD_CHANNEL, relay_runtime_dir: '.gzcoord' };
+  const where = project ? `projects/${project}/integration/gzcoord/config.json` : 'a registered project (this working copy resolves to none)';
+  return { configured: false, source: null,
+           reason: `no GZCoord integration configured for ${project ? `project ${project}` : 'this working copy'}: ` +
+                   `${where} with relay_url and channel, or CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL in the environment` };
 }
 // Module-level defaults for callers that import ensureRelay/api directly;
 // main() resolves the project's own values.
@@ -124,8 +138,8 @@ export function token(root, cfg = integrationConfig()) {
   const synced = syncedToken();
   if (synced) return synced;
   if (process.env.CLAUDE_BRIDGE_AUTH_TOKEN) return process.env.CLAUDE_BRIDGE_AUTH_TOKEN;
-  const env = path.join(root, cfg.token_env_file);
-  if (fs.existsSync(env))
+  const env = cfg.token_env_file ? path.join(root, cfg.token_env_file) : null;
+  if (env && fs.existsSync(env))
     for (const line of fs.readFileSync(env, 'utf8').split('\n'))
       if (line.startsWith('CLAUDE_BRIDGE_AUTH_TOKEN=')) return line.slice('CLAUDE_BRIDGE_AUTH_TOKEN='.length).trim();
   const local = path.join(root, '.claude/settings.local.json');
@@ -374,15 +388,18 @@ export async function main(argv = process.argv.slice(2)) {
   const who = whoami();
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
-  const relayUrl = process.env.CLAUDE_BRIDGE_URL ?? cfg.relay_url;
-  const channel = process.env.GZCOORD_CHANNEL ?? cfg.channel;
+  // Not configured is not an error at a session start, and not a guess
+  // either: one line, exit 0, no relay, no channel.
+  if (!cfg.configured) { console.error(`gzcoord inbox: ${cfg.reason} — skipping`); return 0; }
+  const relayUrl = cfg.relay_url;
+  const channel = cfg.channel;
   // Activate what this session owns before anything else: the hosting
   // working copy starts its relay here, so a session restart is also the relay's.
   const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
   if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
   else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
   let tok = token(root, cfg);
-  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }
+  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file ?? '(no token_env_file configured)'}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# bin/fabric-review — brief a blind review: render the facts of one change
+# into the prompt a code-review dispatch carries.
+#
+#   fabric-review brief  REQUEST[.yaml|.json|-] [--allow-rationale]   the brief, to stdout
+#   fabric-review check  REQUEST                                        validate only, say what it is
+#   fabric-review lenses                                                 the lens vocabulary
+#
+# Then dispatch, exactly as the guard requires (it never reads the prompt):
+#
+#   Agent(subagent_type: "code-review", model: "fable",
+#         description: "Review <what>" (or "Re-review <what>"),
+#         prompt: <the rendered brief, verbatim>)      — and NO isolation
+#
+# A request names WHAT must be true (mode, repository, range, objective,
+# requirements, invariants, compatibility, threat model, scope, out of
+# scope, lenses; previous_findings on a re-review) and never how the
+# change makes it true: a verdict-shaped sentence refuses the render,
+# named. tools/fabric/review_brief.py; runtime/claude-code/review/README.md.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
+case "${1:-}" in
+    brief) shift; exec python3 "$ROOT/tools/fabric/review_brief.py" render "$@" ;;
+    check|lenses) exec python3 "$ROOT/tools/fabric/review_brief.py" "$@" ;;
+    -h|--help|"") sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:+0}" ;;
+    *) echo "fabric-review: unknown command $1 (brief | check | lenses)" >&2; exit 2 ;;
+esac

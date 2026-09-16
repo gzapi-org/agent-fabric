@@ -35,7 +35,8 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh
-    run "new-agent (provisioning plan and refusals)" bash runtime/provisioning/test_new-agent.sh
+    run "new-agent (the sequence, its refusals, a failure at each step)" bash runtime/provisioning/test_new-agent.sh
+    run "rename-working-copy (the shell half)" bash runtime/provisioning/test_rename-working-copy.sh
     run "dispatch guard" bash runtime/claude-code/hooks/test_agent-dispatch-guard.sh
     run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh
     run "subagent clone guard" bash runtime/claude-code/hooks/test_subagent-clone-guard.sh

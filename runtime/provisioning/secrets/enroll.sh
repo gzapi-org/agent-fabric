@@ -77,6 +77,14 @@
 #   6. only after 5: retire the old sources — the ~/.bashrc export line, the
 #      settings.local.json entries, the gh hosts.yml login. The synced env
 #      file is the one source from here.
+#
+# Under failure (test_enroll.sh injects each, against a fake doppler): a
+# stop at any step leaves the old sources in place and nothing under $TMP;
+# a re-run converges — the config it created is reused, names already in
+# Doppler are not re-uploaded, a token issued but never stored is noticed
+# and another issued; an OpenRouter key minted before a failed Doppler
+# write is deleted again. OPENROUTER_API_BASE points the keys API at a
+# test server.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
 PROJECT="${AGENT_FABRIC_SECRETS_PROJECT:-agent-fabric}"
@@ -270,12 +278,20 @@ issue_token() {
   # already holds (workplace admin); a service token at scope / would
   # replace that credential and lock the coordinator out of the project.
   if [[ "$login" == "$(id -un)" ]]; then say "$login: coordinator keeps its CLI token; no service token"; return 0; fi
+  # Issued before AND held by the account: done. Issued but not held (the
+  # store step failed last time, or the account's ~/.doppler was rebuilt)
+  # is the partially-enrolled state — a second token of the same name is
+  # issued and the unused one named for revoking; the account is never
+  # left with a record that says "done" and no credential.
   if doppler configs tokens --project "$PROJECT" --config "$config" --json 2>/dev/null | python3 -c '
 import json, sys
 try: sys.exit(0 if any(t.get("name") == sys.argv[1] for t in (json.load(sys.stdin) or [])) else 1)
 except ValueError: sys.exit(1)' "$name"; then
-    say "$login: service token $name already issued; keeping the account's copy"
-    return 0
+    if [[ -n "$(as_login "$login" doppler configure get token --plain --scope / 2>/dev/null)" ]]; then
+      say "$login: service token $name already issued; keeping the account's copy"
+      return 0
+    fi
+    (( DRY )) || say "$login: a token named $name exists but the account holds none (an earlier run stopped between issuing and storing); issuing another — revoke the unused one in the dashboard"
   fi
   if (( DRY )); then say "would: issue read token $name and configure it for $login"; return 0; fi
   # The token goes from doppler's stdout into the account's config file and nowhere else.
@@ -506,16 +522,20 @@ issue_openrouter_keys() {
     [[ -n "$tgt_cfg" ]] || { say "$login: not enrolled, skipped"; continue; }
     if (( DRY )); then say "would: create OpenRouter key $login and set OPENROUTER_API_KEY in $tgt_cfg"; continue; fi
     local upload="$TMP/$login.orkey.json"; ( umask 077; : > "$upload" )
-    python3 - "$PROJECT" "$me_cfg" "$login" "$upload" <<'PY' || die "$login: key creation failed"
+    # The key's hash (its handle at OpenRouter, not the secret) is kept
+    # beside the upload so a failed store can delete the key it minted:
+    # otherwise a key exists under the login's name that nothing records,
+    # and the re-run mints a second (review, 2026-09-16).
+    local hashf="$TMP/$login.orkey.hash"; ( umask 077; : > "$hashf" )
+    python3 - "$PROJECT" "$me_cfg" "$login" "$upload" "$hashf" "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}" <<'PY' || die "$login: key creation failed"
 import json, subprocess, sys, urllib.request
-project, me_cfg, name, out = sys.argv[1:5]
+project, me_cfg, name, out, hashf, base = sys.argv[1:7]
 r = subprocess.run(["doppler", "secrets", "get", "OPENROUTER_PROVISIONING_KEY", "--plain",
                     "--project", project, "--config", me_cfg], capture_output=True, text=True)
 prov = r.stdout.strip()
 if r.returncode != 0 or not prov:
     print("enroll: OPENROUTER_PROVISIONING_KEY is not in the coordinator's config", file=sys.stderr); sys.exit(1)
-req = urllib.request.Request("https://openrouter.ai/api/v1/keys",
-                             data=json.dumps({"name": name}).encode(),
+req = urllib.request.Request(base + "/keys", data=json.dumps({"name": name}).encode(),
                              headers={"Authorization": f"Bearer {prov}", "Content-Type": "application/json"})
 try:
     with urllib.request.urlopen(req) as resp: body = json.load(resp)
@@ -525,16 +545,41 @@ key = body.get("key") or (body.get("data") or {}).get("key")
 if not key:
     print("enroll: OpenRouter returned no key", file=sys.stderr); sys.exit(1)
 json.dump({"OPENROUTER_API_KEY": key}, open(out, "w"))
-print(f"enroll: created OpenRouter key {name} (hash {(body.get('data') or {}).get('hash', '?')[:12]}…)", file=sys.stderr)
+h = (body.get("data") or {}).get("hash") or ""
+open(hashf, "w").write(h)
+print(f"enroll: created OpenRouter key {name} (hash {h[:12]}…)", file=sys.stderr)
 PY
-    doppler secrets upload "$upload" --project "$PROJECT" --config "$tgt_cfg" --silent >/dev/null || die "$login: upload failed"
-    shred -u "$upload" 2>/dev/null || rm -f "$upload"
+    if ! doppler secrets upload "$upload" --project "$PROJECT" --config "$tgt_cfg" --silent >/dev/null; then
+      shred -u "$upload" 2>/dev/null || rm -f "$upload"
+      if python3 - "$PROJECT" "$me_cfg" "$hashf" "${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}" <<'PY'
+import subprocess, sys, urllib.request
+project, me_cfg, hashf, base = sys.argv[1:5]
+h = open(hashf).read().strip()
+if not h: sys.exit(1)
+prov = subprocess.run(["doppler", "secrets", "get", "OPENROUTER_PROVISIONING_KEY", "--plain", "--project", project, "--config", me_cfg],
+                      capture_output=True, text=True).stdout.strip()
+req = urllib.request.Request(base + "/keys/" + h, method="DELETE", headers={"Authorization": f"Bearer {prov}"})
+try:
+    with urllib.request.urlopen(req): pass
+except Exception: sys.exit(1)
+PY
+      then die "$login: Doppler upload failed; the key just minted was deleted at OpenRouter — nothing to clean up, re-run"
+      else die "$login: Doppler upload failed AND the minted key could not be deleted: a key named $login exists at OpenRouter that nothing records — delete it in the dashboard, then re-run"
+      fi
+    fi
+    shred -u "$upload" "$hashf" 2>/dev/null || rm -f "$upload" "$hashf"
     say "$login: OPENROUTER_API_KEY set in $tgt_cfg"
     as_login "$login" "$(fabric_secrets_of "$login")" sync --quiet || true
   done
 }
 
-TMP="$(mktemp -d)"; chmod 700 "$TMP"
+# Every gathered value lives only under $TMP (0700) between gather and
+# upload, and the EXIT trap removes it on any end — a die, a kill, a full
+# disk (runtime/provisioning/secrets/test_enroll.sh injects each). A
+# temporary directory that cannot be made is the stop, before anything
+# is created remotely.
+TMP="$(mktemp -d 2>/dev/null)" && [[ -d "$TMP" ]] || die "cannot create a temporary directory under ${TMPDIR:-/tmp} (full, or not writable): nothing done"
+chmod 700 "$TMP" || die "cannot secure $TMP: nothing done"
 trap 'rm -rf "$TMP"' EXIT
 command -v doppler >/dev/null || die "doppler CLI not on PATH"
 doppler projects get "$PROJECT" --json >/dev/null 2>&1 || die "Doppler project $PROJECT not reachable with this token"

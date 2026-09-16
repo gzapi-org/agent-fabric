@@ -68,6 +68,21 @@
 # (enroll.sh fill-from excludes them); a guess at a port offset (a row in
 # the project's table is devex-tooling's to add, and the registry marks
 # the name per login so fill-from never inherits one).
+#
+# FAILURE SEMANTICS (review, 2026-09-16 — before this, `run x; say done`
+# announced success whatever x returned, and a failed useradd, clone,
+# bootstrap or bind left a half-made account while later steps went on).
+# Not `set -e`: half the lines here are questions. Every step names one
+# of three:
+#   must         the step is the account: a failure stops the script,
+#                naming the step; nothing after it runs
+#   probe        a question, never an error (is X present?)
+#   best_effort  worth doing, not worth stopping for: a failure is one
+#                warning line and the script goes on
+# A pipeline that ends in sed/grep is judged by its FIRST command's
+# status (${PIPESTATUS[0]}), never by the filter's.
+# test_new-agent.sh runs the real sequence against fakes and injects a
+# failure at each must.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
@@ -93,6 +108,9 @@ done
 say() { printf 'new-agent: %s\n' "$*" >&2; }
 die() { printf 'new-agent: %s\n' "$*" >&2; exit 1; }
 run() { if (( DRY )); then say "would: $*"; else "$@"; fi; }
+must() { run "$@" || die "step failed: $* — nothing after it ran; fix the cause and re-run (every step is idempotent)"; }
+probe() { "$@"; }
+best_effort() { run "$@" || say "warning: $* failed; continuing"; }
 COORD="$(id -un)"
 [[ "$COORD" != root ]] || die "run this as the fabric-coordinator login, not root: the Doppler steps use your own CLI token."
 
@@ -109,8 +127,10 @@ print(next((x for x in p["remotes"] if x.startswith("git@")), p["remotes"][0]))'
 done
 
 LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
-as_login() { sudo -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="/usr/local/bin:/usr/bin:/bin:$HOME_DIR/.local/bin" bash -lc "cd \"\$HOME\" && $*"; }
-(( DRY )) || sudo -n true 2>/dev/null || die "sudo without a password is needed for the account steps (this login has none)."
+SUDO="${SUDO:-sudo}"   # a test puts a fake here; the real one is sudo
+# One shell line as the account; `must as_login '…'` when the line must succeed.
+as_login() { $SUDO -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="/usr/local/bin:/usr/bin:/bin:$HOME_DIR/.local/bin" bash -lc "cd \"\$HOME\" && $*"; }
+(( DRY )) || $SUDO -n true 2>/dev/null || die "sudo without a password is needed for the account steps (this login has none)."
 
 # ---- 0. the host ----------------------------------------------------------------
 # tool:package — what the fabric's hooks and scripts and the managed
@@ -129,26 +149,29 @@ else say "0. host tools present (${#HOST_TOOLS[@]} from the template)"; fi
 # reads it from there for every account.
 if [[ -x /usr/local/bin/doppler ]]; then say "   doppler: /usr/local/bin/doppler"
 elif command -v doppler >/dev/null 2>&1; then
-    run sudo -n install -m 755 "$(command -v doppler)" /usr/local/bin/doppler; say "   doppler: copied to /usr/local/bin (persistent)"
+    best_effort $SUDO -n install -m 755 "$(command -v doppler)" /usr/local/bin/doppler; say "   doppler: copied to /usr/local/bin (persistent)"
 else
     if (( DRY )); then say "would: install doppler to /usr/local/bin with its vendor script (curl -Ls https://cli.doppler.com/install.sh | sudo sh)"
-    else curl -Ls -m 60 https://cli.doppler.com/install.sh | sudo -n sh >/dev/null 2>&1 && say "   doppler: installed to /usr/local/bin" || say "   doppler: NOT installed (vendor script failed; enroll.sh needs it)"; fi
+    else curl -Ls -m 60 https://cli.doppler.com/install.sh | $SUDO -n sh >/dev/null 2>&1 && say "   doppler: installed to /usr/local/bin" || say "   warning: doppler NOT installed (vendor script failed); step 5 will stop there"; fi
 fi
 [[ -x /usr/local/bin/ots-git-gpg-wrapper.sh ]] && say "   gpg wrapper: /usr/local/bin/ots-git-gpg-wrapper.sh" \
     || say "   gpg wrapper: MISSING — commit signing needs it; devex-tooling installs it (gzapp infra/signing/install-shim.sh)"
 
 # ---- 1. the account ---------------------------------------------------------
 if getent passwd "$LOGIN" >/dev/null; then say "1. account $LOGIN exists"
-else run sudo -n useradd -m -s /bin/bash -c "agent-fabric $ROLE" "$LOGIN"; say "1. account $LOGIN created"; fi
+else must $SUDO -n useradd -m -s /bin/bash -c "agent-fabric $ROLE" "$LOGIN"; say "1. account $LOGIN created"; fi
 HOME_DIR="$(getent passwd "$LOGIN" | cut -d: -f6)"; HOME_DIR="${HOME_DIR:-/home/$LOGIN}"
-run sudo -n chmod 700 "$HOME_DIR"
-if getent group otscache >/dev/null && ! id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx otscache; then
-    run sudo -n usermod -aG otscache "$LOGIN"; say "   joined otscache (the shared timestamp cache)"; fi
+# The account's primary group, whatever the host's policy names it (not
+# necessarily the login: user-private groups are a distribution choice).
+GROUP="$(id -gn "$LOGIN" 2>/dev/null || echo "$LOGIN")"
+must $SUDO -n chmod 700 "$HOME_DIR"
+if probe getent group otscache >/dev/null && ! id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx otscache; then
+    best_effort $SUDO -n usermod -aG otscache "$LOGIN"; say "   otscache (the shared timestamp cache): joined"; fi
 
 # ---- 2. the home skeleton and the two binaries ----------------------------
-run sudo -n -u "$LOGIN" mkdir -p "$HOME_DIR"/{projects,.ssh,.claude,.config/gh,.local/bin,.local/share/claude/versions}
-run sudo -n -u "$LOGIN" chmod 700 "$HOME_DIR/.ssh"
-run sudo -n chown "$LOGIN:$LOGIN" "$HOME_DIR/.local" "$HOME_DIR/.local/bin" "$HOME_DIR/.local/share"
+must $SUDO -n -u "$LOGIN" mkdir -p "$HOME_DIR"/{projects,.ssh,.claude,.config/gh,.local/bin,.local/share/claude/versions}
+must $SUDO -n -u "$LOGIN" chmod 700 "$HOME_DIR/.ssh"
+must $SUDO -n chown "$LOGIN:$GROUP" "$HOME_DIR/.local" "$HOME_DIR/.local/bin" "$HOME_DIR/.local/share"
 # claude: the vendor's installer, as the account, on the vendor's latest —
 # resolved against the release pointer so a re-run upgrades an account
 # that fell behind — unless --claude pins a version or stable. Its layout
@@ -160,14 +183,14 @@ if [[ "$want" == latest ]]; then
     resolved="$(curl -fsSL -m 20 https://downloads.claude.ai/claude-code-releases/latest 2>/dev/null | tr -d '[:space:]')"
     [[ "$resolved" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || resolved=""
 fi
-have="$(as_login 'readlink -f ~/.local/bin/claude 2>/dev/null | xargs -r basename' 2>/dev/null || true)"
+have="$(as_login 'test -e ~/.local/bin/claude && readlink -f ~/.local/bin/claude | xargs -r basename' 2>/dev/null || true)"
 if [[ -n "$have" && -n "$resolved" && "$have" == "$resolved" ]]; then say "2. claude $have present (= $want)"
 else
     if (( DRY )); then say "would: as $LOGIN: curl -fsSL https://claude.ai/install.sh | bash -s -- $want"
     else
         as_login "curl -fsSL --proto '=https' -m 120 https://claude.ai/install.sh | bash -s -- '$want'" >"$LOG" 2>&1 \
             && as_login "claude --version" >/dev/null 2>&1 \
-            || { tail -5 "$LOG" >&2; die "claude: the vendor's installer failed for $LOGIN (target $want)."; }
+            || { tail -5 "$LOG" >&2; die "step failed: claude — the vendor's installer failed for $LOGIN (target $want); nothing after it ran"; }
         say "2. claude $(as_login 'claude --version' | cut -d' ' -f1) installed by the vendor's installer ($want${have:+, was $have})"
     fi
 fi
@@ -179,72 +202,90 @@ else
     else
         as_login "curl -fsSL --proto '=https' -m 120 https://openrouter.ai/labs/ori/install.sh | bash" >"$LOG" 2>&1 \
             && as_login "test -x ~/.local/bin/ori" \
-            || { tail -5 "$LOG" >&2; die "ori: the vendor's installer failed for $LOGIN."; }
+            || { tail -5 "$LOG" >&2; die "step failed: ori — the vendor's installer failed for $LOGIN; nothing after it ran"; }
         say "   ori installed by the vendor's installer"
     fi
 fi
 
 # ---- 3. GitHub's host key --------------------------------------------------
-if sudo -n grep -qs "^github.com " "$HOME_DIR/.ssh/known_hosts" 2>/dev/null; then say "3. github.com host key trusted"
+if $SUDO -n grep -qs "^github.com " "$HOME_DIR/.ssh/known_hosts" 2>/dev/null; then say "3. github.com host key trusted"
 else
     if (( DRY )); then say "would: ssh-keyscan github.com >> $HOME_DIR/.ssh/known_hosts"
-    else ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null | sudo -n -u "$LOGIN" tee -a "$HOME_DIR/.ssh/known_hosts" >/dev/null
-         sudo -n -u "$LOGIN" chmod 600 "$HOME_DIR/.ssh/known_hosts"; say "3. github.com host key trusted (ssh-keyscan)"; fi
+    else keys="$(ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null)"; grep -q "^github.com " <<<"$keys" || die "step failed: ssh-keyscan github.com returned no key (offline?)"
+         must bash -c 'printf "%s\n" "$1" | '"$SUDO"' -n -u "$2" tee -a "$3/.ssh/known_hosts" >/dev/null' _ "$keys" "$LOGIN" "$HOME_DIR"
+         must $SUDO -n -u "$LOGIN" chmod 600 "$HOME_DIR/.ssh/known_hosts"; say "3. github.com host key trusted (ssh-keyscan)"; fi
 fi
 
 # ---- 4. the fabric checkout -------------------------------------------------
-if sudo -n test -d "$HOME_DIR/projects/agent-fabric/.git"; then say "4. ~/projects/agent-fabric present"
-else run as_login "git clone -q https://github.com/gzapi-org/agent-fabric.git ~/projects/agent-fabric"; say "4. agent-fabric cloned (https; the fabric is public)"; fi
+if $SUDO -n test -d "$HOME_DIR/projects/agent-fabric/.git"; then say "4. ~/projects/agent-fabric present"
+else must as_login "git clone -q '${AGENT_FABRIC_CLONE_URL:-https://github.com/gzapi-org/agent-fabric.git}' ~/projects/agent-fabric"; say "4. agent-fabric cloned (https; the fabric is public)"; fi
 
 # ---- 5. Doppler enrolment ---------------------------------------------------
 # A key of the account's own is minted once: issue-* replaces whatever the
 # name holds, so a re-run must not mint again. The name's presence in the
 # account's config is the check (names only; no value is read).
 config_has() {  # config_has <name> — true when the account's config carries it
-    local cfg; cfg="$(sudo -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" doppler configure get enclave.config --plain --scope / 2>/dev/null || true)"
+    # PATH is set explicitly: `env -i` leaves execvp its built-in default
+    # (/bin:/usr/bin), which does not reach /usr/local/bin/doppler.
+    local cfg; cfg="$($SUDO -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="/usr/local/bin:/usr/bin:/bin" doppler configure get enclave.config --plain --scope / 2>/dev/null || true)"
     [[ -n "$cfg" ]] || return 1
     doppler secrets --only-names --json --project agent-fabric --config "$cfg" 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if sys.argv[1] in json.load(sys.stdin) else 1)' "$1"
 }
 if (( DRY )); then say "would: enroll.sh $LOGIN; fill-from $COORD $LOGIN; issue-openrouter-keys and issue-openai-keys $LOGIN (each once)"
 else
-    "$ENROLL" "$LOGIN" >/dev/null 2>&1 || true   # first pass: config + token + the strings; verification fails on the missing keys
+    # First pass: config + token + the strings. Its verification is
+    # EXPECTED to report the keys missing (they are issued below), so its
+    # exit status is not the fact here — what is, is that a config exists
+    # for the account afterwards, which config_has proves through it.
+    "$ENROLL" "$LOGIN" >"$LOG" 2>&1
+    probe config_has AGENT_LOGIN || { tail -5 "$LOG" >&2; die "step failed: enroll.sh $LOGIN — no Doppler config holds the account (see above); nothing after it ran"; }
     "$ENROLL" fill-from "$COORD" "$LOGIN" 2>&1 | grep -v "^gathered\|^upload" | sed 's/^/   /' >&2
+    (( PIPESTATUS[0] == 0 )) || die "step failed: enroll.sh fill-from $COORD $LOGIN; nothing after it ran"
     # Both API keys are per login (projects/registry.json agent_env), so
     # fill-from never copies them and presence means "issued".
-    if config_has OPENROUTER_API_KEY; then say "   OpenRouter key: present (issued once; not minted again)"
-    else "$ENROLL" issue-openrouter-keys "$LOGIN" 2>&1 | tail -1 | sed 's/^/   /' >&2; fi
-    if config_has OPENAI_API_KEY; then say "   OpenAI key: present (issued once; not minted again)"
-    else "$ENROLL" issue-openai-keys "$LOGIN" 2>&1 | tail -1 | sed 's/^/   /' >&2; fi
+    if probe config_has OPENROUTER_API_KEY; then say "   OpenRouter key: present (issued once; not minted again)"
+    else "$ENROLL" issue-openrouter-keys "$LOGIN" 2>&1 | tail -1 | sed 's/^/   /' >&2; (( PIPESTATUS[0] == 0 )) || die "step failed: enroll.sh issue-openrouter-keys $LOGIN; nothing after it ran"; fi
+    if probe config_has OPENAI_API_KEY; then say "   OpenAI key: present (issued once; not minted again)"
+    else "$ENROLL" issue-openai-keys "$LOGIN" 2>&1 | tail -1 | sed 's/^/   /' >&2; (( PIPESTATUS[0] == 0 )) || die "step failed: enroll.sh issue-openai-keys $LOGIN; nothing after it ran"; fi
     "$ENROLL" "$LOGIN" 2>&1 | grep -E "authenticated|signing key|verification|OK$|NOT OK" | sed 's/^/   /' >&2
+    (( PIPESTATUS[0] == 0 )) || die "step failed: enroll.sh $LOGIN (sync and verify); nothing after it ran"
     say "5. enrolled; secrets synced"
 fi
 
 # ---- 6. the project clones, as the account, over SSH -----------------------
 for pid in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
-    if sudo -n test -d "$HOME_DIR/projects/$pid/.git"; then say "6. ~/projects/$pid present"
-    else run as_login "git clone -q '${REMOTE[$pid]}' ~/projects/'$pid'" && say "6. $pid cloned from ${REMOTE[$pid]}"; fi
+    if $SUDO -n test -d "$HOME_DIR/projects/$pid/.git"; then say "6. ~/projects/$pid present"
+    else must as_login "git clone -q '${REMOTE[$pid]}' ~/projects/'$pid'"; say "6. $pid cloned from ${REMOTE[$pid]}"; fi
 done
 
 # ---- 7. bootstrap; 8. the role ------------------------------------------------
-run as_login "~/projects/agent-fabric/runtime/claude-code/bootstrap.sh" 2>&1 | tail -1 | sed 's/^/   /' >&2; say "7. bootstrap run"
+if (( DRY )); then say "would: as $LOGIN: bootstrap.sh"
+else
+    as_login "~/projects/agent-fabric/runtime/claude-code/bootstrap.sh" >"$LOG" 2>&1 || { tail -5 "$LOG" >&2; die "step failed: bootstrap.sh as $LOGIN; nothing after it ran"; }
+    tail -1 "$LOG" | sed 's/^/   /' >&2
+fi
+say "7. bootstrap run"
 bound="$(as_login "~/projects/agent-fabric/bin/fabric-role status 2>/dev/null | awk '/^role/{print \$2}'" 2>/dev/null || true)"
 if [[ "$bound" == "$ROLE" ]]; then say "8. role $ROLE already bound"
 else
     first="${PROJECTS[0]:-}"; where="~/projects${first:+/$first}"
     if (( DRY )); then say "would: as_login cd $where && bin/fabric-role bind '$ROLE'"
-    else as_login "cd $where && ~/projects/agent-fabric/bin/fabric-role bind '$ROLE'" 2>&1 | grep -i "bound\|refus" | sed 's/^/   /' >&2; fi
+    else
+        as_login "cd $where && ~/projects/agent-fabric/bin/fabric-role bind '$ROLE'" >"$LOG" 2>&1 || { tail -5 "$LOG" >&2; die "step failed: fabric-role bind $ROLE as $LOGIN; nothing after it ran"; }
+        grep -i "bound\|refus" "$LOG" | sed 's/^/   /' >&2
+    fi
     say "8. role $ROLE bound (from $where)"; fi
 
 # ---- 9. the toolchain each project declares ----------------------------------
 for pid in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
     wc="$HOME_DIR/projects/$pid"
-    if sudo -n test -f "$wc/pnpm-lock.yaml"; then
-        as_login "command -v pnpm >/dev/null" || { run as_login "npm config set prefix ~/.local && npm i -g pnpm >/dev/null"; say "9. pnpm installed under ~/.local"; }
-        sudo -n test -d "$wc/node_modules" && say "9. $pid: node_modules present" || { run as_login "cd ~/projects/'$pid' && pnpm install --frozen-lockfile >/dev/null 2>&1"; say "9. $pid: pnpm install"; }
-    elif sudo -n test -f "$wc/package-lock.json"; then
-        sudo -n test -d "$wc/node_modules" && say "9. $pid: node_modules present" || { run as_login "cd ~/projects/'$pid' && npm ci >/dev/null 2>&1"; say "9. $pid: npm ci"; }
-    elif sudo -n test -f "$wc/requirements.txt"; then
-        sudo -n test -d "$wc/.venv" && say "9. $pid: .venv present" || { run as_login "cd ~/projects/'$pid' && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"; say "9. $pid: venv"; }
+    if probe $SUDO -n test -f "$wc/pnpm-lock.yaml"; then
+        probe as_login "command -v pnpm >/dev/null" || { must as_login "npm config set prefix ~/.local && npm i -g pnpm >/dev/null"; say "9. pnpm installed under ~/.local"; }
+        probe $SUDO -n test -d "$wc/node_modules" && say "9. $pid: node_modules present" || { must as_login "cd ~/projects/'$pid' && pnpm install --frozen-lockfile >/dev/null 2>&1"; say "9. $pid: pnpm install"; }
+    elif probe $SUDO -n test -f "$wc/package-lock.json"; then
+        probe $SUDO -n test -d "$wc/node_modules" && say "9. $pid: node_modules present" || { must as_login "cd ~/projects/'$pid' && npm ci >/dev/null 2>&1"; say "9. $pid: npm ci"; }
+    elif probe $SUDO -n test -f "$wc/requirements.txt"; then
+        probe $SUDO -n test -d "$wc/.venv" && say "9. $pid: .venv present" || { must as_login "cd ~/projects/'$pid' && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"; say "9. $pid: venv"; }
     fi
 done
 
@@ -262,14 +303,14 @@ first="${PROJECTS[0]:-}"; where="~/projects${first:+/$first}"
 for prov in anthropic openrouter; do
     as_login "cd $where && AGENT_FABRIC_NO_ANNOUNCE=1 ~/projects/agent-fabric/runtime/openrouter/launch --provider $prov --print 2>&1 | grep -E '^launch:|resolved profile' | head -1" | sed "s/^/   launch ($prov): /" >&2
 done
-creds="$(sudo -n test -f "$HOME_DIR/.claude/.credentials.json" && echo yes || echo no)"
+creds="$($SUDO -n test -f "$HOME_DIR/.claude/.credentials.json" && echo yes || echo no)"
 cat >&2 <<EOF
 new-agent: done. Left for a person, in a terminal (nothing here can do them):
    $( [[ "$gpgkeys" -gt 0 ]] && echo "- GPG secret key: present" || echo "- GPG secret key: NONE — commits will fail to sign. As the coordinator, in a terminal (the key has a passphrase):
        gpg --export-secret-keys \"\$(git config --get user.signingkey)\" | sudo -u $LOGIN gpg --batch --import
        sudo -u $LOGIN bash -c \"echo '\$(git config --get user.signingkey):6:' | gpg --import-ownertrust\"" )
    $( [[ "$creds" == yes ]] && echo "- ~/.claude/.credentials.json: present (plain-claude path ready)" || echo "- ~/.claude/.credentials.json: absent — the plain-claude path (--provider anthropic) needs it; the broker path does not:
-       sudo install -o $LOGIN -g $LOGIN -m 600 ~/.claude/.credentials.json $HOME_DIR/.claude/" )
+       sudo install -o $LOGIN -g $GROUP -m 600 ~/.claude/.credentials.json $HOME_DIR/.claude/" )
    - first launch is interactive, to accept the workspace-trust dialog:
        moveto $LOGIN${first:+ $first}   then   runtime/openrouter/launch
 EOF

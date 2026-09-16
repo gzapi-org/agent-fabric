@@ -42,7 +42,9 @@ def build_fabric(root: str) -> None:
         os.makedirs(base, exist_ok=True)
         with open(os.path.join(base, "charter.md"), "w", encoding="utf-8") as fh:
             fh.write(f"---\nrole: {role}\nclass: charter\n---\n\n# {role}\n")
-        mem = os.path.join(root, "memory", "projects", "demo", role)
+        # The demo project's memory lives in its working copy (the fixture
+        # workspace beside this fabric), never here.
+        mem = os.path.join(os.path.dirname(root), "demo-clone", ".agent-fabric", "memory", role)
         os.makedirs(mem, exist_ok=True)
         with open(os.path.join(mem, "INDEX.md"), "w", encoding="utf-8") as fh:
             fh.write(f"# {role} index\n")
@@ -249,7 +251,7 @@ def test_tier1_lists_charter_index_and_workflow_from_project_memory(f: Fixture) 
     assert f.run("flutter-dev", "--force").returncode == 0
     listed = _tier1(f, "flutter-dev", "demo")
     assert listed[0].endswith("identities/roles/flutter-dev/charter.md"), listed
-    assert listed[1].endswith("memory/projects/demo/flutter-dev/INDEX.md"), listed
+    assert listed[1].endswith("demo-clone/.agent-fabric/memory/flutter-dev/INDEX.md"), listed
     assert listed[2].endswith("workflow/apk-signing.md") and listed[3].endswith("workflow/hot-reload-traps.md"), listed
     assert not any(p.endswith("notes.txt") for p in listed), listed
 
@@ -262,7 +264,7 @@ def test_tier1_omits_a_class_the_role_does_not_have(f: Fixture) -> None:
 
 
 def test_tier1_accepts_the_single_file_workflow_shape(f: Fixture) -> None:
-    path = os.path.join(f.root, "memory/projects/demo/backend-dev/workflow.md")
+    path = os.path.join(f.ws, ".agent-fabric/memory/backend-dev/workflow.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("---\nrole: backend-dev\nclass: workflow\ntier: 1\n---\n\nbody\n")
     try:
@@ -296,7 +298,10 @@ def test_explicit_project_binds_even_without_a_working_copy(f: Fixture, tmp: str
     assert proc.returncode == 0, proc.stderr
     assert f.binding()["project"] == "demo"
     assert "remit" in proc.stdout and "session-start hook" in proc.stdout, proc.stdout
-    assert any(p.endswith("demo/backend-dev/INDEX.md") for p in _tier1(f, "backend-dev", "demo"))
+    # The project is bound, but its memory lives in a working copy this
+    # binding does not know: only the charter is reachable, and that is
+    # said by the shape of the list, never by a guess at a location.
+    assert [os.path.basename(p) for p in _tier1(f, "backend-dev", "demo")] == ["charter.md"]
     f.run("flutter-dev")
 
 

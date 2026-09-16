@@ -32,7 +32,8 @@ What it does:
   * Regenerates every role INDEX.md from slice frontmatter. The index is
     the only thing a session reads before deciding to load a slice, so it
     is generated rather than maintained — a hand-written index drifts.
-  * Routes a claim owned by two or more roles to `.roles/shared/`, so
+  * Routes a claim owned by two or more roles to `memory/shared/` (or the
+    project's own `shared/`), so
     knowledge two roles need lives once instead of in two copies that
     will disagree later.
   * Merges the citation graph into each role's crossref.json.

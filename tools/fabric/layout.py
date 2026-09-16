@@ -41,9 +41,9 @@ working copy root; a fabric-side slice (charter, domain, memory/shared) is
 linked as `../agent-fabric/<path>`, the sibling-checkout layout every
 adapter already assumes.
 
-A project whose memory has not moved yet would still have it under
-`memory/projects/<project>/` here; that location is honoured while it
-exists (no project is there today).
+A project's memory is never under this repository: `memory/projects/`
+was the pre-migration location, honoured by a runtime branch until
+2026-09-16 (no project had used it for days; lint refuses the directory).
 
 Domain ids currently equal role ids: the extracted corpus filed domain
 knowledge per role, and renaming domains was not part of the extraction.
@@ -128,11 +128,6 @@ def agent_memory_dir(agent: str) -> str:
 
 # --- project homes ----------------------------------------------------------
 
-def legacy_projects_memory_dir() -> str:
-    """Where project memory lived before it moved into the projects."""
-    return os.path.join(FABRIC_ROOT, "memory", "projects")
-
-
 def set_working_copy(project: str, path: str | None) -> None:
     """Tell the layout where a project's working copy is for this run."""
     if path:
@@ -192,15 +187,8 @@ def _project_of_env_working_copy(path: str) -> str | None:
         return None
 
 
-def project_is_legacy(project: str) -> bool:
-    """True while the project's memory still lives under memory/projects/ here."""
-    return os.path.isdir(os.path.join(legacy_projects_memory_dir(), project))
-
-
 def project_memory_root(project: str) -> str:
     """The directory holding <role>/ subtrees for a project."""
-    if project_is_legacy(project):
-        return os.path.join(legacy_projects_memory_dir(), project)
     wc = working_copy_for(project)
     if not wc:
         raise LookupError(
@@ -213,8 +201,6 @@ def project_memory_root(project: str) -> str:
 def project_remit_path(project: str, role: str) -> str | None:
     """The role's authored remit in the project's working copy, if the
     working copy is known (None otherwise; a project need not have one)."""
-    if project_is_legacy(project):
-        return None
     wc = working_copy_for(project)
     return os.path.join(wc, PROJECT_ROLES_SUBDIR, f"{role}.md") if wc else None
 
@@ -273,8 +259,6 @@ def load_hygiene_patterns(projects: list[str] | None = None) -> list[tuple]:
 
 def project_link_root(project: str) -> str:
     """The directory INDEX.md links for this project are relative to."""
-    if project_is_legacy(project):
-        return FABRIC_ROOT
     return working_copy_for(project) or FABRIC_ROOT
 
 
@@ -284,8 +268,6 @@ def project_dir(project: str, role: str) -> str:
 
 def project_report_path(project: str) -> str:
     """Where a drain leaves its report for this project."""
-    if project_is_legacy(project):
-        return os.path.join(FABRIC_ROOT, "memory", "last-drain-report.json")
     return os.path.join(project_memory_root(project), "last-drain-report.json")
 
 
@@ -331,12 +313,9 @@ def root_rel(path: str) -> str:
 
 
 def list_projects() -> list[str]:
-    """Projects whose memory this run can see: the legacy subtrees here, and
-    every project with a known working copy that has a .agent-fabric/memory/."""
+    """Projects whose memory this run can see: every project with a known
+    working copy that has a .agent-fabric/memory/."""
     found: set[str] = set()
-    base = legacy_projects_memory_dir()
-    if os.path.isdir(base):
-        found.update(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)))
     candidates = set(_WORKING_COPIES) | {FABRIC_PROJECT_ID}
     env = os.environ.get("AGENT_FABRIC_WORKING_COPY")
     if env:

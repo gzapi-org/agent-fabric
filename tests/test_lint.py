@@ -150,11 +150,20 @@ def dom(fabric: str, *rest: str) -> str:
     return os.path.join(fabric, "memory", "domains", "web-dev", *rest)
 
 
+def wc_demo(fabric: str) -> str:
+    """The demo project's working copy: a sibling of the fixture fabric,
+    where the project's memory lives (<wc>/.agent-fabric/memory/)."""
+    return os.path.join(os.path.dirname(fabric), "wc-demo")
+
+
 def proj(fabric: str, *rest: str) -> str:
-    return os.path.join(fabric, "memory", "projects", PROJECT, "web-dev", *rest)
+    return os.path.join(wc_demo(fabric), ".agent-fabric", "memory", "web-dev", *rest)
 
 
-CHARTER_LINE = "- [`identities/roles/web-dev/charter.md`](identities/roles/web-dev/charter.md) — The web sub-apps.\n"
+# Links a project's index writes to fabric-side slices go through the
+# sibling checkout, whatever the fixture fabric is called (layout.link_rel).
+F = "../agent-fabric/"
+CHARTER_LINE = f"- [`{F}identities/roles/web-dev/charter.md`]({F}identities/roles/web-dev/charter.md) — The web sub-apps.\n"
 
 
 def index_for(*entries: str) -> str:
@@ -162,6 +171,11 @@ def index_for(*entries: str) -> str:
 
 
 def run_lint(fabric: str, *extra: str) -> tuple[int, str]:
+    # The demo working copy is named whenever it exists, so lint sees the
+    # project's memory where it lives; a case may name it itself too.
+    wc = wc_demo(fabric)
+    if os.path.isdir(wc) and not any(a.startswith(f"{PROJECT}=") for a in extra):
+        extra = ("--working-copy", f"{PROJECT}={wc}", *extra)
     proc = subprocess.run([sys.executable, LINT, "--fabric", fabric, *extra], capture_output=True, text=True)
     return proc.returncode, proc.stdout + proc.stderr
 
@@ -216,8 +230,8 @@ def case_slices_are_still_linted() -> None:
         write(dom(fabric, "domain", "good.md"), SLICE)
         write(dom(fabric, "domain", "bad.md"), NO_FRONTMATTER)
         write(proj(fabric, "INDEX.md"), index_for(
-            "- [`memory/domains/web-dev/domain/good.md`](memory/domains/web-dev/domain/good.md) — A well-formed slice, shaped like the real ones\n",
-            "- [`memory/domains/web-dev/domain/bad.md`](memory/domains/web-dev/domain/bad.md) — x\n"))
+            "- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — A well-formed slice, shaped like the real ones\n",
+            "- [`../agent-fabric/memory/domains/web-dev/domain/bad.md`](../agent-fabric/memory/domains/web-dev/domain/bad.md) — x\n"))
         code, out = run_lint(fabric)
         assert code == 1, f"a slice with no frontmatter should fail:\n{out}"
         assert "domain/bad.md" in out, f"the bad slice went unreported:\n{out}"
@@ -255,7 +269,7 @@ def case_index_need_not_list_payload() -> None:
         fabric = make_base(root)
         write(dom(fabric, "domain", "good.md"), SLICE)
         write(proj(fabric, "INDEX.md"), index_for(
-            "- [`memory/domains/web-dev/domain/good.md`](memory/domains/web-dev/domain/good.md) — A well-formed slice, shaped like the real ones\n"))
+            "- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — A well-formed slice, shaped like the real ones\n"))
         write(ident(fabric, "skills", "webapp-testing", "SKILL.md"), SKILL)
         code, out = run_lint(fabric)
         assert code == 0, f"payload was counted against the index:\n{out}"
@@ -268,7 +282,7 @@ def case_index_description_drift_is_caught() -> None:
         fabric = make_base(root)
         write(dom(fabric, "domain", "good.md"), SLICE)
         write(proj(fabric, "INDEX.md"), index_for(
-            "- [`memory/domains/web-dev/domain/good.md`](memory/domains/web-dev/domain/good.md) — STALE WORDING\n"))
+            "- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — STALE WORDING\n"))
         code, out = run_lint(fabric)
         assert code != 0, f"a drifted index description was not caught:\n{out}"
         assert "STALE WORDING" in out, f"the finding does not quote the index text:\n{out}"
@@ -284,7 +298,7 @@ def case_index_lists_domain_slices() -> None:
         write(proj(fabric, "INDEX.md"), index_for())
         code, out = run_lint(fabric)
         assert code == 1, f"an unindexed domain slice passed:\n{out}"
-        assert "does not list memory/domains/web-dev/domain/good.md" in out, out
+        assert "does not list ../agent-fabric/memory/domains/web-dev/domain/good.md" in out, out
         # And a domain with slices that no project indexes at all is named.
         os.remove(proj(fabric, "INDEX.md"))
         os.rmdir(proj(fabric))
@@ -299,7 +313,7 @@ def case_quoted_description_round_trips() -> None:
         write(dom(fabric, "domain", "good.md"), SLICE.replace(
             'description: "A well-formed slice, shaped like the real ones"', f'description: "{inner}"'))
         write(proj(fabric, "INDEX.md"), index_for(
-            f"- [`memory/domains/web-dev/domain/good.md`](memory/domains/web-dev/domain/good.md) — {inner}\n"))
+            f"- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — {inner}\n"))
         code, out = run_lint(fabric)
         assert code == 0, f"an unescaped-quote description was read differently than assemble reads it:\n{out}"
 
@@ -311,7 +325,7 @@ def case_authored_classes_only_in_identities() -> None:
         fabric = make_base(root)
         write(proj(fabric, "charter.md"), CHARTER)
         write(proj(fabric, "INDEX.md"), index_for(
-            "- [`memory/projects/demo/web-dev/charter.md`](memory/projects/demo/web-dev/charter.md) — The web sub-apps.\n"))
+            "- [`.agent-fabric/memory/web-dev/charter.md`](.agent-fabric/memory/web-dev/charter.md) — The web sub-apps.\n"))
         code, out = run_lint(fabric)
         assert code == 1 and "belongs under identities/roles/" in out, out
 
@@ -326,14 +340,14 @@ def case_brief_is_identity_too() -> None:
         write(ident(fabric, "brief.md"), brief)
         write(proj(fabric, "INDEX.md"), index_for(
             CHARTER_LINE +
-            "- [`identities/roles/web-dev/brief.md`](identities/roles/web-dev/brief.md) — The web sub-apps.\n"))
+            "- [`../agent-fabric/identities/roles/web-dev/brief.md`](../agent-fabric/identities/roles/web-dev/brief.md) — The web sub-apps.\n"))
         code, out = run_lint(fabric)
         assert code == 0, f"a brief beside its charter was refused:\n{out}"
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         write(proj(fabric, "brief.md"), CHARTER.replace("class: charter", "class: brief"))
         write(proj(fabric, "INDEX.md"), index_for(
-            "- [`memory/projects/demo/web-dev/brief.md`](memory/projects/demo/web-dev/brief.md) — The web sub-apps.\n"))
+            "- [`.agent-fabric/memory/web-dev/brief.md`](.agent-fabric/memory/web-dev/brief.md) — The web sub-apps.\n"))
         code, out = run_lint(fabric)
         assert code == 1 and "belongs under identities/roles/" in out, out
 

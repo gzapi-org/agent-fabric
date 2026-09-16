@@ -622,9 +622,9 @@ def main() -> int:
                                .get("projects") or {}).keys())
     except (OSError, ValueError):
         pass
-    legacy_ids = [d for d in (sorted(os.listdir(projects_root)) if os.path.isdir(projects_root) else [])
-                  if os.path.isfile(os.path.join(projects_root, d, "taxonomy.json"))]
-    for pid in sorted(set(registry_ids) | set(legacy_ids) | set(layout.explicit_working_copies())):
+    bound_here_ids = [d for d in (sorted(os.listdir(projects_root)) if os.path.isdir(projects_root) else [])
+                      if os.path.isfile(os.path.join(projects_root, d, "taxonomy.json"))]
+    for pid in sorted(set(registry_ids) | set(bound_here_ids) | set(layout.explicit_working_copies())):
         if True:
             tax_path = layout.project_taxonomy_path(pid)
             if not tax_path:
@@ -713,15 +713,14 @@ def main() -> int:
 
     # --- project memory, and the indexes ------------------------------------
     # A project's memory lives in ITS repository (<working copy>/.agent-fabric/
-    # memory/); this run sees the projects whose working copy it knows, plus
-    # any still under memory/projects/ here (transition). Index links are
-    # relative to the working copy; fabric-side slices reach back through
-    # ../agent-fabric/, which resolve_link maps onto this checkout.
+    # memory/); this run sees the projects whose working copy it knows.
+    # Index links are relative to the working copy; fabric-side slices
+    # reach back through ../agent-fabric/, which resolve_link maps onto
+    # this checkout.
     indexed_domains: set[str] = set()
     for pid in layout.list_projects():
         pbase = layout.project_memory_root(pid)
-        legacy = layout.project_is_legacy(pid)
-        plabel = f"memory/projects/{pid}" if legacy else f"{pid}:{layout.PROJECT_MEMORY_SUBDIR}"
+        plabel = f"{pid}:{layout.PROJECT_MEMORY_SUBDIR}"
         if project_ids and pid not in project_ids:
             findings.append(f"{plabel}: no projects/{pid}/taxonomy.json binds this project")
         for role in sorted(os.listdir(pbase)):

@@ -59,7 +59,7 @@ buffer**; this corpus is the **durable knowledge**.
 | scope | what belongs | default for |
 |---|---|---|
 | `domains/<domain>/` | true of the field regardless of any project | technical knowledge that transfers |
-| `projects/<project>/` | what one system implements, decided, does, and still owes | most of what a session learns |
+| `<working copy>/.agent-fabric/memory/<role>/` (in the project's own repository, never here) | what one system implements, decided, does, and still owes | most of what a session learns |
 | `agents/<login>/` | genuinely specific to one agent and to nothing else | almost nothing — a fact is not agent-scoped merely because that agent discovered it |
 | `shared/` | field knowledge owned by two or more roles, stored once | the assembler's multi-owner route |
 

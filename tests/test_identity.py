@@ -49,7 +49,7 @@ def fabric_fixture(tmp: str) -> str:
     os.makedirs(os.path.join(root, "tools", "fabric"))
     with open(os.path.join(root, "projects", "registry.json"), "w", encoding="utf-8") as fh:
         json.dump({"version": 1, "projects": {"demo": {
-            "remotes": ["git@example.com:org/demo.git"], "memory": "memory/projects/demo"}}}, fh)
+            "remotes": ["git@example.com:org/demo.git"]}}}, fh)
     os.symlink(os.path.join(ROOT, "tools", "fabric", "workingcopy.py"),
                os.path.join(root, "tools", "fabric", "workingcopy.py"))
     return root

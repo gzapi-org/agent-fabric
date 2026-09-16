@@ -88,7 +88,10 @@ cat > "$BIN/sudo" <<STUB
 [[ "\$1" == -n ]] && shift; [[ "\$1" == true ]] && exit 0
 [[ "\$1" == -u ]] && shift 2; [[ "\$1" == -H ]] && shift
 # The fakes first, and never /usr/local/bin: a real claude or doppler there must not be what the fixture account runs.
-args=(); for a in "\$@"; do [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}" && a="\${a//\/usr\/local\/bin:/}"; args+=("\$a"); done
+args=(); for a in "\$@"; do
+  [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}" && a="\${a//\/usr\/local\/bin:/}"
+  [[ "\$a" == AGENT_FABRIC_PATH=* ]] && a="AGENT_FABRIC_PATH=$BIN:\${a#AGENT_FABRIC_PATH=}" && a="\${a//\/usr\/local\/bin:/}"
+  args+=("\$a"); done
 echo "sudo \${args[*]}" | cut -c1-160 >> "$CALLS"
 grep -qsxF "\${args[0]}" "$FAULT" && { echo "fake: \${args[0]} failed (injected)" >&2; exit 1; }
 [[ "\${args[0]}" == chown ]] && exit 0

@@ -291,7 +291,10 @@ sync_and_verify() {
   if (( DRY )); then say "would: fabric-secrets sync as $login and verify"; return 0; fi
   as_login "$login" "$(fabric_secrets_of "$login")" sync || say "$login: sync reported missing names (see above)"
   local ok=1
-  if as_login "$login" bash -lc 'ori auth --json' 2>/dev/null | python3 -c '
+  # A login shell, for the account's own profile — with the PATH the
+  # worker set restored inside it (Debian's /etc/profile assigns PATH
+  # outright; the worker passes its PATH as AGENT_FABRIC_PATH for this).
+  if as_login "$login" bash -lc 'export PATH="${AGENT_FABRIC_PATH:-$HOME/.local/bin}:$PATH"; ori auth --json' 2>/dev/null | python3 -c '
 import json, sys
 try:
     d = json.load(sys.stdin); d = d.get("data", d)
@@ -301,7 +304,7 @@ except (ValueError, AttributeError): sys.exit(1)'; then
   else
     say "$login: ori NOT authenticated from the environment (no OPENROUTER_API_KEY in Doppler?)"; ok=0
   fi
-  if as_login "$login" bash -lc 'gh auth status' >/dev/null 2>&1; then say "$login: gh authenticated"; else say "$login: gh NOT authenticated"; ok=0; fi
+  if as_login "$login" bash -lc 'export PATH="${AGENT_FABRIC_PATH:-$HOME/.local/bin}:$PATH"; gh auth status' >/dev/null 2>&1; then say "$login: gh authenticated"; else say "$login: gh NOT authenticated"; ok=0; fi
   if [[ -n "$(as_login "$login" git config --global --get user.signingkey)" ]]; then say "$login: signing key set"; else say "$login: signing key NOT set"; ok=0; fi
   return $(( ok ? 0 : 1 ))
 }

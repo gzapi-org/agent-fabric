@@ -78,7 +78,7 @@ jobs:
         run: |
           set -e
           if command -v apt-get >/dev/null; then apt-get update; fi
-          ${{ matrix.install }} bash git   # enough to read the map from the checkout
+          ${{ matrix.install }} bash git ca-certificates   # enough to check out and read the map
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -88,7 +88,6 @@ jobs:
           pkgs="$(bash runtime/provisioning/platform/packages.sh ${{ matrix.platform }} | tr '\n' ' ')"
           echo "installing: $pkgs"
           ${{ matrix.install }} $pkgs ${{ matrix.extra }}
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python3 -m pip install --quiet --disable-pip-version-check --break-system-packages ruff jsonschema || python3 -m pip install --quiet --disable-pip-version-check ruff jsonschema
       - name: every tool of the contract answers
         run: |
@@ -96,6 +95,8 @@ jobs:
           . runtime/provisioning/platform/detect.sh
           [ "$PLATFORM_ID" = "${{ matrix.platform }}" ] || { echo "detected $PLATFORM_ID, expected ${{ matrix.platform }}"; exit 1; }
           for t in "${FABRIC_HOST_TOOLS[@]}"; do command -v "$t" >/dev/null || { echo "missing after install: $t"; exit 1; }; done
-      - run: bash tests/run.sh static
-      - run: bash tests/run.sh python
-      - run: bash tests/run.sh bash
+      - name: the suites, as an unprivileged login (a host never runs the fabric as root)
+        run: |
+          set -e
+          useradd -m ci && chown -R ci "$GITHUB_WORKSPACE"
+          su ci -c "cd '$GITHUB_WORKSPACE' && bash tests/run.sh static && bash tests/run.sh python && bash tests/run.sh bash"

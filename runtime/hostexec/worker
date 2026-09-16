@@ -56,6 +56,11 @@ cmd=(); for a in "$@"; do [[ "$a" == @fabric/* ]] && needs_fabric=1; cmd+=("${a/
 SUDO="${SUDO:-sudo}"
 # The command is handed to the account's shell as ARGUMENTS ("$@"), never
 # re-parsed: a value with a space or a quote reaches it whole.
-exec $SUDO -n -u "$as" -H env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin:$home/.local/bin" \
+# AGENT_FABRIC_PATH carries the same PATH for a command that opens a LOGIN
+# shell (bash -l): Debian's /etc/profile assigns PATH outright for a
+# non-root login, so the value set here would be gone by the time the
+# command runs; the command restores it with
+# `export PATH="$AGENT_FABRIC_PATH:$PATH"`.
+exec $SUDO -n -u "$as" -H env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin:$home/.local/bin" AGENT_FABRIC_PATH="/usr/local/bin:/usr/bin:/bin:$home/.local/bin" \
     bash -c 'if [ "$1" = 1 ] && [ ! -d "$2" ]; then echo "worker: $(id -un) has no fabric checkout at $2 on $(hostname -s) (provision it first)" >&2; exit 2; fi
              cd "${3:-$HOME}" && shift 3 && exec "$@"' -- "$needs_fabric" "$fabric" "$cwd" "$@"

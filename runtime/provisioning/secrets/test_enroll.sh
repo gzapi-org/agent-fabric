@@ -114,7 +114,9 @@ cat > "$BIN/sudo" <<STUB
 [[ "\$1" == -u ]] && shift 2; [[ "\$1" == -H ]] && shift
 [[ "\$1" == chown ]] && exit 0
 # On the fake far host (FAKE_FAR, exported by the fake ssh) the far host's own hostname comes first.
-args=(); for a in "\$@"; do [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}" && [[ -n "\${FAKE_FAR:-}" ]] && a="PATH=$SANDBOX/farbin:\${a#PATH=}"; args+=("\$a"); done
+args=(); for a in "\$@"; do
+  for v in PATH AGENT_FABRIC_PATH; do [[ "\$a" == "\$v"=* ]] && a="\$v=$BIN:\${a#*=}" && [[ -n "\${FAKE_FAR:-}" ]] && a="\$v=$SANDBOX/farbin:\${a#*=}"; done
+  args+=("\$a"); done
 exec "\${args[@]}"
 STUB
 cat > "$BIN/getent" <<STUB

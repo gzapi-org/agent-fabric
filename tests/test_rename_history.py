@@ -18,7 +18,8 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TOOL = os.path.join(ROOT, "runtime", "provisioning", "rename_history.py")
 IDENTITY = os.path.join(ROOT, "runtime", "identity.py")
-LOGIN = os.environ.get("USER") or "user"
+import pwd
+LOGIN = pwd.getpwuid(os.geteuid()).pw_name   # the agent is the login, never $USER (unset in a container)
 
 
 def write(path: str, text: str) -> None:

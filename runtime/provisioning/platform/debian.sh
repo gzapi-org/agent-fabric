@@ -13,6 +13,6 @@ pkg_for() {
         python3) echo python3 ;; jq) echo jq ;; gpg) echo gnupg ;; curl) echo curl ;;
         sudo) echo sudo ;; ssh) echo openssh-client ;; getent) echo libc-bin ;; useradd|usermod) echo passwd ;;
         pgrep) echo procps ;; timeout|stat|sha256sum|shred|install) echo coreutils ;; flock) echo util-linux ;;
-        bash) echo bash ;; *) echo "$1" ;;
+        cmp) echo diffutils ;; bash) echo bash ;; *) echo "$1" ;;
     esac
 }

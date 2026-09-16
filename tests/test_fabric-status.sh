@@ -16,10 +16,14 @@ printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"db-admin","updated_at"
 printf 'prompt text\n' > "$STATE/agents/$LOGIN/launch-prompt.md"
 DIGEST="sha256:$(sha256sum "$STATE/agents/$LOGIN/launch-prompt.md" | cut -d' ' -f1)"
 
-# Nothing a real session exported may leak into the forged one.
+# Nothing a real session exported may leak into the forged one; and the
+# login is placed on this host in a fixture registry (the real one need
+# not know a CI runner's login) unless a case names another.
+PLACED="$SANDBOX/placed.json"
+printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operator":"%s","fabric":"x"}},"placement":{"%s":"%s"}}\n' "$(hostname -s)" "$LOGIN" "$LOGIN" "$(hostname -s)" > "$PLACED"
 status() { env -u AGENT_FABRIC_LAUNCH_ROLE -u AGENT_FABRIC_LAUNCH_PROMPT_DIGEST -u AGENT_FABRIC_LAUNCH_SESSION_MODEL \
                -u AGENT_FABRIC_LAUNCH_PROVIDER -u AGENT_FABRIC_LAUNCH_PROFILE -u ANTHROPIC_BASE_URL \
-               AGENT_FABRIC_STATE_DIR="$STATE" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
+               AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_HOSTS_REGISTRY="$PLACED" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
 MODE=()
 
 echo "fabric-status: unlaunched — nothing to drift from"

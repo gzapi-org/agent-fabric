@@ -11,8 +11,9 @@
 #       steps 0-4: host audit, account, home + claude + ori, GitHub's host keys, the fabric clone
 #   new-agent-worker.sh finish <login> <role> [--clone <id>=<remote>]... [--dry-run]
 #       steps 6-10: project clones, bootstrap, the role bound, toolchains, verification
-#   new-agent-worker.sh host-check <login> [--project <id>]...
-#       what this host reports about itself and the account (hostname -s first)
+#   new-agent-worker.sh host-check <login>
+#       what this host reports about itself and the account (hostname -s
+#       first, then whether the account exists); needs no sudo
 #
 # Runs as the host's operator (sudo, no password); as_login runs one
 # shell line as the account. Every step is must, probe or best_effort
@@ -52,18 +53,25 @@ LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
 SUDO="${SUDO:-sudo}"   # a test puts a fake here; the real one is sudo
 HOME_DIR="$(getent passwd "$LOGIN" 2>/dev/null | cut -d: -f6)"; HOME_DIR="${HOME_DIR:-/home/$LOGIN}"
 GROUP="$(id -gn "$LOGIN" 2>/dev/null || echo "$LOGIN")"   # the primary group, whatever the host's policy names it
-# One shell line as the account; `must as_login '…'` when the line must succeed.
-as_login() { $SUDO -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="/usr/local/bin:/usr/bin:/bin:$HOME_DIR/.local/bin" bash -lc "cd \"\$HOME\" && $*"; }
-(( DRY )) || $SUDO -n true 2>/dev/null || die "sudo without a password is needed for the account steps (the operator on $(hostname -s) has none)."
-
+# One shell line as the account, in a LOGIN shell (the account's profile:
+# what its installers put on PATH); `must as_login '…'` when the line must
+# succeed. The PATH is re-asserted INSIDE the shell: Debian's /etc/profile
+# assigns PATH outright for a non-root login, so what env -i set would be
+# gone by the time the line runs (found by the Debian smoke container,
+# which then downloaded the real claude in place of the test's fake).
+as_login() {  # HOME_DIR is re-derived once the account exists, so the PATH is built per call
+    local p="/usr/local/bin:/usr/bin:/bin:$HOME_DIR/.local/bin"
+    $SUDO -n -u "$LOGIN" -H env -i HOME="$HOME_DIR" PATH="$p" AGENT_FABRIC_PATH="$p" \
+        bash -lc 'export PATH="$AGENT_FABRIC_PATH:$PATH"; cd "$HOME" && eval "$1"' _ "$*"
+}
 if [[ "$PHASE" == host-check ]]; then
     # The host names itself; the coordinator compares this with the
     # registry id it reached the host as, and never stamps a host it is not on.
     hostname -s
     getent passwd "$LOGIN" >/dev/null && echo "account: present" || echo "account: absent"
-    for pid in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do $SUDO -n test -d "$HOME_DIR/projects/$pid/.git" && echo "clone $pid: present" || echo "clone $pid: absent"; done
     exit 0
 fi
+(( DRY )) || $SUDO -n true 2>/dev/null || die "sudo without a password is needed for the account steps (the operator on $(hostname -s) has none)."
 
 if [[ "$PHASE" == prepare ]]; then
     # ---- 0. the host ----------------------------------------------------------------

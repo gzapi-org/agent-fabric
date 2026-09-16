@@ -8,6 +8,19 @@ can consume.
     tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \\
         --project <project> --stamp $(date +%F)
 
+    tools/fabric/harvest_memory.py --role architect-cto --bundle - > drain.tar
+    tools/fabric/assemble.py --bundle drain.tar --project <project> --stamp $(date +%F)
+
+THE BUNDLE. `--bundle FILE|-` writes the same drain as one tar — claims/,
+observations.jsonl, references.json, harvest-report.json — plus a
+manifest.json naming who harvested (agent, host, role, project, working
+copy label, the watermark window) and the sha256 of every file. It is
+the artifact that crosses a host: `bin/fabric-host <host> drain <login>`
+runs this AS THE ACCOUNT on its host and streams the tar to the
+coordinator, who assembles it (assemble.py --bundle verifies the
+manifest first). Only the agent reads its memory; the coordinator
+receives the result (review, 2026-09-16).
+
 PROVENANCE. Every observation is stamped with the AGENT (the Linux login,
 from runtime/identity.py), the HOST, the PROJECT the working copy belongs
 to (projects/registry.json, by remote) and the WORKING COPY's basename as a
@@ -64,10 +77,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
+import shutil
 import sys
+import tarfile
+import tempfile
 from typing import Any
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -200,7 +217,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[2])
     ap.add_argument("--role", default=None,
                     help="role these claims belong to (default: the agent's active role)")
-    ap.add_argument("--out", required=True, help="output directory")
+    ap.add_argument("--out", default=None, help="output directory (or --bundle)")
+    ap.add_argument("--bundle", default=None, metavar="FILE|-",
+                    help="write the drain as one tar with a manifest (- for stdout) instead of a directory")
     ap.add_argument("--memory", default=None,
                     help="memory dir (default: the one Claude Code keeps for --working-copy)")
     ap.add_argument("--working-copy", default=None,
@@ -212,6 +231,12 @@ def main() -> int:
                     help="harvest every memory, not only those newer than the project's last drain watermark")
     ap.add_argument("--dry-run", action="store_true", help="report, write nothing")
     args = ap.parse_args()
+    if bool(args.out) == bool(args.bundle):
+        print("harvest_memory: exactly one of --out DIR or --bundle FILE|- (the bundle is the drain as one tar)", file=sys.stderr)
+        return 2
+    if args.bundle:
+        # The directory form, then packed: one writer for both shapes.
+        args.out = tempfile.mkdtemp(prefix="harvest-bundle-")
 
     working_copy = os.path.abspath(args.working_copy or os.getcwd())
     ctx = identity.resolve_context(cwd=working_copy)
@@ -375,7 +400,55 @@ def main() -> int:
         json.dump({k: v for k, v in report.items() if k != "memory_dir"}, fh, indent=2, sort_keys=True)
         fh.write("\n")
 
+    if args.bundle:
+        return write_bundle(args.out, args.bundle, report)
     print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+BUNDLE_FILES = ("harvest-report.json", "references.json", "observations.jsonl")
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_bundle(drain: str, target: str, report: dict) -> int:
+    """The drain directory as one tar: its files under their names, plus
+    manifest.json first — who harvested, the window, and the digest of
+    every file — so the receiver can refuse a bundle that was cut short
+    or changed on the way. Deterministic (fixed mtimes, sorted names).
+    The report goes to stderr: stdout may be the tar."""
+    files = [f for f in BUNDLE_FILES if os.path.exists(os.path.join(drain, f))]
+    files += sorted(os.path.join("claims", n) for n in os.listdir(os.path.join(drain, "claims")))
+    manifest = {
+        "format": "agent-fabric-drain/1",
+        "agent": report["agent"], "host": report["host"], "role": report["role"],
+        "project": report["project"], "working_copy": report["working_copy"],
+        "since_watermark": report["since_watermark"], "next_watermark": report["next_watermark"],
+        "claims": report["claims"],
+        "files": {f: sha256_of(os.path.join(drain, f)) for f in files},
+    }
+    mbytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    out = sys.stdout.buffer if target == "-" else open(target, "wb")
+    try:
+        with tarfile.open(fileobj=out, mode="w|") as tar:
+            info = tarfile.TarInfo("manifest.json"); info.size = len(mbytes); info.mtime = 0; info.mode = 0o644
+            tar.addfile(info, io.BytesIO(mbytes))
+            for f in files:
+                info = tar.gettarinfo(os.path.join(drain, f), arcname=f)
+                info.mtime = 0; info.uid = info.gid = 0; info.uname = info.gname = ""
+                with open(os.path.join(drain, f), "rb") as fh:
+                    tar.addfile(info, fh)
+    finally:
+        if target != "-":
+            out.close()
+    shutil.rmtree(drain, ignore_errors=True)
+    print(json.dumps({k: v for k, v in report.items() if k != "memory_dir"}, indent=2, sort_keys=True), file=sys.stderr)
     return 0
 
 

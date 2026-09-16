@@ -5,6 +5,15 @@
 Turn distiller claims into the knowledge corpus, filed by scope.
 
     tools/fabric/assemble.py --claims DIR --drain DIR --project <project> --stamp DATE
+    tools/fabric/assemble.py --bundle FILE|- --project <project> --stamp DATE
+
+A BUNDLE is the drain as one tar with a manifest (harvest_memory.py
+--bundle; bin/fabric-host <host> drain <login> streams one from the
+account's own host). It is verified before anything is read from it:
+every file the manifest names present with the digest it records, the
+agent and host the same in manifest and report, nothing in the tar the
+manifest does not name. A bundle that was cut short or changed on the
+way is refused with the file named.
 
 Where a slice lands is decided by tools/fabric/layout.py from its class:
 domain knowledge under memory/domains/<role>/, everything learned about
@@ -55,6 +64,8 @@ import os
 import hashlib
 import re
 import sys
+import tarfile
+import tempfile
 from collections import defaultdict
 from typing import Any
 
@@ -357,10 +368,67 @@ def claim_block(claim: dict[str, Any]) -> str:
     return f"## {title}\n{scope}\n{body}{tail}\n"
 
 
+BUNDLE_FORMAT = "agent-fabric-drain/1"
+
+
+def open_bundle(source: str) -> str:
+    """Verify a drain bundle and unpack it into a temp directory; return
+    the directory (its claims/ is --claims, itself --drain). Refuses, by
+    file, anything the manifest does not vouch for."""
+    stream = sys.stdin.buffer if source == "-" else open(source, "rb")
+    dest = tempfile.mkdtemp(prefix="assemble-bundle-")
+    members: dict[str, bytes] = {}
+    try:
+        with tarfile.open(fileobj=stream, mode="r|*") as tar:
+            for info in tar:
+                name = info.name
+                if not info.isfile() or name.startswith(("/", "../")) or "/../" in name:
+                    sys.exit(f"assemble: bundle: refusing member {name!r} (not a plain file under the bundle root)")
+                fh = tar.extractfile(info)
+                members[name] = fh.read() if fh else b""
+    finally:
+        if source != "-":
+            stream.close()
+    if "manifest.json" not in members:
+        sys.exit("assemble: bundle: no manifest.json — not a drain bundle, or cut short before its first member")
+    try:
+        manifest = json.loads(members["manifest.json"])
+    except ValueError as exc:
+        sys.exit(f"assemble: bundle: manifest.json does not parse ({exc})")
+    if manifest.get("format") != BUNDLE_FORMAT:
+        sys.exit(f"assemble: bundle: format {manifest.get('format')!r}, expected {BUNDLE_FORMAT!r}")
+    named = manifest.get("files") or {}
+    for f, digest in sorted(named.items()):
+        if f not in members:
+            sys.exit(f"assemble: bundle: {f} is named in the manifest but missing from the tar (cut short?)")
+        actual = hashlib.sha256(members[f]).hexdigest()
+        if actual != digest:
+            sys.exit(f"assemble: bundle: {f} does not match its manifest digest (changed on the way, or a different harvest)")
+    for f in sorted(members):
+        if f != "manifest.json" and f not in named:
+            sys.exit(f"assemble: bundle: {f} is in the tar but not in the manifest; nothing unnamed is read")
+    if "harvest-report.json" not in members:
+        sys.exit("assemble: bundle: no harvest-report.json")
+    report = json.loads(members["harvest-report.json"])
+    for key in ("agent", "host", "role", "project"):
+        if manifest.get(key) != report.get(key):
+            sys.exit(f"assemble: bundle: manifest says {key}={manifest.get(key)!r} but harvest-report.json says {report.get(key)!r}")
+    for f, data in members.items():
+        path = os.path.join(dest, f)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+    print(f"bundle: {manifest['agent']}@{manifest['host']} role {manifest['role']} project {manifest['project']}: "
+          f"{manifest.get('claims', '?')} claim(s), {len(named)} file(s) verified")
+    return dest
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Assemble knowledge slices from claims.")
-    ap.add_argument("--claims", required=True, help="directory of <role>.json claim files")
-    ap.add_argument("--drain", required=True, help="harvest output directory")
+    ap.add_argument("--claims", default=None, help="directory of <role>.json claim files")
+    ap.add_argument("--drain", default=None, help="harvest output directory")
+    ap.add_argument("--bundle", default=None, metavar="FILE|-",
+                    help="a drain bundle (harvest_memory.py --bundle) in place of --claims/--drain; - reads stdin")
     ap.add_argument("--project", required=True,
                     help="logical project id the project-scoped classes are filed under")
     ap.add_argument("--fabric", default=None,
@@ -372,6 +440,13 @@ def main() -> int:
     ap.add_argument("--stamp", required=True, help="distillation date (YYYY-MM-DD)")
     ap.add_argument("--budget", type=int, default=DEFAULT_SLICE_BUDGET_TOKENS)
     args = ap.parse_args()
+    if args.bundle:
+        if args.claims or args.drain:
+            ap.error("--bundle replaces --claims and --drain")
+        args.drain = open_bundle(args.bundle)
+        args.claims = os.path.join(args.drain, "claims")
+    elif not (args.claims and args.drain):
+        ap.error("--claims and --drain, or --bundle")
     if args.fabric:
         layout.FABRIC_ROOT = os.path.abspath(args.fabric)
     project = args.project

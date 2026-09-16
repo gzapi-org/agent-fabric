@@ -326,9 +326,83 @@ def test_the_watermark_round_trips_through_the_committed_report(tmp: str) -> Non
     assert hr["since_watermark"] == 0 and len(claims_of(out4)) == 2, hr
 
 
+def test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file(tmp: str) -> None:
+    """The bundle is the drain that crosses a host: harvest writes one tar
+    with a manifest naming every file and its digest; assemble verifies it
+    before reading anything, and names the file when it refuses."""
+    import io, tarfile
+    assemble = os.path.join(os.path.dirname(TOOL), "assemble.py")
+    if not os.path.exists(assemble):
+        return
+    mem = os.path.join(tmp, "m15"); os.makedirs(mem)
+    for klass in SCHEMA_CLASSES:
+        write_memory(mem, f"b-{klass}", "project", roles_class=klass)
+    bundle = os.path.join(tmp, "drain.tar")
+    r = subprocess.run([sys.executable, TOOL, "--role", "architect-cto", "--memory", mem, "--bundle", bundle],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "", "with --bundle FILE nothing but the report may reach stdout (stdout may be the tar)"
+    assert '"claims"' in r.stderr, "the report goes to stderr"
+    with tarfile.open(bundle) as tar:
+        names = tar.getnames()
+        assert names[0] == "manifest.json" and "harvest-report.json" in names and "claims/architect-cto.json" in names, names
+        manifest = json.load(tar.extractfile("manifest.json"))
+    assert manifest["format"] == "agent-fabric-drain/1" and manifest["agent"] and manifest["host"] and manifest["role"] == "architect-cto"
+    assert set(manifest["files"]) == set(names) - {"manifest.json"}, manifest["files"]
+    # streamed to stdout, byte-identical (deterministic tar)
+    r2 = subprocess.run([sys.executable, TOOL, "--role", "architect-cto", "--memory", mem, "--bundle", "-"], capture_output=True)
+    assert r2.returncode == 0 and r2.stdout == open(bundle, "rb").read(), "the stdout bundle differs from the file one"
+    # the assembler consumes it, from a file and from stdin
+    def assemble_bundle(src):
+        return subprocess.run([sys.executable, assemble, "--bundle", src, "--fabric", os.path.join(tmp, "assembled15"),
+                               "--project", "demo", "--working-copy", os.path.join(tmp, "wc-demo15"), "--stamp", "2026-01-01"],
+                              capture_output=True, text=True)
+    r = assemble_bundle(bundle)
+    assert r.returncode == 0 and "file(s) verified" in r.stdout and "admitted=" in r.stdout, r.stdout + r.stderr
+    r = subprocess.run([sys.executable, assemble, "--bundle", "-", "--fabric", os.path.join(tmp, "assembled15b"),
+                        "--project", "demo", "--working-copy", os.path.join(tmp, "wc-demo15b"), "--stamp", "2026-01-01"],
+                       capture_output=True, input=open(bundle, "rb").read())
+    assert r.returncode == 0 and b"file(s) verified" in r.stdout, r.stdout + r.stderr
+    # damaged in three ways: a tampered file, a missing file, an extra unnamed file — each refused by name
+    def rewrite(mutate):
+        out = io.BytesIO()
+        with tarfile.open(bundle) as src, tarfile.open(fileobj=out, mode="w") as dst:
+            for info in src:
+                data = src.extractfile(info).read()
+                keep, data = mutate(info.name, data)
+                if not keep:
+                    continue
+                info.size = len(data); dst.addfile(info, io.BytesIO(data))
+            extra = mutate("__extra__", b"")
+            if extra[0]:
+                i = tarfile.TarInfo("claims/stray.json"); i.size = len(extra[1]); dst.addfile(i, io.BytesIO(extra[1]))
+        path = os.path.join(tmp, "damaged.tar"); open(path, "wb").write(out.getvalue()); return path
+    r = assemble_bundle(rewrite(lambda n, d: (n != "__extra__", d.replace(b"the fact", b"a lie") if n == "claims/architect-cto.json" else d)))
+    assert r.returncode != 0 and "claims/architect-cto.json does not match its manifest digest" in r.stderr, r.stderr
+    r = assemble_bundle(rewrite(lambda n, d: (n not in ("observations.jsonl", "__extra__"), d)))
+    assert r.returncode != 0 and "observations.jsonl is named in the manifest but missing" in r.stderr, r.stderr
+    r = assemble_bundle(rewrite(lambda n, d: (True, b"{}" if n == "__extra__" else d)))
+    assert r.returncode != 0 and "claims/stray.json is in the tar but not in the manifest" in r.stderr, r.stderr
+    # an agent mismatch between manifest and report
+    def forge(n, d):
+        if n == "manifest.json":
+            m = json.loads(d); m["agent"] = "someone-else"; return True, json.dumps(m).encode()
+        return n != "__extra__", d
+    r = assemble_bundle(rewrite(forge))
+    assert r.returncode != 0 and "manifest says agent='someone-else'" in r.stderr, r.stderr
+    # not a bundle at all
+    open(os.path.join(tmp, "empty.tar"), "wb").write(b"")
+    r = assemble_bundle(os.path.join(tmp, "empty.tar"))
+    assert r.returncode != 0 and ("no manifest.json" in r.stderr or "bundle" in r.stderr), r.stderr
+    # --out and --bundle are one choice
+    r = subprocess.run([sys.executable, TOOL, "--role", "architect-cto", "--memory", mem], capture_output=True, text=True)
+    assert r.returncode == 2 and "exactly one of --out" in r.stderr
+
+
 def main() -> int:
     cases = [
         test_the_watermark_round_trips_through_the_committed_report,
+        test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file,
         test_role_knowledge_is_opt_in,
         test_the_class_is_taken_verbatim_not_mapped,
         test_a_generated_class_is_refused,

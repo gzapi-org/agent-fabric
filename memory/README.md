@@ -154,6 +154,16 @@ tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \
 tools/fabric/lint.py --working-copy ~/projects/<working-copy>
 ```
 
+Across hosts the drain is a **bundle**: one tar with a manifest naming
+who harvested and the digest of every file, written by the agent on its
+own host and verified by the coordinator before anything is read —
+only the agent reads its memory; the coordinator receives the result.
+
+```sh
+bin/fabric-host <host> drain <login> --role <role> --working-copy ~/projects/<wc> > drain.tar
+tools/fabric/assemble.py --bundle drain.tar --project <project> --working-copy ~/projects/<wc> --stamp $(date +%F)
+```
+
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the
 project from the working copy's remote, and the working copy as a label.
 It reads only memories newer than the **watermark** the project's last

@@ -409,6 +409,86 @@ def test_activation_works_inside_a_linked_worktree(f: Fixture, tmp: str) -> None
     f.run("flutter-dev", "--force")
 
 
+def _tree(ws: str) -> dict[str, str]:
+    """Every file under the workspace's .claude/ with its bytes' digest, and
+    the exclude block — the whole observable state a switch may touch."""
+    import hashlib
+    out: dict[str, str] = {}
+    for d, _, names in os.walk(os.path.join(ws, ".claude")):
+        for n in names:
+            full = os.path.join(d, n)
+            with open(full, "rb") as fh:
+                out[os.path.relpath(full, ws)] = hashlib.sha256(fh.read()).hexdigest()
+    with open(os.path.join(ws, ".git", "info", "exclude"), encoding="utf-8") as fh:
+        out["<exclude>"] = fh.read()
+    return out
+
+
+def test_a_failure_anywhere_in_the_switch_restores_everything(f: Fixture) -> None:
+    """The switch is a transaction: at every injectable point — after
+    staging, after the previous copies were moved out, mid-install, after
+    install, after the binding was written — a failure leaves the
+    workspace, the exclude block and the binding exactly as they were."""
+    assert f.run("flutter-dev", "--force").returncode == 0
+    before_tree, before_binding = _tree(f.ws), f.binding()
+    assert before_binding["role"] == "flutter-dev"
+    for point in ("after-stage", "backup:.claude/skills/widget-testing", "after-backup",
+                  "install:.claude/skills/migration-check", "after-install", "after-binding"):
+        f.env["AGENT_FABRIC_FAULT"] = f"role:{point}"
+        try:
+            proc = f.run("backend-dev")
+        finally:
+            f.env.pop("AGENT_FABRIC_FAULT", None)
+        assert proc.returncode != 0 and "injected fault" in proc.stderr, (point, proc.stderr)
+        assert "restored" in proc.stderr, (point, proc.stderr)
+        assert _tree(f.ws) == before_tree, f"workspace changed after a failure at {point}"
+        assert f.binding() == before_binding or {**f.binding(), "updated_at": None} == {**before_binding, "updated_at": None}, \
+            f"binding changed after a failure at {point}"
+        assert not os.path.exists(os.path.join(f.ws, ".claude", ".agent-fabric-staging")), point
+        assert not os.path.exists(os.path.join(f.ws, ".claude", ".agent-fabric-backup")), point
+    # and a first activation that fails leaves no binding at all
+    dead = os.path.join(f.state, "agents", id_un(), "binding.json")
+    saved = open(dead, "rb").read(); os.remove(dead)
+    f.env["AGENT_FABRIC_FAULT"] = "role:after-binding"
+    try:
+        proc = f.run("backend-dev")
+    finally:
+        f.env.pop("AGENT_FABRIC_FAULT", None)
+    assert proc.returncode != 0 and not os.path.exists(dead), "a failed first activation left a binding"
+    open(dead, "wb").write(saved)
+    # the transaction's directories are excluded, so an interrupted run never dirties git status
+    assert ".claude/.agent-fabric-staging" in f.exclude() and ".claude/.agent-fabric-backup" in f.exclude()
+    # after all that, a clean switch still works
+    assert f.run("backend-dev").returncode == 0 and f.binding()["role"] == "backend-dev"
+
+
+def test_a_backup_left_by_a_crash_is_stashed_not_dropped(f: Fixture) -> None:
+    leftover = os.path.join(f.ws, ".claude", ".agent-fabric-backup", "tx-old", ".claude", "skills", "gone")
+    os.makedirs(leftover)
+    with open(os.path.join(leftover, "SKILL.md"), "w", encoding="utf-8") as fh:
+        fh.write("what an earlier run had replaced\n")
+    os.makedirs(os.path.join(f.ws, ".claude", ".agent-fabric-staging", "tx-old"))
+    proc = f.run("flutter-dev")
+    assert proc.returncode == 0, proc.stderr
+    assert "interrupted run's backup moved to" in proc.stderr, proc.stderr
+    assert not os.path.exists(os.path.join(f.ws, ".claude", ".agent-fabric-backup"))
+    assert not os.path.exists(os.path.join(f.ws, ".claude", ".agent-fabric-staging"))
+    stashed = [os.path.join(d, n) for d, _, names in os.walk(os.path.join(f.state, "agents", id_un(), "stash")) for n in names]
+    assert any(p.endswith("gone/SKILL.md") for p in stashed), stashed
+
+
+def test_a_failed_deactivation_restores_the_copies(f: Fixture) -> None:
+    assert f.binding()["role"] == "flutter-dev"
+    before_tree, before_binding = _tree(f.ws), f.binding()
+    f.env["AGENT_FABRIC_FAULT"] = "role:after-binding"
+    try:
+        proc = f.run("deactivate")
+    finally:
+        f.env.pop("AGENT_FABRIC_FAULT", None)
+    assert proc.returncode != 0 and "restored" in proc.stderr, proc.stderr
+    assert _tree(f.ws) == before_tree and {**f.binding(), "updated_at": None} == {**before_binding, "updated_at": None}
+
+
 def main() -> int:
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -437,6 +517,9 @@ def main() -> int:
             test_a_role_change_says_goodbye_and_never_hello,
             test_unknown_role_is_a_usage_error,
             test_activation_works_inside_a_linked_worktree,
+            test_a_failure_anywhere_in_the_switch_restores_everything,
+            test_a_backup_left_by_a_crash_is_stashed_not_dropped,
+            test_a_failed_deactivation_restores_the_copies,
         ]
         for case in cases:
             try:

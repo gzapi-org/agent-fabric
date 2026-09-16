@@ -35,6 +35,16 @@ Why nothing here writes to a committed file: a switch can happen in the
 middle of unrelated work. The binding goes to the agent's state directory;
 a per-agent `role-history.jsonl` there keeps the chronology for provenance.
 
+A switch is a transaction (review, 2026-09-16). The new copies are built
+under `.claude/.agent-fabric-staging/<tx>/` first; the previous ones are
+moved, not deleted, to `.claude/.agent-fabric-backup/<tx>/`; each staged
+copy reaches its name by one rename; the binding is written last and is
+the commit point. Anything failing before the cleanup — a full disk, a
+kill, a fault a test injects (AGENT_FABRIC_FAULT) — rolls the workspace,
+the exclude block and the binding back to what they were, under the
+agent lock the whole way. A backup a crash left behind is moved to the
+stash on the next run, never silently dropped.
+
 Exit 0 on success, 1 on a refusal that needs a decision, 2 on usage error.
 <<< help
 """
@@ -125,10 +135,9 @@ def write_exclude_block(workspace: str, paths: list[str]) -> None:
     while existing and existing[-1] == "":
         existing.pop()
     block = [MARK_BEGIN, "# Installed by tools/fabric/role.py; do not edit by hand."]
-    block += [f"/{p}" for p in sorted(paths)]
+    block += [f"/{p}" for p in sorted(set(paths) | set(TRANSIENT_DIRS))]
     block.append(MARK_END)
-    with open(exclude, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(existing + [""] + block) + "\n")
+    identity.atomic_write(exclude, "\n".join(existing + [""] + block) + "\n")
 
 
 def adapted_items(workspace: str, installed: list[dict]) -> list[dict]:
@@ -138,6 +147,123 @@ def adapted_items(workspace: str, installed: list[dict]) -> list[dict]:
         if os.path.exists(target) and digest_path(target) != item.get("digest"):
             out.append(item)
     return out
+
+
+STAGING_DIR = os.path.join(".claude", ".agent-fabric-staging")
+BACKUP_DIR = os.path.join(".claude", ".agent-fabric-backup")
+TRANSIENT_DIRS = (STAGING_DIR, BACKUP_DIR)
+
+
+def _fault(point: str) -> None:
+    """Failure injection for tests/test_role.py: raise at a named point when
+    AGENT_FABRIC_FAULT names it (`role:<point>`). Never set outside a test;
+    the rollback it exercises is what a kill or a full disk would need."""
+    if os.environ.get("AGENT_FABRIC_FAULT") == f"role:{point}":
+        raise RuntimeError(f"injected fault at {point}")
+
+
+def _txid() -> str:
+    return identity.now_iso().replace(":", "") + f"-{os.getpid()}"
+
+
+def _remove(path: str) -> None:
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.remove(path)
+
+
+def sweep_leftovers(workspace: str, state_dir: str) -> list[str]:
+    """A previous run that died after its commit point may have left its
+    staging (copies of committed sources: dropped) and its backup (the
+    copies it had replaced: kept, moved to the stash). Returns what was
+    moved so the caller can say so."""
+    moved: list[str] = []
+    staging = os.path.join(workspace, STAGING_DIR)
+    if os.path.isdir(staging):
+        shutil.rmtree(staging, ignore_errors=True)
+    backup = os.path.join(workspace, BACKUP_DIR)
+    if os.path.isdir(backup):
+        for tx in sorted(os.listdir(backup)):
+            src = os.path.join(backup, tx)
+            dst = os.path.join(state_dir, "stash", f"interrupted-{tx}")
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)
+            moved.append(dst)
+        shutil.rmtree(backup, ignore_errors=True)
+    return moved
+
+
+class WorkspaceTransaction:
+    """The workspace half of an activation or deactivation: stage, back up,
+    swap, and either commit (drop the backup) or roll back (restore it).
+    Renames only, so each step is atomic on the filesystem the workspace
+    is on; the set of steps is made whole again by rollback()."""
+
+    def __init__(self, workspace: str, previous_workspace: str, txid: str):
+        self.workspace, self.previous_workspace = workspace, previous_workspace
+        self.staging = os.path.join(workspace, STAGING_DIR, txid)
+        self.backup = os.path.join(previous_workspace, BACKUP_DIR, txid)
+        self.staged: list[tuple[str, str]] = []      # (staged path, target rel)
+        self.moved_out: list[tuple[str, str]] = []   # (original target, backup path)
+        self.moved_in: list[str] = []                # targets now in place
+
+    def stage(self, plan: list[tuple[str, str, str]]) -> list[dict]:
+        """Copy every source into staging and digest it there; nothing under
+        the workspace's real names changes."""
+        installed: list[dict] = []
+        for source, rel, kind in plan:
+            staged = os.path.join(self.staging, rel)
+            os.makedirs(os.path.dirname(staged), exist_ok=True)
+            if os.path.isdir(source):
+                shutil.copytree(source, staged)
+            else:
+                shutil.copy2(source, staged)
+            self.staged.append((staged, rel))
+            installed.append({"path": rel, "source": os.path.relpath(source, layout.FABRIC_ROOT),
+                              "kind": kind, "digest": digest_path(staged)})
+        return installed
+
+    def back_up(self, previous: list[dict]) -> None:
+        """Move exactly what a previous activation installed out of the way —
+        never a sweep, never a delete."""
+        for item in previous:
+            target = os.path.join(self.previous_workspace, item["path"])
+            if not os.path.lexists(target):
+                continue
+            kept = os.path.join(self.backup, item["path"])
+            os.makedirs(os.path.dirname(kept), exist_ok=True)
+            os.rename(target, kept)
+            self.moved_out.append((target, kept))
+            _fault(f"backup:{item['path']}")
+
+    def install(self) -> None:
+        for staged, rel in self.staged:
+            target = os.path.join(self.workspace, rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            os.rename(staged, target)
+            self.moved_in.append(target)
+            _fault(f"install:{rel}")
+
+    def rollback(self) -> None:
+        for target in reversed(self.moved_in):
+            _remove(target)
+        for target, kept in reversed(self.moved_out):
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            os.rename(kept, target)
+        self.moved_in.clear(); self.moved_out.clear()
+        self.commit()
+
+    def commit(self) -> None:
+        """Drop the transaction's directories; best effort, after the binding
+        is the fact. A leftover is swept by the next run (sweep_leftovers)."""
+        for d in (self.staging, self.backup):
+            shutil.rmtree(d, ignore_errors=True)
+            parent = os.path.dirname(d)
+            try:
+                os.rmdir(parent)
+            except OSError:
+                pass
 
 
 def append_history(state_dir: str, record: dict) -> None:
@@ -233,22 +359,31 @@ def _deactivate_locked(ctx: dict) -> int:
     if not binding.get("role"):
         print("no role active for this agent")
         return 0
-    if workspace:
-        for item in binding.get("installed", []):
-            target = os.path.join(workspace, item["path"])
-            if os.path.isdir(target):
-                shutil.rmtree(target, ignore_errors=True)
-            elif os.path.exists(target):
-                os.remove(target)
-        write_exclude_block(workspace, [])
+    previous = binding.get("installed", []) or []
+    tx = WorkspaceTransaction(workspace or ctx["state_dir"], workspace or ctx["state_dir"], _txid())
+    try:
+        if workspace:
+            for path in sweep_leftovers(workspace, ctx["state_dir"]):
+                print(f"an interrupted run's backup moved to {path}", file=sys.stderr)
+            tx.back_up(previous)
+            write_exclude_block(workspace, [])
+        identity.write_binding({**binding, "role": None, "installed": [], "session": ctx.get("session")},
+                               ctx["agent"])
+        _fault("after-binding")
+    except BaseException:
+        tx.rollback()
+        if workspace:
+            write_exclude_block(workspace, [item["path"] for item in previous])
+        identity.write_binding(binding, ctx["agent"])
+        print("role: deactivation failed; the workspace and the binding were restored", file=sys.stderr)
+        raise
+    tx.commit()
     append_history(ctx["state_dir"], {
         "agent": ctx["agent"], "host": ctx["host"], "role": None,
         "previous_role": binding.get("role"), "project": binding.get("project"),
         "working_copy": binding.get("working_copy"), "valid_from": identity.now_iso(),
         "reason": "deactivate",
     })
-    identity.write_binding({**binding, "role": None, "installed": [], "session": ctx.get("session")},
-                           ctx["agent"])
     active = os.path.join(ctx["state_dir"], "active")
     if os.path.islink(active) or os.path.exists(active):
         os.remove(active)
@@ -336,31 +471,6 @@ def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project:
             else:
                 shutil.copy2(target, destination)
 
-    # 2. Remove exactly what a previous activation installed — never a sweep.
-    for item in previous:
-        target = os.path.join(previous_workspace, item["path"])
-        if os.path.isdir(target):
-            shutil.rmtree(target, ignore_errors=True)
-        elif os.path.exists(target):
-            os.remove(target)
-    if previous_workspace != workspace:
-        write_exclude_block(previous_workspace, [])
-
-    # 3. Install the new role under exact names (the name is the command).
-    installed: list[dict[str, str]] = []
-    for source, rel, kind in plan:
-        target = os.path.join(workspace, rel)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        if os.path.isdir(source):
-            shutil.copytree(source, target)
-        else:
-            shutil.copy2(source, target)
-        installed.append({"path": rel, "source": os.path.relpath(source, layout.FABRIC_ROOT),
-                          "kind": kind, "digest": digest_path(target)})
-    write_exclude_block(workspace, [item["path"] for item in installed])
-
-    # 4. Bind. The agent is stamped by identity.py from the OS; the role,
-    #    project and working copy are the attributes bound to it.
     # The project bound here is the one the WORKSPACE belongs to (or the one
     # named explicitly). A previous binding's project is deliberately not
     # carried over: activating from the parent directory means no project
@@ -369,6 +479,42 @@ def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project:
         project = ctx["project"]
     changed = binding.get("role") != role or binding.get("project") != project
     previous_role = binding.get("role")
+
+    # 2–4 are one transaction: stage the new copies, move the previous ones
+    # out (never a sweep, never a delete), swap the staged ones in by rename,
+    # then bind — the binding is the commit point. Any failure before the
+    # cleanup restores the workspace, both exclude blocks and the binding.
+    for path in sweep_leftovers(workspace, ctx["state_dir"]):
+        print(f"an interrupted run's backup moved to {path}", file=sys.stderr)
+    tx = WorkspaceTransaction(workspace, previous_workspace, _txid())
+    try:
+        installed = tx.stage(plan)
+        _fault("after-stage")
+        tx.back_up(previous)
+        _fault("after-backup")
+        if previous_workspace != workspace:
+            write_exclude_block(previous_workspace, [])
+        tx.install()
+        _fault("after-install")
+        write_exclude_block(workspace, [item["path"] for item in installed])
+        identity.write_binding({
+            "role": role, "project": project, "working_copy": ctx["working_copy"],
+            "workspace": workspace, "session": ctx.get("session"), "installed": installed,
+        }, ctx["agent"])
+        _fault("after-binding")
+    except BaseException:
+        tx.rollback()
+        write_exclude_block(previous_workspace, [item["path"] for item in previous])
+        if previous_workspace != workspace:
+            write_exclude_block(workspace, [])
+        if binding:
+            identity.write_binding(binding, ctx["agent"])
+        else:
+            _remove(identity.binding_path(ctx["agent"]))
+        print(f"role: activation of {role} failed; the workspace and the binding were restored",
+              file=sys.stderr)
+        raise
+    tx.commit()
     if changed and previous_role:
         _announce("GOODBYE", ctx, previous_role, binding.get("project"), f"role change: {previous_role} -> {role}")
     if changed or not binding:
@@ -378,10 +524,6 @@ def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project:
             "working_copy": ctx["working_copy"], "valid_from": identity.now_iso(),
             "reason": "initial" if not binding.get("role") else "role-change",
         })
-    identity.write_binding({
-        "role": role, "project": project, "working_copy": ctx["working_copy"],
-        "workspace": workspace, "session": ctx.get("session"), "installed": installed,
-    }, ctx["agent"])
     active = os.path.join(ctx["state_dir"], "active")
     if os.path.islink(active) or os.path.exists(active):
         os.remove(active)

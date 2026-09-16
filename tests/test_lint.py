@@ -599,6 +599,31 @@ def case_a_managed_projects_name_stays_out_of_generic_files() -> None:
         assert code == 1 and "runtime/provisioning/x.sh:1" in out, f"provisioning naming a project passed:\n{out}"
 
 
+def case_review_lenses_are_named_described_and_bounded() -> None:
+    """The lens directory is the vocabulary: each file names itself, has a
+    one-line description, a body under the cap; general.md must exist."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        lenses = os.path.join(fabric, "runtime", "claude-code", "review", "lenses")
+        write(os.path.join(lenses, "general.md"), "---\nname: general\ndescription: The ordinary review.\n---\nLook at everything.\n")
+        write(os.path.join(lenses, "security.md"), "---\nname: security\ndescription: Trust boundaries.\n---\nWhere does input enter?\n")
+        code, out = run_lint(fabric)
+        assert code == 0, f"sound lenses were refused:\n{out}"
+        write(os.path.join(lenses, "security.md"), "---\nname: secure\ndescription: Trust boundaries.\n---\nWhere does input enter?\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "security.md: name 'secure' must equal the filename" in out, f"a misnamed lens passed:\n{out}"
+        write(os.path.join(lenses, "security.md"), "---\nname: security\ndescription: Trust boundaries.\n---\n" + ("x" * 1600) + "\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "the cap is 1500" in out, f"an oversized lens passed:\n{out}"
+        write(os.path.join(lenses, "security.md"), "Where does input enter?\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "no frontmatter" in out, f"a lens without frontmatter passed:\n{out}"
+        os.remove(os.path.join(lenses, "security.md")); os.remove(os.path.join(lenses, "general.md"))
+        write(os.path.join(lenses, "cleanup.md"), "---\nname: cleanup\ndescription: Dead code.\n---\nWhat is unreachable now?\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "no general.md" in out, f"a lens directory without general passed:\n{out}"
+
+
 def main() -> int:
     cases = [
         case_clean_base_passes,
@@ -625,6 +650,7 @@ def main() -> int:
         case_the_class_list_a_reader_sees_is_the_real_one,
         case_the_host_registry_is_one_host_per_id_and_placements_are_known,
         case_a_managed_projects_name_stays_out_of_generic_files,
+        case_review_lenses_are_named_described_and_bounded,
     ]
     failures = 0
     for case in cases:

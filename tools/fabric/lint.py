@@ -535,6 +535,50 @@ def project_name_findings(root: str) -> list[str]:
     return findings
 
 
+LENS_BODY_CAP = 1500
+LENS_DESCRIPTION_CAP = 120
+LENS_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+def review_lens_findings(root: str) -> list[str]:
+    """runtime/claude-code/review/lenses/<name>.md: the review lens
+    vocabulary IS this directory (bin/fabric-review lenses lists it, the
+    brief renderer inlines a named one). Each file: `name:` equal to the
+    filename, a one-line `description:`, a body under the cap — a lens
+    biases a review and is paid on every dispatch that names it."""
+    findings: list[str] = []
+    base = os.path.join(root, "runtime", "claude-code", "review", "lenses")
+    if not os.path.isdir(base):
+        return findings
+    names = sorted(os.listdir(base))
+    if "general.md" not in names:
+        findings.append("runtime/claude-code/review/lenses/: no general.md — the renderer adds `general` to every brief")
+    for fn in names:
+        rel = f"runtime/claude-code/review/lenses/{fn}"
+        if not fn.endswith(".md"):
+            findings.append(f"{rel}: not a lens (.md)")
+            continue
+        text = open(os.path.join(base, fn), encoding="utf-8").read()
+        m = FRONTMATTER_RE.match(text)
+        if not m:
+            findings.append(f"{rel}: no frontmatter (name:, description:)")
+            continue
+        meta = dict(line.split(":", 1) for line in m.group(1).split("\n") if ":" in line)
+        meta = {k.strip(): v.strip() for k, v in meta.items()}
+        stem = fn[:-3]
+        if meta.get("name") != stem or not LENS_NAME_RE.match(stem):
+            findings.append(f"{rel}: name {meta.get('name')!r} must equal the filename and be a lowercase slug")
+        desc = meta.get("description", "")
+        if not desc or len(desc) > LENS_DESCRIPTION_CAP:
+            findings.append(f"{rel}: description missing or over {LENS_DESCRIPTION_CAP} characters (one line, shown by fabric-review lenses)")
+        body = text[m.end():]
+        if len(body.encode()) > LENS_BODY_CAP:
+            findings.append(f"{rel}: body is {len(body.encode())} bytes; the cap is {LENS_BODY_CAP} (a lens is paid on every dispatch that names it)")
+        if not body.strip():
+            findings.append(f"{rel}: empty body")
+    return findings
+
+
 def host_registry_findings(root: str) -> list[str]:
     """runtime/hosts/registry.json: a host id is its short hostname, so ids
     are unique by construction and an ssh destination reaches one host;
@@ -756,6 +800,9 @@ def main() -> int:
 
     # --- no project's name in a generic file --------------------------------
     findings += project_name_findings(root)
+
+    # --- the review lenses ---------------------------------------------------
+    findings += review_lens_findings(root)
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

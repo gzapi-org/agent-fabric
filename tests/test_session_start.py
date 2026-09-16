@@ -184,6 +184,9 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     hooks = json.dumps(settings["hooks"])
     assert "session-start.sh" in hooks and "agent-dispatch-guard.sh" in hooks and ROOT in hooks
     assert "communication/gzcoord/scripts/inbox.mjs" in hooks, "the workspace drains the GZCoord inbox too"
+    for event in ("PreToolUse", "UserPromptSubmit", "SessionEnd"):
+        assert "plan-hold.sh" in json.dumps(settings["hooks"][event]), f"the plan hold follows the mode on {event}"
+    assert any("plan-hold.sh" in json.dumps(g) and "matcher" not in g for g in settings["hooks"]["PreToolUse"]), "the plan hold sees every tool call"
     assert "statusline.sh" in settings["statusLine"]["command"]
     assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"
     assert not os.path.exists(os.path.join(home, ".claude", "commands", "role.md")), "/role is retired; nothing installs it"

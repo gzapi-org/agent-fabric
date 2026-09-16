@@ -41,6 +41,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh
     run "subagent clone guard" bash runtime/claude-code/hooks/test_subagent-clone-guard.sh
     run "model-switch guard" bash runtime/claude-code/hooks/test_model-switch-guard.sh
+    run "plan hold" bash runtime/claude-code/hooks/test_plan-hold.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
     run "hostexec (local and ssh backends)" bash runtime/hostexec/test_hostexec.sh

@@ -685,7 +685,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdPath, holdStatus } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1060,4 +1060,108 @@ test('inbox --follow prints a delivery and keeps running', async () => {
   child.kill('SIGKILL'); server.closeAllConnections(); server.close();
   assert.match(out, /FOLLOW-BODY/, 'the delivery was printed');
   assert.ok(stillRunning, '--follow did not exit after the delivery');
+});
+
+// The hold: while the session plans, the watch polls nothing.
+test('holdStatus: a marker is a hold only while the pid it names is alive', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
+  const f = path.join(dir, 'me.json');
+  assert.equal(holdStatus(f).held, false, 'no marker');
+  fs.writeFileSync(f, 'not json');
+  assert.deepEqual(holdStatus(f), { held: false, reason: 'marker unreadable' });
+  fs.writeFileSync(f, JSON.stringify({ session_id: 's', since: 't' }));
+  assert.equal(holdStatus(f).reason, 'marker names no pid');
+  fs.writeFileSync(f, JSON.stringify({ session_id: 's', pid: process.pid, since: 't' }));
+  assert.equal(holdStatus(f).held, true, 'our own pid is alive');
+  assert.equal(holdStatus(f, () => false).held, false, 'a dead pid is not a hold');
+  assert.match(holdStatus(f, () => false).reason, /is gone/);
+  // the path is per login, under the per-uid dir, overridable for tests
+  assert.equal(holdPath('db-admin', 1000), '/tmp/agent-fabric-hold-1000/db-admin.json');
+  process.env.AGENT_FABRIC_HOLD_DIR = dir;
+  assert.equal(holdPath('x'), path.join(dir, 'x.json'));
+  delete process.env.AGENT_FABRIC_HOLD_DIR;
+});
+
+test('waitLoop: held polls nothing, a hold mid-slice cuts the slice, release delivers', async () => {
+  const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
+  const rec = id => ({ id, sender: 'develop-qzapp/x', timestamp: 't', content: `[GZCOORD/1] INFO\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-${id}\nBROADCAST: true\n` });
+  let held = true;
+  let fetches = 0;
+  const transitions = [];
+  const sleep = () => new Promise(r => setImmediate(r));
+  // 1. Held from the start: the fetch is never called until the hold clears.
+  let ticks = 0;
+  const p = waitLoop({ fetchPage: async () => { fetches += 1; return { messages: [rec('m1')] }; }, ack: async () => {}, waitTotal: 1800,
+                       forMeFn: msg => forMe(msg, me), held: () => { ticks += 1; if (ticks > 5) held = false; return held; },
+                       onHold: h => transitions.push(h), sleep });
+  const r = await p;
+  assert.equal(r.delivered, true, 'delivered once released');
+  assert.equal(fetches, 1, 'no poll while held');
+  assert.ok(ticks > 5, 'the hold was checked repeatedly');
+  assert.deepEqual(transitions, [true, false], 'told once on hold and once on release');
+  // 2. A hold that begins during a slice aborts it; nothing is acknowledged; the
+  //    message waits on the relay (the fake re-serves it) and lands after release.
+  let holdNow = false;
+  const acked = [];
+  let served = 0;
+  const fetchPage = (slice, signal) => new Promise((resolve, reject) => {
+    served += 1;
+    if (served === 1) {
+      // a long poll that would deliver m2 after a while; the hold arrives first
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      setTimeout(() => holdNow = true, 5);
+    } else resolve({ messages: [rec('m2')] });
+  });
+  let checks = 0;
+  const r2 = await waitLoop({ fetchPage, ack: async id => { acked.push(id); }, waitTotal: 1800, forMeFn: msg => forMe(msg, me),
+                              held: () => { if (holdNow) { checks += 1; if (checks > 3) holdNow = false; } return holdNow; },
+                              holdPollMs: 1 });
+  assert.equal(r2.delivered, true);
+  assert.equal(served, 2, 'the cut slice was retried after release');
+  assert.deepEqual(acked, ['m2'], 'nothing was acknowledged for the cut slice');
+  // 3. A fetch that fails for its own reason still throws (the watch reports the relay).
+  await assert.rejects(waitLoop({ fetchPage: async () => { throw new Error('relay down'); }, ack: async () => {}, waitTotal: 4, forMeFn: () => false }), /relay down/);
+});
+
+test('inbox --follow polls nothing while the hold marker names a live pid', async () => {
+  const mine = `[GZCOORD/1] INFO\nFROM: x/y\nROLE: backend-dev\nPROJECT: fixture\nBROADCAST: true\nMESSAGE-ID: 01a09fc1-0000-7000-8000-00000000001f\nSUBJECT: live\n\nNOTES:\nHELD-BODY\n`;
+  let waits = 0;
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json'); res.setHeader('connection', 'close');
+    if (req.url === '/status') { res.end('{}'); return; }
+    if (req.url.startsWith('/api/wait')) {
+      waits += 1;
+      res.end(JSON.stringify({ messages: [{ seq: 5, id: 'r5', ts: 'T', sender: 'x/y', content: mine }], next_cursor: 'c' }));
+      return;
+    }
+    res.end('{}');
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
+  const marker = path.join(holdDir, `${os.userInfo().username}.json`);
+  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, since: 'T' }));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), AGENT_FABRIC_HOLD_DIR: holdDir,
+                CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const child = spawn('node', [INBOX, '--follow'], { env });
+  let out = '', err = '';
+  child.stdout.on('data', d => { out += d; });
+  child.stderr.on('data', d => { err += d; });
+  await new Promise(r => setTimeout(r, 2500));
+  const waitsWhileHeld = waits;
+  const outWhileHeld = out;
+  fs.unlinkSync(marker);                       // the plan is approved
+  await new Promise(resolve => { const t = setInterval(() => { if (out.includes('HELD-BODY')) { clearInterval(t); resolve(); } }, 50); setTimeout(() => { clearInterval(t); resolve(); }, 8000); });
+  child.kill('SIGKILL'); server.closeAllConnections(); server.close();
+  assert.equal(waitsWhileHeld, 0, 'the relay was not polled while held');
+  assert.equal(outWhileHeld, '', 'nothing on stdout while held');
+  assert.match(err, /inbox held/, 'the hold is said on stderr');
+  assert.match(out, /HELD-BODY/, 'delivered once the marker was gone');
+  // --held answers from the same marker
+  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, since: 'T' }));
+  const h = spawnSync('node', [INBOX, '--held'], { env, encoding: 'utf8' });
+  assert.equal(h.status, 0); assert.match(h.stdout, /^held: .* session plan \(pid \d+\)/);
+  fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: 4194304000, since: 'T' }));
+  const n = spawnSync('node', [INBOX, '--held'], { env, encoding: 'utf8' });
+  assert.equal(n.status, 1); assert.match(n.stdout, /^not held: session 4194304000 is gone/);
 });

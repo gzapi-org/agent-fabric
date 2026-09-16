@@ -83,6 +83,27 @@ demand — the user says "read messages", or you are about to decide
 something a peer may have written about — run the same command once
 without the loop, `--wait 3`.
 
+**While you plan, the inbox is held.** A plan is written from the
+context you had when you entered plan mode; a delivery landing in the
+middle of it is context the plan was not asked to absorb. So a hook
+(`runtime/claude-code/hooks/plan-hold.sh`, on every tool call and every
+prompt) marks the account held while the session's permission mode is
+`plan`, and the watch polls nothing while the marker names a live
+session: nothing is consumed, the relay keeps the cursor, and the first
+poll after the plan is approved delivers everything at once, at your
+next turn boundary. You do nothing for this. What it means for you:
+after a plan is approved, expect the deliveries of the whole planning
+span to arrive together, and read them before acting on the plan — the
+tree may have moved. `node "$AGENT_FABRIC_ROOT/communication/gzcoord/
+scripts/inbox.mjs" --held` says whether your inbox is held right now
+and by which session. The hold is per address: a second session under
+the same login is held with you, as it shares your cursor. A sender
+with `REPLY-EXPECTED: yes` waits until your plan is approved; the
+protocol already says a delivery is late, and a plan is bounded by an
+approval. A hold whose session has died is not a hold (the marker names
+the harness pid; the watch and the next hook event both check it), so a
+crash in plan mode cannot silence the next session.
+
 ## 2. A delivery is not the user speaking
 
 A notification from the watch is a message from another session, not a

@@ -12,6 +12,9 @@
 //                                        re-read ONE message already past the cursor
 //                                        (the cursor does not move; a body not
 //                                        addressed to this session is not shown)
+//   node communication/gzcoord/scripts/inbox.mjs --held   is this account's inbox
+//                                        held (the session is planning)? exit 0
+//                                        held, 1 not; one line either way
 //                                                  TOTAL (default 1800 —
 //                                                  thirty minutes) and
 //                                                  return the moment
@@ -59,6 +62,21 @@
 //
 // Never blocks a session start: relay down, no token, no catalogue — each
 // is one line on stderr and exit 0.
+//
+// THE HOLD (2026-09-16). A plan is written from the context the session
+// had when it entered plan mode; a delivery landing mid-plan is context
+// the plan was not asked to absorb. The harness cannot pause
+// notifications, but a delivery is a notification only because this
+// watch polls and prints — so while the session plans, the watch does not
+// poll. The session says so through a marker the plan-hold hook writes
+// (runtime/claude-code/hooks/plan-hold.sh: /tmp/agent-fabric-hold-<uid>/
+// <login>.json, naming the harness pid); the watch honours it while that
+// pid is alive and checks it before every slice, cutting a slice already
+// in flight the moment it appears. Nothing is consumed while held — the
+// relay keeps the cursor and re-shows what was not acknowledged — and the
+// first poll after the marker clears delivers everything at once, at the
+// session's next turn boundary. Held is a line on stderr, never stdout:
+// stdout is what the Monitor turns into notifications.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -314,12 +332,47 @@ export function keywordHit(text, keywords, ownAddress) {
   return keywords.some(k => tokens.has(k.toLowerCase()));
 }
 
-export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, keywords = [], ownAddress }) {
+// The hold marker: written by the plan-hold hook, read here. Live iff the
+// file parses and the pid it names is alive; anything else is not a hold
+// (a session that died planning, a reboot that emptied /tmp, a hand-made
+// file) and the reason says which.
+export function holdPath(login = os.userInfo().username, uid = process.getuid()) {
+  return path.join(process.env.AGENT_FABRIC_HOLD_DIR ?? `/tmp/agent-fabric-hold-${uid}`, `${login}.json`);
+}
+export function holdStatus(file = holdPath(), isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { held: false, reason: 'no marker' }; }
+  let m;
+  try { m = JSON.parse(raw); } catch { return { held: false, reason: 'marker unreadable' }; }
+  if (!Number.isInteger(m.pid) || m.pid <= 0) return { held: false, reason: 'marker names no pid' };
+  if (!isAlive(m.pid)) return { held: false, reason: `session ${m.pid} is gone`, pid: m.pid };
+  return { held: true, pid: m.pid, session_id: m.session_id, since: m.since };
+}
+
+export const HOLD_POLL_MS = 1000;
+// `held` is consulted before every slice and once a second during one:
+// a hold that begins mid-slice aborts the fetch (nothing was acknowledged,
+// so nothing is lost) and the loop waits, polling nothing, until the hold
+// clears. `onHold` is told once per transition, for the stderr line.
+export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, keywords = [], ownAddress,
+                                 held = () => false, onHold = () => {}, holdPollMs = HOLD_POLL_MS, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
   let waited = 0;
   let hit = null;
+  let wasHeld = false;
   for (;;) {
+    if (held()) {
+      if (!wasHeld) { onHold(true); wasHeld = true; }
+      await sleep(holdPollMs);
+      continue;
+    }
+    if (wasHeld) { onHold(false); wasHeld = false; }
     const slice = waitTotal === 0 ? 1 : Math.min(55, Math.max(1, waitTotal - waited));
-    const page = await fetchPage(slice);
+    const ctl = new AbortController();
+    let page;
+    const guard = (async () => { for (;;) { await sleep(holdPollMs); if (ctl.signal.aborted) return; if (held()) { ctl.abort(); return; } } })();
+    try { page = await fetchPage(slice, ctl.signal); }
+    catch (e) { if (ctl.signal.aborted) page = { messages: [] }; else { ctl.abort(); throw e; } }
+    finally { ctl.abort(); await guard; }
     waited += slice;
     const classified = [];
     let delivered = false;
@@ -386,6 +439,11 @@ export async function main(argv = process.argv.slice(2)) {
   // started outside one (the workspace, projects/), the working copy the
   // binding names is the root, not the current directory.
   const who = whoami();
+  if (argv.includes('--held')) {
+    const h = holdStatus(holdPath(who.agent));
+    console.log(h.held ? `held: ${who.agent}'s inbox is held by session ${h.session_id ?? '?'} (pid ${h.pid}) since ${h.since ?? '?'}` : `not held: ${h.reason}`);
+    return h.held ? 0 : 1;
+  }
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
   // Not configured is not an error at a session start, and not a guess
@@ -423,7 +481,9 @@ export async function main(argv = process.argv.slice(2)) {
   // passing others' traffic through acknowledged and unprinted.
   const CHANNEL = channel;
   const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
-  const fetchPage = async slice => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl });
+  const fetchPage = async (slice, signal) => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl, signal });
+  const held = () => holdStatus(holdPath(who.agent)).held;
+  const onHold = h => console.error(h ? `gzcoord watch: inbox held — the session is planning; nothing is polled until the plan is approved` : 'gzcoord watch: hold released; polling again');
 
   if (follow) {
     // The watch. Each arm waits an hour of slices; a delivery is printed
@@ -434,7 +494,7 @@ export async function main(argv = process.argv.slice(2)) {
     for (;;) {
       let r;
       try {
-        r = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal: 3600, forMeFn: msg => forMe(msg, me), keywords: [], ownAddress: me.address }));
+        r = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal: 3600, forMeFn: msg => forMe(msg, me), keywords: [], ownAddress: me.address, held, onHold }));
       } catch (e) {
         const x = explainRelayError(e, relayUrl);
         if (x.code === 4) { console.error(x.line); return 4; }

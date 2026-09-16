@@ -95,7 +95,7 @@ def test_vocabulary_is_the_class_and_the_providers_model(f: Fixture) -> None:
     p = f.run("set", "--provider", "anthropic", "code-high", "opus")
     assert p.returncode == 1 and "not a native Claude id" in p.stderr, "a tier alias is not a model"
     p = f.run("set", "--provider", "openrouter", "code-low", "haiku")
-    assert p.returncode == 1 and "not a model id" in p.stderr, p.stderr
+    assert p.returncode == 1 and "not an OpenRouter model id" in p.stderr, p.stderr
     p = f.run("set", "--provider", "anthropic", "opus", "claude-opus-5")
     assert p.returncode == 1 and "not a target on anthropic" in p.stderr and "code-plan" in p.stderr, p.stderr
     p = f.run("set", "--provider", "openrouter", "review", "z-ai/glm-5.3")

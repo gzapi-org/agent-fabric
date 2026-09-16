@@ -49,6 +49,8 @@
     "gzapi.ge": {
       "title": "gzapi.ge — the company website (Gzapi LLC)",
       "remotes": [
+        "git@github.com:gzapi-org/gzapi.ge.git",
+        "https://github.com/gzapi-org/gzapi.ge",
         "git@github.com:andreabenetton/gzapi.ge.git",
         "https://github.com/andreabenetton/gzapi.ge"
       ],
@@ -57,11 +59,13 @@
       "memory": ".agent-fabric/memory",
       "integration": "projects/gzapi.ge/integration",
       "license": "LicenseRef-gzapi-ge-Proprietary",
-      "note": "Static Astro site, vision-level by rule, ka/en. The brand's source of truth: where a deck and the site disagree on a token or a phrase, the site wins (owner, 2026-09-15). One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default."
+      "note": "Static Astro site, vision-level by rule, ka/en. The brand's source of truth: where a deck and the site disagree on a token or a phrase, the site wins (owner, 2026-09-15). One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default. Moved to gzapi-org on 2026-09-16; the andreabenetton spellings stay listed for clones not yet re-pointed."
     },
     "gzapp.decks": {
       "title": "gzapp.decks — brand presentation decks (Marp)",
       "remotes": [
+        "git@github.com:gzapi-org/gzapp.decks.git",
+        "https://github.com/gzapi-org/gzapp.decks",
         "git@github.com:andreabenetton/gzapp.decks.git",
         "https://github.com/andreabenetton/gzapp.decks"
       ],
@@ -70,7 +74,7 @@
       "memory": ".agent-fabric/memory",
       "integration": null,
       "license": "LicenseRef-gzapp-decks-Proprietary",
-      "note": "Marp decks under one brand theme whose tokens are vendored from gzapi.ge (the source of truth); bilingual, an asset register every image has a row in, PDFs as versioned build output. One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default; the vendored fonts are OFL-1.1."
+      "note": "Marp decks under one brand theme whose tokens are vendored from gzapi.ge (the source of truth); bilingual, an asset register every image has a row in, PDFs as versioned build output. One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default; the vendored fonts are OFL-1.1. Moved to gzapi-org on 2026-09-16; the andreabenetton spellings stay listed for clones not yet re-pointed."
     }
   }
 }

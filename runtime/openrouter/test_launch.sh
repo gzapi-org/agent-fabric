@@ -372,7 +372,7 @@ out="$(runa --version 2>&1)"; rc=$?
 grep -q "^goodbye .*--note session ended by signal 15" "$ALOG" && ok "…and the GOODBYE names the signal" || bad "goodbye note" "$(cat "$ALOG")"
 write_fake_ori
 
-echo "launch: a fabric checkout behind origin/main is refused"
+echo "launch: a fabric checkout behind origin/main is pulled and the launcher re-executes on it"
 # The fixture fabric becomes a git checkout with a bare origin one commit ahead.
 mkfabric
 G() { git -C "$FABRIC" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
@@ -385,10 +385,23 @@ out="$(run --print 2>&1)"; rc=$?
 rm -rf "$SANDBOX/other"; git clone -q "$SANDBOX/origin.git" "$SANDBOX/other"
 git -C "$SANDBOX/other" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m newer; git -C "$SANDBOX/other" push -q origin main
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 1 ]] && grep -q "1 commit(s) behind origin/main" <<<"$out" && grep -q "pull --ff-only origin main" <<<"$out" && ok "behind: refused, with the pull command" || bad "stale checkout admitted" "$out"
-! grep -q "resolved profile" <<<"$out" && ok "…before resolving anything" || bad "resolved on a stale checkout" "$out"
+[[ $rc -eq 0 ]] && grep -q "was 1 commit(s) behind origin/main; pulled to" <<<"$out" && grep -q "relaunching on it" <<<"$out" && ok "behind: pulled, said so, relaunched" || bad "stale checkout not pulled" "$out"
+[[ "$(G rev-parse HEAD)" == "$(git -C "$SANDBOX/other" rev-parse HEAD)" ]] && ok "…the checkout is at origin/main" || bad "not pulled" "$(G log --oneline -2)"
+grep -q "resolved profile" <<<"$out" && ok "…and the relaunch resolved the profile (one pull, one relaunch)" || bad "no profile after the relaunch" "$out"
+# behind again, with a local commit that cannot fast-forward: refused with the reason
+git -C "$SANDBOX/other" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m newer2; git -C "$SANDBOX/other" push -q origin main
+G commit -q --allow-empty -m local-divergence
+out="$(run --print 2>&1)"; rc=$?
+[[ $rc -eq 1 ]] && grep -q "cannot fast-forward" <<<"$out" && ! grep -q "resolved profile" <<<"$out" && ok "diverged: refused with the reason, before resolving anything" || bad "diverged checkout admitted" "$out"
+G reset -q --hard origin/main
+# behind, with the override: launches without pulling, loudly
+git -C "$SANDBOX/other" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m newer3; git -C "$SANDBOX/other" push -q origin main
 out="$(AGENT_FABRIC_ALLOW_STALE=1 run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "WARNING — agent-fabric is 1 commit(s) behind" <<<"$out" && ok "AGENT_FABRIC_ALLOW_STALE=1: launches, loudly" || bad "override" "$out"
+[[ $rc -eq 0 ]] && grep -q "WARNING — agent-fabric is 1 commit(s) behind" <<<"$out" && [[ "$(G rev-parse HEAD)" != "$(git -C "$SANDBOX/other" rev-parse HEAD)" ]] && ok "AGENT_FABRIC_ALLOW_STALE=1: launches without pulling, loudly" || bad "override" "$out"
+# a relaunch that is still behind does not loop
+out="$(AGENT_FABRIC_PULLED=1 run --print 2>&1)"; rc=$?
+[[ $rc -eq 1 ]] && grep -q "still 1 commit(s) behind origin/main after a pull; not relaunching again" <<<"$out" && ok "a second relaunch is refused: no loop" || bad "loop guard" "$out"
+G pull -q --ff-only origin main
 G remote set-url origin /nonexistent/origin.git
 out="$(run --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q "could not fetch origin/main" <<<"$out" && ok "origin unreachable: launches on what is checked out, and says so" || bad "offline refused" "$out"

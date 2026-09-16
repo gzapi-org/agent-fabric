@@ -132,6 +132,7 @@ die() { echo "launch: $*" >&2; exit 1; }
 PRINT_ONLY=0
 PROVIDER="openrouter"
 ARGS=()
+ORIG_ARGS=("$@")   # for the re-exec after a pull, below
 prev_arg=""
 for arg in "$@"; do
     if [[ "$arg" == "--print" ]]; then PRINT_ONLY=1
@@ -152,8 +153,15 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 # a pull, and on 2026-09-16 two accounts came back on the previous
 # launcher (no GOODBYE, two HELLOs) after a DECISION told everyone to
 # pull. So the launcher checks: a fetch, and a checkout behind
-# origin/main is refused with the one command that fixes it. Offline
-# (the fetch fails) it launches on what is checked out and says so.
+# origin/main is PULLED — fast-forward only; every role but the
+# coordinator is read-only here, so there is nothing local to lose, and
+# --ff-only refuses on its own if the checkout ever diverged — and the
+# launcher re-executes itself so the session runs on what was pulled
+# (bash reads a script as it runs; the file under it must not change).
+# It was a refusal naming the pull command until the CEO asked, the same
+# day, why the person had to type what the launcher already knew. A pull
+# that cannot fast-forward is refused with the reason; offline (the fetch
+# fails) it launches on what is checked out and says so.
 # AGENT_FABRIC_ALLOW_STALE=1 overrides, loudly, for the case where the
 # push itself is what a session is about to do.
 if git -C "$FABRIC_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -163,12 +171,18 @@ if git -C "$FABRIC_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
         if (( BEHIND > 0 )); then
             if [[ "${AGENT_FABRIC_ALLOW_STALE:-}" == 1 ]]; then
                 echo "launch: WARNING — agent-fabric is $BEHIND commit(s) behind origin/main; launching anyway (AGENT_FABRIC_ALLOW_STALE=1)." >&2
+            elif [[ "${AGENT_FABRIC_PULLED:-}" == 1 ]]; then
+                die "agent-fabric at $FABRIC_ROOT is still $BEHIND commit(s) behind origin/main after a pull; not relaunching again.
+  Look at the checkout: git -C \"$FABRIC_ROOT\" status"
+            elif git -C "$FABRIC_ROOT" pull -q --ff-only origin main 2>/dev/null; then
+                echo "launch: agent-fabric was $BEHIND commit(s) behind origin/main; pulled to $(git -C "$FABRIC_ROOT" rev-parse --short HEAD) and relaunching on it." >&2
+                AGENT_FABRIC_PULLED=1 exec bash "$0" "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
             else
-                die "agent-fabric at $FABRIC_ROOT is $BEHIND commit(s) behind origin/main.
-  A session runs on the launcher, hooks, prompt and routing of this checkout,
-  so it must be current. Run:
-    git -C \"$FABRIC_ROOT\" pull --ff-only origin main
-  then relaunch (moveto <account> does the pull only on entry, not on launch)."
+                die "agent-fabric at $FABRIC_ROOT is $BEHIND commit(s) behind origin/main and cannot fast-forward
+  (local commits or changes on this checkout). A session runs on the launcher,
+  hooks, prompt and routing of this checkout, so it must be current. Look:
+    git -C \"$FABRIC_ROOT\" status
+  and bring it to origin/main, then relaunch."
             fi
         fi
     else

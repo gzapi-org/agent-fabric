@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# runtime/hostexec/worker — run one command on THIS host, as this login
+# or as another account. The half of the host executor that stands on
+# the target: `hostexec` runs it directly for the host it is on, and over
+# ssh for every other, so the same lines do the same thing wherever the
+# account lives.
+#
+#   worker [--as <login>] [--cwd <dir>] -- <cmd> [args...]
+#
+# As the operator (no --as, or --as the caller's own login): the command
+# runs as is, in the caller's environment. As another account: through
+# sudo, with a clean environment — HOME from the passwd entry, a fixed
+# PATH plus the account's ~/.local/bin, cwd its home (or --cwd) — the
+# idiom every provisioning tool used inline until 2026-09-16
+# (runtime/provisioning/secrets/enroll.sh as_login, new-agent.sh
+# as_login, rename-working-copy.sh as); one place now. stdin, stdout,
+# stderr and the exit status are the command's: a token piped in and a
+# bundle streamed out pass through untouched and never appear in argv.
+#
+# An argument beginning `@fabric/` names a path under THIS host's fabric
+# checkout (the one this worker sits in): the caller need not know where
+# the operator keeps it, and nothing expands ~ on the far side.
+#
+# $SUDO names the sudo to use (a test puts a fake here); the real one is
+# `sudo -n`: a password prompt is a failure, never a wait.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+as=""; cwd=""
+while (( $# )); do
+    case "$1" in
+        --as) as="$2"; shift 2 ;;
+        --as=*) as="${1#--as=}"; shift ;;
+        --cwd) cwd="$2"; shift 2 ;;
+        --cwd=*) cwd="${1#--cwd=}"; shift ;;
+        --) shift; break ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "worker: unknown argument $1 (the command comes after --)" >&2; exit 2 ;;
+    esac
+done
+(( $# )) || { echo "worker: no command after --" >&2; exit 2; }
+cmd=(); for a in "$@"; do cmd+=("${a/#@fabric\//$ROOT/}"); done; set -- "${cmd[@]}"
+me="$(id -un)"
+if [[ -z "$as" || "$as" == "$me" ]]; then
+    [[ -n "$cwd" ]] && { cd "$cwd" || exit 1; }
+    exec "$@"
+fi
+home="$(getent passwd "$as" | cut -d: -f6)"
+[[ -n "$home" ]] || { echo "worker: no such login on $(hostname -s): $as" >&2; exit 2; }
+SUDO="${SUDO:-sudo}"
+# The command is handed to the account's shell as ARGUMENTS ("$@"), never
+# re-parsed: a value with a space or a quote reaches it whole.
+exec $SUDO -n -u "$as" -H env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin:$home/.local/bin" \
+    bash -c 'cd "${1:-$HOME}" && shift && exec "$@"' -- "$cwd" "$@"

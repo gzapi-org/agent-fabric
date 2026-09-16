@@ -540,6 +540,35 @@ def case_the_class_list_a_reader_sees_is_the_real_one() -> None:
         assert code == 1 and "CLAUDE.md: does not name capability class 'code-high'" in out, f"CLAUDE.md drift passed:\n{out}"
 
 
+def case_the_host_registry_is_one_host_per_id_and_placements_are_known() -> None:
+    def registry(hosts, placement):
+        return json.dumps({"version": 1, "hosts": hosts, "placement": placement})
+    H = {"platform": "debian", "ssh": "op@h2.example", "operator": "op", "fabric": "~/projects/agent-fabric"}
+    L = {"platform": "fedora-qubes", "ssh": None, "operator": "user", "fabric": "~/projects/agent-fabric"}
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        shutil.copytree(os.path.join(ROOT, "runtime", "hosts", "schema"), os.path.join(fabric, "runtime", "hosts", "schema"))
+        reg = os.path.join(fabric, "runtime", "hosts", "registry.json")
+        write(reg, registry({"local": L, "h2": H}, {"a": "local", "b": "h2"}))
+        code, out = run_lint(fabric)
+        assert code == 0, f"a sound registry was refused:\n{out}"
+        write(reg, registry({"local": L, "h2": H, "h3": H}, {"a": "local"}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "share the ssh destination" in out, f"two hosts on one destination passed:\n{out}"
+        write(reg, registry({"h2": H}, {"a": "h2"}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "exactly one host has ssh null" in out, f"no local host passed:\n{out}"
+        write(reg, registry({"local": L}, {"a": "elsewhere"}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "names host 'elsewhere', which is not registered" in out, f"an unknown placement passed:\n{out}"
+        write(reg, registry({"Bad_Host": L}, {}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "Bad_Host" in out, f"an id that is not a short hostname passed:\n{out}"
+        write(reg, registry({"local": {**L, "role": "fabric-coordinator"}}, {}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "role" in out, f"a role in a host entry passed (placement is never identity):\n{out}"
+
+
 def main() -> int:
     cases = [
         case_clean_base_passes,
@@ -564,6 +593,7 @@ def main() -> int:
         case_model_profiles_schema_is_enforced,
         case_the_repository_is_one_license,
         case_the_class_list_a_reader_sees_is_the_real_one,
+        case_the_host_registry_is_one_host_per_id_and_placements_are_known,
     ]
     failures = 0
     for case in cases:

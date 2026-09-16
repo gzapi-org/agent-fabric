@@ -476,6 +476,44 @@ def class_doc_findings(root: str) -> list[str]:
     return findings
 
 
+def host_registry_findings(root: str) -> list[str]:
+    """runtime/hosts/registry.json: a host id is its short hostname, so ids
+    are unique by construction and an ssh destination reaches one host;
+    exactly one host is the one this registry is read on (ssh null); a
+    placement names a known host. Placement is where an account is, never
+    who it is — the schema forbids anything else in a host entry."""
+    findings: list[str] = []
+    path = os.path.join(root, "runtime", "hosts", "registry.json")
+    if not os.path.exists(path):
+        return findings
+    where = "runtime/hosts/registry.json"
+    try:
+        reg = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"{where}: does not parse ({exc})"]
+    schema = load_schema(root, os.path.join("runtime", "hosts", "schema"), "hosts")
+    if schema:
+        findings += validate_json(schema, reg, where)
+        if findings:
+            return findings
+    hosts = reg.get("hosts") or {}
+    local = [h for h, e in hosts.items() if e.get("ssh") is None]
+    if len(local) != 1:
+        findings.append(f"{where}: exactly one host has ssh null (the one this registry is read on); found {len(local)}: {', '.join(sorted(local)) or 'none'}")
+    seen: dict[str, str] = {}
+    for hid, e in sorted(hosts.items()):
+        dest = e.get("ssh")
+        if dest is None:
+            continue
+        if dest in seen:
+            findings.append(f"{where}: hosts {seen[dest]} and {hid} share the ssh destination {dest!r}; one destination is one host")
+        seen[dest] = hid
+    for login, hid in sorted((reg.get("placement") or {}).items()):
+        if hid not in hosts:
+            findings.append(f"{where}: placement of {login!r} names host {hid!r}, which is not registered")
+    return findings
+
+
 def load_schema(root: str, subdir: str, name: str) -> dict[str, Any] | None:
     path = os.path.join(root, subdir, f"{name}.schema.json")
     if not os.path.exists(path):
@@ -653,6 +691,9 @@ def main() -> int:
 
     # --- the class list a reader sees --------------------------------------
     findings += class_doc_findings(root)
+
+    # --- the hosts and where each account lives -----------------------------
+    findings += host_registry_findings(root)
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

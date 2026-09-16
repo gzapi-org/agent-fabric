@@ -24,6 +24,7 @@ agent-fabric contains agent infrastructure
 | **MEMORY** | What durable knowledge can it retrieve? | `memory/domains/`, `memory/agents/<login>/`, `memory/shared/` here; `<working copy>/.agent-fabric/memory/<role>/` in each project — generated indexes, provenance, tiered loading (`memory/README.md`) |
 | **PROJECT** | Which logical system is it working on? | `projects/registry.json`, matched from a working copy's remote by `tools/fabric/workingcopy.py` |
 | **WORKING COPY** | Which filesystem/Git checkout is being used? | the cwd's git toplevel, recorded in the agent's runtime binding as a path and a label |
+| **HOST** | Which machine is the account on, and how does the coordinator reach it? | `runtime/hosts/registry.json` — hosts by short hostname, each account's placement; `runtime/hostexec/` runs one command there, directly on this host or over ssh with the same worker; `bin/fabric-host`. Placement is where an account is, never who it is |
 | **CAPABILITY** | How much reasoning does a task require? | `routing/capabilities.json` classes: `code-low`, `code-medium`, `code-high`, `code-plan`, `code-review` |
 | **MODEL ROUTING** | Which concrete model satisfies that capability now? | `routing/capabilities.json` providers, layered by `routing/profiles.json` (per role, per login) |
 | **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm2claude-shim` |

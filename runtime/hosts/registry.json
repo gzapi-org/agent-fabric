@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "description": "Where the agents' accounts are: the hosts the fabric operates, and which host each login was provisioned on (placement). A host's id is its short hostname — what runtime/identity.py current_host() returns and what a GZCoord address carries — so two hosts can never share one, and a worker that reports another name than the id it was reached as is refused. `ssh` is how the coordinator reaches the host's operator account (an ssh destination; null for the host the coordinator runs on, reached directly), `operator` the login there that holds sudo and the fabric checkout at `fabric`. Placement is where an account lives, never its identity (the OS's) and never its role.",
+  "hosts": {
+    "develop-qzapp": {
+      "platform": "fedora-qubes",
+      "ssh": null,
+      "operator": "user",
+      "fabric": "~/projects/agent-fabric"
+    }
+  },
+  "placement": {
+    "user": "develop-qzapp",
+    "gzcoord-coordinator": "develop-qzapp",
+    "architect-cto-01": "develop-qzapp",
+    "backend-dev-01": "develop-qzapp",
+    "backend-dev-02": "develop-qzapp",
+    "flutter-dev-01": "develop-qzapp",
+    "flutter-dev-02": "develop-qzapp",
+    "web-dev-01": "develop-qzapp",
+    "web-dev-02": "develop-qzapp",
+    "db-admin": "develop-qzapp",
+    "devex-tooling": "develop-qzapp",
+    "edge-hosting": "develop-qzapp",
+    "product-i18n": "develop-qzapp",
+    "domain-transit": "develop-qzapp",
+    "brand-comms-01": "develop-qzapp"
+  }
+}

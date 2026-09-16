@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# bin/fabric-host — the coordinator's door to the hosts the agents live on.
+#
+#   fabric-host list                                  hosts and placements (runtime/hosts/registry.json)
+#   fabric-host <host> check                          the host answers as the id it is registered under
+#   fabric-host <host> run [--as <login>] [--tty] -- <cmd>...   one command there (runtime/hostexec/hostexec)
+#   fabric-host <host> moveto <login> [<clone>]       an interactive shell as that account, in its workspace
+#   fabric-host <host> rename <login> <old> <new> [--dry-run]   rename-working-copy.sh, run there
+#   fabric-host <host> drain <login> [harvest flags...] > drain.tar   the account's memory as a bundle (stdout)
+#
+# Every subcommand is the same operation on every host: the local one is
+# reached directly (today's sudo and filesystem access, unchanged), any
+# other over ssh, with the same worker on the far side — the backend is
+# the registry's choice, never the caller's. What the coordinator keeps
+# to itself (Doppler, the API keys) never goes through here; what is
+# host-local (accounts, homes, installers, a shell, a rename, a drain)
+# always does. A path given as @fabric/<rel> is under the fabric checkout
+# on the TARGET host, wherever its operator keeps it. docs/host-execution.md.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+REGISTRY="${AGENT_FABRIC_HOSTS_REGISTRY:-$ROOT/runtime/hosts/registry.json}"
+HX="$ROOT/runtime/hostexec/hostexec"
+die() { printf 'fabric-host: %s\n' "$*" >&2; exit "${2:-2}"; }
+usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; }
+
+[[ $# -ge 1 ]] || { usage; exit 2; }
+case "$1" in
+    -h|--help) usage; exit 0 ;;
+    list)
+        python3 - "$REGISTRY" <<'PY'
+import json, sys
+reg = json.load(open(sys.argv[1]))
+for hid, h in sorted((reg.get("hosts") or {}).items()):
+    where = "this host (direct)" if h.get("ssh") is None else f"ssh {h['ssh']}"
+    print(f"{hid:20} {h['platform']:14} operator {h['operator']:12} {where}")
+    placed = sorted(l for l, p in (reg.get("placement") or {}).items() if p == hid)
+    print("                     accounts: " + (", ".join(placed) or "(none placed)"))
+unplaced = sorted(l for l, p in (reg.get("placement") or {}).items() if p not in (reg.get("hosts") or {}))
+if unplaced: print("placed on an unknown host: " + ", ".join(unplaced))
+PY
+        exit $? ;;
+esac
+
+host="$1"; shift
+[[ $# -ge 1 ]] || { usage; exit 2; }
+sub="$1"; shift
+case "$sub" in
+    check)
+        reported="$("$HX" "$host" -- hostname -s)" || die "$host: unreachable, or the worker did not run (see above)" 1
+        if [[ "$reported" == "$host" ]]; then echo "host $host: answers as $host"; exit 0; fi
+        die "$host answers as '$reported': the registry id is the host's short hostname, and this one is not; fix runtime/hosts/registry.json or the host's name before placing an account there" 1 ;;
+    run)
+        exec "$HX" "$host" "$@" ;;
+    moveto)
+        [[ $# -ge 1 ]] || die "moveto needs the login"
+        login="$1"; shift
+        exec "$HX" "$host" --tty -- moveto "$login" "$@" ;;
+    rename)
+        [[ $# -ge 3 ]] || die "rename needs <login> <old> <new>"
+        exec "$HX" "$host" -- @fabric/runtime/provisioning/rename-working-copy.sh "$@" ;;
+    drain)
+        [[ $# -ge 1 ]] || die "drain needs the login"
+        login="$1"; shift
+        [[ -t 1 ]] && die "drain writes a tar to stdout; redirect it (> drain.tar) or pipe it to assemble.py --bundle -"
+        exec "$HX" "$host" --as "$login" -- python3 @fabric/tools/fabric/harvest_memory.py --bundle - "$@" ;;
+    *) die "unknown subcommand $sub (list | check | run | moveto | rename | drain)" ;;
+esac

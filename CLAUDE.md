@@ -57,7 +57,7 @@ directory, the repository, the branch or the session.
 | role | the function you currently perform | `identities/roles/<role>/{charter,brief}.md`, bound by `bin/fabric-role` before launch, in your system prompt |
 | project | the logical system being worked on | `projects/registry.json`, matched by a working copy's remote |
 | working copy | the checkout in use | your cwd's git toplevel; a label, not an identity |
-| host | the machine | recorded beside the agent |
+| host | the machine | recorded beside the agent; where each account lives is `runtime/hosts/registry.json`, reached through `runtime/hostexec/` |
 | session | this conversation | the harness session id, in your runtime binding |
 
 ## Working here
@@ -166,7 +166,8 @@ memory/         domains/ agents/<login>/ shared/ — field knowledge; project kn
 routing/        capability classes -> models; model families -> shims (shims/<slug>/ their
                 sources, tools/fabric/shim.py their tool); review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
-runtime/        identity.py (the resolver), claude-code/ openrouter/ github/ provisioning/ adapters
+runtime/        identity.py (the resolver), hosts/ (the registry: hosts and placement), hostexec/ (one
+                command on a host, local or ssh), claude-code/ openrouter/ github/ provisioning/ adapters
 projects/       registry.json and per-project bindings (taxonomy, integration)
 policies/       authority rules and the guards that make violations visible
 tools/fabric/   role.py, assemble.py, lint.py, routing.py, shim.py, harvest*, query.sh

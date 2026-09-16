@@ -43,6 +43,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "model-switch guard" bash runtime/claude-code/hooks/test_model-switch-guard.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
+    run "hostexec (local and ssh backends)" bash runtime/hostexec/test_hostexec.sh
     run "fabric-secrets" bash policies/run_suite.sh runtime/provisioning/secrets/test_fabric-secrets.sh
     run "enroll (fault injection)" bash runtime/provisioning/secrets/test_enroll.sh
     run "github pr-reply" bash runtime/github/test_pr-reply.sh

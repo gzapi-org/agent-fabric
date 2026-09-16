@@ -167,8 +167,20 @@ node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay <rela
 It reads the channel's recent history without a consumer id (nothing
 moves), shows the body only if the message is addressed to you, and
 otherwise prints its metadata line — SPEC §17 applies to a replay too.
-Never pipe the watch or a drain through anything that truncates; the
-notification is the whole message or it is a lost message.
+Never pipe the watch or a drain through anything that truncates.
+
+**A delivery that ends in a `[gzcoord: body cut here …]` line is not the
+whole message.** The harness shows about 3,000 characters of one
+notification and cuts the rest with "...(truncated)" — the cut landed
+inside REQUEST or VERIFIED on four deliveries (architect-cto,
+2026-09-16). So the watch cuts first, at a place of its own: every
+metadata line stays, the body stops at a line boundary, and the last
+line names the replay command with the relay seq. Run it before acting
+on such a message; the body you did not see is the part that matters
+most. When several messages land at once the watch shares the space
+between them, and past what fits it lists one line per message with
+its seq. The session-start drain is not a notification and is shown
+whole.
 
 ## 4. After a token rotation
 

@@ -256,10 +256,12 @@ test('a line over 72 characters warns, naming the line, and stays valid', () => 
   const text = `[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nMESSAGE-ID: test-0001\nSPECIALTIES: ${long}\n\nABOUT:\n${long}\n`;
   const result = validate(text);
   assert.equal(result.ok, true);
-  const lines = result.warnings.filter(w => w.includes('may re-break'));
+  const lines = result.warnings.filter(w => w.includes('re-breaks it'));
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /^line 6 is 86 columns wide/);
+  assert.match(lines[0], /^line 6 is 86 columns wide; over 72 a terminal copy re-breaks it/);
   assert.match(lines[1], /^line 9 is 73 columns wide/);
+  // Off (the bridge path): no width warning at any length.
+  assert.deepEqual(validate(text, { maxColumns: 0 }).warnings.filter(w => w.includes('columns wide')), []);
   // Exactly 72 is inside the limit.
   assert.deepEqual(validate(`[GZCOORD/1] INFO\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nMESSAGE-ID: test-0001\nBROADCAST: true\n\nNOTES:\n${'y'.repeat(72)}\n`).warnings, []);
 });
@@ -685,7 +687,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, NOTIFICATION_CAP, REPLAY_CMD } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -957,6 +959,16 @@ test('send --dry-run validates and resolves but posts nothing', async () => {
   });
 });
 
+test('send carries a long line as written, with no width warning (the bridge does not re-break)', async () => {
+  await withRelay(async (relay, posts) => {
+    const wide = valid.replace(/\n$/, '') + '\n' + 'a path or an id that is longer than seventy-two columns: /home/x/projects/agent-fabric/runtime/claude-code/hooks/plan-hold.sh\n';
+    const r = await sendWith(relay, wide);
+    assert.equal(r.code, 0, r.err);
+    assert.ok(!/columns wide/.test(r.err), `no width warning on the send path: ${r.err}`);
+    assert.equal(posts[0].body.content, wide, 'the line is posted as written');
+  });
+});
+
 test('send normalizes a pasted, indented message before validating', async () => {
   await withRelay(async (relay, posts) => {
     const r = await sendWith(relay, valid.split('\n').map(l => l ? '    ' + l : l).join('\n'));
@@ -1060,6 +1072,32 @@ test('inbox --follow prints a delivery and keeps running', async () => {
   child.kill('SIGKILL'); server.closeAllConnections(); server.close();
   assert.match(out, /FOLLOW-BODY/, 'the delivery was printed');
   assert.ok(stillRunning, '--follow did not exit after the delivery');
+});
+
+test('inbox --follow bounds a long delivery to one notification and names the replay', async () => {
+  const body = Array.from({ length: 200 }, (_, i) => `line ${i} LONG-BODY`).join('\n') + '\nTHE-END\n';
+  const mine = `[GZCOORD/1] INFO\nFROM: x/y\nROLE: backend-dev\nPROJECT: fixture\nBROADCAST: true\nMESSAGE-ID: 01a09fc1-0000-7000-8000-00000000002f\nSUBJECT: long\n\nNOTES:\n${body}`;
+  let served = false;
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json'); res.setHeader('connection', 'close');
+    if (req.url === '/status') { res.end('{}'); return; }
+    if (req.url.startsWith('/api/wait')) {
+      if (!served) { served = true; res.end(JSON.stringify({ messages: [{ seq: 77, id: 'r77', ts: 'T', sender: 'x/y', content: mine }], next_cursor: 'c' })); }
+      return;
+    }
+    res.end('{}');
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const child = spawn('node', [INBOX, '--follow'], { env });
+  let out = '';
+  await new Promise(resolve => { child.stdout.on('data', d => { out += d; if (out.includes('--replay 77]')) setTimeout(resolve, 200); }); setTimeout(resolve, 8000); });
+  child.kill('SIGKILL'); server.closeAllConnections(); server.close();
+  assert.ok(out.length <= NOTIFICATION_CAP + 1, `the event is bounded: ${out.length}`);
+  assert.ok(out.includes('SUBJECT: long\n\nNOTES:\nline 0 LONG-BODY'), 'metadata and the body head are there');
+  assert.ok(!out.includes('THE-END'), 'the tail is not');
+  assert.ok(out.includes('[gzcoord: body cut here to fit one notification — the whole message: node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay 77]'));
 });
 
 // The hold: while the session plans, the watch polls nothing.
@@ -1205,4 +1243,42 @@ test('inbox --follow polls nothing while the hold marker names a live pid', asyn
   fs.writeFileSync(path.join(holdDir, '4194304000.json'), JSON.stringify({ session_id: 'plan', pid: 4194304000, since: 'T' }));
   const n = spawnSync('node', [INBOX, '--held'], { env, encoding: 'utf8' });
   assert.equal(n.status, 1); assert.match(n.stdout, /^not held: 4194304000\.json: session 4194304000 is gone/);
+});
+
+// The notification cap: what one --follow event carries.
+test('render under a cap: metadata whole, body cut at a line, the replay command last', () => {
+  const me = { address: 'develop-qzapp/user', slug: 'fabric-coordinator' };
+  const meta = (id, to = 'develop-qzapp/user') => `[GZCOORD/1] OBSERVATION\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nTO: ${to}\nREPLY-EXPECTED: no\nMESSAGE-ID: 01a0a9dd-e876-73e2-a329-c5b7cf28ba${id}\nSUBJECT: subject ${id}`;
+  const longBody = 'OBSERVATION:\n' + Array.from({ length: 150 }, (_, i) => `line ${i} of a long body`).join('\n') + '\nREQUEST:\nthe ask at the very end\n';
+  const rec = (seq, content) => ({ id: `r${seq}`, seq, sender: 'develop-qzapp/x', timestamp: 'T', content });
+  const mine = (seq, content) => ({ rec: rec(seq, content), msg: parse(content), isMine: true });
+  const other = seq => { const c = meta(String(seq).padStart(2, '0'), 'develop-qzapp/z') + '\n'; return { rec: rec(seq, c), msg: parse(c), isMine: false }; };
+  // a short delivery is untouched by the cap
+  const short = render({ classified: [mine(1, meta('01') + '\n\nNOTES:\nshort\n')] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.equal(short, render({ classified: [mine(1, meta('01') + '\n\nNOTES:\nshort\n')] }, me, 'c'), 'under the cap, the same text as without one');
+  assert.ok(!short.includes('--replay'));
+  // a long one is cut by us, not by the harness
+  const long = render({ classified: [mine(405, meta('05') + '\n\n' + longBody), other(406), other(407)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(long.length <= NOTIFICATION_CAP, `over the cap: ${long.length}`);
+  assert.ok(long.includes('SUBJECT: subject 05\n\nOBSERVATION:\nline 0 of a long body\n'), 'metadata whole, body from its first line');
+  assert.ok(!long.includes('the ask at the very end'), 'the tail was cut');
+  assert.match(long, /\nline \d+ of a long body\n\n\[gzcoord: body cut here to fit one notification — the whole message: node "\$AGENT_FABRIC_ROOT\/communication\/gzcoord\/scripts\/inbox\.mjs" --replay 405\]\n```/, 'cut at a line boundary; the replay command names the seq');
+  assert.match(long, /2 not addressed to you, not listed here \(over the notification cap\)/);
+  assert.ok(!long.includes('subject 06'), 'others are counted, not listed, when the cap is reached');
+  assert.equal(REPLAY_CMD, 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay');
+  // two long messages share the budget; each carries its own replay line
+  const two = render({ classified: [mine(410, meta('10') + '\n\n' + longBody), mine(411, meta('11') + '\n\n' + longBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(two.length <= NOTIFICATION_CAP);
+  assert.ok(two.includes('--replay 410]') && two.includes('--replay 411]'));
+  assert.ok(two.includes('SUBJECT: subject 10\n\nOBSERVATION:\nline 0') && two.includes('SUBJECT: subject 11\n\nOBSERVATION:\nline 0'));
+  // a short and a long one: the short one is whole, the long one gets the rest
+  const mixed = render({ classified: [mine(420, meta('20') + '\n\nNOTES:\nwhole\n'), mine(421, meta('21') + '\n\n' + longBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(mixed.length <= NOTIFICATION_CAP);
+  assert.ok(mixed.includes('NOTES:\nwhole\n```') && !mixed.includes('--replay 420]'), 'the short message is whole and carries no cut notice');
+  assert.ok(mixed.includes('--replay 421]'));
+  // more messages than the metadata alone allows: one line each
+  const many = render({ classified: Array.from({ length: 30 }, (_, i) => mine(500 + i, meta(String(i).padStart(2, '0')) + '\n\n' + longBody)) }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(many.length <= NOTIFICATION_CAP);
+  assert.match(many, /\(over the notification cap: each message by its seq/);
+  assert.ok(many.includes('  seq 500  01a0a9dd-e876-73e2-a329-c5b7cf28ba00  OBSERVATION  TO develop-qzapp/user  subject 00'));
 });

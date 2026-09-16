@@ -42,7 +42,7 @@ BROADCAST: true                 #   … or everyone; exactly one of the three
 IN-REPLY-TO: <message-id>       # when answering
 REPLY-EXPECTED: yes|no
 MESSAGE-ID: <uuidv7>            # node communication/gzcoord/scripts/gzmsg.mjs new-id
-SUBJECT: one line, 72 columns or fewer
+SUBJECT: one line, short
 
 OBSERVATION:
 what you noticed, as fact
@@ -67,7 +67,11 @@ REFERENCES:
 
 Rules that are not style:
 
-- **Lines of 72 columns or fewer** — the relay re-breaks longer ones.
+- **Lines of 72 columns or fewer, where you can** — a courtesy to the
+  reader's terminal, not a rule of the wire: the bridge carries a line
+  as written, so a path or an id that is longer goes out whole and
+  `send.mjs` says nothing about it. Only a message someone will paste
+  by hand (`gzmsg.mjs validate`) still warns about width.
 - **Address one way.** `TO` for a session, `TO-ROLE` for whoever holds
   the role, `BROADCAST` for a rule everyone applies. A recipient reads the
   body only when it is addressed; a broadcast spends every session's

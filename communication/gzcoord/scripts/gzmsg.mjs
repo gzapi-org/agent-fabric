@@ -237,7 +237,8 @@ export function slugOf(instance, taxonomy) {
   return best;
 }
 
-export function validate(text, { taxonomy } = {}) {
+export const RELAY_MAX_COLUMNS = 72;   // the width a terminal copy keeps; not the bridge's
+export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}) {
   const errors = [];
   const warnings = [];
   let msg;
@@ -312,17 +313,19 @@ export function validate(text, { taxonomy } = {}) {
     if (value === '')
       warnings.push(`${key} has an empty value — a section marker with trailing whitespace reads as metadata`);
   // Not a grammar rule — SPEC §14 keeps carrier limits off the wire — but
-  // the current carrier is a terminal copy, and a line it re-breaks stops
-  // being metadata (docs/HUMAN-RELAY-TRANSPORT.md, "Sending"). Advisory,
-  // and the width is the relay's, so a future transport drops or moves it.
-  // Measured in columns, not code units: String.length undercounts CJK
-  // and overcounts combining marks and astral characters.
-  const RELAY_MAX_COLUMNS = 72;
-  text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line, i) => {
-    const w = columns(line);
-    if (w > RELAY_MAX_COLUMNS)
-      warnings.push(`line ${i + 1} is ${w} columns wide; over ${RELAY_MAX_COLUMNS} the relay may re-break it`);
-  });
+  // a terminal copy re-breaks a long line, and a re-broken metadata line
+  // stops being metadata (history/telegram-transport, "Sending"). The
+  // width is the carrier's: the bridge relay carries a line as written
+  // (a 93-column line arrived whole, 2026-09-16), so send.mjs passes
+  // maxColumns: 0 and the check is off on that path; the CLI keeps it for
+  // a message someone will paste. Measured in columns, not code units:
+  // String.length undercounts CJK and overcounts combining marks.
+  if (maxColumns > 0)
+    text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line, i) => {
+      const w = columns(line);
+      if (w > maxColumns)
+        warnings.push(`line ${i + 1} is ${w} columns wide; over ${maxColumns} a terminal copy re-breaks it`);
+    });
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
 

@@ -431,24 +431,73 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
 
 // One delivery (or drain) as the session reads it: what is for me in
 // full, what is not by its metadata line (SPEC §17).
-function render(res, me, channel, taxonomy) {
+//
+// THE NOTIFICATION CAP. What the watch prints reaches the session as a
+// Monitor notification, and the harness shows about 3,000 characters of
+// one event, then "...(truncated)" — the rest exists only in the task's
+// output file, which the session does not know to open (architect-cto,
+// 2026-09-16, four deliveries cut inside REQUEST or VERIFIED; measured
+// here at 3,017 characters shown). So --follow renders under a cap of
+// its own: a delivery that fits is printed whole; one that does not
+// keeps every metadata line, cuts the body at a line boundary, and says
+// where it cut and how to read the whole message (--replay, which moves
+// no cursor). The cut is ours, at a place we choose, and the last line
+// is the instruction; the harness's cut lands anywhere and says only
+// "truncated". The drain (SessionStart hook context) is not a
+// notification and is rendered whole.
+export const NOTIFICATION_CAP = 2800;
+export const REPLAY_CMD = 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay';
+function cutAtLine(text, max) {
+  if (text.length <= max) return text;
+  const nl = text.lastIndexOf('\n', max);
+  return text.slice(0, nl > max / 2 ? nl : max);
+}
+export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
   const mine = [], others = [];
   for (const { rec, msg, isMine } of res.classified) {
     if (!msg) { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
     (isMine ? mine : others).push({ rec, msg });
   }
-  const out = [];
-  out.push(`gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${channel}`);
-  for (const { rec, msg } of mine) {
+  const head = `gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${channel}`;
+  const parts = mine.map(({ rec }) => {
     const v = validate(rec.content, { taxonomy });
     const flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
-    out.push('', `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`, '```text', rec.content.replace(/\n$/, ''), '```');
+    const title = `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`;
+    const text = rec.content.replace(/\n$/, '');
+    // metadata is everything up to the first blank line; the body follows
+    const blank = text.indexOf('\n\n');
+    const meta = blank >= 0 ? text.slice(0, blank) : text;
+    const body = blank >= 0 ? text.slice(blank + 2) : '';
+    return { rec, title, meta, body };
+  });
+  const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg)}`);
+  const whole = [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta + (p.body ? '\n\n' + p.body : ''), '```']),
+                 ...(others.length ? ['', 'Not addressed to you — listed, bodies not read (SPEC §17):', ...otherLines] : [])].join('\n');
+  if (whole.length <= cap) return whole;
+
+  // Over the cap: metadata whole, bodies share what is left, others by count.
+  const notice = p => `[gzcoord: body cut here to fit one notification — the whole message: ${REPLAY_CMD} ${p.rec.seq}]`;
+  const othersNote = others.length ? `\n\n${others.length} not addressed to you, not listed here (over the notification cap); their metadata lines are in the watch's output file.` : '';
+  const fixed = [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta, '', notice(p), '```'])].join('\n').length + othersNote.length;
+  if (fixed > cap) {
+    // Too many messages for one notification: one line each, read by seq.
+    const lines = [head, `(over the notification cap: each message by its seq, read it with: ${REPLAY_CMD} <seq>)`];
+    for (const p of parts) lines.push(`  seq ${p.rec.seq}  ${oneLine(parse(p.rec.content))}`);
+    if (others.length) lines.push(`  and ${others.length} not addressed to you`);
+    return cutAtLine(lines.join('\n'), cap);
   }
-  if (others.length) {
-    out.push('', 'Not addressed to you — listed, bodies not read (SPEC §17):');
-    for (const o of others) out.push(`  ${o.line ?? oneLine(o.msg)}`);
+  let budget = cap - fixed;
+  const shares = parts.map(() => 0);
+  // shortest bodies first: what they do not need goes to the longer ones
+  const order = parts.map((p, i) => i).sort((a, b) => parts[a].body.length - parts[b].body.length);
+  order.forEach((i, k) => { const share = Math.floor(budget / (order.length - k)); const take = Math.min(share, parts[i].body.length + 2); shares[i] = take; budget -= take; });
+  const out = [head];
+  for (const [i, p] of parts.entries()) {
+    const cut = cutAtLine(p.body, Math.max(0, shares[i] - 2));
+    const fits = cut.length >= p.body.length;
+    out.push('', p.title, '```text', p.meta + (cut ? '\n\n' + cut : ''), ...(fits ? [] : ['', notice(p)]), '```');
   }
-  return out.join('\n');
+  return out.join('\n') + othersNote;
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -533,7 +582,7 @@ export async function main(argv = process.argv.slice(2)) {
         continue;
       }
       if (down) { console.log('gzcoord watch: relay is back; watching again'); down = false; }
-      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy));
+      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy, { cap: NOTIFICATION_CAP }));
     }
   }
 

@@ -44,8 +44,10 @@ export async function main(argv = process.argv.slice(2)) {
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
 
-  // Validate as the last step before sending; the validator's own words go to stderr.
-  const result = validate(text, { taxonomy });
+  // Validate as the last step before sending; the validator's own words go
+  // to stderr. The line-width check is off: the bridge carries a line as
+  // written, and a warning nobody can act on (a path, an id) is noise.
+  const result = validate(text, { taxonomy, maxColumns: 0 });
   for (const w of result.warnings ?? []) console.error(`send: warning: ${w}`);
   if (!result.ok) { for (const e of result.errors ?? []) console.error(`send: ${e}`); console.error('send: not sent — the message does not validate'); return 2; }
   const msg = parse(text);

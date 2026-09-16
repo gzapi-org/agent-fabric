@@ -20,7 +20,8 @@ Two standing exceptions exist, both named in the root file, both
 review: step 26 of the canonical lifecycle (judging an automated review
 claim with a subagent, added after two findings were dismissed by hand
 in a row and both dismissals were wrong), and the substitute review
-dispatched when `pr-review-status.sh` reports a DECLINE. Nothing else.
+dispatched when the project's review-status tooling (gzapp:
+`tools/gh/pr-review-status.sh`) reports a DECLINE. Nothing else.
 
 ## The `model` field — the ~40-agent bill
 
@@ -60,7 +61,8 @@ class on the wrong alias, and prompts on a premium one.
 
 One role escapes the premium ban without a per-dispatch ask: a
 **substitute reviewer**, dispatched either at step 26 (judging an
-automated review claim) or when `pr-review-status.sh` reports a
+automated review claim) or when the project's review-status tooling
+(gzapp: `tools/gh/pr-review-status.sh`) reports a
 DECLINE and no automated review is coming at all.
 
 **`fable` is a tier alias, and the target is agent-fabric's routing.**
@@ -204,26 +206,43 @@ and every dispatch in this repo names its tier.
 
 ### The review brief
 
-The agent definition carries the charter; the DISPATCH carries the
-scope, and the scope is where independence is won or lost:
+Three parts, kept apart (`runtime/claude-code/review/README.md`): the
+reviewer's **constitution** is its agent file — the method, the revert
+test, the quoted hunk, the bounded re-review, the shape of a finding
+all live there and nowhere else; the **charter** is what the DISPATCH
+carries — the facts of this change; a **lens** is a named bias
+(`bin/fabric-review lenses`). The charter is where independence is won
+or lost, so it is rendered, not improvised:
 
-- **No session context.** Not the plan, not the rationale, not what
-  you believe is correct. An agent told what the author expects
-  confirms it; the whole value is that it does not know.
-- **One agent per PR**, briefed on the exact `base..head` range (or a
-  diff file in the scratchpad when the range is not yet pushed). Name
-  the range in the prompt.
-- **State the revert test**: "if this range were reverted, would the
-  problem go away?" Findings that fail it are pre-existing and go in
-  their own section — still reported, never mixed in.
-- **Require each finding to quote its hunk.** A finding that cannot
-  point at `+`/`-` lines is pre-existing or speculation.
-- **On a re-review, say explicitly: verify only the new hunks against
-  the previous findings; do not re-read or re-verify anything outside
-  them.** Leaving that sentence out cost another project ~50k tokens
-  per comment-only commit, and the re-reading manufactured the next
-  round's findings. The description begins `re-review` so the guard
-  and the agent both know which mode this is.
+1. Write a request in the scratchpad: `mode`, `repository`, `range`
+   (or `diff`), `objective` — one line, what must be true of the
+   system — `requirements`, `invariants`, `compatibility`,
+   `threat_model`, `scope`, `out_of_scope`, `lenses`. Every field is a
+   FACT: what must be true. Never how the change makes it true, what
+   was fixed, or where you suspect the defect — a reviewer told why the
+   code is right agrees with it, and the whole value is that it does
+   not know. `bin/fabric-review brief request.yaml` refuses a
+   verdict-shaped sentence and names it; rephrase as what must be true
+   (`--allow-rationale` renders it flagged, for the rare fact that
+   reads like a verdict).
+2. Paste the rendered brief into `prompt`, verbatim. Not the plan, not
+   the rationale, not the implementation transcript, not another
+   reviewer's conclusions.
+3. **One agent per PR**, on the exact `base..head` (or a diff file in
+   the scratchpad when the range is not yet pushed).
+4. **A re-review** is `mode: re-review`, the range of the fix commits
+   only, and `previous_findings:` — the previous report, a file. The
+   constitution verifies only the new hunks against those findings, by
+   number; leaving the bound out once cost another project ~50k tokens
+   per comment-only commit and manufactured the next round's findings.
+   The description begins `re-review` so the guard and the agent both
+   know which mode this is.
+
+The renderer is ergonomics and a lint, not authorisation: the dispatch
+guard decides from four fields of the call and never reads the prompt
+(above — a hook that judged prompt text would be a hole). A prose brief
+written by hand is still admitted; the constitution takes its range and
+treats the rest as facts only where they are facts.
 
 ### The reviewer reads history; it changes nothing
 

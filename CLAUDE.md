@@ -109,6 +109,9 @@ directory, the repository, the branch or the session.
   isolation: they cannot write, and a worktree would hide the
   uncommitted work they are asked about. Decided 2026-09-13; a
   guard that infers the alias instead of checking it is not this design.
+  A review is briefed with `bin/fabric-review brief` — the facts of the
+  change under fixed headings, never the author's conclusions
+  (`policies/subagent-dispatch/SKILL.md` §The review brief).
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Two skills carry the procedure and are
   installed for every account: `gzcoord-send` (compose, mint the id,

@@ -501,6 +501,31 @@ def case_the_repository_is_one_license() -> None:
         assert code == 1 and "lives in the project's repository" in out, f"project knowledge here passed:\n{out}"
 
 
+def case_the_class_list_a_reader_sees_is_the_real_one() -> None:
+    """README.md and CLAUDE.md spell out the capability classes; each list
+    must be exactly what routing/capabilities.json defines. The README
+    said `review` for a class named code-review for days (2026-09-16)."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        classes = sorted(json.load(open(os.path.join(fabric, "routing", "capabilities.json")))["classes"])
+        row = "| **CAPABILITY** | x | `routing/capabilities.json` classes: " + ", ".join(f"`{c}`" for c in classes) + " |\n"
+        write(os.path.join(fabric, "README.md"), "# r\n\n" + row)
+        code, out = run_lint(fabric)
+        assert code == 0, f"the real list was refused:\n{out}"
+        write(os.path.join(fabric, "README.md"), "# r\n\n" + row.replace("`code-review`", "`review`"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "README.md: names capability class 'review'" in out \
+            and "does not name capability class 'code-review'" in out, f"a wrong class name passed:\n{out}"
+        write(os.path.join(fabric, "README.md"), "# r\n\nno classes here\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "class list was not found" in out, f"a README without the list passed:\n{out}"
+        # CLAUDE.md's sentence is checked the same way
+        write(os.path.join(fabric, "README.md"), "# r\n\n" + row)
+        write(os.path.join(fabric, "CLAUDE.md"), "- **Subagents** name a capability class in `subagent_type` — the five\n  are `code-low`, `code-medium` — and the alias.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "CLAUDE.md: does not name capability class 'code-high'" in out, f"CLAUDE.md drift passed:\n{out}"
+
+
 def main() -> int:
     cases = [
         case_clean_base_passes,
@@ -524,6 +549,7 @@ def main() -> int:
         case_model_profiles_unknown_role_is_refused,
         case_model_profiles_schema_is_enforced,
         case_the_repository_is_one_license,
+        case_the_class_list_a_reader_sees_is_the_real_one,
     ]
     failures = 0
     for case in cases:

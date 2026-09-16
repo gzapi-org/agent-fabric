@@ -437,6 +437,45 @@ def license_findings(root: str) -> list[str]:
     return findings
 
 
+CLASS_DOCS = {
+    # Where the class list is written out for a reader; each must name every
+    # class in routing/capabilities.json and nothing that is not one — the
+    # README said `review` for a class named code-review until 2026-09-16.
+    "README.md": r"`routing/capabilities.json` classes:([^|\n]*)",
+    "CLAUDE.md": r"name a capability class in `subagent_type`[^.]*?the five\s+are (.*?)— and",
+}
+
+
+def class_doc_findings(root: str) -> list[str]:
+    """The capability class names a document lists must be exactly the
+    classes routing/capabilities.json defines."""
+    findings: list[str] = []
+    cap_path = os.path.join(root, "routing", "capabilities.json")
+    try:
+        classes = set((json.load(open(cap_path, encoding="utf-8")).get("classes") or {}).keys())
+    except (OSError, ValueError):
+        return findings  # the file's own parse is reported by the routing check
+    if not classes:
+        return findings
+    for rel, pattern in CLASS_DOCS.items():
+        path = os.path.join(root, rel)
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        m = re.search(pattern, text, flags=re.S)
+        if not m:
+            findings.append(f"{rel}: the capability class list was not found (lint looks for {pattern!r})")
+            continue
+        named = set(re.findall(r"`([a-z][a-z0-9-]*)`", m.group(1)))
+        for extra in sorted(named - classes):
+            findings.append(f"{rel}: names capability class {extra!r}, which routing/capabilities.json does not define "
+                            f"(classes: {', '.join(sorted(classes))})")
+        for missing in sorted(classes - named):
+            findings.append(f"{rel}: does not name capability class {missing!r} (routing/capabilities.json defines it)")
+    return findings
+
+
 def load_schema(root: str, subdir: str, name: str) -> dict[str, Any] | None:
     path = os.path.join(root, subdir, f"{name}.schema.json")
     if not os.path.exists(path):
@@ -611,6 +650,9 @@ def main() -> int:
 
     # --- licenses ----------------------------------------------------------
     findings += license_findings(root)
+
+    # --- the class list a reader sees --------------------------------------
+    findings += class_doc_findings(root)
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

@@ -161,7 +161,7 @@ def test_the_rationale_lint_refuses_verdicts_and_passes_facts(tmp: str) -> None:
     facts = ["A secret never appears in argv.", "Same-host behaviour must remain supported.", "Contracts 1.1.0 clients keep working.",
              "The coordinator and the agent may be on different hosts.", "A malformed reply is an error, never an empty result.",
              "Nothing under apps/ interprets a time zone because-of-clock is not a word here"]
-    for f in facts[:-1]:
+    for f in facts:
         assert refusals({**ok, "objective": f}) == [], f"a fact was refused: {f!r}"
     # --allow-rationale renders, flagged under Brief notes
     out = rb.render({**ok, "objective": "This fixes the PATH bug."}, allow_rationale=True)
@@ -178,7 +178,12 @@ def test_re_review_inlines_the_previous_report_and_names_the_new_range(tmp: str)
     assert "## Previous findings\n" in out and "1. P2 likely — apps/x.py:10" in out, "the previous report is inlined verbatim"
     assert "answering each by number" in out
     assert "## Objective\n(none stated)" in out, "a re-review needs no objective"
-    assert out.count("### ") == 1, "only general unless a lens is named"
+    assert out.count("### ") == 0 and "(none named" in out, "a re-review carries no lens it did not name, general included"
+    out = rb.render({**req, "lenses": ["security"]})
+    assert out.count("### ") == 1 and "### security\n" in out, "a named lens is inlined on a re-review; general is not added"
+    # 11: the inlined report is fenced, so its headings do not read as the brief's
+    assert "## Previous findings\nVerify only the hunks of the range above against these, answering each by number.\n```markdown\n## Findings on the change\n1. P2 likely" in out
+    assert out.count("\n## Findings on the change") == 1 and "\n```\n## Lenses" in out
 
 
 def test_the_yaml_subset_and_the_cli(tmp: str) -> None:
@@ -201,7 +206,9 @@ lenses: [protocol, security]
     doc = rb.parse_request(open(req).read())
     assert doc["objective"] == "An itinerary's times are the engine's." and doc["requirements"] == ["A malformed engine response is an error.", "Plain item"]
     assert doc["mode"] == "review", "a trailing comment is not part of the value"
-    assert doc["compatibility"] == ["Contracts 1.1.0 clients keep working (#746)", "quoted"], "a # inside a quoted string is text (a PR number)" and doc["threat_model"] == [] and doc["lenses"] == ["protocol", "security"]
+    assert doc["compatibility"] == ["Contracts 1.1.0 clients keep working (#746)", "quoted"], "a # inside a quoted string is text (a PR number)"
+    assert doc["threat_model"] == [], "an empty inline list is empty"
+    assert doc["lenses"] == ["protocol", "security"], "an inline list keeps its order"
     r = subprocess.run([BIN, "check", req], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.startswith("ok: review of main..HEAD"), r.stdout + r.stderr
     r = subprocess.run([BIN, "brief", req], capture_output=True, text=True)
@@ -218,18 +225,56 @@ lenses: [protocol, security]
     assert r.returncode == 0, r.stderr
 
 
+def test_the_parser_refuses_what_it_cannot_keep(tmp: str) -> None:
+    """Findings of the first live review (2b61473): a block line kept its
+    comment and its quotes; an apostrophe opened a quote; a duplicate key,
+    an empty block and a block indicator with trailing text were silent."""
+    parse = rb.parse_request
+    # 1: a comment on a `- item` line, and a comment line inside a folded scalar
+    doc = parse('requirements:\n  - "fix #12 is out"  # c\n  - plain # trailing\nobjective: >-\n  the PR (#746)\n  # a note to self\n  more\n')
+    assert doc["requirements"] == ["fix #12 is out", "plain"], doc
+    assert doc["objective"] == "the PR (#746) more", doc
+    # 2: an apostrophe inside a plain value is text, a quote opens only at a value's start
+    doc = parse("objective: The engine's clock is authoritative # ADR-58\nlenses: [it's late, \"b, c\"]\n")
+    assert doc["objective"] == "The engine's clock is authoritative", doc
+    assert doc["lenses"] == ["it's late", "b, c"], doc
+    doc = parse("requirements:\n  - The engine's clock # note\n")
+    assert doc["requirements"] == ["The engine's clock"], doc
+    def refused(text: str) -> str:
+        try:
+            parse(text)
+        except rb.RequestError as exc:
+            return " | ".join(exc.problems)
+        raise AssertionError(f"parsed silently: {text!r}")
+    assert "unterminated ' quote" in refused("lenses: [it's, 'open]\n")
+    # 3: a key given twice loses a value; refused in both syntaxes
+    assert "line 2: mode: given twice" in refused("mode: review\nmode: re-review\n")
+    assert "mode: given twice" in refused('{"mode": "review", "mode": "re-review"}')
+    # 4: an empty block is the empty value of its shape
+    doc = parse("objective:\nrequirements:\n\nlenses: []\n")
+    assert doc == {"objective": "", "requirements": [], "lenses": []}, doc
+    # 5: a block indicator with text on its line would have rendered nothing
+    assert "objective: a block indicator (>) takes no text on its line" in refused("objective: > 3 retries is an error\n")
+    assert "block indicator (|-)" in refused("objective: |- x\n")
+    # 6: the front door: no argument is a usage error, --help is not
+    r = subprocess.run([BIN], capture_output=True, text=True)
+    assert r.returncode == 2 and "numeric argument" not in r.stderr and "fabric-review brief" in r.stderr, r.stderr
+    r = subprocess.run([BIN, "--help"], capture_output=True, text=True)
+    assert r.returncode == 0 and "fabric-review brief" in r.stdout, r.stderr
+
+
 def test_the_readme_example_renders_as_documented(tmp: str) -> None:
     """The README shows a request and its rendered head; both are the
     renderer's output, so the README cannot drift from the tool."""
     readme = open(os.path.join(ROOT, "runtime", "claude-code", "review", "README.md"), encoding="utf-8").read()
     m = re.search(r"```yaml\n(.*?)```", readme, re.S)
     assert m, "the README carries no yaml example"
-    req = rb.parse_request(m.group(1).replace("/home/user/projects/gzapp", tmp))
-    os.makedirs(os.path.join(tmp, ".git"), exist_ok=True)
+    repo = os.path.join(tmp, "readme"); os.makedirs(os.path.join(repo, ".git"))
+    req = rb.parse_request(m.group(1).replace("/home/user/projects/gzapp", repo))
     out = rb.render(req)
     head = re.search(r"```markdown\n(.*?)```", readme, re.S)
     assert head, "the README carries no rendered example"
-    expected = head.group(1).replace("/home/user/projects/gzapp", tmp)
+    expected = head.group(1).replace("/home/user/projects/gzapp", repo)
     assert out.startswith(expected.split("## Lenses")[0]), "the README's rendered example differs from the renderer's output"
 
 
@@ -238,7 +283,8 @@ def main() -> int:
              test_the_incident_rules_are_still_there, test_the_new_rules_are_stated_once,
              test_render_carries_every_heading_once_and_the_named_lenses, test_every_refusal_names_its_field,
              test_the_rationale_lint_refuses_verdicts_and_passes_facts, test_re_review_inlines_the_previous_report_and_names_the_new_range,
-             test_the_yaml_subset_and_the_cli, test_the_readme_example_renders_as_documented]
+             test_the_yaml_subset_and_the_cli, test_the_parser_refuses_what_it_cannot_keep,
+             test_the_readme_example_renders_as_documented]
     failures = 0
     tmp = tempfile.mkdtemp()
     for case in cases:

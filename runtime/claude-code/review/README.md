@@ -4,7 +4,7 @@
 |---|---|---|---|
 | **constitution** | the reviewer's stable reasoning discipline — method, evidence rules, the shape of a finding, the report | `runtime/claude-code/agents/code-review.md` — the subagent's whole system prompt (a Claude Code subagent gets its agent file, not the harness prompt, and none of the parent conversation) | fabric-coordinator |
 | **charter** | the facts of one change: mode, repository, range, what must be true, what is out of scope, which lenses | the dispatch `prompt`, rendered by `bin/fabric-review brief` from a request file under fixed headings | the dispatching session |
-| **lens** | where to look first and what usually goes wrong there | `lenses/<name>.md`; the directory is the vocabulary (`bin/fabric-review lenses`); `general` is always on | fabric-coordinator |
+| **lens** | where to look first and what usually goes wrong there | `lenses/<name>.md`; the directory is the vocabulary (`bin/fabric-review lenses`); `general` is always on for a review | fabric-coordinator |
 
 Blindness removes anchoring, not facts. The charter says **what must be
 true**; it never says whether or how the change makes it true — that is
@@ -83,7 +83,9 @@ unknown key is refused (`invariant:` → "did you mean invariants?").
 **A re-review** carries `mode: re-review`, the range of the *fix commits
 only*, and `previous_findings: <the previous report, a file>`; the
 constitution then verifies only the new hunks against those findings, by
-number. Lenses are not re-rendered unless named.
+number. A re-review carries only the lenses it names — `general`
+included: it verifies, it does not explore — so one that names none pays
+for no lens text.
 
 ## The dispatch
 

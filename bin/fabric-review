@@ -23,6 +23,7 @@ export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
 case "${1:-}" in
     brief) shift; exec python3 "$ROOT/tools/fabric/review_brief.py" render "$@" ;;
     check|lenses) exec python3 "$ROOT/tools/fabric/review_brief.py" "$@" ;;
-    -h|--help|"") sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:+0}" ;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    "") sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
     *) echo "fabric-review: unknown command $1 (brief | check | lenses)" >&2; exit 2 ;;
 esac

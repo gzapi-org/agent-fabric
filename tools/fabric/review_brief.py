@@ -12,7 +12,8 @@ prompt). The CHARTER is what this renders: the facts of one change —
 mode, repository, range, what must be true, what is out of scope — under
 fixed headings the constitution names. A LENS is a file under
 runtime/claude-code/review/lenses/ whose body is inlined under the
-brief's Lenses heading; `general` is always on.
+brief's Lenses heading; `general` is always on for a review (a re-review
+carries only the lenses it names: it verifies, it does not explore).
 
 WHAT A BRIEF CARRIES AND WHAT IT MUST NOT. Facts: a requirement, an
 invariant, a compatibility target, a threat model, a boundary — WHAT must
@@ -98,6 +99,9 @@ def _unquote(v: str) -> str:
 
 
 def _inline_list(v: str) -> list[str]:
+    """`[a, "b, c", 'd']`. A quote opens an item only at the item's start
+    (an apostrophe inside a plain item is text); an unterminated quote is
+    refused rather than absorbing the rest of the list."""
     inner = v.strip()[1:-1].strip()
     if not inner:
         return []
@@ -108,29 +112,44 @@ def _inline_list(v: str) -> list[str]:
                 quote = None
             else:
                 cur += ch
-        elif ch in "\"'":
-            quote = ch
+        elif ch in "\"'" and cur.strip() == "":
+            quote = ch; cur = ""
         elif ch == ",":
             items.append(cur.strip()); cur = ""
         else:
             cur += ch
+    if quote:
+        raise RequestError([f"request: unterminated {quote} quote in {v.strip()!r}"])
     items.append(cur.strip())
     return [i for i in items if i != ""]
 
 
-def _strip_comment(line: str) -> str:
+def _strip_comment(line: str, value_at: int = 0) -> str:
     """A `#` outside quotes, at the start or after whitespace, begins a
-    comment; a `#` inside a quoted string (a PR number) is text."""
+    comment; a `#` inside a quoted string (a PR number) is text. A quote
+    opens a string only where a value starts (`value_at`, or after a
+    `- `): an apostrophe inside a plain value is text."""
     quote = None
+    body_start = value_at
     for i, ch in enumerate(line):
         if quote:
             if ch == quote:
                 quote = None
-        elif ch in "\"'":
+        elif ch in "\"'" and line[body_start:i].strip() == "":
             quote = ch
         elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i].rstrip()
     return line.rstrip()
+
+
+def _value_start(line: str) -> int:
+    """Where the value begins on a `key: value` or `- item` line."""
+    st = line.lstrip()
+    if st.startswith("- "):
+        return len(line) - len(st) + 2
+    if ":" in line:
+        return line.index(":") + 1
+    return 0
 
 
 def parse_request(text: str) -> dict:
@@ -138,7 +157,14 @@ def parse_request(text: str) -> dict:
     key seen, so validate() can refuse the unknown ones."""
     stripped = text.lstrip()
     if stripped.startswith("{"):
-        doc = json.loads(text)
+        def no_duplicates(pairs):
+            out: dict = {}
+            for k, v in pairs:
+                if k in out:
+                    raise RequestError([f"request: {k}: given twice; the earlier value would be lost"])
+                out[k] = v
+            return out
+        doc = json.loads(text, object_pairs_hook=no_duplicates)
         if not isinstance(doc, dict):
             raise RequestError(["request: the JSON document is not an object"])
         return doc
@@ -147,7 +173,7 @@ def parse_request(text: str) -> dict:
     i = 0
     while i < len(lines):
         raw = lines[i]
-        line = _strip_comment(raw)
+        line = _strip_comment(raw, _value_start(raw))
         i += 1
         if not line.strip():
             continue
@@ -157,22 +183,28 @@ def parse_request(text: str) -> dict:
             raise RequestError([f"request line {i}: not `key: value` ({raw.strip()!r})"])
         key, _, value = line.partition(":")
         key = key.strip(); value = value.strip()
-        if value == "" or value == "|" or value.startswith(">"):
-            # a block: `- item` lines, or a folded/literal scalar
+        if key in doc:
+            raise RequestError([f"request line {i}: {key}: given twice; the earlier value would be lost"])
+        if value in ("", "|", "|-", ">", ">-"):
+            # a block: `- item` lines, or a folded/literal scalar. Each
+            # block line is comment-stripped like a top-level one.
             block: list[str] = []
             while i < len(lines) and (lines[i].startswith((" ", "\t")) or lines[i].strip() == ""):
-                if lines[i].strip() != "":
-                    block.append(lines[i])
+                stripped = _strip_comment(lines[i], _value_start(lines[i]) if lines[i].strip().startswith("- ") else len(lines[i]) - len(lines[i].lstrip()))
+                if stripped.strip() != "":
+                    block.append(stripped)
                 i += 1
-            if value.startswith(">") or value == "|":
+            if not block:
+                doc[key] = [] if key in LIST_KEYS else ""
+            elif value in ("|", "|-", ">", ">-"):
                 joiner = " " if value.startswith(">") else "\n"
                 doc[key] = joiner.join(b.strip() for b in block)
             elif all(b.strip().startswith("- ") or b.strip() == "-" for b in block):
                 doc[key] = [_unquote(b.strip()[2:]) for b in block if b.strip() != "-"]
-            elif not block:
-                doc[key] = ""
             else:
                 raise RequestError([f"request: {key}: a block must be `- item` lines or a folded scalar (>-)"])
+        elif value.startswith(("|", ">")):
+            raise RequestError([f"request line {i}: {key}: a block indicator ({value.split()[0]}) takes no text on its line; put the text on the indented lines below"])
         elif value.startswith("[") and value.endswith("]"):
             doc[key] = [_unquote(x) for x in _inline_list(value)]
         else:
@@ -283,8 +315,10 @@ def render(req: dict, lenses_dir: str | None = None, allow_rationale: bool = Fal
     if problems:
         raise RequestError(problems)
     known = lenses(lenses_dir)
-    names = list(dict.fromkeys(["general", *(req.get("lenses") or [])]))
     mode = req["mode"]
+    # A review always carries general; a re-review verifies the new hunks
+    # against the previous findings and carries only a lens it names.
+    names = list(dict.fromkeys(([] if mode == "re-review" else ["general"]) + list(req.get("lenses") or [])))
     out = [f"# Review brief ({BRIEF_VERSION})", "## Mode", mode,
            "## Repository", f"{req['repository']} (the live clone; read-only for you)",
            "## Range", req["range"] if req.get("range") else f"diff file: {req['diff']} (the range is not yet pushed; the tree is the same clone)"]
@@ -293,9 +327,13 @@ def render(req: dict, lenses_dir: str | None = None, allow_rationale: bool = Fal
                          ("threat_model", "Threat model"), ("scope", "Scope"), ("out_of_scope", "Out of scope")):
         out += [f"## {heading}", _items(req.get(key))]
     if mode == "re-review":
+        # Fenced: the previous report carries headings at the brief's own
+        # level, and verbatim inside a fence is still verbatim.
         out += ["## Previous findings", "Verify only the hunks of the range above against these, answering each by number.",
-                open(req["previous_findings"], encoding="utf-8").read().rstrip()]
+                "```markdown", open(req["previous_findings"], encoding="utf-8").read().rstrip(), "```"]
     out.append("## Lenses")
+    if not names:
+        out.append("(none named; the constitution's method applies)")
     for name in names:
         out += [f"### {name}", known[name]["body"]]
     if rationale:
@@ -338,12 +376,12 @@ def main(argv: list[str] | None = None) -> int:
                 problems += [f"{f}: {s!r} — {w}" for f, s, w in rationale_findings(req)] if not allow else []
                 if problems:
                     raise RequestError(problems)
-                names = list(dict.fromkeys(["general", *(req.get("lenses") or [])]))
-                print(f"ok: {req['mode']} of {req.get('range') or req.get('diff')} in {req['repository']}; lenses {', '.join(names)}"
+                names = list(dict.fromkeys(([] if req["mode"] == "re-review" else ["general"]) + list(req.get("lenses") or [])))
+                print(f"ok: {req['mode']} of {req.get('range') or req.get('diff')} in {req['repository']}; lenses {', '.join(names) or 'none'}"
                       + (f"; {len(names)} lenses — more than {MANY_LENSES} dilutes the bias" if len(names) > MANY_LENSES else ""))
                 return 0
             sys.stdout.write(render(req, allow_rationale=allow))
-            names = list(dict.fromkeys(["general", *(req.get("lenses") or [])]))
+            names = list(dict.fromkeys(([] if req["mode"] == "re-review" else ["general"]) + list(req.get("lenses") or [])))
             if len(names) > MANY_LENSES:
                 print(f"review_brief: {len(names)} lenses — more than {MANY_LENSES} dilutes the bias", file=sys.stderr)
             return 0

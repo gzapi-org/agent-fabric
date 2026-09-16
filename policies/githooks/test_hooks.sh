@@ -32,10 +32,15 @@ try_commit() {  # $1 = path to touch, $2 = message; prints rc
   ( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -q -m "$2" >/dev/null 2>"$TMP/err" ); echo $?
 }
 
-echo "a commit outside .agent-fabric/ is untouched by the fence"
+echo "a commit outside .agent-fabric/ is untouched by the fence, and declares the role that made it"
 bind backend-dev; new_repo
 [[ "$(try_commit src/a.txt 'code')" == 0 ]] && pass "commits with any role" || fail "refused" "$(cat "$TMP/err")"
-git -C "$TMP/repo" log -1 --format=%B | grep -q 'Fabric-Role' && fail "trailer added to an unrelated commit" || pass "no trailer added"
+git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: backend-dev$' && pass "…and declares Fabric-Role: backend-dev (every account commits under one author; the trailer names the lane)" || fail "no trailer on a code commit" "$(git -C "$TMP/repo" log -1 --format=%B)"
+[[ "$(try_commit src/a.txt $'typed\n\nFabric-Role: architect-cto')" == 0 ]] && pass "a typed trailer on a code commit is left as typed (a claim, not the binding)" || fail "refused" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -c '^Fabric-Role:' | grep -q '^1$' && pass "…and not doubled" || fail "trailer doubled" "$(git -C "$TMP/repo" log -1 --format=%B)"
+rm -f "$TMP/state/agents/"*/binding.json
+[[ "$(try_commit src/a.txt 'unbound')" == 0 ]] && pass "no binding: the commit is admitted" || fail "refused without a binding" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -q 'Fabric-Role' && fail "a trailer with no binding to back it" || pass "…and declares nothing (a fact about the account, never a claim it cannot make)"
 
 echo "a commit under .agent-fabric/ needs the role bound"
 bind backend-dev; new_repo
@@ -85,7 +90,7 @@ git -C "$TMP/repo" checkout -q master 2>/dev/null || git -C "$TMP/repo" checkout
 git -C "$TMP/repo" checkout -q feature; bind backend-dev
 ( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git merge -q --no-ff --no-edit "$(git rev-parse --abbrev-ref @{-1})" >/dev/null 2>"$TMP/err" ); rc=$?
 [[ $rc == 0 ]] && pass "backend-dev bound: the fold commits" || fail "the fold was refused" "$(cat "$TMP/err")"
-git -C "$TMP/repo" log -1 --format=%B | grep -q 'Fabric-Role' && fail "a fold got a Fabric-Role trailer" || pass "…and declares no role (it changed nothing under guard)"
+git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: backend-dev$' && pass "…and declares the role that folded it, as every commit does" || fail "no trailer on the fold" "$(git -C "$TMP/repo" log -1 --format=%B)"
 [[ -z "$(git -C "$TMP/repo" diff HEAD^2 HEAD -- .agent-fabric/)" ]] && pass "…and .agent-fabric/ equals main's" || fail "fold altered .agent-fabric/"
 
 echo "a merge that also hand-edits a slice is refused"

@@ -79,10 +79,22 @@ limits: text anyone can type, `--no-verify` skips the hooks. It stops
 the accident and makes the deliberate change visible. The login in the
 branch name plays no part.
 
+**Every commit carries the trailer, not only a guarded one** (since
+2026-09-16). Every account commits under one git author, so the author
+line says nothing about the lane; the branch name says it once and a
+merge folds it away; the trailer travels with the message through
+rebase, cherry-pick and `am`. `commit-msg` writes `Fabric-Role: <the
+bound role>` on any commit whose account has a binding, and nothing on
+one that has none — a fact about the account, never a claim it cannot
+make. Only under guard is the role also checked against the owner; on a
+code commit the trailer is attribution, not authorisation, and CI reads
+it nowhere but under guard.
+
 A merge commit that only folds a parent's `.agent-fabric/` — the routine
 "update from main" after a drain — changes nothing of its own: the hooks
 compare the staged guarded tree with each parent's and let it through
-without a trailer, exactly as the CI tripwire skips merge commits. A merge
+(with the folding account's role as its trailer, like any commit),
+exactly as the CI tripwire skips merge commits. A merge
 that also edits a slice by hand differs from both parents and is refused
 like any other change (`policies/githooks/guarded-change.sh`).
 

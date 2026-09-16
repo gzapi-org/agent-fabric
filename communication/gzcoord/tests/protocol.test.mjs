@@ -1274,6 +1274,13 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   const wide = render({ classified: [mine(430, meta('30') + '\n\n' + wideBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
   assert.ok(!wide.includes('columns wide'), 'no width warning on the receive side');
   assert.ok(wide.includes('SUBJECT: subject 30\n\nNOTES:\nline 0 '), 'metadata whole, body from its first line');
+  // validator lines are capped only under a cap: the drain shows them all
+  const invalid = '[GZCOORD/1] INFO\nFROM: nobody\n\nNOTES:\nstray one\nstray two\nstray three\nstray four\nstray five\n';
+  const invRec = { rec: rec(460, invalid), msg: { type: 'INFO', metadata: { BROADCAST: 'true' } }, isMine: true };
+  const drained = render({ classified: [invRec] }, me, 'c');
+  const watched = render({ classified: [invRec] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
+  assert.ok(!drained.includes('more validator lines') && (drained.match(/INVALID:/g) || []).length > 4, 'the drain shows every validator line');
+  assert.ok(watched.includes('more validator lines') && (watched.match(/INVALID:/g) || []).length === 4, 'the watch caps them');
   // F2: no blank line after the metadata (SPEC §6 MAY), and CRLF — still split at the section marker
   assert.deepEqual(splitMessage('A: 1\nB: 2\nNOTES:\nx\n\ny\n'), { meta: 'A: 1\nB: 2', body: 'NOTES:\nx\n\ny' });
   assert.deepEqual(splitMessage('A: 1\r\nB: 2\r\n\r\nNOTES:\r\nx\r\n'), { meta: 'A: 1\nB: 2', body: 'NOTES:\nx' });

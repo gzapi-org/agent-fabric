@@ -477,7 +477,8 @@ export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
     // The message has arrived: the terminal-copy width warning does not apply.
     const v = validate(rec.content, { taxonomy, maxColumns: 0 });
     let flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
-    if (flags.length > MAX_FLAG_LINES) flags = [...flags.slice(0, MAX_FLAG_LINES), `… and ${flags.length - MAX_FLAG_LINES} more validator lines`];
+    // Only under a cap: the drain shows every validator line.
+    if (Number.isFinite(cap) && flags.length > MAX_FLAG_LINES) flags = [...flags.slice(0, MAX_FLAG_LINES), `… and ${flags.length - MAX_FLAG_LINES} more validator lines`];
     const title = `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`;
     const text = rec.content.replace(/\n$/, '');
     return { rec, title, text, ...splitMessage(text) };

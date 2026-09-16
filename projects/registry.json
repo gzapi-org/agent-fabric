@@ -55,7 +55,7 @@
       "default_branch": "main",
       "taxonomy": ".agent-fabric/taxonomy.json",
       "memory": ".agent-fabric/memory",
-      "integration": null,
+      "integration": "projects/gzapi.ge/integration",
       "license": "LicenseRef-gzapi-ge-Proprietary",
       "note": "Static Astro site, vision-level by rule, ka/en. The brand's source of truth: where a deck and the site disagree on a token or a phrase, the site wins (owner, 2026-09-15). One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default."
     },

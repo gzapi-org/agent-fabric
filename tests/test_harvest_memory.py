@@ -424,6 +424,21 @@ def test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file(tmp: str) -> 
     assert r.returncode == 2 and "exactly one of --out" in r.stderr
 
 
+def test_the_memory_slug_is_the_harness_s_spelling(tmp: str) -> None:
+    """Claude Code names a launch directory by turning every character
+    that is not a letter or a digit into `-` — a dot as much as a slash
+    (read back 2026-09-17). Kills: mapping `/` alone, which left every
+    dotted working copy (gzapp.decks, gzapi.ge) without its memory."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("harvest", os.path.join(ROOT, "tools", "fabric", "harvest_memory.py"))
+    harvest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harvest)
+    assert harvest.memory_slug("/home/x/projects/gzapp") == "-home-x-projects-gzapp"
+    assert harvest.memory_slug("/home/x/projects/gzapp.decks") == "-home-x-projects-gzapp-decks", harvest.memory_slug("/home/x/projects/gzapp.decks")
+    assert harvest.memory_slug("/home/x/.claude-mem") == "-home-x--claude-mem"
+    assert harvest.default_memory_dir("/home/x/projects/gzapi.ge").endswith("/.claude/projects/-home-x-projects-gzapi-ge/memory")
+
+
 def main() -> int:
     cases = [
         test_the_watermark_round_trips_through_the_committed_report,
@@ -445,6 +460,7 @@ def main() -> int:
         test_missing_memory_dir_exits_two,
         test_assemble_gets_the_files_it_requires,
         test_the_assembler_actually_consumes_the_drain,
+        test_the_memory_slug_is_the_harness_s_spelling,
     ]
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:

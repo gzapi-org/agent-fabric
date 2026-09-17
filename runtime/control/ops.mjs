@@ -272,7 +272,11 @@ export function workerTranscripts(files, { hours = 24, now = Date.now() } = {}) 
 // hygiene refuses a memory carrying a secret; a memory directory with no
 // working copy beside it is named and left where it is.
 export const MEMORY_PART_BYTES = 90 * 1024;
-export function memorySlug(dir) { return path.resolve(dir).replace(/\//g, '-'); }
+// The harness's name for a launch directory: every character that is not
+// a letter or a digit becomes `-` — `/` and `.` alike (read back 2026-09-17:
+// ~/projects/gzapp.decks is -home-…-projects-gzapp-decks). The harvester's
+// memory_slug is the same rule.
+export function memorySlug(dir) { return path.resolve(dir).replace(/[^A-Za-z0-9]/g, '-'); }
 export function memoryDirs(home = os.homedir(), projectsDir = path.join(home, 'projects')) {
   const root = path.join(home, '.claude', 'projects');
   let slugs; try { slugs = fs.readdirSync(root); } catch { return []; }

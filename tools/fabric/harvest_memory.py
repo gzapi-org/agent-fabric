@@ -163,13 +163,23 @@ def split_rendering(body: str) -> tuple[str, str | None]:
     return body[:m.start()].rstrip(), body[m.end():].strip()
 
 
+def memory_slug(directory: str) -> str:
+    """The name Claude Code gives a launch directory under
+    ~/.claude/projects/: the absolute path with every character that is
+    not a letter or a digit turned into `-` — `/` and `.` alike, read
+    back on 2026-09-17 (`~/projects/gzapp.decks` is
+    `-home-user-projects-gzapp-decks`; a `/` alone left every dotted
+    working copy without its memory). Two directories that differ only
+    in such a character share a slug; the harness does not tell them
+    apart either."""
+    return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(directory))
+
+
 def default_memory_dir(working_copy: str) -> str:
-    """The memory directory Claude Code keeps for a launch directory: the
-    absolute path with every `/` turned into `-`. A location, not an
-    identity — the same agent has one such directory per directory it has
-    launched from."""
-    slug = os.path.abspath(working_copy).replace("/", "-")
-    return os.path.expanduser(f"~/.claude/projects/{slug}/memory")
+    """The memory directory Claude Code keeps for a launch directory. A
+    location, not an identity — the same agent has one such directory per
+    directory it has launched from."""
+    return os.path.expanduser(f"~/.claude/projects/{memory_slug(working_copy)}/memory")
 
 
 def previous_watermark(working_copy: str, host: str) -> tuple[int, str | None]:

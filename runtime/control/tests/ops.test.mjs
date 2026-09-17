@@ -149,21 +149,27 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
 test('memoryDirs: every memory directory with a memory in it, matched to ~/projects/<wc> by slug; MEMORY.md alone is nothing', () => {
   const h = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-home-'));
   const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
+  const dotted = path.join(h, 'projects', 'gzapi.ge'); fs.mkdirSync(dotted, { recursive: true });
   fs.mkdirSync(path.join(h, 'projects', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(h, 'projects', 'notes.txt'), 'not a working copy');
   const mem = slug => { const d = path.join(h, '.claude', 'projects', slug, 'memory'); fs.mkdirSync(d, { recursive: true }); return d; };
   fs.writeFileSync(path.join(mem(memorySlug(wc)), 'fact.md'), '---\nname: fact\n---\nx');
   fs.writeFileSync(path.join(mem(memorySlug(wc)), 'MEMORY.md'), '- index');
   fs.writeFileSync(path.join(mem('-home-elsewhere-old-checkout'), 'stray.md'), 'x');
+  fs.writeFileSync(path.join(mem(memorySlug(dotted)), 'brand.md'), 'x');
   fs.writeFileSync(path.join(mem(memorySlug(path.join(h, 'projects', 'agent-fabric'))), 'MEMORY.md'), '- only the index');
   fs.mkdirSync(path.join(h, '.claude', 'projects', '-no-memory-dir'), { recursive: true });
   const ds = memoryDirs(h).sort((a, b) => a.slug.localeCompare(b.slug));
   assert.deepEqual(ds, [
     { slug: '-home-elsewhere-old-checkout', memory: path.join(h, '.claude', 'projects', '-home-elsewhere-old-checkout', 'memory'), files: 1, working_copy: null },
+    { slug: memorySlug(dotted), memory: path.join(h, '.claude', 'projects', memorySlug(dotted), 'memory'), files: 1, working_copy: dotted },
     { slug: memorySlug(wc), memory: path.join(h, '.claude', 'projects', memorySlug(wc), 'memory'), files: 1, working_copy: wc },
   ]);
+  assert.ok(memorySlug(dotted).endsWith('-projects-gzapi-ge'), 'the dotted copy is matched under the harness\'s spelling');
   assert.deepEqual(memoryDirs('/nonexistent'), []);
   assert.equal(memorySlug('/home/x/projects/gzapp'), '-home-x-projects-gzapp');
+  assert.equal(memorySlug('/home/x/projects/gzapp.decks'), '-home-x-projects-gzapp-decks', 'a dot is a dash too, as the harness names it');
+  assert.equal(memorySlug('/home/x/.claude-mem'), '-home-x--claude-mem');
 });
 
 test('memory: one harvester run per directory — the tar from stdout, the report from stderr — gzipped, base64, in parts; a failure and a strayed directory are rows, not throws', async () => {

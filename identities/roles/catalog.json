@@ -46,6 +46,11 @@
       "candidate": true
     },
     {
+      "id": "p2p-network-dev",
+      "title": "Rust peer-to-peer networking developer",
+      "candidate": true
+    },
+    {
       "id": "web-dev",
       "title": "Web sub-app developer"
     }

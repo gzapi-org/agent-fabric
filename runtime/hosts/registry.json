@@ -24,6 +24,7 @@
     "edge-hosting": "develop-qzapp",
     "domain-transit": "develop-qzapp",
     "brand-comms-01": "develop-qzapp",
-    "language-culture-ge": "develop-qzapp"
+    "language-culture-ge": "develop-qzapp",
+    "p2p-network-dev-01": "develop-qzapp"
   }
 }

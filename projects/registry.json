@@ -88,6 +88,19 @@
       "integration": "projects/gzapp.decks/integration",
       "license": "LicenseRef-gzapp-decks-Proprietary",
       "note": "Marp decks under one brand theme whose tokens are vendored from gzapi.ge (the source of truth); bilingual, an asset register every image has a row in, PDFs as versioned build output. One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default; the vendored fonts are OFL-1.1. Moved to gzapi-org on 2026-09-16; the andreabenetton spellings stay listed for clones not yet re-pointed."
+    },
+    "interweave": {
+      "title": "InterWeave — peer-to-peer transport for Claude Code Channels and first-party clients",
+      "remotes": [
+        "git@github.com:gzapi-org/InterWeave.git",
+        "https://github.com/gzapi-org/InterWeave"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": "projects/interweave/integration",
+      "license": "Apache-2.0",
+      "note": "A Rust workspace on libp2p: one PeerId, many EndpointIds, signed GossipSub broadcast, a directed protocol, replaceable discovery, Kademlia, AutoNAT v2 / Circuit Relay v2 / DCUtR. Worked by the owner's own login until 2026-09-17, when the CEO made it a managed project with one new role, p2p-network-dev (the code), architect-cto holding its decision records and stage gates, devex-tooling its CI. Its merge queue stays on (the owner, 2026-09-17)."
     }
   }
 }

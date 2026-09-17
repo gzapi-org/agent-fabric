@@ -58,7 +58,7 @@ export function controlConfig(env = process.env, file = path.join(HERE, 'config.
 }
 
 // The operators: <host>/<operator> for every host in the registry.
-export function operatorAddresses(registry = path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
+export function operatorAddresses(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   try {
     const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
     return new Set(Object.entries(d.hosts ?? {}).map(([h, v]) => `${h}/${v.operator ?? 'user'}`));

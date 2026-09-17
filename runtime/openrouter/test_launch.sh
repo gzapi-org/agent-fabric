@@ -34,7 +34,7 @@ fi
 echo "ORI-EXECCED:$*"
 # The child's ENVIRONMENT, not only its argv: a pin that lost its `export`
 # would still print under --print and still be absent here.
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "ORI-ENV:$v=${!v:-}"
 done
 FAKE
@@ -226,7 +226,7 @@ echo "launch: --provider anthropic execs plain claude with only the pinned tiers
 cat > "$SANDBOX/bin/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo "CLAUDE-EXECCED:$*"
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "CLAUDE-ENV:$v=${!v:-}"
 done
 FAKE
@@ -257,6 +257,18 @@ mkdir -p "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"; printf
 printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"language-culture","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 outlc="$(run --provider anthropic -- --version 2>&1)"
 grep -q "CLAUDE-EXECCED:.*--disallowedTools WebSearch .*--version" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch" || bad "WebSearch not removed on the language-culture login" "$outlc"
+grep -q "CLAUDE-EXECCED:.*--append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outlc" && grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$" <<<"$outlc" && ok "…with the prompt still appended and no build stamp: the locale carries no harness text" || bad "append expected without a harness translation" "$outlc"
+# The locale carries the harness text: the whole prompt is replaced, the build stamped, on both providers.
+printf -- '---\nclass: harness-translation\ntranslates: runtime/claude-code/harness/en.md\ntranslates_digest: sha256:x\n---\nშენ ხარ Claude Code. მეხსიერება: `{memory_dir}`.\n' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/harness.md"
+outlc="$(run --provider anthropic -- --version 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outlc" && ! grep -q -- "--append-system-prompt-file" <<<"$outlc" && ok "a locale with the harness text execs claude with the whole prompt replaced" || bad "the prompt was not replaced" "$outlc"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=." <<<"$outlc" && ok "…and the build it ran is stamped" || bad "no build stamp on the replace branch" "$outlc"
+grep -q "შენ ხარ Claude Code. მეხსიერება: \`$HOME/.claude/projects/" "$STATE/agents/$LOGIN/launch-prompt.md" && ! grep -q "{memory_dir}" "$STATE/agents/$LOGIN/launch-prompt.md" && ok "the rendered file ends with the harness text, its memory directory filled" || bad "harness text not rendered" "$(tail -3 "$STATE/agents/$LOGIN/launch-prompt.md")"
+outp="$(run --provider anthropic --print 2>&1)"
+grep -q "bytes; --system-prompt-file)" <<<"$outp" && grep -q "AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=" <<<"$outp" && ok "--print names the flag and the build" || bad "--print does not name the replace" "$outp"
+outori="$(run -- --version 2>&1)"
+grep -q "ORI-EXECCED:claude .*--system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outori" && ok "the broker path carries the same flag" || bad "ori path lost the replace flag" "$outori"
+rm -f "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/harness.md"
 rm -rf "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"
 outlc="$(run --provider anthropic -- --version 2>&1)"
 ! grep -q -- "--disallowedTools" <<<"$outlc" && ok "…and not when its locale has no search authored" || bad "WebSearch removed without a locale" "$outlc"

@@ -159,6 +159,48 @@ read at call time, never in a URL, a log line or a result; the keys'
 fingerprints show in `fabric-ctl <login> keys`. The worker never sees
 these tools: search is the bridge's.
 
+## The prompt in the locale
+
+The CEO (2026-09-17): the whole system prompt in the locale — the
+harness's own text too, translated by the holder, the charter before
+it, in place of the English for `ge`. Read back first
+(`docs/live-checks/2026-09-17-claude-code-harness-prompt.md`, the
+Claude Code docs): `--system-prompt-file` **replaces** the default text
+and there is no prepend, so "the charter before the harness text" means
+one file the fabric assembles in that order and passes with that flag.
+What a replacement never touches, because the harness sends it outside
+the replaceable text and in English: the SDK's own opening line, the
+function-calling grammar, every tool schema, the agent and skill
+listings, the MCP instructions, CLAUDE.md, the reminders. Tools are
+dispatched by name against those schemas, never by prose — so the prose
+is free to translate and the identifiers are the whole risk.
+
+The pieces and their sources: `identities/prompt/{header,brief-missing,
+team,memory}.md`, the role's `charter.md` (and `brief.md` where one
+exists), and `runtime/claude-code/harness/en.md` — the harness text
+captured from a live build, its memory directory as the placeholder
+`{memory_dir}`. A locale's translation of any piece lives at
+`identities/roles/<role>/locale/<suffix>/<piece>.md`, names its source
+and the source's body digest, and is rendered for the login of that
+suffix by `launch_prompt.py`; the harness translation, when present,
+goes last and switches the launcher to `--system-prompt-file`, with the
+build it ran stamped beside the capture's. **lint holds every
+translation to its identifiers**: every backticked span, slash command,
+path, UPPER_SNAKE name, model id, tag, `[[link]]`, dotted file name,
+fenced block and `{placeholder}` of the source appears in the
+translation the same number of times (`bin/fabric-locale tokens
+<source>` prints the list; `digest` the digest). A translation that
+lags its source is served — a launch never fails on a day's lag — and
+named by lint until its holder re-renders it.
+
+**The translation is the holder's, entirely.** fabric-coordinator
+commits the English sources, the machinery and the tests, and authors
+no Georgian; the holder translates every piece in its own session and
+opens the PR it does not merge. The kill switch is a file's absence:
+without `locale/<suffix>/harness.md` the launch is today's (append, the
+harness's English, the locale's charter); without any one piece, that
+piece's English.
+
 ## The costs, stated
 
 - **Tokens.** A locale render of the charter is allowed 1.35× the
@@ -172,6 +214,12 @@ these tools: search is the bridge's.
 - **A second model call per request.** The bridge dispatches a worker
   for what it once did in one turn. The bridge's own turn is the
   translation and the rendering; the judgement is the worker's.
+- **The whole prompt in the locale.** With the harness text translated
+  the `ge` holder's system prompt is about 20 000 tokens on every
+  request (charter ≈ 7 600, harness ≈ 7 700, the shared pieces ≈ 4 800),
+  against ≈ 12 000 today; and the harness text changes with the CLI
+  build, so its capture is a live-check duty and every re-capture is a
+  re-translation. The CEO's choice for this role.
 - **Only `ge` exists.** The construction is generic by login suffix;
   the payload for a second locale is a second `locale/<suffix>/`
   directory, reviewed by its holder.

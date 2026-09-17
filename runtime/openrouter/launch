@@ -227,7 +227,8 @@ for arg in "$@"; do
         --system-prompt|--system-prompt=*|--system-prompt-file|--system-prompt-file=*|\
         --append-system-prompt|--append-system-prompt=*|--append-system-prompt-file|--append-system-prompt-file=*)
             die "passing ${arg%%=*} is refused: the role's system prompt is the
-  launcher's (tools/fabric/launch_prompt.py -> --append-system-prompt-file);
+  launcher's (tools/fabric/launch_prompt.py -> --append-system-prompt-file,
+  or --system-prompt-file for a locale that carries the harness text);
   a second one would replace or shadow it." ;;
     esac
 done
@@ -384,8 +385,29 @@ export AGENT_FABRIC_LAUNCH_PROVIDER="$PROVIDER"
 # digest is stamped so a session can say what it was launched with and
 # fabric-status can see the file change under it.
 PROMPT_FILE="$STATE_DIR/launch-prompt.md"
-PROMPT_DIGEST="$(python3 "$FABRIC_ROOT/tools/fabric/launch_prompt.py" --out "$PROMPT_FILE")" ||
+PROMPT_DIGEST="$(python3 "$FABRIC_ROOT/tools/fabric/launch_prompt.py" --out "$PROMPT_FILE" 2>/dev/null)" ||
     die "could not render the role's system prompt (tools/fabric/launch_prompt.py)."
+# THE PROMPT IN THE LOCALE. A language-culture login whose locale carries
+# a translation of the harness's own text (identities/roles/language-
+# culture/locale/<suffix>/harness.md, of runtime/claude-code/harness/en.md)
+# is launched with the WHOLE prompt replaced — the fabric's part in the
+# locale, then the harness text in the locale, in that order, rendered by
+# launch_prompt.py — instead of the fabric's part appended after the
+# harness's English (the CEO, 2026-09-17; docs/language-culture-bridge.md).
+# The harness still sends the function-calling grammar, every tool
+# schema, the listings and CLAUDE.md outside the replaceable text, so
+# nothing about how tools are called changes. The absence of that file
+# is the kill switch: append, as for every other login. On that branch
+# the build is stamped beside the capture's `build:`, so a build that
+# moved past it is visible — never a gate.
+SUFFIX="$(id -un | sed 's/.*-//')"
+HARNESS_FILE="$FABRIC_ROOT/identities/roles/language-culture/locale/$SUFFIX/harness.md"
+PROMPT_FLAG=--append-system-prompt-file
+if [[ "$ROLE" == language-culture && -f "$HARNESS_FILE" ]]; then
+    PROMPT_FLAG=--system-prompt-file
+    AGENT_FABRIC_LAUNCH_CLAUDE_VERSION="$(claude --version 2>/dev/null | head -1 || true)"
+    export AGENT_FABRIC_LAUNCH_CLAUDE_VERSION
+fi
 export AGENT_FABRIC_LAUNCH_ROLE="$ROLE"
 export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST="$PROMPT_DIGEST"
 
@@ -447,7 +469,8 @@ PY
     echo "  export AGENT_FABRIC_LAUNCH_PROVIDER=$AGENT_FABRIC_LAUNCH_PROVIDER"
     echo "  export AGENT_FABRIC_LAUNCH_ROLE=$AGENT_FABRIC_LAUNCH_ROLE"
     echo "  export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST=$AGENT_FABRIC_LAUNCH_PROMPT_DIGEST"
-    echo "  prompt  : $PROMPT_FILE ($(wc -c <"$PROMPT_FILE") bytes; --append-system-prompt-file)"
+    echo "  prompt  : $PROMPT_FILE ($(wc -c <"$PROMPT_FILE") bytes; $PROMPT_FLAG)"
+    [[ -z "${AGENT_FABRIC_LAUNCH_CLAUDE_VERSION:-}" ]] || echo "  export AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$AGENT_FABRIC_LAUNCH_CLAUDE_VERSION (the prompt is replaced; runtime/claude-code/harness/en.md names the build it was captured from)"
     echo "            $(head -n 1 "$PROMPT_FILE")"
     exit 0
 fi
@@ -486,7 +509,7 @@ PROJECT="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("project"
 # than placed first: "last wins" would be an assumption about claude's
 # argv handling, and the stamp above must not be able to disagree with
 # what the child actually applies.
-PROMPT_ARGS=(--append-system-prompt-file "$PROMPT_FILE")
+PROMPT_ARGS=("$PROMPT_FLAG" "$PROMPT_FILE")
 CMD=()
 [[ "$PROVIDER" == anthropic ]] || CMD+=(ori)
 CMD+=(claude)
@@ -498,7 +521,7 @@ CMD+=(claude)
 # session at exec (the CEO, 2026-09-17). install-agent-files.sh writes the
 # same as a permissions.deny in the login's user settings, the fence for
 # a session launched without this launcher.
-LOCALE_SEARCH="$FABRIC_ROOT/identities/roles/language-culture/locale/$(id -un | sed 's/.*-//')/locale.json"
+LOCALE_SEARCH="$FABRIC_ROOT/identities/roles/language-culture/locale/$SUFFIX/locale.json"
 if [[ "$ROLE" == language-culture && -f "$LOCALE_SEARCH" ]]; then CMD+=(--disallowedTools WebSearch); fi
 CMD+=("${PROMPT_ARGS[@]}" "$@")
 

@@ -9,7 +9,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { parseArgs, rows, table, writeBundles } from '../ctl.mjs';
+import { parseArgs, rows, table, writeBundles, manifestAgent, partKey } from '../ctl.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 
 const CTL = new URL('../ctl.mjs', import.meta.url).pathname;
@@ -38,20 +38,31 @@ test('rows and table: an answered account and a silent one', () => {
   assert.match(table('ping', rs), /db-admin\s+ok\s+120 ms/);
   // The script table: the workers column — input and answers binned — and `-` when there are none.
   const sc = { status: 'ok', turns: 3, thinking: { letters: 0 }, thinking_blocks: { only: 0, mixed: 0, latin: 0, empty: 3 }, text: { letters: 40, georgian: 100 }, notes: { status: 'none' } };
-  const w = { status: 'ok', files: 2, skipped_with_tools: 1, turns: 4, input: { letters: 300, georgian: 100, blocks: { only: 3, mixed: 0, latin: 1, empty: 0 } }, text: { letters: 200, georgian: 100, blocks: { only: 4, mixed: 0, latin: 0, empty: 0 } } };
+  const w = { status: 'ok', files: 2, other_subagents: 1, turns: 4, tool_uses: 0, input: { letters: 300, georgian: 100, blocks: { only: 3, mixed: 0, latin: 1, empty: 0 } }, text: { letters: 200, georgian: 100, blocks: { only: 4, mixed: 0, latin: 0, empty: 0 } } };
   const st = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: w } } }]));
   assert.match(st, /workers \(input \/ answers\)/);
   assert.match(st, /db-admin\s+ok\s+none.*2 file\(s\): in 3 only \/ 0 mixed \/ 1 latin \/ out 4 only \/ 0 mixed \/ 0 latin/);
-  const none = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: { status: 'none', skipped_with_tools: 0 } } } }]));
+  const none = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: { status: 'none', other_subagents: 0 } } } }]));
   assert.match(none, /db-admin\s+ok\s+none.*unreadable\s+-\s*$/m);
 });
+
+// A tar as the harvester writes it: manifest.json first (ustar header, size in octal), then padding.
+function tarWith(manifest, filler = 1200) {
+  const body = Buffer.from(JSON.stringify(manifest) + '\n');
+  const h = Buffer.alloc(512); h.write('manifest.json', 0); h.write('0000644\0', 100); h.write('0000000\0', 108); h.write('0000000\0', 116);
+  h.write(body.length.toString(8).padStart(11, '0') + '\0', 124); h.write('00000000000\0', 136); h.write('        ', 148); h.write('0', 156); h.write('ustar\0', 257); h.write('00', 263);
+  let sum = 0; for (const b of h) sum += b; h.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+  const pad = Buffer.alloc((512 - body.length % 512) % 512);
+  return Buffer.concat([h, body, pad, crypto.randomBytes(filler)]);
+}
 
 // The bundles a drain answers with, put back together: by slug and part,
 // gunzipped, checked against the sha the report named, written under the
 // login; anything short, corrupt or wrong-sha is a status, not a file.
 test('writeBundles: reassembly, and the three ways a bundle is refused', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-out-'));
-  const tar = crypto.randomBytes(1500); const sha = crypto.createHash('sha256').update(tar).digest('hex');
+  const tar = tarWith({ format: 'agent-fabric-drain/1', agent: 'db-admin', host: 'h' }); const sha = crypto.createHash('sha256').update(tar).digest('hex');
+  assert.equal(manifestAgent(tar), 'db-admin'); assert.equal(manifestAgent(crypto.randomBytes(2000)), null);
   const b64 = zlib.gzipSync(tar).toString('base64'); const cut = Math.ceil(b64.length / 2);
   const chunks = [b64.slice(0, cut), b64.slice(cut)];
   const bundle = (slug, wc, over = {}) => ({ slug, working_copy: wc, files: 2, status: 'ok', bytes: tar.length, sha256: sha, parts: 2, ...over });
@@ -60,21 +71,29 @@ test('writeBundles: reassembly, and the three ways a bundle is refused', () => {
     { from: 'h/db-admin', data: { memory: { status: 'ok', bundles: [bundle('s-a', '/h/db-admin/projects/gzapp'), bundle('s-b', '/h/db-admin/projects/other', { sha256: 'not-the-sha' }), bundle('s-c', '/h/db-admin/projects/short'), { slug: 's-d', files: 1, status: 'no-working-copy' }] } } },
     { from: 'h/web-dev-01', data: { memory: { status: 'ok', bundles: [bundle('s-e', '/h/web-dev-01/projects/gzapp')] } } },
   ];
-  const parts = { 'h/db-admin': [{ slug: 's-b', part: 1, parts: 2, chunk: chunks[0] }, { slug: 's-a', part: 2, parts: 2, chunk: chunks[1] }, { slug: 's-b', part: 2, parts: 2, chunk: chunks[1] },
-                                 { slug: 's-a', part: 1, parts: 2, chunk: chunks[0] }, { slug: 's-c', part: 1, parts: 2, chunk: chunks[0] }],
-                  'h/web-dev-01': [{ slug: 's-e', part: 1, parts: 2, chunk: 'not base64 of a gzip!!' }, { slug: 's-e', part: 2, parts: 2, chunk: '' }] };
+  const asMap = (from, list) => { const m = new Map(); for (const p of list) { const k = partKey(from, p); if (!m.has(k)) m.set(k, p); } return m; };
+  const parts = { 'h/db-admin': asMap('h/db-admin', [{ slug: 's-b', part: 1, parts: 2, chunk: chunks[0] }, { slug: 's-a', part: 2, parts: 2, chunk: chunks[1] }, { slug: 's-b', part: 2, parts: 2, chunk: chunks[1] },
+                                 { slug: 's-a', part: 1, parts: 2, chunk: chunks[0] }, { slug: 's-a', part: 1, parts: 2, chunk: 'a replayed copy of part 1' }, { slug: 's-c', part: 1, parts: 2, chunk: chunks[0] }]),
+                  'h/web-dev-01': asMap('h/web-dev-01', [{ slug: 's-e', part: 1, parts: 2, chunk: 'not base64 of a gzip!!' }, { slug: 's-e', part: 2, parts: 2, chunk: '' }, { slug: 's-f', part: 1, parts: 2, chunk: chunks[0] }, { slug: 's-f', part: 2, parts: 2, chunk: chunks[1] }]) };
+  replies[1].data.memory.bundles.push(bundle('s-f', '/h/web-dev-01/projects/gzapp2'));   // a bundle whose manifest says db-admin, under web-dev-01's name
   writeBundles(out, expected, replies, parts);
   const [a, b, c, d] = replies[0].data.memory.bundles;
   assert.equal(a.status, 'ok'); assert.equal(a.written, path.join(out, 'db-admin', 'gzapp.tar'));
-  assert.deepEqual(fs.readFileSync(a.written), tar, 'parts out of order on the wire, in order in the file');
+  assert.deepEqual(fs.readFileSync(a.written), tar, 'parts out of order on the wire, a replayed one ignored, in order in the file');
+  assert.equal((fs.statSync(a.written).mode & 0o777), 0o600); assert.equal((fs.statSync(path.join(out, 'db-admin')).mode & 0o777), 0o700);
   assert.equal(b.status, 'sha-mismatch'); assert.equal(c.status, 'incomplete'); assert.equal(d.status, 'no-working-copy');
   assert.equal(replies[1].data.memory.bundles[0].status, 'unreadable');
+  assert.equal(replies[1].data.memory.bundles[1].status, 'wrong-agent'); assert.equal(replies[1].data.memory.bundles[1].manifest_agent, 'db-admin');
   assert.deepEqual(fs.readdirSync(path.join(out, 'db-admin')), ['gzapp.tar'], 'a refused bundle leaves no file');
   assert.ok(!fs.existsSync(path.join(out, 'web-dev-01')) && !fs.existsSync(path.join(out, 'silent')));
   const rs = rows(expected, replies);
   const t = table('memory', rs);
   assert.match(t, /db-admin\s+ok\s+gzapp\s+2 memories\s+ok -> .*gzapp\.tar/);
   assert.match(t, /db-admin\s+ok\s+other\s+2 memories\s+sha-mismatch/);
+  assert.match(t, /web-dev-01\s+ok\s+gzapp2\s+2 memories\s+wrong-agent: manifest names db-admin/);
+  const failed = table('memory', rows(expected, [{ from: 'h/silent', data: { memory: { status: 'failed', error: 'boom' } } }, { from: 'h/db-admin', data: { memory: { status: 'ok', bundles: [{ slug: 'x', working_copy: '/h/db-admin/projects/gzapp', files: 3, status: 'harvest-failed', error: 'harvest_memory: refusing rather than guessing where these belong:\n  leaky.md: carries a credential by shape' }] } } }]));
+  assert.match(failed, /silent\s+ok\s+memory failed: boom/);
+  assert.match(failed, /db-admin\s+ok\s+gzapp\s+3 memories\s+harvest-failed: .*leaky\.md: carries a credential by shape/);
   assert.match(t, /db-admin\s+ok\s+s-d\s+1 memories\s+no-working-copy/);
   assert.match(t, /silent\s+no answer/);
   assert.match(table('memory', rows(expected, [{ from: 'h/silent', data: { memory: { status: 'ok', bundles: [] } } }])), /silent\s+ok\s+no memory/);
@@ -153,7 +172,7 @@ test('fabric-ctl db-admin memory --out: the report record, then the parts, colle
   let done = false;
   try {
     const reg = registryFile();
-    const tar = crypto.randomBytes(4000); const sha = crypto.createHash('sha256').update(tar).digest('hex');
+    const tar = tarWith({ format: 'agent-fabric-drain/1', agent: 'db-admin', host: H }, 4000); const sha = crypto.createHash('sha256').update(tar).digest('hex');
     const b64 = zlib.gzipSync(tar).toString('base64'); const cut = Math.ceil(b64.length / 3);
     const chunks = [b64.slice(0, cut), b64.slice(cut, 2 * cut), b64.slice(2 * cut)];
     const answer = () => {
@@ -166,6 +185,7 @@ test('fabric-ctl db-admin memory --out: the report record, then the parts, colle
       rec({ memory: { status: 'ok', bundles: [{ slug: 's-1', working_copy: '/home/db-admin/projects/gzapp', files: 7, status: 'ok', bytes: tar.length, gzip_bytes: 4100, sha256: sha, parts: 3,
                                                  report: { claims: 5, counts: { in_scope: 7, total: 7 }, needs_rendering: ['ka-a', 'ka-b'], skipped_no_roles_class: ['private'] } }] }, parts: 3 });
       rec({ part: { slug: 's-1', part: 1, parts: 3, chunk: chunks[0] } });
+      rec({ part: { slug: 's-1', part: 1, parts: 3, chunk: chunks[0] } });   // replayed: must not count as the second part
       // the last two parts arrive a moment later: the poll must keep going past the first record
       setTimeout(() => { rec({ part: { slug: 's-1', part: 2, parts: 3, chunk: chunks[1] } }); rec({ part: { slug: 's-1', part: 3, parts: 3, chunk: chunks[2] } }); }, 800);
     };

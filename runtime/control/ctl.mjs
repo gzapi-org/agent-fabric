@@ -51,12 +51,25 @@ export function parseArgs(argv) {
 }
 
 // The drain bundles: <out>/<login>/<working copy>.tar, each reassembled from its
-// parts, gunzipped and checked against the sha256 the first reply named;
-// a bundle that does not verify is not written, and the row says so.
+// parts, gunzipped, checked against the sha256 the first reply named, and
+// checked to be that login's — the tar's manifest names who harvested it,
+// and a reply is only a record on a channel every token holder can write,
+// so a bundle whose manifest says another agent is refused as `wrong-agent`
+// rather than filed under a name it did not come from. A bundle that does
+// not verify is not written, and the row says so. Directories 0700, files
+// 0600: a drain is other people's memory.
+export function manifestAgent(tar) {
+  // The harvester writes manifest.json as the first member: a 512-byte
+  // header (name at 0, size in octal at 124), then the bytes.
+  if (tar.length < 512 || tar.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '') !== 'manifest.json') return null;
+  const size = parseInt(tar.subarray(124, 136).toString('utf8').replace(/\0.*$/s, '').trim(), 8);
+  try { return JSON.parse(tar.subarray(512, 512 + size).toString('utf8')).agent ?? null; } catch { return null; }
+}
+export function partKey(from, p) { return `${from}\u0000${p?.slug}\u0000${p?.part}`; }
 export function writeBundles(out, expected, replies, parts) {
   for (const e of expected) {
     const r = replies.find(x => x.from === e.address); if (!r) continue;
-    const got = parts[e.address] ?? [];
+    const got = [...(parts[e.address] ?? new Map()).values()];
     for (const b of r.data?.memory?.bundles ?? []) {
       if (b.status !== 'ok') continue;
       const mine = got.filter(p => p.slug === b.slug).sort((x, y) => x.part - y.part);
@@ -65,8 +78,10 @@ export function writeBundles(out, expected, replies, parts) {
       try { tar = zlib.gunzipSync(Buffer.from(mine.map(p => p.chunk).join(''), 'base64')); } catch { b.status = 'unreadable'; continue; }
       const sha = crypto.createHash('sha256').update(tar).digest('hex');
       if (sha !== b.sha256) { b.status = 'sha-mismatch'; continue; }
-      const dir = path.join(out, e.login); fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, `${path.basename(b.working_copy)}.tar`); fs.writeFileSync(file, tar); b.written = file;
+      const agent = manifestAgent(tar);
+      if (agent !== e.login) { b.status = 'wrong-agent'; b.manifest_agent = agent; continue; }
+      const dir = path.join(out, e.login); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = path.join(dir, `${path.basename(b.working_copy)}.tar`); fs.writeFileSync(file, tar, { mode: 0o600 }); b.written = file;
     }
   }
 }
@@ -98,11 +113,13 @@ export function table(op, rs) {
     lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} bundles`);
     for (const r of rs) {
       if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      if (r.memory && r.memory.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} memory ${r.memory.status}${r.memory.error ? `: ${r.memory.error}` : ''}`); continue; }
       const bs = r.memory?.bundles ?? [];
       if (!bs.length) { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} no memory`); continue; }
       for (const b of bs) {
         const rep = b.report ? `${b.report.claims} claim(s), ${b.report.needs_rendering.length} need rendering, ${b.report.skipped_no_roles_class.length} skipped` : 'no report';
-        lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${(b.working_copy ? path.basename(b.working_copy) : b.slug).padEnd(24)} ${b.files} memories  ${b.status}${b.written ? ` -> ${b.written}` : ''}  ${b.status === 'ok' ? rep : ''}`.trimEnd());
+        const why = b.status === 'harvest-failed' ? `: ${String(b.error ?? '').trim().split('\n').slice(-2).join(' ')}` : b.status === 'wrong-agent' ? `: manifest names ${b.manifest_agent ?? 'nobody'}` : '';
+        lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${(b.working_copy ? path.basename(b.working_copy) : b.slug).padEnd(24)} ${b.files} memories  ${b.status}${why}${b.written ? ` -> ${b.written}` : ''}  ${b.status === 'ok' ? rep : ''}`.trimEnd());
       }
     }
     return lines.join('\n');
@@ -168,7 +185,10 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const replies = []; const parts = {};
   const want = new Set(expected.map(e => e.address));   // no reply yet
   // A memory reply is complete only when every part it announced arrived.
-  const short = () => args.op === 'memory' ? replies.filter(r => (parts[r.from]?.length ?? 0) < (r.data?.parts ?? 0)).length : 0;
+  // Distinct parts, keyed by slug and number, the first record for a key
+  // winning: a replayed or duplicated part neither completes a reply early
+  // nor breaks its reassembly.
+  const short = () => args.op === 'memory' ? replies.filter(r => (parts[r.from]?.size ?? 0) < (r.data?.parts ?? 0)).length : 0;
   const deadline = t0 + args.timeout * 1000;
   let since = sent.id;
   while (Date.now() < deadline && (want.size || short())) {
@@ -180,16 +200,17 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
       since = rec.id;
       let r; try { r = JSON.parse(rec.content); } catch { continue; }
       if (r?.kind !== 'reply' || r.in_reply_to !== id) continue;
-      if (r.data?.part) { (parts[r.from] ??= []).push(r.data.part); continue; }
+      if (r.data?.part) { const m = (parts[r.from] ??= new Map()); const k = partKey(r.from, r.data.part); if (!m.has(k)) m.set(k, r.data.part); continue; }
       if (want.has(r.from)) { r.latency_ms = Date.now() - t0; replies.push(r); want.delete(r.from); }
     }
     if (want.size || short()) await new Promise(r => setTimeout(r, 500));
   }
-  if (args.op === 'memory') writeBundles(args.out, expected, replies, parts);
+  let refused = 0;
+  if (args.op === 'memory') { writeBundles(args.out, expected, replies, parts); for (const r of replies) for (const b of r.data?.memory?.bundles ?? []) if (b.status !== 'ok' && b.status !== 'no-working-copy') refused += 1; }
   const rs = rows(expected, replies);
   if (args.json) for (const r of rs) console.log(JSON.stringify(r));
   else console.log(table(args.op, rs));
-  return want.size || short() ? 1 : 0;
+  return want.size || short() || refused ? 1 : 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(c => process.exit(c)).catch(e => { console.error(`fabric-ctl: ${e.message}`); process.exit(1); });

@@ -113,32 +113,38 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.ok(!JSON.stringify(withNotes).includes('მოთხოვნა'), 'no note text leaves');
   assert.equal(notesDir('/h', { XDG_STATE_HOME: '/st' }, 'ge'), '/st/agent-fabric/agents/ge/notes');
   assert.equal(notesDir('/h', {}, 'ge'), '/h/.local/state/agent-fabric/agents/ge/notes');
-  // The workers: the tool-less subagent transcripts beside the session, its USER records the input.
-  assert.deepEqual(s.workers, { status: 'none', skipped_with_tools: 0 });
+  // The workers: the subagent transcripts beside the session whose sidecar names the locale worker; its USER records the input.
+  assert.deepEqual(s.workers, { status: 'none', other_subagents: 0 });
   const sub = path.join(dir, 'live', 'subagents'); fs.mkdirSync(sub, { recursive: true });
   const user = c => JSON.stringify({ type: 'user', message: { role: 'user', content: c } });
+  const meta = (name, agentType) => fs.writeFileSync(path.join(sub, `${name}.meta.json`), JSON.stringify({ agentType, model: 'opus' }));
+  const handback = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'SubagentHandback', input: {} }] } });
   const worker = [user('თხოვნა: გადახედე ამ ტექსტს და უპასუხე ქართულად, სრული აბზაცი აქ.'),
                   turn('', 'პასუხი ქართულად, საკმაოდ გრძელი აბზაცი რომ დაითვალოს ბლოკად.'),
                   user([{ type: 'text', text: 'მეორე თხოვნა ქართულად, ისევ საკმაოდ გრძელი აბზაცი, სამოცამდე ასო.' }]),
+                  user('<system-reminder>\nYour final report is delivered through SubagentHandback; a plain final message is NOT delivered. Call it now.\n</system-reminder>'),
                   JSON.stringify({ type: 'attachment', attachment: { type: 'x' } }),
-                  turn('', 'მეორე პასუხი ქართულად, საკმაოდ გრძელი ტექსტი აქაც.')];
-  fs.writeFileSync(path.join(sub, 'agent-aaa.jsonl'), worker.join('\n') + '\n');
-  const reviewer = [user('Repository: /x. Review the range a..b'), JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] } }), turn('', 'Findings: none.')];
-  fs.writeFileSync(path.join(sub, 'agent-bbb.jsonl'), reviewer.join('\n') + '\n');
+                  turn('', 'მეორე პასუხი ქართულად, საკმაოდ გრძელი ტექსტი აქაც.'), handback];
+  fs.writeFileSync(path.join(sub, 'agent-aaa.jsonl'), worker.join('\n') + '\n'); meta('agent-aaa', 'locale-worker');
+  const reviewer = [user('Repository: /x. Review the range a..b'), JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] } }), turn('', 'Findings: none.'), handback];
+  fs.writeFileSync(path.join(sub, 'agent-bbb.jsonl'), reviewer.join('\n') + '\n'); meta('agent-bbb', 'code-review');
+  fs.writeFileSync(path.join(sub, 'agent-nometa.jsonl'), user('a subagent with no sidecar, long enough to be a block') + '\n');
   const w = script(h).workers;
-  assert.equal(w.status, 'ok'); assert.equal(w.files, 1, 'the reviewer used tools: not a worker'); assert.equal(w.skipped_with_tools, 1); assert.equal(w.turns, 2);
-  assert.deepEqual(w.input.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 }, JSON.stringify(w.input));
+  assert.equal(w.status, 'ok'); assert.equal(w.files, 1, 'only the sidecar that says locale-worker'); assert.equal(w.other_subagents, 2); assert.equal(w.turns, 3);
+  assert.equal(w.tool_uses, 0, 'the hand-back is not a tool use of the worker');
+  assert.deepEqual(w.input.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 }, `the injected reminder is not the bridge's input: ${JSON.stringify(w.input)}`);
   assert.deepEqual(w.text.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 });
   assert.equal(w.input.georgian, 100); assert.ok(w.input.letters > 0);
   assert.ok(!JSON.stringify(w).includes('თხოვნა'), 'no worker text leaves');
-  // English reaching the worker is counted in the INPUT bins, from the user records — not from the answers.
-  fs.appendFileSync(path.join(sub, 'agent-aaa.jsonl'), user('A paragraph of English that the bridge let through to the worker.') + '\n' + turn('', 'მოკლე პასუხი ქართულად, საკმაოდ გრძელი რომ ბლოკი გამოვიდეს.') + '\n');
+  // English reaching the worker is counted in the INPUT bins, from the user records — not from the answers; a real tool use is counted.
+  fs.appendFileSync(path.join(sub, 'agent-aaa.jsonl'), user('A paragraph of English that the bridge let through to the worker.') + '\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'u', name: 'TaskStop', input: {} }] } }) + '\n' + turn('', 'მოკლე პასუხი ქართულად, საკმაოდ გრძელი რომ ბლოკი გამოვიდეს.') + '\n');
   const leak = script(h).workers;
   assert.deepEqual(leak.input.blocks, { only: 2, mixed: 0, latin: 1, empty: 0 }, 'the leak is one latin input block');
   assert.deepEqual(leak.text.blocks, { only: 3, mixed: 0, latin: 0, empty: 0 }, 'the answers stay Georgian');
-  const stale = path.join(sub, 'agent-ccc.jsonl'); fs.writeFileSync(stale, user('old English input, long enough to be a block') + '\n'); fs.utimesSync(stale, past, past);
+  assert.equal(leak.tool_uses, 1);
+  const stale = path.join(sub, 'agent-ccc.jsonl'); fs.writeFileSync(stale, user('old English input, long enough to be a block') + '\n'); meta('agent-ccc', 'locale-worker'); fs.utimesSync(stale, past, past);
   assert.equal(script(h).workers.files, 1, 'a worker transcript older than the window is not read');
-  assert.deepEqual(workerTranscripts([{ f: '/nonexistent/s.jsonl' }]), { status: 'none', skipped_with_tools: 0 });
+  assert.deepEqual(workerTranscripts([{ f: '/nonexistent/s.jsonl' }]), { status: 'none', other_subagents: 0 });
 });
 
 // The drain over the control plane: the account's own memory directories,
@@ -167,6 +173,9 @@ test('memoryDirs: every memory directory with a memory in it, matched to ~/proje
   ]);
   assert.ok(memorySlug(dotted).endsWith('-projects-gzapi-ge'), 'the dotted copy is matched under the harness\'s spelling');
   assert.deepEqual(memoryDirs('/nonexistent'), []);
+  fs.mkdirSync(path.join(h, 'projects', 'gzapi-ge'), { recursive: true });   // the same slug as gzapi.ge
+  const amb = memoryDirs(h).find(d => d.slug === memorySlug(dotted));
+  assert.deepEqual({ wc: amb.working_copy, ambiguous: amb.ambiguous }, { wc: null, ambiguous: true }, 'two working copies with one slug: neither is guessed');
   assert.equal(memorySlug('/home/x/projects/gzapp'), '-home-x-projects-gzapp');
   assert.equal(memorySlug('/home/x/projects/gzapp.decks'), '-home-x-projects-gzapp-decks', 'a dot is a dash too, as the harness names it');
   assert.equal(memorySlug('/home/x/.claude-mem'), '-home-x--claude-mem');

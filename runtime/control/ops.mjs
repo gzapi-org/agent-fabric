@@ -220,17 +220,26 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
 }
 
 // THE WORKERS. A subagent's transcript is stored beside its session's
-// (<session>/subagents/agent-*.jsonl). The locale worker of the
-// language-culture bridge (identities/roles/language-culture/charter.md)
-// has no tools, so its transcript is the one with no tool_use block —
-// every other class uses tools; a transcript that does is counted as
-// skipped, not read. Its USER records are the worker's input, which the
-// bridge composed: a Latin paragraph there is English reaching the
-// worker, the leak the construction exists to prevent. Its assistant
-// text is the answer. Paragraphs binned like the notes; counts only.
-export function workerTranscripts(files, { hours = 24, now = Date.now() } = {}) {
+// (<session>/subagents/agent-*.jsonl) with a sidecar the harness writes,
+// agent-*.meta.json, whose agentType names the type dispatched: the
+// locale worker of the language-culture bridge
+// (identities/roles/language-culture/charter.md) is the one whose sidecar
+// says locale-worker — read back 2026-09-17, when "no tool_use block"
+// turned out to fit no transcript: the hand-back itself is a tool_use
+// (SubagentHandback), and the harness refuses to spawn an agent with no
+// tool at all, so the worker carries one inert tool. Its USER records are
+// the worker's input, which the bridge composed, less the harness's own
+// <system-reminder> spans (English, injected into every subagent, and not
+// the bridge's doing): a Latin paragraph left is English reaching the
+// worker, the leak the construction exists to prevent. Its assistant text
+// is the answer. Any tool_use but the hand-back is counted as tool_uses —
+// a worker that used a tool is a worker with one. Paragraphs binned like
+// the notes; counts only.
+export const WORKER_TYPE = 'locale-worker';
+const REMINDER_RE = /<system-reminder>[\s\S]*?(<\/system-reminder>|$)/g;
+export function workerTranscripts(files, { hours = 24, now = Date.now(), type = WORKER_TYPE } = {}) {
   const input = {}, text = {}; const inputBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }, textBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
-  let n = 0, turns = 0, withTools = 0;
+  let n = 0, turns = 0, others = 0, toolUses = 0;
   for (const { f } of files) {
     const dir = path.join(path.dirname(f), path.basename(f, '.jsonl'), 'subagents');
     let names; try { names = fs.readdirSync(dir); } catch { continue; }
@@ -239,24 +248,28 @@ export function workerTranscripts(files, { hours = 24, now = Date.now() } = {}) 
       const p = path.join(dir, name);
       let st; try { st = fs.statSync(p); } catch { continue; }
       if (now - st.mtimeMs > hours * 3600000) continue;
+      let meta = null; try { meta = JSON.parse(fs.readFileSync(p.replace(/\.jsonl$/, '.meta.json'), 'utf8')); } catch { /* no sidecar: not a worker */ }
+      if (meta?.agentType !== type) { others += 1; continue; }
       let body; try { body = fs.readFileSync(p, 'utf8'); } catch { continue; }
-      const recs = body.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(d => d && typeof d === 'object');
-      if (recs.some(d => d.type === 'assistant' && (d.message?.content ?? []).some(b => b?.type === 'tool_use'))) { withTools += 1; continue; }
       n += 1;
-      for (const d of recs) {
-        const c = d.message?.content;
-        if (d.type === 'user') {
+      for (const line of body.split('\n')) {
+        let d; try { d = JSON.parse(line); } catch { continue; }
+        const c = d?.message?.content;
+        if (d?.type === 'user') {
           const texts = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text) : [];
-          for (const t of texts) paragraphs(t, input, inputBlocks);
-        } else if (d.type === 'assistant') {
+          for (const t of texts) { const own = t.replace(REMINDER_RE, ''); if (own.trim()) paragraphs(own, input, inputBlocks); }
+        } else if (d?.type === 'assistant') {
           turns += 1;
-          for (const b of Array.isArray(c) ? c : []) if (b?.type === 'text' && typeof b.text === 'string') paragraphs(b.text, text, textBlocks);
+          for (const b of Array.isArray(c) ? c : []) {
+            if (b?.type === 'text' && typeof b.text === 'string') paragraphs(b.text, text, textBlocks);
+            else if (b?.type === 'tool_use' && b.name !== 'SubagentHandback') toolUses += 1;
+          }
         }
       }
     }
   }
-  if (!n) return { status: 'none', skipped_with_tools: withTools };
-  return { status: 'ok', files: n, skipped_with_tools: withTools, turns, input: { ...shares(input), blocks: inputBlocks }, text: { ...shares(text), blocks: textBlocks } };
+  if (!n) return { status: 'none', other_subagents: others };
+  return { status: 'ok', files: n, other_subagents: others, turns, tool_uses: toolUses, input: { ...shares(input), blocks: inputBlocks }, text: { ...shares(text), blocks: textBlocks } };
 }
 
 // THE DRAIN, over the control plane (the CEO, 2026-09-17: the way out of
@@ -268,26 +281,31 @@ export function workerTranscripts(files, { hours = 24, now = Date.now() } = {}) 
 // account's ~/projects/* — and answers with the bundles gzipped and
 // base64, in parts that fit the relay's 128 KiB message limit, plus each
 // harvest report (`needs_rendering` and the skipped list included). No
-// request field reaches argv: the op takes none; the harvester's own
-// hygiene refuses a memory carrying a secret; a memory directory with no
-// working copy beside it is named and left where it is.
+// request field reaches argv: the op takes none. The harvester refuses
+// the whole drain when a memory carries a credential by shape
+// (harvest_memory.CREDENTIAL_PATTERNS), so no secret reaches the channel;
+// a memory directory with no working copy beside it, or with two, is
+// named and left where it is.
 export const MEMORY_PART_BYTES = 90 * 1024;
 // The harness's name for a launch directory: every character that is not
 // a letter or a digit becomes `-` — `/` and `.` alike (read back 2026-09-17:
-// ~/projects/gzapp.decks is -home-…-projects-gzapp-decks). The harvester's
+// ~/projects/foo.bar is -home-…-projects-foo-bar). The harvester's
 // memory_slug is the same rule.
 export function memorySlug(dir) { return path.resolve(dir).replace(/[^A-Za-z0-9]/g, '-'); }
 export function memoryDirs(home = os.homedir(), projectsDir = path.join(home, 'projects')) {
   const root = path.join(home, '.claude', 'projects');
   let slugs; try { slugs = fs.readdirSync(root); } catch { return []; }
   let copies = []; try { copies = fs.readdirSync(projectsDir).map(d => path.join(projectsDir, d)).filter(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } }); } catch { /* no projects dir */ }
-  const bySlug = new Map(copies.map(d => [memorySlug(d), d]));
+  const bySlug = new Map(); const ambiguous = new Set();
+  for (const d of copies) { const k = memorySlug(d); if (bySlug.has(k)) ambiguous.add(k); else bySlug.set(k, d); }
   const out = [];
   for (const slug of slugs) {
     const memory = path.join(root, slug, 'memory');
     let n = 0; try { n = fs.readdirSync(memory).filter(f => f.endsWith('.md') && f !== 'MEMORY.md').length; } catch { continue; }
     if (!n) continue;
-    out.push({ slug, memory, files: n, working_copy: bySlug.get(slug) ?? null });
+    // Two working copies with one slug (gzapp.decks and gzapp-decks): the
+    // harness cannot tell them apart and neither can this; named, not guessed.
+    out.push({ slug, memory, files: n, working_copy: ambiguous.has(slug) ? null : (bySlug.get(slug) ?? null), ...(ambiguous.has(slug) ? { ambiguous: true } : {}) });
   }
   return out;
 }
@@ -295,7 +313,7 @@ export async function memory(home = os.homedir(), { root = process.env.AGENT_FAB
   const tool = path.join(root, 'tools', 'fabric', 'harvest_memory.py');
   const bundles = [];
   for (const d of dirs) {
-    if (!d.working_copy) { bundles.push({ slug: d.slug, files: d.files, status: 'no-working-copy' }); continue; }
+    if (!d.working_copy) { bundles.push({ slug: d.slug, files: d.files, status: d.ambiguous ? 'ambiguous-working-copy' : 'no-working-copy' }); continue; }
     // The tar on stdout, the report on stderr: one run gives both.
     const args = [tool, '--bundle', '-', '--memory', d.memory, '--working-copy', d.working_copy, ...(all ? ['--all'] : [])];
     let r;

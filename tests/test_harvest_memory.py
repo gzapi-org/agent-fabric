@@ -479,6 +479,11 @@ def test_the_watermark_never_passes_an_unrendered_memory(tmp: str) -> None:
     rep = json.loads(r.stdout)
     assert rep["needs_rendering"] == ["georgian.md"] and rep["claims"] == 1, rep
     assert rep["next_watermark"] == 1_700_000_000_000, f"the watermark stops at the last memory that drained: {rep['next_watermark']}"
+    # The unrendered memory older than one that drains: the watermark stops below it, not at the newer one.
+    os.utime(ka, (1_699_999_900, 1_699_999_900))
+    rep = json.loads(run(mem, out, "--all", "--dry-run").stdout)
+    assert rep["needs_rendering"] == ["georgian.md"] and rep["claims"] == 1, rep
+    assert rep["next_watermark"] == 1_699_999_900_000 - 1, f"below the oldest unrendered memory: {rep['next_watermark']}"
 
 
 def main() -> int:

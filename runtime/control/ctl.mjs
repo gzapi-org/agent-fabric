@@ -80,8 +80,10 @@ export function writeBundles(out, expected, replies, parts) {
       if (sha !== b.sha256) { b.status = 'sha-mismatch'; continue; }
       const agent = manifestAgent(tar);
       if (agent !== e.login) { b.status = 'wrong-agent'; b.manifest_agent = agent; continue; }
-      const dir = path.join(out, e.login); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const file = path.join(dir, `${path.basename(b.working_copy)}.tar`); fs.writeFileSync(file, tar, { mode: 0o600 }); b.written = file;
+      // mkdir's mode and writeFile's apply only on creation: a directory or a
+      // tar left by an earlier drain keeps its mode unless set again.
+      const dir = path.join(out, e.login); fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
+      const file = path.join(dir, `${path.basename(b.working_copy)}.tar`); fs.writeFileSync(file, tar, { mode: 0o600 }); fs.chmodSync(file, 0o600); b.written = file;
     }
   }
 }
@@ -208,7 +210,10 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
     if (want.size || short()) await new Promise(r => setTimeout(r, 500));
   }
   let refused = 0;
-  if (args.op === 'memory') { writeBundles(args.out, expected, replies, parts); for (const r of replies) for (const b of r.data?.memory?.bundles ?? []) if (b.status !== 'ok' && b.status !== 'no-working-copy') refused += 1; }
+  if (args.op === 'memory') {
+    writeBundles(args.out, expected, replies, parts);
+    for (const r of replies) { if (r.data?.memory && r.data.memory.status !== 'ok') refused += 1; for (const b of r.data?.memory?.bundles ?? []) if (b.status !== 'ok' && b.status !== 'no-working-copy') refused += 1; }
+  }
   const rs = rows(expected, replies);
   if (args.json) for (const r of rs) console.log(JSON.stringify(r));
   else console.log(table(args.op, rs));

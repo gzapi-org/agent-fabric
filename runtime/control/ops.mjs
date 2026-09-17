@@ -330,7 +330,7 @@ export function memoryDirs(home = os.homedir(), projectsDir = path.join(home, 'p
     const memory = path.join(root, slug, 'memory');
     let n = 0; try { n = fs.readdirSync(memory).filter(f => f.endsWith('.md') && f !== 'MEMORY.md').length; } catch { continue; }
     if (!n) continue;
-    // Two working copies with one slug (gzapp.decks and gzapp-decks): the
+    // Two working copies with one slug (foo.bar and foo-bar): the
     // harness cannot tell them apart and neither can this; named, not guessed.
     out.push({ slug, memory, files: n, working_copy: ambiguous.has(slug) ? null : (bySlug.get(slug) ?? null), ...(ambiguous.has(slug) ? { ambiguous: true } : {}) });
   }

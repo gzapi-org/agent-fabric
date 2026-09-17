@@ -83,6 +83,10 @@ test('writeBundles: reassembly, and the three ways a bundle is refused', () => {
   assert.equal(a.status, 'ok'); assert.equal(a.written, path.join(out, 'db-admin', 'gzapp.tar'));
   assert.deepEqual(fs.readFileSync(a.written), tar, 'parts out of order on the wire, a replayed one ignored, in order in the file');
   assert.equal((fs.statSync(a.written).mode & 0o777), 0o600); assert.equal((fs.statSync(path.join(out, 'db-admin')).mode & 0o777), 0o700);
+  // A tree an earlier drain left world-readable is tightened on the next write, not kept.
+  fs.chmodSync(a.written, 0o644); fs.chmodSync(path.join(out, 'db-admin'), 0o755); a.status = 'ok'; delete a.written;
+  writeBundles(out, expected, replies, parts);
+  assert.equal((fs.statSync(a.written).mode & 0o777), 0o600); assert.equal((fs.statSync(path.join(out, 'db-admin')).mode & 0o777), 0o700);
   assert.equal(b.status, 'sha-mismatch'); assert.equal(c.status, 'incomplete'); assert.equal(d.status, 'no-working-copy');
   assert.equal(replies[1].data.memory.bundles[0].status, 'unreadable');
   assert.equal(replies[1].data.memory.bundles[1].status, 'wrong-agent'); assert.equal(replies[1].data.memory.bundles[1].manifest_agent, 'db-admin');
@@ -219,5 +223,13 @@ test('fabric-ctl db-admin memory --out: the report record, then the parts, colle
     assert.ok(last); assert.equal(s.status, 1, s.err + s.out);
     assert.match(s.out, /db-admin\s+ok\s+gzapp\s+7 memories\s+incomplete/);
     assert.ok(!fs.existsSync(file), 'nothing written for a short bundle');
+    // A daemon whose whole memory section failed: the row says so and the exit code is 1, as for a refused bundle.
+    done = false; r.rows.length = 0;
+    const failedAnswer = () => { if (done) return; const req = r.rows.find(x => x.content.includes('"request"')); if (!req) return setTimeout(failedAnswer, 50); done = true;
+      const id = JSON.parse(req.content).id; const from = `${H}/db-admin`;
+      r.add(from, JSON.stringify({ v: 1, kind: 'reply', id: 'r-f', in_reply_to: id, from, op: 'memory', ok: true, data: { memory: { status: 'failed', error: 'boom' }, parts: 0 } })); };
+    setTimeout(failedAnswer, 50);
+    const f = await run(r.url(), reg, ['db-admin', 'memory', '--out', out, '--timeout', '5']);
+    assert.equal(f.status, 1, f.err + f.out); assert.match(f.out, /db-admin\s+ok\s+memory failed: boom/);
   } finally { done = true; r.close(); }
 });

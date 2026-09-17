@@ -321,6 +321,7 @@ def main() -> int:
     observations: list[dict[str, Any]] = []
     skipped: list[str] = []
     needs_rendering: list[str] = []
+    unrendered_ms: list[int] = []
     refusals: list[str] = []
 
     for name in sorted(os.listdir(memory_dir)):
@@ -365,6 +366,7 @@ def main() -> int:
                 # Named in every report until rendered: the watermark does
                 # not pass it (the charter: "never dropped").
                 needs_rendering.append(name)
+                unrendered_ms.append(parsed["mtime_ms"])
                 continue
             text, language = rendering, "non-latin"
             for script_name, lo, hi in (("ka", 0x10A0, 0x10FF), ("ru", 0x0400, 0x04FF), ("el", 0x0370, 0x03FF),
@@ -413,6 +415,12 @@ def main() -> int:
             print(f"  {r}", file=sys.stderr)
         return 1
 
+    # The watermark stops below the oldest unrendered memory, whatever drained
+    # after it: the next incremental drain names it again (the charter:
+    # "never dropped"), at the price of re-reading what came after — which
+    # the assembler dedupes by content hash.
+    if unrendered_ms:
+        next_ms = min(next_ms, min(unrendered_ms) - 1)
     report = {
         "role": role, "agent": ctx["agent"], "host": host, "project": project,
         "working_copy": label, "memory_dir": memory_dir,

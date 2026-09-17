@@ -152,8 +152,8 @@ ignored. Each verified tar lands at `<dir>/<login>/<working copy>.tar`
 `tools/fabric/assemble.py --bundle` takes. A bundle that is short,
 unreadable or wrong is a status in the row (`incomplete`, `unreadable`,
 `sha-mismatch`, `wrong-agent`, `harvest-failed` with the harvester's
-reason) and no file; exit 1 when any account is silent or any bundle
-refused.
+reason) and no file; exit 1 when any account is silent, any bundle
+refused, or an account's memory section failed.
 `bin/fabric-host <host> drain <login>` stays as the sudo fallback for a
 host whose daemons are down. The drain cycle is in `memory/README.md`.
 

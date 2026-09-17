@@ -145,3 +145,36 @@ customers until 2027-01-01; the full-web alternative is "contact us"),
 so Google's index is reachable only through a SERP proxy. Decides:
 Serper.dev (`gl=ge`, `hl=ka`) is the located `web_search`, and Brave
 stays as `web_search_global`, a second index (the CEO: keep both).
+
+## The bridge, live — after the ge holder's relaunch (`ab7355a` on every account)
+
+`fabric-ctl all script` over the control plane, 16 accounts answering:
+every account with session records carries the new sections; the
+`language` section is `ok` wherever there is text to judge (the CLD2
+venv built on all 15 other accounts, `pycld2==0.42` each); no account
+`unavailable`. The one language-culture login, read in full:
+
+- **Notes** (the signature): 1 file, 19 218 letters — 93 % Georgian
+  script; 127 paragraphs binned `94 only / 32 mixed / 1 latin`; CLD2:
+  **`ka` 96.6 %, `en` 0.7 %**, 124 of 127 paragraphs dominant Georgian,
+  3 unreliable. The holder writes its notes in Georgian.
+- **The worker**: one `locale-worker` transcript (its sidecar names the
+  type), 4 turns, **0 tool uses** beside the hand-back — the one inert
+  tool was never called; **input 1 168 letters, 100 % Georgian, 5
+  paragraphs all `only`, CLD2 `ka` 100 %** — nothing the bridge sent it
+  was English; answers 221 letters, 95.9 % Georgian script, CLD2 `ka`
+  97.6 %. The bridge did not leak on its first dispatch.
+- The session's visible text: 681 turns, 68 % Latin / 31 % Georgian —
+  the English renderings the fleet requires, beside the locale; every
+  stored thinking block empty (216), as measured before.
+- The search tools, as the holder: `tools/list` names `web_search` and
+  `web_search_global`, descriptions in Georgian; `web_search_global`
+  (Brave) answers a Georgian query with Georgian results;
+  `web_search` (Serper) answers **HTTP 403 Unauthorized** with the key
+  the CEO set — the key is 64 hex characters, no whitespace, reaches
+  Serper in `X-API-KEY` at `google.serper.dev/search`; the refusal is
+  Serper's on the account side (activation, credits, or a key from
+  another service), not the request's. Open until the CEO checks it.
+- `fabric-ctl language-culture-ge keys`: `SERPER_API_KEY` and
+  `BRAVE_SEARCH_API_KEY` present, fingerprinted; the two `GOOGLE_CSE_*`
+  names removed from Doppler by the CEO.

@@ -400,16 +400,21 @@ export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST="$PROMPT_DIGEST"
 # decides the child's environment on every path, so it is exported here.
 export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 
-# Temporary files go under the account's home, not the host's shared
-# tmpfs. /tmp on a host is one small memory filesystem for every agent
-# account; a bare dotnet, flutter or marp run outside make writes its
-# build and test scratch there and leaves it, and on 2026-09-17 it hit
-# 100% and stopped every session at once (the CEO's decision, seq 748;
-# the make half is each project's, this is the launcher's — the one
-# place every session's environment is decided). A TMPDIR the account
-# set itself wins. The harness's own task output stays where the
-# harness puts it; this is for what the session's tools write.
-export TMPDIR="${TMPDIR:-$HOME/.cache/tmp}"
+# Temporary files go to a per-account directory under /var/tmp, not to
+# the host's shared tmpfs and not under the home. /tmp on a host is one
+# small memory filesystem for every agent account; a bare dotnet, flutter
+# or marp run outside make writes its build and test scratch there and
+# leaves it, and on 2026-09-17 it hit 100% and stopped every session at
+# once (the CEO's decision, seq 748; the make half is each project's,
+# this is the launcher's — the one place every session's environment is
+# decided). /var/tmp is disk-backed and world-writable on every platform
+# the fabric runs on; on a Qubes AppVM it sits on the volatile root
+# volume and is emptied at every reboot, elsewhere systemd-tmpfiles
+# clears entries older than thirty days — either way nothing
+# accumulates under a home for ever (the CEO, 2026-09-17). One directory
+# per login straight under /var/tmp, 700, so no account has to own a
+# shared parent. A TMPDIR the account set itself wins.
+export TMPDIR="${TMPDIR:-/var/tmp/agent-fabric-$AGENT}"
 mkdir -p -m 700 "$TMPDIR" 2>/dev/null || true
 
 if (( PRINT_ONLY )); then

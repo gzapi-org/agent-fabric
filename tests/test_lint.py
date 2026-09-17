@@ -327,6 +327,31 @@ def case_index_description_drift_is_caught() -> None:
         assert "A well-formed slice" in out, f"the finding does not quote the slice text:\n{out}"
 
 
+def case_a_sibling_working_copy_is_linted_unasked() -> None:
+    """The working copies beside the checkout are linted without being
+    named, so a charter edited here with the project's index describing
+    the old one fails the fabric's own run before the project's CI does
+    (2026-09-17). The sibling is found by its remote against the registry;
+    --no-siblings turns it off. Kills: dropping the discovery, or making
+    it ignore a drifted index."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(dom(fabric, "domain", "good.md"), SLICE)
+        wc = wc_demo(fabric)
+        write(proj(fabric, "INDEX.md"), index_for(
+            "- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — STALE WORDING\n"))
+        # a git working copy whose remote the fixture registry maps to the demo project
+        _write_license_layout(fabric, {"version": 1, "projects": {
+            "agent-fabric": {"license": "Apache-2.0", "remotes": ["git@github.com:gzapi-org/agent-fabric.git"]},
+            "demo": {"license": "Apache-2.0", "remotes": ["git@example.com:org/demo.git"]}}}, REUSE_OK)
+        subprocess.run(["git", "-C", wc, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", wc, "remote", "add", "origin", "git@example.com:org/demo.git"], check=True)
+        proc = subprocess.run([sys.executable, LINT, "--fabric", fabric], capture_output=True, text=True)
+        assert proc.returncode != 0 and "STALE WORDING" in proc.stdout + proc.stderr, f"the sibling's drifted index passed unasked:\n{proc.stdout}{proc.stderr}"
+        proc = subprocess.run([sys.executable, LINT, "--fabric", fabric, "--no-siblings"], capture_output=True, text=True)
+        assert proc.returncode == 0, f"--no-siblings still looked beside the checkout:\n{proc.stdout}{proc.stderr}"
+
+
 def case_index_lists_domain_slices() -> None:
     """A role's domain slices live outside the project directory and must
     still be indexed there. Kills: indexing only the project directory."""
@@ -666,6 +691,7 @@ def main() -> int:
     cases = [
         case_clean_base_passes,
         case_index_description_drift_is_caught,
+        case_a_sibling_working_copy_is_linted_unasked,
         case_index_lists_domain_slices,
         case_quoted_description_round_trips,
         case_payload_is_exempt,

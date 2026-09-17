@@ -82,6 +82,27 @@ FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
 PAYLOAD_DIRS = frozenset({"skills", "commands"})
 
 
+def sibling_working_copies(root: str) -> dict[str, str]:
+    """Registered projects whose working copy sits beside this checkout
+    (the workspace layout: projects/<clone>/ for each), with a
+    .agent-fabric/memory/ to lint. Keyed by project id."""
+    out: dict[str, str] = {}
+    parent = os.path.dirname(os.path.abspath(root))
+    registry = workingcopy.load_registry(os.path.join(root, "projects", "registry.json"))
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(parent, name)
+        if path == os.path.abspath(root) or not os.path.isdir(os.path.join(path, layout.PROJECT_DIRNAME, "memory")):
+            continue
+        pid = workingcopy.resolve(path, registry).get("project")
+        if pid and pid != layout.FABRIC_PROJECT_ID and pid not in out:
+            out[pid] = path
+    return out
+
+
 def prompt_template_findings() -> list[str]:
     """The sections every launch prompt appends after the role's own files
     (tools/fabric/launch_prompt.py): each must exist, carry `{role}` so it
@@ -715,6 +736,8 @@ def main() -> int:
                     help="a managed project's checkout whose .agent-fabric/memory/ is linted too "
                          "(repeatable; the project is resolved from the checkout's remote unless "
                          "named as PROJECT=DIR)")
+    ap.add_argument("--no-siblings", action="store_true",
+                    help="do not lint the registered working copies found beside this checkout")
     args = ap.parse_args()
     if args.fabric:
         layout.FABRIC_ROOT = os.path.abspath(args.fabric)
@@ -731,6 +754,16 @@ def main() -> int:
                   "(name it as PROJECT=DIR)", file=sys.stderr)
             return 2
         layout.set_working_copy(pid, path)
+    # The working copies beside this checkout are linted too, unasked: a
+    # project's CI lints its .agent-fabric/ against a fresh clone of this
+    # repository, so a charter edited here with the project's index left
+    # describing the old one passes a fabric-only run and fails every PR
+    # of that project (2026-09-17, a morning of one project's CI). What sits
+    # beside the fabric is what the fabric's own run must see.
+    if not args.no_siblings:
+        for pid, path in sibling_working_copies(root).items():
+            if pid not in layout.explicit_working_copies():
+                layout.set_working_copy(pid, path)
 
     findings: list[str] = []
     schemas = os.path.join("identities", "schemas")

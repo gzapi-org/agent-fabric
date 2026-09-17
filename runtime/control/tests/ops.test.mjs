@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -113,6 +113,32 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.ok(!JSON.stringify(withNotes).includes('მოთხოვნა'), 'no note text leaves');
   assert.equal(notesDir('/h', { XDG_STATE_HOME: '/st' }, 'ge'), '/st/agent-fabric/agents/ge/notes');
   assert.equal(notesDir('/h', {}, 'ge'), '/h/.local/state/agent-fabric/agents/ge/notes');
+  // The workers: the tool-less subagent transcripts beside the session, its USER records the input.
+  assert.deepEqual(s.workers, { status: 'none', skipped_with_tools: 0 });
+  const sub = path.join(dir, 'live', 'subagents'); fs.mkdirSync(sub, { recursive: true });
+  const user = c => JSON.stringify({ type: 'user', message: { role: 'user', content: c } });
+  const worker = [user('თხოვნა: გადახედე ამ ტექსტს და უპასუხე ქართულად, სრული აბზაცი აქ.'),
+                  turn('', 'პასუხი ქართულად, საკმაოდ გრძელი აბზაცი რომ დაითვალოს ბლოკად.'),
+                  user([{ type: 'text', text: 'მეორე თხოვნა ქართულად, ისევ საკმაოდ გრძელი აბზაცი, სამოცამდე ასო.' }]),
+                  JSON.stringify({ type: 'attachment', attachment: { type: 'x' } }),
+                  turn('', 'მეორე პასუხი ქართულად, საკმაოდ გრძელი ტექსტი აქაც.')];
+  fs.writeFileSync(path.join(sub, 'agent-aaa.jsonl'), worker.join('\n') + '\n');
+  const reviewer = [user('Repository: /x. Review the range a..b'), JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] } }), turn('', 'Findings: none.')];
+  fs.writeFileSync(path.join(sub, 'agent-bbb.jsonl'), reviewer.join('\n') + '\n');
+  const w = script(h).workers;
+  assert.equal(w.status, 'ok'); assert.equal(w.files, 1, 'the reviewer used tools: not a worker'); assert.equal(w.skipped_with_tools, 1); assert.equal(w.turns, 2);
+  assert.deepEqual(w.input.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 }, JSON.stringify(w.input));
+  assert.deepEqual(w.text.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 });
+  assert.equal(w.input.georgian, 100); assert.ok(w.input.letters > 0);
+  assert.ok(!JSON.stringify(w).includes('თხოვნა'), 'no worker text leaves');
+  // English reaching the worker is counted in the INPUT bins, from the user records — not from the answers.
+  fs.appendFileSync(path.join(sub, 'agent-aaa.jsonl'), user('A paragraph of English that the bridge let through to the worker.') + '\n' + turn('', 'მოკლე პასუხი ქართულად, საკმაოდ გრძელი რომ ბლოკი გამოვიდეს.') + '\n');
+  const leak = script(h).workers;
+  assert.deepEqual(leak.input.blocks, { only: 2, mixed: 0, latin: 1, empty: 0 }, 'the leak is one latin input block');
+  assert.deepEqual(leak.text.blocks, { only: 3, mixed: 0, latin: 0, empty: 0 }, 'the answers stay Georgian');
+  const stale = path.join(sub, 'agent-ccc.jsonl'); fs.writeFileSync(stale, user('old English input, long enough to be a block') + '\n'); fs.utimesSync(stale, past, past);
+  assert.equal(script(h).workers.files, 1, 'a worker transcript older than the window is not read');
+  assert.deepEqual(workerTranscripts([{ f: '/nonexistent/s.jsonl' }]), { status: 'none', skipped_with_tools: 0 });
 });
 
 // The drain over the control plane: the account's own memory directories,

@@ -36,6 +36,14 @@ test('rows and table: an answered account and a silent one', () => {
   assert.match(t, /db-admin\s+ok\s+x@y.z\s+12%\s+2026-09-17T10:50\s+80%\s+2026-09-21T16:00\s+db-admin\s+abc1234 \(2 behind\)/);
   assert.match(t, /web-dev-01\s+no answer/);
   assert.match(table('ping', rs), /db-admin\s+ok\s+120 ms/);
+  // The script table: the workers column — input and answers binned — and `-` when there are none.
+  const sc = { status: 'ok', turns: 3, thinking: { letters: 0 }, thinking_blocks: { only: 0, mixed: 0, latin: 0, empty: 3 }, text: { letters: 40, georgian: 100 }, notes: { status: 'none' } };
+  const w = { status: 'ok', files: 2, skipped_with_tools: 1, turns: 4, input: { letters: 300, georgian: 100, blocks: { only: 3, mixed: 0, latin: 1, empty: 0 } }, text: { letters: 200, georgian: 100, blocks: { only: 4, mixed: 0, latin: 0, empty: 0 } } };
+  const st = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: w } } }]));
+  assert.match(st, /workers \(input \/ answers\)/);
+  assert.match(st, /db-admin\s+ok\s+none.*2 file\(s\): in 3 only \/ 0 mixed \/ 1 latin \/ out 4 only \/ 0 mixed \/ 0 latin/);
+  const none = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: { status: 'none', skipped_with_tools: 0 } } } }]));
+  assert.match(none, /db-admin\s+ok\s+none.*unreadable\s+-\s*$/m);
 });
 
 // The bundles a drain answers with, put back together: by slug and part,

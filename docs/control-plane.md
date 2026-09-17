@@ -67,7 +67,15 @@ the CEO for that role; counts and shares only, never text, and not part
 of `status` since it reads megabytes. The reasoning itself is not on
 disk — most thinking blocks are stored with no text and the rest as
 short summaries — which is why the notes are the signature and the
-transcript's text share the second number), `memory` (the drain: the
+transcript's text share the second number. `workers`, in the same
+reply: the locale worker's transcripts — the subagent records stored
+beside each session, `<session>/subagents/agent-*.jsonl`, of which the
+worker's are the ones with no `tool_use` block, since it has no tools;
+one that used a tool is counted as skipped, not read. Its user records
+are the worker's input, composed by the bridge, so a Latin paragraph
+there is English that reached the worker — the leak the construction of
+`docs/language-culture-bridge.md` exists to prevent; its text blocks are
+the answers. Both binned per paragraph like the notes), `memory` (the drain: the
 account's own daemon runs `tools/fabric/harvest_memory.py --bundle`
 over each memory directory the harness keeps for it, matched to the
 working copy it was written from by slug, and answers with each bundle

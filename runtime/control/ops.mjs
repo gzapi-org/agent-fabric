@@ -156,6 +156,16 @@ const shares = counts => {
   for (const [k, v] of Object.entries(counts).sort((a, b) => b[1] - a[1])) out[k] = Math.round(1000 * v / total) / 10;
   return out;
 };
+// A block (a thinking block, a paragraph) binned by its non-Latin share:
+// `only` at 90 %, `mixed` from 30 %, `latin` below, `empty` under 20 letters.
+const binInto = (blocks, counts) => {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total < 20) { blocks.empty += 1; return; }
+  const nonLatin = total - (counts.latin ?? 0) - (counts.other ?? 0);
+  const share = nonLatin / total;
+  blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
+};
+const paragraphs = (text, counts, blocks) => { for (const para of text.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(blocks, c); for (const [k, v] of Object.entries(c)) counts[k] = (counts[k] ?? 0) + v; } };
 export function notesDir(home = os.homedir(), env = process.env, login = (() => { try { return os.userInfo().username; } catch { return 'unknown'; } })()) {
   return path.join(env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'agent-fabric', 'agents', login, 'notes');
 }
@@ -178,13 +188,6 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
   // The notes: every file under the notes directory touched in the window,
   // its paragraphs binned like thinking blocks.
   const noteCounts = {}; const noteBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }; let noteFiles = 0;
-  const binInto = (blocks, counts) => {
-    const total = Object.values(counts).reduce((a, b) => a + b, 0);
-    if (total < 20) { blocks.empty += 1; return; }
-    const nonLatin = total - (counts.latin ?? 0) - (counts.other ?? 0);
-    const share = nonLatin / total;
-    blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
-  };
   try {
     for (const n of fs.readdirSync(notes)) {
       const f = path.join(notes, n);
@@ -192,7 +195,7 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
       if (!st.isFile() || now - st.mtimeMs > hours * 3600000) continue;
       let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
       noteFiles += 1;
-      for (const para of body.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(noteBlocks, c); for (const [k, v] of Object.entries(c)) noteCounts[k] = (noteCounts[k] ?? 0) + v; }
+      paragraphs(body, noteCounts, noteBlocks);
     }
   } catch { /* no notes directory: reported as none */ }
   const notesOut = noteFiles ? { status: 'ok', files: noteFiles, ...shares(noteCounts), blocks: noteBlocks } : { status: 'none', dir: notes };
@@ -213,7 +216,47 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
       }
     }
   }
-  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut };
+  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut, workers: workerTranscripts(files, { hours, now }) };
+}
+
+// THE WORKERS. A subagent's transcript is stored beside its session's
+// (<session>/subagents/agent-*.jsonl). The locale worker of the
+// language-culture bridge (identities/roles/language-culture/charter.md)
+// has no tools, so its transcript is the one with no tool_use block —
+// every other class uses tools; a transcript that does is counted as
+// skipped, not read. Its USER records are the worker's input, which the
+// bridge composed: a Latin paragraph there is English reaching the
+// worker, the leak the construction exists to prevent. Its assistant
+// text is the answer. Paragraphs binned like the notes; counts only.
+export function workerTranscripts(files, { hours = 24, now = Date.now() } = {}) {
+  const input = {}, text = {}; const inputBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }, textBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
+  let n = 0, turns = 0, withTools = 0;
+  for (const { f } of files) {
+    const dir = path.join(path.dirname(f), path.basename(f, '.jsonl'), 'subagents');
+    let names; try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!/^agent-.*\.jsonl$/.test(name)) continue;
+      const p = path.join(dir, name);
+      let st; try { st = fs.statSync(p); } catch { continue; }
+      if (now - st.mtimeMs > hours * 3600000) continue;
+      let body; try { body = fs.readFileSync(p, 'utf8'); } catch { continue; }
+      const recs = body.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(d => d && typeof d === 'object');
+      if (recs.some(d => d.type === 'assistant' && (d.message?.content ?? []).some(b => b?.type === 'tool_use'))) { withTools += 1; continue; }
+      n += 1;
+      for (const d of recs) {
+        const c = d.message?.content;
+        if (d.type === 'user') {
+          const texts = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text) : [];
+          for (const t of texts) paragraphs(t, input, inputBlocks);
+        } else if (d.type === 'assistant') {
+          turns += 1;
+          for (const b of Array.isArray(c) ? c : []) if (b?.type === 'text' && typeof b.text === 'string') paragraphs(b.text, text, textBlocks);
+        }
+      }
+    }
+  }
+  if (!n) return { status: 'none', skipped_with_tools: withTools };
+  return { status: 'ok', files: n, skipped_with_tools: withTools, turns, input: { ...shares(input), blocks: inputBlocks }, text: { ...shares(text), blocks: textBlocks } };
 }
 
 // THE DRAIN, over the control plane (the CEO, 2026-09-17: the way out of

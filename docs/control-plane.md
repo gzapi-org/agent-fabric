@@ -57,7 +57,12 @@ token, which goes into one request header and nowhere else), `keys`
 (name, presence and twelve hex digits of the sha256 of each synced key —
 enough to tell two keys apart, never a value), `fabric` (head, branch,
 how far behind `origin/main`, dirty), `session` (Claude processes as the
-login; whether one is planning), `status` (all of them). A section that
+login; whether one is planning), `script` (the letters of the account's
+own session records — thinking and visible text apart — counted by
+Unicode script over the last 24 h: the signature of the language a
+session reasons in, asked for by the CEO for the language-culture role;
+counts and shares only, never text, and not part of `status` since it
+reads megabytes), `status` (all but `script`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
@@ -88,7 +93,7 @@ the coordinator.
 
 ## The coordinator's side
 
-`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|ping] [--json] [--timeout S]`
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]`
 posts one request and reads the replies after its own id every half
 second until every placed address has answered or the timeout is spent
 (20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:

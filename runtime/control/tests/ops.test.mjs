@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { identity, usage, keys, fabric, session, collect, KEY_NAMES, OPS } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, script, scriptCounts, collect, KEY_NAMES, OPS } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -77,6 +77,30 @@ test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fail
   assert.equal((await fabric('/no/checkout', () => { throw new Error('not a git repository'); })).status, 'not-a-checkout');
   const asyncExec = async (...a) => ({ stdout: exec(...a) });   // the real execFile shape
   assert.equal((await fabric('/some/root', asyncExec)).head, 'abc1234');
+});
+
+test('script: letters by script, thinking and text apart, from the account\'s own session records; nothing of the text leaves', () => {
+  assert.deepEqual(scriptCounts('Hello, world! 123'), { latin: 10 });
+  assert.deepEqual(scriptCounts('გამარჯობა hello'), { georgian: 9, latin: 5 });
+  assert.deepEqual(scriptCounts('привет'), { cyrillic: 6 });
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'script-home-'));
+  const dir = path.join(h, '.claude', 'projects', '-home-x-projects-demo'); fs.mkdirSync(dir, { recursive: true });
+  const turn = (thinking, text) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'thinking', thinking }, { type: 'text', text }] } });
+  const lines = [turn('I think in English about this', 'გამარჯობა — the answer in Georgian, then its rendering'), turn('ვფიქრობ ქართულად', 'ok'),
+                 JSON.stringify({ type: 'user', message: { content: 'ignored' } }), 'not json'];
+  fs.writeFileSync(path.join(dir, 'live.jsonl'), lines.join('\n') + '\n');
+  const old = path.join(dir, 'old.jsonl'); fs.writeFileSync(old, turn('ძველი', 'old') + '\n');
+  const past = new Date(Date.now() - 48 * 3600000); fs.utimesSync(old, past, past);
+  const s = script(h);
+  assert.equal(s.status, 'ok'); assert.equal(s.files, 1, 'a record older than the window is not read'); assert.equal(s.turns, 2);
+  assert.equal(s.thinking.letters, 24 + 15); assert.ok(s.thinking.latin > s.thinking.georgian, JSON.stringify(s));
+  assert.ok(s.text.georgian > 0 && s.text.latin > 0);
+  assert.deepEqual(s.thinking_blocks, { only: 0, mixed: 0, latin: 1, empty: 1 }, 'the English block is latin; the short Georgian one is under the 20-letter floor');
+  fs.appendFileSync(path.join(dir, 'live.jsonl'), turn('ვფიქრობ ქართულად და ვწერ ქართულად, ეს ბლოკი მხოლოდ ქართულია', 'x') + '\n' + turn('ნახევარი ქართული ნახევარი and half of it English text', 'x') + '\n');
+  assert.deepEqual(script(h).thinking_blocks, { only: 1, mixed: 1, latin: 1, empty: 1 });
+  assert.ok(!JSON.stringify(s).includes('answer'), 'no text leaves, only counts');
+  assert.equal(script(h, { hours: 72 }).files, 2);
+  assert.equal(script('/nonexistent').status, 'no-records');
 });
 
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {

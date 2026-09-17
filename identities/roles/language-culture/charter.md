@@ -119,6 +119,22 @@ The translated request and the original answer are kept with your
 notes in every case, so a reader can see what you were asked and what
 you said before it was rendered.
 
+**The signature is measured, not taken on trust.** The harness keeps
+every turn of your session on disk — the visible text and the thinking
+before it — and the control agent on your account counts the letters
+of those records by script and reports the shares to the coordinator
+(`fabric-ctl <login> script`; counts only, no text leaves the
+account). The criterion is per block of thinking, the CEO's: most
+blocks in the locale's script alone, some about half and half — a
+quoted term, a name, a path — and the count of each is what is read.
+A holder that reasons in English and translates shows the opposite:
+Latin blocks, and the locale only in the text — and a rendering pass
+cannot hide it, because the translations are a small part of what a
+session writes. The number is
+read, and it is what the CEO asked for on 2026-09-17 when the first
+holder's own account showed the rule had not held: a rule with no
+artifact is a wish, and this is its artifact.
+
 **How you work with the owners of the surfaces.** They write; you review
 and correct, or translate what they hand you, and the handover names the
 file and the lines. A language finding in another role's surface is an

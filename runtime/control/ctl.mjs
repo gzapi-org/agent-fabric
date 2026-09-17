@@ -2,7 +2,7 @@
 // post one request on the control channel, read the replies, print them.
 // Front door: bin/fabric-ctl.
 //
-//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|ping] [--json] [--timeout S]
+//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]
 //
 // A login becomes an address through the registry's placement
 // (<host>/<login>); `all` is every placement, addressed as "*". The
@@ -54,7 +54,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -65,6 +65,19 @@ export function table(op, rs) {
   if (op === 'ping') {
     lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} latency`);
     for (const r of rs) lines.push(`${r.account.padEnd(22)} ${r.status.padEnd(10)} ${r.latency_ms != null ? r.latency_ms + ' ms' : ''}`.trimEnd());
+    return lines.join('\n');
+  }
+  if (op === 'script') {
+    const top = s => !s || s.status !== 'ok' ? null : s;
+    const fmt = sh => !sh || !sh.letters ? '-' : Object.entries(sh).filter(([k]) => k !== 'letters').slice(0, 3).map(([k, v]) => `${k} ${v}%`).join(', ') + ` (${sh.letters} letters)`;
+    const bins = b => !b ? '-' : `${b.only} only / ${b.mixed} mixed / ${b.latin} latin`;
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'turns'.padStart(5)}  ${'thinking blocks (non-Latin)'.padEnd(30)} ${'thinking, by script'.padEnd(40)} text, by script`);
+    for (const r of rs) {
+      if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      const s = top(r.script);
+      if (!s) { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${(r.script?.status ?? '-')}`); continue; }
+      lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${String(s.turns).padStart(5)}  ${bins(s.thinking_blocks).padEnd(30)} ${fmt(s.thinking).padEnd(40)} ${fmt(s.text)}`);
+    }
     return lines.join('\n');
   }
   lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'claude account'.padEnd(30)} ${'5h'.padStart(4)}  ${'5h resets (UTC)'.padEnd(16)} ${'7d'.padStart(4)}  ${'7d resets (UTC)'.padEnd(16)} ${'role'.padEnd(18)} fabric`);
@@ -80,7 +93,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|ping] [--json] [--timeout S]'); return args.help ? 0 : 2; }
+  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]'); return args.help ? 0 : 2; }
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;

@@ -19,7 +19,7 @@ import { promisify } from 'node:util';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -90,6 +90,96 @@ export function session(uid = process.getuid(), exec = execFileSync) {
   return { claude_processes: n, planning: holdStatus().held };
 }
 
+// Which SCRIPT the account writes in — the signature of the language it
+// reasons in. A role that must think in the language it answers for
+// (language-culture) leaves exactly one artifact that differs when it
+// does not: the letters of its own session records. The harness keeps
+// every assistant turn, thinking blocks included, under
+// ~/.claude/projects/<launch dir>/<session>.jsonl; this counts the LETTERS
+// of those blocks by script (Unicode block: Latin, Georgian, Cyrillic,
+// Greek, Arabic, Hebrew, Armenian, CJK, other) and reports shares —
+// thinking and visible text apart, since a session that reasons in one
+// language and translates its answers shows a low share in thinking and
+// a higher one in text. Nothing of the text itself leaves the account:
+// counts and percentages only. Records touched in the last `hours`
+// (default 24), newest `limit` files (default 5).
+//
+// The CEO's criterion (2026-09-17) is per BLOCK, not per total: most
+// thinking blocks must be in the locale's script alone, some will be
+// about half and half (a term quoted, a name), and a session that
+// reasons in English shows the opposite — so each thinking block is
+// also binned by the share of its dominant non-Latin script: `only`
+// (≥ 90 %), `mixed` (30–90 %), `latin` (< 30 %), and the bins are
+// reported as counts of blocks.
+const SCRIPT_RANGES = [
+  ['georgian', [[0x10A0, 0x10FF], [0x1C90, 0x1CBF], [0x2D00, 0x2D2F]]],
+  ['cyrillic', [[0x0400, 0x052F], [0x2DE0, 0x2DFF], [0xA640, 0xA69F]]],
+  ['greek', [[0x0370, 0x03FF], [0x1F00, 0x1FFF]]],
+  ['armenian', [[0x0530, 0x058F]]],
+  ['hebrew', [[0x0590, 0x05FF]]],
+  ['arabic', [[0x0600, 0x06FF], [0x0750, 0x077F], [0x08A0, 0x08FF]]],
+  ['cjk', [[0x3040, 0x30FF], [0x4E00, 0x9FFF], [0xAC00, 0xD7AF]]],
+  ['latin', [[0x0041, 0x005A], [0x0061, 0x007A], [0x00C0, 0x024F], [0x1E00, 0x1EFF]]],
+];
+export function scriptCounts(text, counts = {}) {
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp < 0x41) continue;                      // digits, punctuation, space
+    let name = null;
+    for (const [n, ranges] of SCRIPT_RANGES) { if (ranges.some(([a, b]) => cp >= a && cp <= b)) { name = n; break; } }
+    if (!name) { if (/\p{L}/u.test(ch)) name = 'other'; else continue; }
+    counts[name] = (counts[name] ?? 0) + 1;
+  }
+  return counts;
+}
+const shares = counts => {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const out = { letters: total };
+  for (const [k, v] of Object.entries(counts).sort((a, b) => b[1] - a[1])) out[k] = Math.round(1000 * v / total) / 10;
+  return out;
+};
+export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.now() } = {}) {
+  const root = path.join(home, '.claude', 'projects');
+  let files = [];
+  try {
+    for (const d of fs.readdirSync(root)) {
+      const dir = path.join(root, d);
+      let names; try { names = fs.readdirSync(dir); } catch { continue; }
+      for (const n of names) {
+        if (!n.endsWith('.jsonl')) continue;
+        const f = path.join(dir, n);
+        let st; try { st = fs.statSync(f); } catch { continue; }
+        if (now - st.mtimeMs <= hours * 3600000) files.push({ f, mtime: st.mtimeMs });
+      }
+    }
+  } catch { return { status: 'no-records' }; }
+  files.sort((a, b) => b.mtime - a.mtime); files = files.slice(0, limit);
+  if (!files.length) return { status: 'no-records', hours };
+  const thinking = {}, text = {}; let turns = 0;
+  const blocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
+  const bin = counts => {
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (total < 20) { blocks.empty += 1; return; }
+    const nonLatin = total - (counts.latin ?? 0) - (counts.other ?? 0);
+    const share = nonLatin / total;
+    blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
+  };
+  for (const { f } of files) {
+    let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    for (const line of body.split('\n')) {
+      if (!line.includes('"assistant"')) continue;
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      if (d?.type !== 'assistant') continue;
+      turns += 1;
+      for (const b of d.message?.content ?? []) {
+        if (b?.type === 'thinking' && typeof b.thinking === 'string') { const c = scriptCounts(b.thinking); bin(c); for (const [k, v] of Object.entries(c)) thinking[k] = (thinking[k] ?? 0) + v; }
+        else if (b?.type === 'text' && typeof b.text === 'string') scriptCounts(b.text, text);
+      }
+    }
+  }
+  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text) };
+}
+
 // Everything, for `status`; the sections a request names, otherwise.
 export async function collect(op, ctx = {}) {
   const wants = op === 'status' ? ['identity', 'usage', 'keys', 'fabric', 'session'] : [op];
@@ -101,6 +191,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'keys') return guard(name, () => keys(ctx.home));
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));
     if (name === 'session') return guard(name, () => session(ctx.uid, ctx.exec));
+    if (name === 'script') return guard(name, () => script(ctx.home));
     return Promise.resolve();
   }));
   return data;

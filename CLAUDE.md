@@ -40,6 +40,8 @@ agent-fabric/bin/fabric-status          # all of that plus the API path, model p
                                         # capability resolution and routing health — ONE call
 agent-fabric/bin/fabric-model list      # every model choice per provider, with its source layer;
                                         # `set --provider <p> <target> <model>` writes your own layer
+agent-fabric/bin/fabric-usage           # (coordinator) every placed account's Claude usage windows,
+                                        # each read by that account itself through the host executor
 ```
 
 When asked who you are, what you are bound to, or which API or model

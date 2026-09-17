@@ -1,0 +1,6 @@
+{
+  "description": "The fabric's control channel: machine records between the control agent that runs on every account (runtime/control/agentd.mjs, a systemd user unit) and the coordinator's fabric-ctl. One relay, the one the fleet's GZCoord traffic rides (the coordinator workspace's projects/.gzcoord/), a channel of its own whose name ends in :control so no session's inbox ever drains it (inbox.mjs refuses one). Not GZCoord messages: one JSON object per relay message, requests and replies correlated by id, addressed by convention (to: an address, a list, or *). ttl_s bounds how old a request may be when answered. Env overrides: CLAUDE_BRIDGE_URL, FABRIC_CONTROL_CHANNEL (tests). Written 2026-09-17 (the CEO: a real-time control plane).",
+  "relay_url": "http://127.0.0.1:8765",
+  "channel": "fabric:control",
+  "ttl_s": 30
+}

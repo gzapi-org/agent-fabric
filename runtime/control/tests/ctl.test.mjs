@@ -72,7 +72,7 @@ test('fabric-ctl all usage: two of three answer — table, a no-answer row, exit
     assert.match(out.out, /web-dev-01\s+ok\s+-\s+no-credentials/);
     assert.match(out.out, /edge-hosting\s+no answer/);
     const req = JSON.parse(r.rows[0].content);
-    assert.equal(req.kind, 'request'); assert.equal(req.op, 'usage'); assert.equal(req.to, '*'); assert.match(req.from, /\/user$/);
+    assert.equal(req.kind, 'request'); assert.equal(req.op, 'usage'); assert.equal(req.to, '*'); assert.match(req.from, /^[^/]+\/[^/]+$/, 'from is this login\'s own address, whatever the login is (CI runs as runner)');
     assert.ok(!r.hits.some(h => h.startsWith('/api/ack') || h.startsWith('/api/wait')), 'history reads only, no cursor');
     const j = await run(r.url(), reg, ['db-admin', 'ping', '--json', '--timeout', '1']);
     assert.equal(j.status, 1); assert.deepEqual(JSON.parse(j.out.trim()), { account: 'db-admin', host: 'h', status: 'no answer' });

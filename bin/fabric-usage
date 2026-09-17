@@ -18,6 +18,11 @@
 #
 # An account with no credentials file, or whose read fails, gets one
 # line saying so; the table is never silently short.
+#
+# Superseded for everyday use by `bin/fabric-ctl all usage`, which asks
+# each account's control agent over the relay (docs/control-plane.md):
+# no sudo, no per-host loop, a second instead of a minute. This stays as
+# the fallback for a host whose daemons are down.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REGISTRY="${AGENT_FABRIC_HOSTS_REGISTRY:-$ROOT/runtime/hosts/registry.json}"

@@ -1,0 +1,117 @@
+# The control plane: a daemon per account, a channel on the relay, `fabric-ctl`
+
+Decided by the CEO on 2026-09-17, after the first fleet usage table was
+made by hand and the second (`bin/fabric-usage`) could only be made by
+the coordinator's login, through sudo, one host at a time: "we have to
+extend it really as a real time control plane — when a message is
+received by a process on the agent, it will answer with the required
+data." What "received" means there is the whole design.
+
+## What "received" means on the control channel
+
+**A daemon, never a session.** Every account runs
+`runtime/control/agentd.mjs` under a systemd *user* unit
+(`runtime/control/agent-fabric-agentd.service`, installed and enabled by
+`bootstrap.sh` at every moveto entry). It is alive whether or not a
+Claude session is: the account lingers (`docs/live-checks/2026-09-17-control-plane.md`
+§persistence), so its user manager exists from boot. A request reaches
+the daemon, the daemon reads what the account can say about itself
+(`runtime/control/ops.mjs`), and posts the answer. No harness, no model,
+no prompt, no sudo is in the loop, and nothing a request carries is ever
+executed: the ops are a closed enum and take no arguments.
+
+**A channel no session drains.** The records ride the same relay as the
+fleet's GZCoord traffic (the coordinator workspace's `projects/.gzcoord/`),
+on a channel of their own, `fabric:control` (`runtime/control/config.json`).
+They are not GZCOORD/1 messages — one JSON object per relay message — and
+the inbox runtime refuses any channel whose name ends in `:control`
+(`inbox.mjs`, `send.mjs`: exit 2, nothing read or sent), so a session's
+watch cannot be pointed at machine records by mistake, and the protocol
+that sessions coordinate over stays exactly what it was
+(`communication/gzcoord/protocol/`: the grammar is frozen, and this is
+not a message type).
+
+**No delivery, only reading.** The relay has no point-to-point delivery:
+every reader sees every record on a channel. Addressing is by
+convention — `to` is an address, a list, or `*` — and each daemon answers
+only what names it; the coordinator reads the replies by `in_reply_to`.
+The daemon keeps no consumer cursor and never acks: it primes from the
+newest record on the channel at start and long-polls after it
+(`since_id`), so a restart never replays history and a request posted
+while a daemon was down is simply not answered — which `fabric-ctl`
+reports as a `no answer` row, never as a short table.
+
+## The wire
+
+```json
+{"v":1,"kind":"request","id":"<uuidv7>","from":"<host>/<login>","to":"*","op":"status","ts":"<iso>","ttl_s":30}
+{"v":1,"kind":"reply","id":"<uuidv7>","in_reply_to":"<request id>","from":"<host>/<login>","op":"status","ts":"<iso>","ok":true,
+ "data":{"identity":{...},"usage":{...},"keys":[...],"fabric":{...},"session":{...},"agentd":{"pid":1,"started":"<iso>","uptime_s":1}}}
+```
+
+Ops: `ping`, `identity` (agent, host, role, project, working copy, the
+Claude account signed in — email and organisation from the harness's own
+profile record — and whether a credentials file exists), `usage` (the
+five-hour and seven-day windows, read with the account's own OAuth
+token, which goes into one request header and nowhere else), `keys`
+(name, presence and twelve hex digits of the sha256 of each synced key —
+enough to tell two keys apart, never a value), `fabric` (head, branch,
+how far behind `origin/main`, dirty), `session` (Claude processes as the
+login; whether one is planning), `status` (all of them). A section that
+cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
+always arrives and its gaps are named. The relay's `sender` field is
+client-supplied and carries the same address, for a human reading the
+channel.
+
+## The fence, v1 — and the signing that follows
+
+A daemon answers a request only when `from` is a host operator's address
+as `runtime/hosts/registry.json` places it, `op` is in the closed set,
+`ts + ttl_s` is not in the past, and `id` was not seen (an LRU of 256).
+That is a fence, not a proof: the relay verifies no sender, and any
+holder of the shared relay token can write the operator's address. It
+stops the accident — another session's watch, a typo, a replay of
+history — and it bounds what a forged request can obtain to the same
+non-secret facts. Signing is the next commit, as its own change: an
+Ed25519 key the coordinator alone holds (its Doppler config), the public
+key committed under `runtime/control/`, `sig` over the canonical request
+fields, and a daemon that finds the public key drops unsigned requests.
+Not HMAC: a shared secret in every account's config lets every account
+forge the coordinator.
+
+## The coordinator's side
+
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|ping] [--json] [--timeout S]`
+posts one request and reads the replies after its own id every half
+second until every placed address has answered or the timeout is spent
+(20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:
+a run leaves its request and the replies on the channel, nothing
+anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
+whose daemons are down.
+
+## Why the accounts had to be persisted first
+
+This host is a Qubes AppVM with `rw-only` persistence: `/home` survives
+a reboot, the root volume — `/etc/passwd` included — does not, and the
+fifteen accounts had existed only there since the first was made. A
+daemon per account is worth nothing on accounts that vanish at boot.
+Binding the account files under `/rw/bind-dirs` was ruled out by
+reading shadow-utils, not by guessing: a bound single file is a
+mountpoint, and `useradd`'s `rename(2)` of `passwd+` over it fails with
+EBUSY, breaking every later account. The mechanism that works is the
+one the host already used for `/tmp`: a boot script under
+`/rw/config/rc.local.d/` that re-adds the snapshotted lines
+(`runtime/provisioning/platform/qubes/agent-fabric-accounts.rc`), fed by
+`persist-accounts.sh` at every account's creation and by `bin/fabric-host
+<host> persist` for the ones that already existed. Linger is enabled in
+the same step, on every platform: that is what gives the account a user
+manager at boot, and the manager is what starts the daemon.
+
+## A second host
+
+The relay binds `127.0.0.1`, and every daemon on this host reaches it
+there (`runtime/control/config.json`). A second host needs a URL its
+daemons can reach — `hosts.<h>.control_relay_url` in the registry,
+exported as `CLAUDE_BRIDGE_URL` to the unit — and the same channel; the
+fence already keys on the registry's operator per host. Not built until
+a second host exists.

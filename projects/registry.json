@@ -70,7 +70,7 @@
       "default_branch": "main",
       "taxonomy": ".agent-fabric/taxonomy.json",
       "memory": ".agent-fabric/memory",
-      "integration": null,
+      "integration": "projects/gzapi.brand/integration",
       "license": "LicenseRef-gzapi-brand-Proprietary",
       "note": "Names, claims by audience, the brand subset of the design tokens, the asset register and the decision records; no code, no build. The brand's source of authority since the owner's decision of 2026-09-17 (brand/decisions/0001), superseding the 2026-09-15 ruling that gzapi.ge was: the site, the decks and the product's shared web tokens copy the brand subset at a pinned commit and record it. One role, brand-comms; the owner decides, brand-comms proposes. A private repository whose tree carries no licence file; registered by fabric-coordinator on 2026-09-17."
     },

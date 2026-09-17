@@ -687,7 +687,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, splitMessage, NOTIFICATION_CAP, REPLAY_CMD } from '../scripts/inbox.mjs';
+import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, splitMessage, NOTIFICATION_CAP, REPLAY_CMD, assertNotControlChannel } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1331,4 +1331,27 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   const fifty = render({ classified: Array.from({ length: 50 }, (_, i) => mine(700 + i, meta(String(i).padStart(2, '0')) + '\n\n' + longBody)), ...[] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
   assert.ok(fifty.length <= NOTIFICATION_CAP);
   assert.match(fifty, /\n  … and \d+ more for you \(seq 7\d\d–749\), each read with --replay <seq>$/, `a listing that dropped lines says so: ${fifty.slice(-200)}`);
+});
+
+// The control channel: machine records, never a session's.
+test('a :control channel is refused by the drain, the watch and send, before any request reaches the relay', async () => {
+  assert.throws(() => assertNotControlChannel('fabric:control'), /control channel/);
+  assert.doesNotThrow(() => assertNotControlChannel('gzapp:gzcoord'));
+  assert.doesNotThrow(() => assertNotControlChannel('x:controls'));
+  const hits = [];
+  const server = http.createServer((req, res) => { hits.push(req.url); res.setHeader('content-type', 'application/json'); res.end('{"messages":[]}'); });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fabric:control' };
+  for (const args of [[], ['--follow'], ['--wait', '1']]) {
+    const r = spawnSync('node', [INBOX, ...args], { env, encoding: 'utf8', timeout: 10000 });
+    assert.equal(r.status, 2, `inbox ${args.join(' ')}: exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /control channel/);
+  }
+  const f = path.join(env.HOME, 'm.txt'); fs.writeFileSync(f, valid);
+  const s = spawnSync('node', [SEND, f], { env, encoding: 'utf8', timeout: 10000 });
+  server.closeAllConnections(); server.close();
+  assert.equal(s.status, 2, `send: exit ${s.status}\n${s.stderr}`);
+  assert.match(s.stderr, /is a control channel[\s\S]*not sent/);
+  assert.deepEqual(hits.filter(u => u.startsWith('/api/')), [], `a request reached the relay: ${hits}`);
 });

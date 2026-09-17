@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami } from './gzmsg.mjs';
-import { identity, inboxRoot, integrationConfig, token, api, syncedToken } from './inbox.mjs';
+import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -59,6 +59,7 @@ export async function main(argv = process.argv.slice(2)) {
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
   if (!cfg.configured) { console.error(`send: ${cfg.reason} — not sent`); return 3; }
+  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(`send: ${e.message} — not sent`); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   const taxPath = findTaxonomy(root);

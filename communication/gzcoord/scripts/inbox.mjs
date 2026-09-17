@@ -133,6 +133,19 @@ function gitToplevel() {
 // workspace (projects/) — identity.py reports the project from the binding
 // but no working copy, so the binding's own working_copy (the checkout the
 // role was activated in) is the root; the cwd is only the last resort.
+// A channel whose name ends in ":control" carries the fabric's machine
+// records (runtime/control/: requests a per-account daemon answers with
+// usage, identity, key fingerprints), not GZCOORD/1 messages, and no
+// session may ever drain or send on it — a control record printed into a
+// session's context is exactly what the control plane exists to avoid,
+// and the env override GZCOORD_CHANNEL would otherwise let one be named
+// (decided 2026-09-17). Throws; the CLIs print it and exit 2 before any
+// request reaches the relay.
+export function assertNotControlChannel(channel) {
+  if (typeof channel === 'string' && /:control$/.test(channel))
+    throw new Error(`${channel} is a control channel: machine records for the control agent (runtime/control/), never a session's inbox or outbox`);
+}
+
 export function inboxRoot(who) {
   const top = gitToplevel();
   if (top) return top;
@@ -551,6 +564,7 @@ export async function main(argv = process.argv.slice(2)) {
   // Not configured is not an error at a session start, and not a guess
   // either: one line, exit 0, no relay, no channel.
   if (!cfg.configured) { console.error(`gzcoord inbox: ${cfg.reason} — skipping`); return 0; }
+  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(`gzcoord inbox: ${e.message}`); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   // Activate what this session owns before anything else: the hosting

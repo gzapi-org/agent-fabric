@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # agent-fabric: re-create the role accounts at boot, and their linger.
 #
 # In a Qubes AppVM the root volume is a volatile snapshot of the template:
@@ -10,7 +10,8 @@
 # and shadow-utils writes passwd+ then rename(2), which fails with EBUSY
 # on a mountpoint, so every later useradd would break. This runs from
 # /rw/config/rc.local.d (qubes-misc-post.service, after logind is up)
-# and appends, verbatim, every snapshotted account record that the boot's
+# — executed, not sourced, so bash is fine — and appends, verbatim, every
+# snapshotted account record that the boot's
 # /etc lacks; then enables linger for each so its user manager, and the
 # control agent under it, come up without a login.
 #

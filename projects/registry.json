@@ -85,7 +85,7 @@
       "default_branch": "main",
       "taxonomy": ".agent-fabric/taxonomy.json",
       "memory": ".agent-fabric/memory",
-      "integration": null,
+      "integration": "projects/gzapp.decks/integration",
       "license": "LicenseRef-gzapp-decks-Proprietary",
       "note": "Marp decks under one brand theme whose tokens are vendored from gzapi.ge (the source of truth); bilingual, an asset register every image has a row in, PDFs as versioned build output. One role, brand-comms. A private repository whose tree carries no license file: all rights reserved by default; the vendored fonts are OFL-1.1. Moved to gzapi-org on 2026-09-16; the andreabenetton spellings stay listed for clones not yet re-pointed."
     }

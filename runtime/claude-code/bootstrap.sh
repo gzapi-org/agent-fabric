@@ -23,6 +23,8 @@
 #   ~/.config/systemd/user/agent-fabric-agentd.service
 #                                      the control agent (runtime/control/), enabled and started
 #                                      in this account's user manager when one is running
+#   ~/.cache/agent-fabric/langid/       fastText's lid.176.ftz and its predictor venv, for the
+#                                      control agent's script op (runtime/langid/), best effort
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
 # session start. Nothing here makes projects/ a git repository. A managed
@@ -194,6 +196,13 @@ if (( ! DRY_RUN )); then
         echo "  !  $UNIT_NAME: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus (loginctl enable-linger $(id -un), or the next login starts it)"
     fi
 fi
+
+# 7. The language-identification model and predictor for the control
+#    agent's `script` op (runtime/langid/): fetched by pinned digest into
+#    ~/.cache/agent-fabric/langid/, best effort — offline, the op reports
+#    `language` as unavailable and nothing else changes.
+if (( DRY_RUN )); then bash "$FABRIC_ROOT/runtime/langid/install.sh" --dry-run || true
+else bash "$FABRIC_ROOT/runtime/langid/install.sh" || echo "  !  langid: not installed (above); fabric-ctl <login> script reports language unavailable until it is"; fi
 
 echo "bootstrap: $changed written, $same already current."
 echo "Launch from $PROJECTS: cd \"$PROJECTS\" && claude   — the session starts as $(python3 "$FABRIC_ROOT/runtime/identity.py")."

@@ -165,11 +165,37 @@ const binInto = (blocks, counts) => {
   const share = nonLatin / total;
   blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
 };
-const paragraphs = (text, counts, blocks) => { for (const para of text.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(blocks, c); for (const [k, v] of Object.entries(c)) counts[k] = (counts[k] ?? 0) + v; } };
+const paragraphs = (text, counts, blocks, sink) => { for (const para of text.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(blocks, c); for (const [k, v] of Object.entries(c)) counts[k] = (counts[k] ?? 0) + v; sink?.push(para); } };
+// THE LANGUAGE, not only the script (the CEO, 2026-09-17: use fastText).
+// Script shares cannot tell English from Italian or Russian from
+// Ukrainian; lid.176.ftz can, per paragraph. The predictor runs in the
+// account's own venv on the account's own text (runtime/langid/,
+// installed by bootstrap.sh); only the labels come back. A paragraph
+// under 20 letters is not judged, a top label under LANGID_FLOOR is
+// `unsure` (a code line scored en 0.38, a two-letter answer 0.63, read
+// back 2026-09-17). Without the venv or the model the section says
+// `unavailable`, never a guess.
+export const LANGID_FLOOR = 0.5;
+export function langidCmd(home = os.homedir(), root = process.env.AGENT_FABRIC_ROOT ?? path.join(home, 'projects', 'agent-fabric')) {
+  return [path.join(home, '.cache', 'agent-fabric', 'langid', 'venv', 'bin', 'python'), path.join(root, 'runtime', 'langid', 'langid.py')];
+}
+export function languages(paragraphs, { home, root, exec = execFileSync, floor = LANGID_FLOOR } = {}) {
+  const judged = paragraphs.filter(p => Object.values(scriptCounts(p)).reduce((a, b) => a + b, 0) >= 20);
+  const [py, script] = langidCmd(home, root);
+  if (!fs.existsSync(py)) return { status: 'unavailable', why: 'no predictor venv (runtime/langid/install.sh)' };
+  if (!judged.length) return { status: 'ok', paragraphs: 0, counts: {} };
+  let out;
+  try { out = exec(py, [script], { input: JSON.stringify(judged), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 60000 }); }
+  catch (e) { return { status: 'unavailable', why: String(e?.stderr ?? e?.message ?? e).trim().split('\n').pop().slice(0, 160) }; }
+  let labels; try { labels = JSON.parse(out); } catch { return { status: 'unavailable', why: 'the predictor answered something that is not JSON' }; }
+  const counts = {};
+  for (const [label, prob] of labels) { const k = prob >= floor && label ? label : 'unsure'; counts[k] = (counts[k] ?? 0) + 1; }
+  return { status: 'ok', paragraphs: judged.length, counts: Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1])) };
+}
 export function notesDir(home = os.homedir(), env = process.env, login = (() => { try { return os.userInfo().username; } catch { return 'unknown'; } })()) {
   return path.join(env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'agent-fabric', 'agents', login, 'notes');
 }
-export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.now(), notes = notesDir(home) } = {}) {
+export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.now(), notes = notesDir(home), langid = languages } = {}) {
   const root = path.join(home, '.claude', 'projects');
   let files = [];
   try {
@@ -187,7 +213,7 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
   files.sort((a, b) => b.mtime - a.mtime); files = files.slice(0, limit);
   // The notes: every file under the notes directory touched in the window,
   // its paragraphs binned like thinking blocks.
-  const noteCounts = {}; const noteBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }; let noteFiles = 0;
+  const noteCounts = {}; const noteBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }; let noteFiles = 0; const noteParas = [];
   try {
     for (const n of fs.readdirSync(notes)) {
       const f = path.join(notes, n);
@@ -195,10 +221,10 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
       if (!st.isFile() || now - st.mtimeMs > hours * 3600000) continue;
       let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
       noteFiles += 1;
-      paragraphs(body, noteCounts, noteBlocks);
+      paragraphs(body, noteCounts, noteBlocks, noteParas);
     }
   } catch { /* no notes directory: reported as none */ }
-  const notesOut = noteFiles ? { status: 'ok', files: noteFiles, ...shares(noteCounts), blocks: noteBlocks } : { status: 'none', dir: notes };
+  const notesOut = noteFiles ? { status: 'ok', files: noteFiles, ...shares(noteCounts), blocks: noteBlocks, language: langid(noteParas, { home }) } : { status: 'none', dir: notes };
   if (!files.length) return { status: 'no-records', hours, notes: notesOut };
   const thinking = {}, text = {}; let turns = 0;
   const blocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
@@ -216,7 +242,7 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
       }
     }
   }
-  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut, workers: workerTranscripts(files, { hours, now }) };
+  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut, workers: workerTranscripts(files, { hours, now, langid: p => langid(p, { home }) }) };
 }
 
 // THE WORKERS. A subagent's transcript is stored beside its session's
@@ -237,8 +263,8 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
 // the notes; counts only.
 export const WORKER_TYPE = 'locale-worker';
 const REMINDER_RE = /<system-reminder>[\s\S]*?(<\/system-reminder>|$)/g;
-export function workerTranscripts(files, { hours = 24, now = Date.now(), type = WORKER_TYPE } = {}) {
-  const input = {}, text = {}; const inputBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }, textBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
+export function workerTranscripts(files, { hours = 24, now = Date.now(), type = WORKER_TYPE, langid = null } = {}) {
+  const input = {}, text = {}; const inputBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }, textBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }; const inputParas = [], textParas = [];
   let n = 0, turns = 0, others = 0, toolUses = 0;
   for (const { f } of files) {
     const dir = path.join(path.dirname(f), path.basename(f, '.jsonl'), 'subagents');
@@ -257,11 +283,11 @@ export function workerTranscripts(files, { hours = 24, now = Date.now(), type = 
         const c = d?.message?.content;
         if (d?.type === 'user') {
           const texts = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text) : [];
-          for (const t of texts) { const own = t.replace(REMINDER_RE, ''); if (own.trim()) paragraphs(own, input, inputBlocks); }
+          for (const t of texts) { const own = t.replace(REMINDER_RE, ''); if (own.trim()) paragraphs(own, input, inputBlocks, inputParas); }
         } else if (d?.type === 'assistant') {
           turns += 1;
           for (const b of Array.isArray(c) ? c : []) {
-            if (b?.type === 'text' && typeof b.text === 'string') paragraphs(b.text, text, textBlocks);
+            if (b?.type === 'text' && typeof b.text === 'string') paragraphs(b.text, text, textBlocks, textParas);
             else if (b?.type === 'tool_use' && b.name !== 'SubagentHandback') toolUses += 1;
           }
         }
@@ -269,7 +295,8 @@ export function workerTranscripts(files, { hours = 24, now = Date.now(), type = 
     }
   }
   if (!n) return { status: 'none', other_subagents: others };
-  return { status: 'ok', files: n, other_subagents: others, turns, tool_uses: toolUses, input: { ...shares(input), blocks: inputBlocks }, text: { ...shares(text), blocks: textBlocks } };
+  return { status: 'ok', files: n, other_subagents: others, turns, tool_uses: toolUses,
+           input: { ...shares(input), blocks: inputBlocks, ...(langid ? { language: langid(inputParas) } : {}) }, text: { ...shares(text), blocks: textBlocks, ...(langid ? { language: langid(textParas) } : {}) } };
 }
 
 // THE DRAIN, over the control plane (the CEO, 2026-09-17: the way out of

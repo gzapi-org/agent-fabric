@@ -126,11 +126,13 @@ export function table(op, rs) {
   }
   if (op === 'script') {
     const top = s => !s || s.status !== 'ok' ? null : s;
-    const fmt = sh => !sh || !sh.letters ? '-' : Object.entries(sh).filter(([k]) => k !== 'letters').slice(0, 3).map(([k, v]) => `${k} ${v}%`).join(', ') + ` (${sh.letters} letters)`;
+    // The shares are the numeric entries but `letters` and `files`; the section's status, blocks and language ride beside them.
+    const fmt = sh => !sh || !sh.letters ? '-' : Object.entries(sh).filter(([k, v]) => typeof v === 'number' && k !== 'letters' && k !== 'files').slice(0, 3).map(([k, v]) => `${k} ${v}%`).join(', ') + ` (${sh.letters} letters)`;
     const bins = b => !b ? '-' : `${b.only} only / ${b.mixed} mixed / ${b.latin} latin`;
-    const notes = n => !n || n.status !== 'ok' ? 'none' : `${n.files} file(s): ${bins(n.blocks)} — ${fmt(n)}`;
+    const lang = l => !l ? '' : l.status !== 'ok' ? ' — lang unavailable' : !l.paragraphs ? '' : ' — lang ' + Object.entries(l.counts).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ');
+    const notes = n => !n || n.status !== 'ok' ? 'none' : `${n.files} file(s): ${bins(n.blocks)}${lang(n.language)} — ${fmt(n)}`;
     // The workers: the locale worker's input (the bridge's leak signal) and its answers, paragraphs by script.
-    const workers = w => !w || w.status !== 'ok' ? '-' : `${w.files} file(s): in ${bins(w.input.blocks)} / out ${bins(w.text.blocks)}`;
+    const workers = w => !w || w.status !== 'ok' ? '-' : `${w.files} file(s): in ${bins(w.input.blocks)}${lang(w.input.language)} / out ${bins(w.text.blocks)}${lang(w.text.language)}`;
     lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'notes (the signature: paragraphs by script)'.padEnd(70)} ${'turns'.padStart(5)}  ${'text, by script'.padEnd(44)} ${'thinking (stored text only)'.padEnd(40)} workers (input / answers)`);
     for (const r of rs) {
       if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }

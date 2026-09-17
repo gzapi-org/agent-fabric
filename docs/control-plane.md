@@ -77,7 +77,16 @@ the `<system-reminder>` spans the harness injects into every subagent —
 so a Latin paragraph there is English that reached the worker, the leak
 the construction of `docs/language-culture-bridge.md` exists to prevent;
 its text blocks are the answers; a `tool_use` other than the hand-back
-is `tool_uses`. Both binned per paragraph like the notes), `memory` (the drain: the
+is `tool_uses`. Both binned per paragraph like the notes. And beside
+every bin, the **language** of the paragraphs, not only their script —
+`language: {status, paragraphs, counts}` on the notes, the worker's
+input and its answers: fastText's `lid.176.ftz` (the CEO, 2026-09-17),
+run in the account's own venv on the account's own text
+(`runtime/langid/`, installed by `bootstrap.sh` by pinned digest), the
+labels alone coming back; a paragraph under twenty letters is not
+judged, a top label under 0.5 is `unsure`, and without the model the
+section says `unavailable` rather than guessing. Script shares cannot
+tell English from Italian or Russian from Ukrainian; this can), `memory` (the drain: the
 account's own daemon runs `tools/fabric/harvest_memory.py --bundle`
 over each memory directory the harness keeps for it, matched to the
 working copy it was written from by slug, and answers with each bundle

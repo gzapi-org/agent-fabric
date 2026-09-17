@@ -98,3 +98,28 @@ read a file and to list its tools.
   channel — was real: the harvester had no hygiene step (the comment
   claiming one was wrong). It now refuses the whole drain on a
   credential-shaped hit, before any claim is built.
+
+## fastText on this host (the CEO: "use fastText, lid.176.ftz")
+
+`fasttext-predict==0.9.2.4` installs on this host's Python 3.14 from a
+prebuilt wheel (no compiler); `lid.176.ftz` is 938 013 bytes, sha256
+`8f3472cf…603e83` (pinned in `runtime/langid/model.json`); it loads in
+0.06 s and predicts 2 000 paragraphs in 0.06 s. Read back on the
+paragraph shapes the op meets:
+
+| paragraph | top label |
+|---|---|
+| a Georgian note line | `ka` 0.81 (`xmf` 0.19 second — same script) |
+| an English paragraph | `en` 0.96 |
+| an Italian paragraph | `it` 0.95 |
+| a Russian paragraph | `ru` 0.998 |
+| half Georgian, half English, with a path | `ka` 0.83 |
+| a code line (`ops.mjs:294 memory() exec …`) | `en` 0.38 |
+| `ok` | `en` 0.63 |
+| Georgian in Latin letters | `pl` 0.09 — unidentified |
+
+- Decides: the language section bins by top label with a 0.5 floor
+  (`unsure` below it — the code line and the two-letter answer fall
+  there), judges only paragraphs of twenty letters or more, and reports
+  `unavailable` without the venv or the model. Script shares stay: they
+  are what catches Latin-letter Georgian, which the model cannot.

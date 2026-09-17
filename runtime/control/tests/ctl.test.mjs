@@ -38,10 +38,12 @@ test('rows and table: an answered account and a silent one', () => {
   assert.match(table('ping', rs), /db-admin\s+ok\s+120 ms/);
   // The script table: the workers column — input and answers binned — and `-` when there are none.
   const sc = { status: 'ok', turns: 3, thinking: { letters: 0 }, thinking_blocks: { only: 0, mixed: 0, latin: 0, empty: 3 }, text: { letters: 40, georgian: 100 }, notes: { status: 'none' } };
-  const w = { status: 'ok', files: 2, other_subagents: 1, turns: 4, tool_uses: 0, input: { letters: 300, georgian: 100, blocks: { only: 3, mixed: 0, latin: 1, empty: 0 } }, text: { letters: 200, georgian: 100, blocks: { only: 4, mixed: 0, latin: 0, empty: 0 } } };
+  const w = { status: 'ok', files: 2, other_subagents: 1, turns: 4, tool_uses: 0, input: { letters: 300, georgian: 100, blocks: { only: 3, mixed: 0, latin: 1, empty: 0 }, language: { status: 'ok', paragraphs: 4, counts: { ka: 3, en: 1 } } }, text: { letters: 200, georgian: 100, blocks: { only: 4, mixed: 0, latin: 0, empty: 0 }, language: { status: 'unavailable' } } };
   const st = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: w } } }]));
   assert.match(st, /workers \(input \/ answers\)/);
-  assert.match(st, /db-admin\s+ok\s+none.*2 file\(s\): in 3 only \/ 0 mixed \/ 1 latin \/ out 4 only \/ 0 mixed \/ 0 latin/);
+  assert.match(st, /db-admin\s+ok\s+none.*2 file\(s\): in 3 only \/ 0 mixed \/ 1 latin — lang ka 3, en 1 \/ out 4 only \/ 0 mixed \/ 0 latin — lang unavailable/);
+  const withNotesLang = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, notes: { status: 'ok', files: 1, letters: 90, georgian: 100, blocks: { only: 2, mixed: 0, latin: 0, empty: 0 }, language: { status: 'ok', paragraphs: 2, counts: { ka: 2 } } }, workers: { status: 'none', other_subagents: 0 } } } }]));
+  assert.match(withNotesLang, /1 file\(s\): 2 only \/ 0 mixed \/ 0 latin — lang ka 2 — georgian 100%/);
   const none = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: { status: 'none', other_subagents: 0 } } } }]));
   assert.match(none, /db-admin\s+ok\s+none.*unreadable\s+-\s*$/m);
 });

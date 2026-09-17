@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -106,7 +106,10 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.equal(s.notes.status, 'none');
   const nd = path.join(h, 'state', 'agent-fabric', 'agents', 'ge', 'notes'); fs.mkdirSync(nd, { recursive: true });
   fs.writeFileSync(path.join(nd, '2026-09-17.md'), 'მოთხოვნა: გადათარგმნილი მოთხოვნა ქართულად, სრული აბზაცი.\n\nჩემი მსჯელობა ქართულად: ეს ტექსტი მხოლოდ ქართულია და საკმაოდ გრძელი.\n\nA paragraph written in English, long enough to count as a block here.\n');
-  const withNotes = script(h, { notes: nd });
+  const fakeLang = paras => ({ status: 'ok', paragraphs: paras.length, counts: { ka: paras.length } });
+  assert.equal(script(h, { notes: nd }).notes.language.status, 'unavailable', 'no venv on this scratch home: said, not guessed');
+  const withNotes = script(h, { notes: nd, langid: fakeLang });
+  assert.deepEqual(withNotes.notes.language, { status: 'ok', paragraphs: 3, counts: { ka: 3 } }, 'every note paragraph reaches the predictor');
   assert.equal(withNotes.notes.status, 'ok'); assert.equal(withNotes.notes.files, 1);
   assert.deepEqual(withNotes.notes.blocks, { only: 2, mixed: 0, latin: 1, empty: 0 }, JSON.stringify(withNotes.notes));
   assert.ok(withNotes.notes.georgian > withNotes.notes.latin);
@@ -129,7 +132,8 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   const reviewer = [user('Repository: /x. Review the range a..b'), JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] } }), turn('', 'Findings: none.'), handback];
   fs.writeFileSync(path.join(sub, 'agent-bbb.jsonl'), reviewer.join('\n') + '\n'); meta('agent-bbb', 'code-review');
   fs.writeFileSync(path.join(sub, 'agent-nometa.jsonl'), user('a subagent with no sidecar, long enough to be a block') + '\n');
-  const w = script(h).workers;
+  const w = script(h, { langid: fakeLang }).workers;
+  assert.deepEqual(w.input.language, { status: 'ok', paragraphs: 2, counts: { ka: 2 } }); assert.deepEqual(w.text.language, { status: 'ok', paragraphs: 2, counts: { ka: 2 } });
   assert.equal(w.status, 'ok'); assert.equal(w.files, 1, 'only the sidecar that says locale-worker'); assert.equal(w.other_subagents, 2); assert.equal(w.turns, 3);
   assert.equal(w.tool_uses, 0, 'the hand-back is not a tool use of the worker');
   assert.deepEqual(w.input.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 }, `the injected reminder is not the bridge's input: ${JSON.stringify(w.input)}`);
@@ -211,6 +215,21 @@ test('memory: one harvester run per directory — the tar from stdout, the repor
   assert.equal(MEMORY_PART_BYTES, 90 * 1024, 'under the relay\'s 128 KiB message limit with the envelope');
   const whole = await memory('/home/x', { root: '/r', exec, dirs: [dirs[0]] });
   assert.equal(whole.bundles[0].parts, 1, 'a 3 KB tar is one part at the real size');
+});
+
+test('languages: the predictor judges only paragraphs of twenty letters, a low top label is unsure, no venv is unavailable, and the text reaches only the predictor', () => {
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lang-home-'));
+  assert.deepEqual(languages(['ქართული აბზაცი საკმაოდ გრძელი'], { home: h }).status, 'unavailable');
+  const venvPy = langidCmd(h, '/r')[0]; fs.mkdirSync(path.dirname(venvPy), { recursive: true }); fs.writeFileSync(venvPy, '');
+  assert.equal(langidCmd(h, '/r')[1], '/r/runtime/langid/langid.py');
+  const seen = [];
+  const exec = (cmd, args, opts) => { seen.push({ cmd, args, input: JSON.parse(opts.input) }); return JSON.stringify([['ka', 0.81], ['en', 0.96], ['en', 0.38], ['it', 0.95]]); };
+  const l = languages(['ქართული აბზაცი, საკმაოდ გრძელი რომ განისაჯოს', 'An English paragraph long enough to be judged here', 'ops.mjs:294 memory() exec harvest --bundle', 'Un paragrafo italiano abbastanza lungo da essere giudicato', 'ok'], { home: h, root: '/r', exec });
+  assert.deepEqual(l, { status: 'ok', paragraphs: 4, counts: { en: 1, ka: 1, it: 1, unsure: 1 } });
+  assert.equal(seen[0].cmd, venvPy); assert.deepEqual(seen[0].args, ['/r/runtime/langid/langid.py']); assert.equal(seen[0].input.length, 4, 'the two-letter answer is not sent');
+  assert.deepEqual(languages([], { home: h, root: '/r', exec }), { status: 'ok', paragraphs: 0, counts: {} });
+  assert.equal(languages(['An English paragraph long enough to be judged here'], { home: h, root: '/r', exec: () => { throw Object.assign(new Error('x'), { stderr: 'langid: no model at /m (runtime/langid/install.sh)\n' }); } }).why, 'langid: no model at /m (runtime/langid/install.sh)');
+  assert.equal(languages(['An English paragraph long enough to be judged here'], { home: h, root: '/r', exec: () => 'nope' }).status, 'unavailable');
 });
 
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {

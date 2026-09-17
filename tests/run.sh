@@ -39,6 +39,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh
     run "new-agent (the sequence, its refusals, a failure at each step)" bash runtime/provisioning/test_new-agent.sh
     run "account persistence (the Qubes boot script, the snapshot writer)" bash runtime/provisioning/platform/test_qubes-accounts.sh
+    run "language identification (the model by digest, the predictor venv)" bash runtime/langid/test_install.sh
     run "rename-working-copy (the shell half)" bash runtime/provisioning/test_rename-working-copy.sh
     run "dispatch guard" bash runtime/claude-code/hooks/test_agent-dispatch-guard.sh
     run "review bash guard" bash runtime/claude-code/hooks/test_review-bash-guard.sh

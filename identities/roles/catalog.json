@@ -3,42 +3,12 @@
   "description": "The reusable roles agent-fabric knows: id (the slug that goes on the wire and names identities/roles/<id>/), title, and whether the role is still a candidate. Path and keyword rules that say WHERE a role applies inside a managed repository are not here — they belong to projects/<project-id>/taxonomy.json.",
   "roles": [
     {
-      "id": "flutter-dev",
-      "title": "Flutter developer"
-    },
-    {
-      "id": "backend-dev",
-      "title": ".NET backend developer"
-    },
-    {
-      "id": "db-admin",
-      "title": "Database administrator"
-    },
-    {
-      "id": "web-dev",
-      "title": "Web sub-app developer"
-    },
-    {
-      "id": "edge-hosting",
-      "title": "Domain, DNS, edge and hosting"
-    },
-    {
-      "id": "devex-tooling",
-      "title": "Developer experience and repo tooling"
-    },
-    {
       "id": "architect-cto",
       "title": "Architect / CTO"
     },
     {
-      "id": "product-i18n",
-      "title": "Language, translation and localization",
-      "candidate": true
-    },
-    {
-      "id": "domain-transit",
-      "title": "Transit domain",
-      "candidate": true
+      "id": "backend-dev",
+      "title": ".NET backend developer"
     },
     {
       "id": "brand-comms",
@@ -46,8 +16,38 @@
       "candidate": true
     },
     {
+      "id": "db-admin",
+      "title": "Database administrator"
+    },
+    {
+      "id": "devex-tooling",
+      "title": "Developer experience and repo tooling"
+    },
+    {
+      "id": "domain-transit",
+      "title": "Transit domain",
+      "candidate": true
+    },
+    {
+      "id": "edge-hosting",
+      "title": "Domain, DNS, edge and hosting"
+    },
+    {
       "id": "fabric-coordinator",
       "title": "Control-plane coordinator (agent-fabric, and the GZCoord protocol)"
+    },
+    {
+      "id": "flutter-dev",
+      "title": "Flutter developer"
+    },
+    {
+      "id": "language-culture",
+      "title": "Language, translation, localization and culture",
+      "candidate": true
+    },
+    {
+      "id": "web-dev",
+      "title": "Web sub-app developer"
     }
   ]
 }

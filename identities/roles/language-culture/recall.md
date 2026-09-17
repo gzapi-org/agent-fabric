@@ -1,7 +1,7 @@
 ---
-role: product-i18n
+role: language-culture
 class: recall
-description: "Where product-i18n's knowledge lives — charter, remit, distilled slices, this agent's memory — and how to trace a claim to its sources."
+description: "Where language-culture's knowledge lives — charter, remit, distilled slices, this agent's memory — and how to trace a claim to its sources."
 tier: 2
 distilled_at: 2026-08-10
 ---
@@ -11,12 +11,12 @@ distilled_at: 2026-08-10
 What this role knows lives in three places, and each answers a different
 question.
 
-- **The charter** (`identities/roles/product-i18n/charter.md`, here) — what the
+- **The charter** (`identities/roles/language-culture/charter.md`, here) — what the
   function is. The project's remit for it
-  (`<working copy>/.agent-fabric/roles/product-i18n.md`) — what the function
+  (`<working copy>/.agent-fabric/roles/language-culture.md`) — what the function
   covers in that repository.
-- **The distilled slices** — `memory/domains/product-i18n/` here for the field,
-  `<working copy>/.agent-fabric/memory/product-i18n/` in the project for the
+- **The distilled slices** — `memory/domains/language-culture/` here for the field,
+  `<working copy>/.agent-fabric/memory/language-culture/` in the project for the
   system. Each is a claim with provenance; the project's `INDEX.md` for
   this role lists all of them with the cue that says when to open one.
   They answer "what is true".

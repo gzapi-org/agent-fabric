@@ -114,13 +114,20 @@ export function remember(seen, id) {
   if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
 }
 
+// A reply is one record; a `memory` reply is several: the first carries
+// the bundles' reports and sizes, then one record per part
+// ({part, parts, slug, chunk}) — the relay's message limit is 128 KiB and
+// a drain is bigger. The coordinator reassembles by slug and part and
+// verifies the sha256 the first record names.
 export async function answer(request, ctx) {
   const data = request.op === 'ping' ? {} : await collect(request.op, ctx);
-  return {
-    v: 1, kind: 'reply', id: newId(), in_reply_to: request.id, from: ctx.me.address, op: request.op,
-    ts: new Date().toISOString(), ok: true,
-    data: { ...data, agentd: { pid: process.pid, started: ctx.started, uptime_s: Math.round((Date.now() - Date.parse(ctx.started)) / 1000) } },
-  };
+  const head = () => ({ v: 1, kind: 'reply', id: newId(), in_reply_to: request.id, from: ctx.me.address, op: request.op, ts: new Date().toISOString(), ok: true });
+  const meta = { agentd: { pid: process.pid, started: ctx.started, uptime_s: Math.round((Date.now() - Date.parse(ctx.started)) / 1000) } };
+  if (request.op !== 'memory' || !data.memory?.bundles) return { ...head(), data: { ...data, ...meta } };
+  const parts = [];
+  const bundles = data.memory.bundles.map(b => { const { _parts, ...rest } = b; for (let i = 0; i < (_parts ?? []).length; i++) parts.push({ slug: b.slug, part: i + 1, parts: _parts.length, chunk: _parts[i] }); return rest; });
+  const first = { ...head(), data: { memory: { ...data.memory, bundles }, ...meta, parts: parts.length } };
+  return { ...first, _followups: parts.map(p => ({ ...head(), data: { part: p } })) };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -133,7 +140,7 @@ export async function main(argv = process.argv.slice(2)) {
   let usageAt = 0, usageLast = null;
   const usageCached = async () => { if (Date.now() - usageAt > USAGE_CACHE_MS) { usageLast = await usage(); usageAt = Date.now(); } return usageLast; };
   const ctx = { me, started, usageCached };   // no `who`: identity() resolves it per request
-  if (self) { console.log(JSON.stringify(await answer({ id: 'self', op: 'status' }, ctx), null, 2)); return 0; }
+  if (self) { const { _followups, ...r } = await answer({ id: 'self', op: 'status' }, ctx); console.log(JSON.stringify(r, null, 2)); return 0; }
 
   const root = inboxRoot(who);
   const gz = integrationConfig(who.project);
@@ -180,7 +187,9 @@ export async function main(argv = process.argv.slice(2)) {
         if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
         const reply = await answer(a.request, ctx);
-        await post(reply);
+        const { _followups, ...firstReply } = reply;
+        await post(firstReply);
+        for (const f of _followups ?? []) await post(f);
         console.error(`agentd: answered ${a.request.op} for ${a.request.from} (${a.request.id.slice(0, 8)})`);
       }
       if (once) return 0;

@@ -7,7 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource } from '../agentd.mjs';
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
+import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer } from '../agentd.mjs';
 
 const AGENTD = new URL('../agentd.mjs', import.meta.url).pathname;
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
@@ -103,6 +105,43 @@ function scratchHome() {
   fs.writeFileSync(path.join(h, '.config', 'agent-fabric', 'secrets.env'), "export CLAUDE_BRIDGE_AUTH_TOKEN='tok-fixture'\nexport OPENROUTER_API_KEY='sk-or-secret-value-0123456789'\n");
   return h;
 }
+
+test('answer: a memory reply is the report first, then one record per part in order; the parts never ride in the first record', async () => {
+  const tar = crypto.randomBytes(2500);
+  const exec = async () => ({ stdout: tar, stderr: JSON.stringify({ claims: 1, counts: { in_scope: 1, total: 1 }, needs_rendering: [], skipped_no_roles_class: [] }) });
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-mem-'));
+  const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
+  const mem = path.join(h, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  const ctx = { me: { address: 'h/db-admin' }, started: new Date().toISOString(), home: h, exec };
+  const r = await answer({ id: 'q1', op: 'memory' }, ctx);
+  assert.equal(r.op, 'memory'); assert.equal(r.in_reply_to, 'q1'); assert.equal(r.data.parts, 1);
+  const b = r.data.memory.bundles[0];
+  assert.equal(b.status, 'ok'); assert.equal(b.parts, 1); assert.equal(b.working_copy, wc); assert.equal(b.report.claims, 1);
+  assert.ok(!('_parts' in b) && !JSON.stringify(r.data).includes('chunk'), 'the first record carries the report and sizes, not the bundle');
+  assert.equal(r._followups.length, 1);
+  const f = r._followups[0];
+  assert.equal(f.kind, 'reply'); assert.equal(f.in_reply_to, 'q1'); assert.equal(f.from, 'h/db-admin'); assert.notEqual(f.id, r.id);
+  assert.deepEqual(Object.keys(f.data), ['part']);
+  assert.deepEqual({ slug: f.data.part.slug, part: f.data.part.part, parts: f.data.part.parts }, { slug: b.slug, part: 1, parts: 1 });
+  assert.deepEqual(zlib.gunzipSync(Buffer.from(f.data.part.chunk, 'base64')), tar);
+  assert.equal(crypto.createHash('sha256').update(tar).digest('hex'), b.sha256);
+  const ping = await answer({ id: 'q2', op: 'ping' }, ctx);
+  assert.ok(!('_followups' in ping), 'only a memory reply has follow-ups');
+  const empty = await answer({ id: 'q3', op: 'memory' }, { ...ctx, home: fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-nomem-')) });
+  assert.deepEqual(empty.data.memory, { status: 'ok', bundles: [] }); assert.equal(empty.data.parts, 0); assert.deepEqual(empty._followups, []);
+});
+
+// A python3 on the daemon's PATH that answers for the harvester alone — a
+// fixed payload on stdout, the report on stderr — and hands everything
+// else to the real interpreter (whoami needs it). The payload is bigger
+// than one relay message, so the parts are real at the real size.
+function fakeHarvester(payload) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-py-'));
+  fs.writeFileSync(path.join(bin, 'payload.tar'), payload);
+  const real = process.env.PATH.split(':').map(d => path.join(d, 'python3')).find(f => fs.existsSync(f));
+  fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in *harvest_memory.py) cat "${bin}/payload.tar"; printf '%s' '{"claims": 4, "counts": {"in_scope": 5, "total": 5}, "needs_rendering": ["ka-1"], "skipped_no_roles_class": []}' >&2; exit 0;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  return bin;
+}
 const request = over => JSON.stringify({ v: 1, kind: 'request', id: newId(), from: 'develop-qzapp/user', to: '*', op: 'ping', ts: new Date().toISOString(), ttl_s: 30, ...over });
 // Asynchronous: the fake relay lives in this process, and a synchronous
 // spawn would block the event loop it answers from.
@@ -177,6 +216,38 @@ test('agentd --once: an empty channel is primed with an up record; a cleared his
     const waits = r.hits.filter(h => h.startsWith('/api/wait?'));
     assert.ok(waits.length >= 2 && waits.length <= 3, `one wait per prime, no spin: ${waits.join(' ')}`);
     assert.ok(waits[waits.length - 1].includes(`since_id=${r.rows[0].id}`), 'the last wait follows the new up record');
+  } finally { r.close(); }
+});
+
+test('agentd --once: a memory request is answered with the report and then the bundle in parts under the relay\'s limit, reassembling to the harvester\'s bytes', async () => {
+  const payload = crypto.randomBytes(200 * 1024);   // ~267 KB of base64: three parts at 90 KiB
+  const bin = fakeHarvester(payload);
+  const home = scratchHome();
+  const wc = path.join(home, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
+  const mem = path.join(home, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  const r = relay([['develop-qzapp/user', request({ op: 'ping', id: 'primer' })]]);
+  await r.listen();
+  try {
+    r.waiting().then(() => r.add('develop-qzapp/user', request({ op: 'memory' })));
+    const out = await new Promise(resolve => {
+      const child = spawn('node', [AGENTD, '--once'], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, CLAUDE_BRIDGE_URL: r.url(), FABRIC_CONTROL_CHANNEL: 'test:control' } });
+      let stderr = ''; child.stderr.on('data', d => { stderr += d; });
+      const t = setTimeout(() => child.kill('SIGKILL'), 30000);
+      child.on('close', status => { clearTimeout(t); resolve({ status, stderr }); });
+    });
+    assert.equal(out.status, 0, out.stderr);
+    const rs = replies(r);
+    assert.equal(rs.length, 4, `one report record and three parts: ${rs.map(x => Object.keys(x.data)).join(' | ')}\n${out.stderr}`);
+    const [first, ...parts] = rs;
+    assert.equal(first.data.parts, 3); assert.equal(first.data.memory.bundles.length, 1);
+    const b = first.data.memory.bundles[0];
+    assert.equal(b.status, 'ok'); assert.equal(b.parts, 3); assert.equal(b.bytes, payload.length); assert.equal(b.working_copy, wc);
+    assert.deepEqual(b.report, { claims: 4, counts: { in_scope: 5, total: 5 }, needs_rendering: ['ka-1'], skipped_no_roles_class: [] });
+    assert.deepEqual(parts.map(p => p.data.part.part), [1, 2, 3], 'in order');
+    assert.ok(parts.every(p => p.data.part.parts === 3 && p.data.part.slug === b.slug && p.in_reply_to === first.in_reply_to));
+    for (const row of r.rows) assert.ok(row.content.length < 128 * 1024, `every record under the relay's limit: ${row.content.length}`);
+    const tar = zlib.gunzipSync(Buffer.from(parts.map(p => p.data.part.chunk).join(''), 'base64'));
+    assert.deepEqual(tar, payload); assert.equal(crypto.createHash('sha256').update(tar).digest('hex'), b.sha256);
   } finally { r.close(); }
 });
 

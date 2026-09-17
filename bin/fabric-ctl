@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bin/fabric-ctl — ask the fleet's control agents, in real time.
 #
-#   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|ping] [--json] [--timeout S]
+#   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]
+#   fabric-ctl <login|all> memory --out <dir>     the drain: each account's bundles, <dir>/<login>/<wc>.tar
 #
 # One request on the control channel, the replies read back and printed
 # one row per expected account: the Claude account it is signed into, its
@@ -9,7 +10,8 @@
 # not answer within the timeout is a row saying so, and the exit code is
 # 1. No sudo, no session, no model in the loop: the agents answer as
 # themselves (runtime/control/agentd.mjs), the coordinator only asks.
-# bin/fabric-usage is the sudo fallback for an account with no agent up.
+# bin/fabric-usage and bin/fabric-host drain are the sudo fallbacks for an
+# account with no agent up.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"

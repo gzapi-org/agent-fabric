@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, collect, KEY_NAMES, OPS } from '../ops.mjs';
+import zlib from 'node:zlib';
+import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -114,6 +115,63 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.equal(notesDir('/h', {}, 'ge'), '/h/.local/state/agent-fabric/agents/ge/notes');
 });
 
+// The drain over the control plane: the account's own memory directories,
+// each matched to the working copy it was written from, harvested by the
+// account's own harvester and answered as a gzipped bundle in relay-sized
+// parts with the report beside it. Nothing of a memory's text is in the
+// reply but the bundle itself.
+test('memoryDirs: every memory directory with a memory in it, matched to ~/projects/<wc> by slug; MEMORY.md alone is nothing', () => {
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-home-'));
+  const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
+  fs.mkdirSync(path.join(h, 'projects', 'agent-fabric'), { recursive: true });
+  fs.writeFileSync(path.join(h, 'projects', 'notes.txt'), 'not a working copy');
+  const mem = slug => { const d = path.join(h, '.claude', 'projects', slug, 'memory'); fs.mkdirSync(d, { recursive: true }); return d; };
+  fs.writeFileSync(path.join(mem(memorySlug(wc)), 'fact.md'), '---\nname: fact\n---\nx');
+  fs.writeFileSync(path.join(mem(memorySlug(wc)), 'MEMORY.md'), '- index');
+  fs.writeFileSync(path.join(mem('-home-elsewhere-old-checkout'), 'stray.md'), 'x');
+  fs.writeFileSync(path.join(mem(memorySlug(path.join(h, 'projects', 'agent-fabric'))), 'MEMORY.md'), '- only the index');
+  fs.mkdirSync(path.join(h, '.claude', 'projects', '-no-memory-dir'), { recursive: true });
+  const ds = memoryDirs(h).sort((a, b) => a.slug.localeCompare(b.slug));
+  assert.deepEqual(ds, [
+    { slug: '-home-elsewhere-old-checkout', memory: path.join(h, '.claude', 'projects', '-home-elsewhere-old-checkout', 'memory'), files: 1, working_copy: null },
+    { slug: memorySlug(wc), memory: path.join(h, '.claude', 'projects', memorySlug(wc), 'memory'), files: 1, working_copy: wc },
+  ]);
+  assert.deepEqual(memoryDirs('/nonexistent'), []);
+  assert.equal(memorySlug('/home/x/projects/gzapp'), '-home-x-projects-gzapp');
+});
+
+test('memory: one harvester run per directory — the tar from stdout, the report from stderr — gzipped, base64, in parts; a failure and a strayed directory are rows, not throws', async () => {
+  const tar = crypto.randomBytes(3000);   // incompressible: the parts are real
+  const report = { role: 'db-admin', claims: 2, counts: { in_scope: 3, total: 3 }, needs_rendering: ['ka-note'], skipped_no_roles_class: ['private'], memory_dir: '/never/leaves' };
+  const calls = [];
+  const exec = async (cmd, args, opts) => { calls.push({ cmd, args, opts });
+    if (args.includes('/m/broken')) throw Object.assign(new Error('exit 1'), { stderr: 'harvest_memory: refusing rather than guessing where these belong:\n  private-secret.md' });
+    return { stdout: tar, stderr: Buffer.from(JSON.stringify(report)) }; };
+  const dirs = [{ slug: 's-gzapp', memory: '/m/gzapp', files: 3, working_copy: '/home/x/projects/gzapp' },
+                { slug: 's-stray', memory: '/m/stray', files: 1, working_copy: null },
+                { slug: 's-broken', memory: '/m/broken', files: 1, working_copy: '/home/x/projects/broken' }];
+  const m = await memory('/home/x', { root: '/r', exec, dirs, all: true, partBytes: 1000 });
+  assert.equal(m.status, 'ok'); assert.equal(m.bundles.length, 3);
+  const [ok, stray, broken] = m.bundles;
+  assert.equal(ok.status, 'ok'); assert.equal(ok.bytes, 3000); assert.equal(ok.sha256, crypto.createHash('sha256').update(tar).digest('hex'));
+  assert.ok(ok.parts >= 4 && ok._parts.length === ok.parts, `${ok.parts} parts of 1000 chars for ~4 KB of base64`);
+  assert.ok(ok._parts.every((p, i) => p.length === 1000 || i === ok._parts.length - 1));
+  assert.deepEqual(zlib.gunzipSync(Buffer.from(ok._parts.join(''), 'base64')), tar, 'the parts reassemble to the tar');
+  assert.deepEqual(ok.report, { claims: 2, counts: { in_scope: 3, total: 3 }, needs_rendering: ['ka-note'], skipped_no_roles_class: ['private'] });
+  assert.ok(!('memory_dir' in ok.report), 'only the whitelisted report keys travel');
+  assert.deepEqual(stray, { slug: 's-stray', files: 1, status: 'no-working-copy' });
+  assert.equal(broken.status, 'harvest-failed'); assert.match(broken.error, /refusing rather than guessing/);
+  assert.equal(calls.length, 2, 'one run per harvestable directory, none for the stray');
+  assert.equal(calls[0].cmd, 'python3'); assert.equal(calls[0].args[0], '/r/tools/fabric/harvest_memory.py');
+  assert.deepEqual(calls[0].args.slice(1), ['--bundle', '-', '--memory', '/m/gzapp', '--working-copy', '/home/x/projects/gzapp', '--all']);
+  assert.equal(calls[0].opts.env.AGENT_FABRIC_ROOT, '/r');
+  const noAll = []; await memory('/home/x', { root: '/r', exec: async (c, a) => { noAll.push(a); return { stdout: tar, stderr: 'not json' }; }, dirs: [dirs[0]] });
+  assert.ok(!noAll[0].includes('--all'), 'the watermark applies unless asked'); 
+  assert.equal(MEMORY_PART_BYTES, 90 * 1024, 'under the relay\'s 128 KiB message limit with the envelope');
+  const whole = await memory('/home/x', { root: '/r', exec, dirs: [dirs[0]] });
+  assert.equal(whole.bundles[0].parts, 1, 'a 3 KB tar is one part at the real size');
+});
+
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {
   const s = session(4242, (cmd, args) => { assert.deepEqual(args, ['-u', '4242', '-x', 'claude']); return '111\n222\n'; });
   assert.equal(s.claude_processes, 2); assert.equal(typeof s.planning, 'boolean');
@@ -130,5 +188,8 @@ test('collect: status is every section, a single op its own, and a failing secti
   assertNoSecret(all);
   const one = await collect('keys', ctx);
   assert.deepEqual(Object.keys(one), ['keys']);
-  assert.ok(OPS.includes('ping') && OPS.includes('status'));
+  assert.ok(OPS.includes('ping') && OPS.includes('status') && OPS.includes('memory'));
+  assert.ok(!('memory' in all), 'a drain is asked for, never part of status');
+  const mem = await collect('memory', { home: h, exec: () => { throw new Error('never runs'); } });
+  assert.deepEqual(mem, { memory: { status: 'ok', bundles: [] } }, 'a home with no memory answers an empty drain');
 });

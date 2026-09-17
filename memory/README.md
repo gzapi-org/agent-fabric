@@ -165,15 +165,27 @@ tools/fabric/assemble.py --claims /tmp/drain/claims --drain /tmp/drain \
 tools/fabric/lint.py --working-copy ~/projects/<working-copy>
 ```
 
-Across hosts the drain is a **bundle**: one tar with a manifest naming
+Across accounts the drain is a **bundle**: one tar with a manifest naming
 who harvested and the digest of every file, written by the agent on its
-own host and verified by the coordinator before anything is read —
+own account and verified by the coordinator before anything is read —
 only the agent reads its memory; the coordinator receives the result.
+It travels over the control plane (`docs/control-plane.md`): each
+account's own daemon answers `memory` by running the harvester on every
+memory directory the harness keeps for it, and `fabric-ctl` reassembles
+and verifies what came back — no sudo, no read of another home.
 
 ```sh
-bin/fabric-host <host> drain <login> --role <role> --working-copy ~/projects/<wc> > drain.tar
-tools/fabric/assemble.py --bundle drain.tar --project <project> --working-copy ~/projects/<wc> --stamp $(date +%F)
+bin/fabric-ctl all memory --out /tmp/drain            # <login>/<working copy>.tar per account, plus each report
+tools/fabric/assemble.py --bundle /tmp/drain/<login>/<wc>.tar --project <project> --working-copy ~/projects/<wc> --stamp $(date +%F)
 ```
+
+The table is the dry run: each row carries the harvest report — the
+claim count, the `needs_rendering` names to send the holder, the skipped
+names — beside the bundle's status, so the language-culture step above
+reads from the same run that fetched the bundles. A bundle whose parts
+are short or whose digest is wrong is refused with a status and no file.
+`bin/fabric-host <host> drain <login> > drain.tar` remains only as the
+sudo fallback for a host whose daemons are down.
 
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the
 project from the working copy's remote, and the working copy as a label.

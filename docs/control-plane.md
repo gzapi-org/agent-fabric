@@ -67,7 +67,18 @@ the CEO for that role; counts and shares only, never text, and not part
 of `status` since it reads megabytes. The reasoning itself is not on
 disk — most thinking blocks are stored with no text and the rest as
 short summaries — which is why the notes are the signature and the
-transcript's text share the second number), `status` (all but `script`). A section that
+transcript's text share the second number), `memory` (the drain: the
+account's own daemon runs `tools/fabric/harvest_memory.py --bundle`
+over each memory directory the harness keeps for it, matched to the
+working copy it was written from by slug, and answers with each bundle
+gzipped and base64 in follow-up records of at most 90 KiB — the relay's
+message limit is 128 KiB — after a first record carrying the sizes, the
+sha256 of every tar and the harvest report: claims, `needs_rendering`,
+the skipped names. The way out of god mode (the CEO, 2026-09-17): until
+this op a drain read another account's home through sudo; now only the
+account reads its memory, and the coordinator receives the result. A
+memory directory with no working copy beside it is named and left where
+it is; not part of `status`), `status` (all but `script` and `memory`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
@@ -106,6 +117,17 @@ a run leaves its request and the replies on the channel, nothing
 anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
 whose daemons are down. A run by a login that is not a host operator is
 refused before anything is posted: no daemon would answer it.
+
+`bin/fabric-ctl <login|all> memory --out <dir>` is the drain (timeout
+120 s): a reply counts as complete only when every part it announced has
+arrived; the parts are reassembled by slug and order, gunzipped and
+checked against the sha256 the first record named, and each verified tar
+lands at `<dir>/<login>/<working copy>.tar` — the shape
+`tools/fabric/assemble.py --bundle` takes. A bundle that is short,
+unreadable or wrong is a status in the row (`incomplete`, `unreadable`,
+`sha-mismatch`) and no file; exit 1 when any account is silent or short.
+`bin/fabric-host <host> drain <login>` stays as the sudo fallback for a
+host whose daemons are down. The drain cycle is in `memory/README.md`.
 
 ## Why the accounts had to be persisted first
 

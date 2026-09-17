@@ -16,10 +16,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'memory', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -215,6 +216,57 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
   return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut };
 }
 
+// THE DRAIN, over the control plane (the CEO, 2026-09-17: the way out of
+// god mode). Until now a drain read another account's home through sudo
+// (bin/fabric-host drain). Here the account's own daemon runs the
+// harvester on its own memory — one bundle per memory directory Claude
+// Code keeps for it (~/.claude/projects/<slug>/memory), each resolved to
+// the working copy it belongs to by matching the slug against the
+// account's ~/projects/* — and answers with the bundles gzipped and
+// base64, in parts that fit the relay's 128 KiB message limit, plus each
+// harvest report (`needs_rendering` and the skipped list included). No
+// request field reaches argv: the op takes none; the harvester's own
+// hygiene refuses a memory carrying a secret; a memory directory with no
+// working copy beside it is named and left where it is.
+export const MEMORY_PART_BYTES = 90 * 1024;
+export function memorySlug(dir) { return path.resolve(dir).replace(/\//g, '-'); }
+export function memoryDirs(home = os.homedir(), projectsDir = path.join(home, 'projects')) {
+  const root = path.join(home, '.claude', 'projects');
+  let slugs; try { slugs = fs.readdirSync(root); } catch { return []; }
+  let copies = []; try { copies = fs.readdirSync(projectsDir).map(d => path.join(projectsDir, d)).filter(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } }); } catch { /* no projects dir */ }
+  const bySlug = new Map(copies.map(d => [memorySlug(d), d]));
+  const out = [];
+  for (const slug of slugs) {
+    const memory = path.join(root, slug, 'memory');
+    let n = 0; try { n = fs.readdirSync(memory).filter(f => f.endsWith('.md') && f !== 'MEMORY.md').length; } catch { continue; }
+    if (!n) continue;
+    out.push({ slug, memory, files: n, working_copy: bySlug.get(slug) ?? null });
+  }
+  return out;
+}
+export async function memory(home = os.homedir(), { root = process.env.AGENT_FABRIC_ROOT ?? path.join(home, 'projects', 'agent-fabric'), exec = execFileP, dirs = memoryDirs(home), all = false, partBytes = MEMORY_PART_BYTES } = {}) {
+  const tool = path.join(root, 'tools', 'fabric', 'harvest_memory.py');
+  const bundles = [];
+  for (const d of dirs) {
+    if (!d.working_copy) { bundles.push({ slug: d.slug, files: d.files, status: 'no-working-copy' }); continue; }
+    // The tar on stdout, the report on stderr: one run gives both.
+    const args = [tool, '--bundle', '-', '--memory', d.memory, '--working-copy', d.working_copy, ...(all ? ['--all'] : [])];
+    let r;
+    try { r = await exec('python3', args, { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AGENT_FABRIC_ROOT: root }, timeout: 120000 }); }
+    catch (e) { bundles.push({ slug: d.slug, files: d.files, working_copy: d.working_copy, status: 'harvest-failed', error: String(e?.stderr ?? e?.message ?? e).slice(-400) }); continue; }
+    const tar = Buffer.from(r.stdout ?? '');
+    let report = null;
+    try { const j = JSON.parse(String(r.stderr ?? '')); report = { claims: j.claims, counts: j.counts, needs_rendering: j.needs_rendering ?? [], skipped_no_roles_class: j.skipped_no_roles_class ?? [] }; } catch { report = null; }
+    const gz = zlib.gzipSync(tar, { level: 9 });
+    const b64 = gz.toString('base64');
+    const parts = [];
+    for (let i = 0; i < b64.length; i += partBytes) parts.push(b64.slice(i, i + partBytes));
+    bundles.push({ slug: d.slug, files: d.files, working_copy: d.working_copy, status: 'ok', bytes: tar.length, gzip_bytes: gz.length,
+                   sha256: crypto.createHash('sha256').update(tar).digest('hex'), parts: parts.length, report, _parts: parts });
+  }
+  return { status: 'ok', bundles };
+}
+
 // Everything, for `status`; the sections a request names, otherwise.
 export async function collect(op, ctx = {}) {
   const wants = op === 'status' ? ['identity', 'usage', 'keys', 'fabric', 'session'] : [op];
@@ -227,6 +279,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));
     if (name === 'session') return guard(name, () => session(ctx.uid, ctx.exec));
     if (name === 'script') return guard(name, () => script(ctx.home));
+    if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
     return Promise.resolve();
   }));
   return data;

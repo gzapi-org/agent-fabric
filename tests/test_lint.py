@@ -396,6 +396,99 @@ def case_domain_bound_by_an_unseen_project_is_not_judged() -> None:
         assert code == 1 and "memory/domains/db-admin" in out and "indexed by no project" in out, out
 
 
+GE_BODY = "\n# web-dev — წესდება\n\n" + ("ეს არის ქართული თარგმანი, რომელიც სრულად ქართულ დამწერლობაზეა დაწერილი. " * 6) + "\n"
+
+
+def _digest_of_body(path: str) -> str:
+    import hashlib
+    import re as _re
+    text = open(path, encoding="utf-8").read()
+    body = _re.sub(r"\A---\n.*?\n---\n", "", text, count=1, flags=_re.DOTALL)
+    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _translation(digest: str, klass: str = "charter") -> str:
+    return (f'---\nrole: "web-dev"\nclass: {klass}\ndescription: "ქართული წესდება"\ntier: 1\ndistilled_at: "2026-09-17"\n'
+            f'translates: identities/roles/web-dev/charter.md\ntranslates_digest: {digest}\n---\n' + GE_BODY)
+
+
+WORKER = """---
+name: locale-worker
+description: The Georgian-only worker of the language role (agent-fabric) — receives Georgian, answers Georgian
+model: opus
+tools:
+---
+
+შენ ხარ ქართული ენის რედაქტორი. პასუხობ მხოლოდ ქართულად.
+"""
+
+
+def case_locale_translation_is_a_charter_with_a_digest() -> None:
+    """A locale charter is linted on its own terms (schema, class, source
+    and digest) and never as a generic slice beside a worker file that
+    carries no fabric frontmatter. Kills: dropping the locale/ exemption
+    in lint_slices, or the translation rule itself."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(ident(fabric, "locale", "ge", "charter.md"), _translation(_digest_of_body(ident(fabric, "charter.md"))))
+        write(ident(fabric, "locale", "ge", "worker.md"), WORKER)
+        code, out = run_lint(fabric)
+        assert code == 0, f"a well-formed translation and worker failed:\n{out}"
+        # class must be charter; the source must be this role's charter
+        write(ident(fabric, "locale", "ge", "charter.md"), _translation(_digest_of_body(ident(fabric, "charter.md")), klass="brief"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "is class charter" in out, out
+
+
+def case_translation_lag_is_reported() -> None:
+    """The English charter moves, the translation keeps the old digest:
+    named, never silently served as current. Kills: dropping the digest
+    comparison."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(ident(fabric, "locale", "ge", "charter.md"), _translation(_digest_of_body(ident(fabric, "charter.md"))))
+        assert run_lint(fabric)[0] == 0
+        write(ident(fabric, "charter.md"), CHARTER + "\nA paragraph the translation does not carry yet.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "the translation lags" in out, out
+
+
+def case_locale_worker_shape_and_hygiene() -> None:
+    """The worker file is not a slice, but its shape is asserted (the
+    dispatcher's name, an English description with the installer's marker,
+    an alias, no tools) and hygiene still runs over its body."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(ident(fabric, "locale", "ge", "worker.md"), WORKER)
+        assert run_lint(fabric)[0] == 0
+        bad = WORKER.replace("name: locale-worker", "name: ka-worker").replace("(agent-fabric)", "").replace("tools:\n", "tools: Read, Bash\n")
+        write(ident(fabric, "locale", "ge", "worker.md"), bad)
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        for phrase in ("locale-worker", "agent-fabric` marker", "tools must be empty"):
+            assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        write(ident(fabric, "locale", "ge", "worker.md"), WORKER.replace("description: The Georgian-only worker", "description: ქართული მუშა"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "not English" in out, out
+        write(ident(fabric, "locale", "ge", "worker.md"), WORKER + "\nRun it against ghp_ABCDEFGHIJKLMNOP.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "credential" in out, f"a credential in the worker body passed:\n{out}"
+
+
+def case_non_latin_translation_budget_is_stricter() -> None:
+    """A Georgian body is budgeted at two characters a token, not four:
+    a body that passes the flat estimate is refused. Kills: using
+    CHARS_PER_TOKEN for a non-Latin body."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        # ~9 000 letters: 2 250 tokens at 4/char (under 3000*1.35), 4 500 at 2/char (over)
+        big = "\n# წ\n\n" + ("ქართული ტექსტი " * 600) + "\n"
+        text = _translation(_digest_of_body(ident(fabric, "charter.md"))).replace(GE_BODY, big)
+        write(ident(fabric, "locale", "ge", "charter.md"), text)
+        code, out = run_lint(fabric)
+        assert code == 1 and "at 2 chars/token" in out, out
+
+
 def case_quoted_description_round_trips() -> None:
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
@@ -735,6 +828,10 @@ def main() -> int:
         case_knowledge_not_in_identities,
         case_taxonomy_roles_are_catalogued,
         case_domain_bound_by_an_unseen_project_is_not_judged,
+        case_locale_translation_is_a_charter_with_a_digest,
+        case_translation_lag_is_reported,
+        case_locale_worker_shape_and_hygiene,
+        case_non_latin_translation_budget_is_stricter,
         case_model_profiles_layered_file_passes,
         case_model_profiles_cheap_review_is_refused,
         case_model_profiles_agents_are_logins,

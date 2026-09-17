@@ -43,6 +43,7 @@ clean machine can still run it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -62,7 +63,17 @@ _wc_spec.loader.exec_module(workingcopy)
 
 BUDGET_TOKENS = 1800
 CHARS_PER_TOKEN = 4
+# A body written mostly in a non-Latin script tokenizes worse than the flat
+# four-characters-a-token estimate: two is the conservative divisor lint
+# uses for such a body, so the budget check tightens rather than loosens
+# (the live check of the first Georgian charter records the real count).
+NON_LATIN_CHARS_PER_TOKEN = 2
 TIER1_BUDGET_TOKENS = 3000
+# identities/roles/<role>/locale/<suffix>/: a locale's translation of the
+# charter and the locale's worker prompt — authored files with their own
+# rules (locale_translation_findings, locale_worker_findings), skipped by
+# the generic slice walk like payload is.
+LOCALE_DIRNAME = "locale"
 
 # The generic patterns plus every visible project's own list (its working
 # copy's .agent-fabric/hygiene.json), loaded in main() once the working
@@ -149,6 +160,126 @@ def hygiene_findings(where: str, text: str) -> list[str]:
         out.append(
             f"{where}: reads as non-English ({sorted(italian)[:5]}) — translate it"
         )
+    return out
+
+
+def _is_mostly_non_latin(text: str) -> bool:
+    """True when at least half the letters of `text` are outside the Latin
+    range — a body written in Georgian, Cyrillic, Arabic, CJK …"""
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    non_latin = sum(1 for ch in letters if ord(ch) > 0x024F)
+    return non_latin * 2 >= len(letters)
+
+
+def _source_digest(path: str) -> str:
+    """sha256 over an authored file's BODY (frontmatter stripped), the digest
+    a translation records in `translates.digest`."""
+    with open(path, encoding="utf-8") as fh:
+        body = FRONTMATTER_RE.sub("", fh.read())
+    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def locale_translation_findings(role: str, role_path: str, template_schema: dict[str, Any] | None) -> list[str]:
+    """identities/roles/<role>/locale/<suffix>/charter.md: a translation of
+    the role's charter that launch_prompt renders for a login whose name
+    ends in <suffix>. It is a charter slice (schema, class, role) that
+    names its source and the source's digest; a digest that no longer
+    matches is the lag finding — the translation is still served, and
+    this is where the lag is seen. Its budget uses the non-Latin divisor."""
+    out: list[str] = []
+    base = os.path.join(role_path, LOCALE_DIRNAME)
+    if not os.path.isdir(base):
+        return out
+    source = os.path.join(role_path, "charter.md")
+    for suffix in sorted(os.listdir(base)):
+        path = os.path.join(base, suffix, "charter.md")
+        if not os.path.isfile(path):
+            continue
+        rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/charter.md"
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        meta = parse_frontmatter(text)
+        if meta is None:
+            out.append(f"{rel}: no frontmatter — a translation carries its source and digest")
+            continue
+        if template_schema:
+            out += validate_json(template_schema, meta, rel)
+        if meta.get("class") != "charter":
+            out.append(f"{rel}: class {meta.get('class')!r}; a locale charter is class charter")
+        if meta.get("role") != role:
+            out.append(f"{rel}: role {meta.get('role')!r} but lives under {role}/")
+        of, digest = meta.get("translates"), meta.get("translates_digest")
+        if not of or not digest:
+            out.append(f"{rel}: no `translates` / `translates_digest` — which English charter, and at what digest")
+        else:
+            if of != f"identities/roles/{role}/charter.md":
+                out.append(f"{rel}: translates {of!r}, not identities/roles/{role}/charter.md")
+            if os.path.isfile(source):
+                now = _source_digest(source)
+                if digest != now:
+                    out.append(f"{rel}: translates the English charter at {digest}, but it is now {now} "
+                               "— the translation lags; update the body and its digest")
+        body = FRONTMATTER_RE.sub("", text)
+        out += hygiene_findings(rel, body)
+        divisor = NON_LATIN_CHARS_PER_TOKEN if _is_mostly_non_latin(body) else CHARS_PER_TOKEN
+        approx = len(body) // divisor
+        if approx > TIER1_BUDGET_TOKENS * 1.35:
+            out.append(f"{rel}: ~{approx} tokens (at {divisor} chars/token) exceeds the tier-1 budget "
+                       f"{TIER1_BUDGET_TOKENS} — a launch prompt pays every one of them")
+    return out
+
+
+AGENT_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
+
+
+def locale_worker_findings(role: str, role_path: str) -> list[str]:
+    """identities/roles/<role>/locale/<suffix>/worker.md: the locale's
+    worker — a Claude Code agent file (name, description, model, tools),
+    not a slice. install-agent-files.sh installs it as
+    ~/.claude/agents/locale-worker.md on a login of this role whose name
+    ends in <suffix>, and removes it by the `agent-fabric` marker in its
+    description, so the shape is asserted here: the name the dispatcher
+    uses, an English one-line description carrying the marker, no tools
+    (it must read nothing), and a body that passes hygiene."""
+    out: list[str] = []
+    base = os.path.join(role_path, LOCALE_DIRNAME)
+    if not os.path.isdir(base):
+        return out
+    for suffix in sorted(os.listdir(base)):
+        path = os.path.join(base, suffix, "worker.md")
+        if not os.path.isfile(path):
+            continue
+        rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/worker.md"
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        m = AGENT_FRONTMATTER_RE.match(text)
+        if not m:
+            out.append(f"{rel}: no agent frontmatter (name, description, model, tools)")
+            continue
+        fields: dict[str, str] = {}
+        for line in m.group(1).splitlines():
+            km = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
+            if km:
+                fields[km.group(1)] = km.group(2).strip()
+        if fields.get("name") != "locale-worker":
+            out.append(f"{rel}: name {fields.get('name')!r}; the installer and the guard know it as locale-worker")
+        desc = fields.get("description", "").strip("\"'")
+        if not desc:
+            out.append(f"{rel}: no description — the dispatcher reads it")
+        else:
+            if "agent-fabric" not in desc:
+                out.append(f"{rel}: description lacks the `agent-fabric` marker the installer removes it by")
+            if any(ord(ch) > 0x024F and ch.isalpha() for ch in desc):
+                out.append(f"{rel}: description is not English — the dispatcher (the bridge) reads it in English")
+        if fields.get("model", "") not in ("haiku", "sonnet", "opus", "fable"):
+            out.append(f"{rel}: model {fields.get('model')!r}; a harness alias (haiku/sonnet/opus/fable)")
+        if "tools" not in fields:
+            out.append(f"{rel}: no `tools:` line — the worker must declare it has none")
+        elif fields["tools"].strip("[] \"'"):
+            out.append(f"{rel}: tools {fields['tools']!r}; the worker reads nothing — tools must be empty")
+        out += hygiene_findings(rel, text[m.end():])
     return out
 
 
@@ -675,7 +806,7 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
         # `identities/roles/<role>/skills/`. A `skills/` nested anywhere
         # else is a directory of slices like any other.
         if dirpath == base and where_prefix.startswith("identities/"):
-            dirnames[:] = [d for d in dirnames if d not in PAYLOAD_DIRS]
+            dirnames[:] = [d for d in dirnames if d not in PAYLOAD_DIRS and d != LOCALE_DIRNAME]
         for filename in sorted(filenames):
             # README.md is documentation of a directory, never a slice.
             if not filename.endswith(".md") or filename in ("INDEX.md", "README.md"):
@@ -881,6 +1012,8 @@ def main() -> int:
                                 findings += hygiene_findings(layout.root_rel(full), fh.read())
         identity_slices[role] = lint_slices(role_path, f"identities/roles/{role}", template_schema,
                                             findings, shared_owner_count, descriptions)
+        findings += locale_translation_findings(role, role_path, template_schema)
+        findings += locale_worker_findings(role, role_path)
         for rel in identity_slices[role]:
             klass = (parse_frontmatter(open(os.path.join(root, rel), encoding="utf-8").read()) or {}).get("class")
             if klass not in layout.IDENTITY_CLASSES:

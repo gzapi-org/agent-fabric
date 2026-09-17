@@ -109,6 +109,16 @@
       "items": {
         "type": "string"
       }
+    },
+    "translates": {
+      "description": "A locale translation of an authored identity file: the repo-relative path of the English source it renders. Paired with translates_digest. Written 2026-09-17 for language-culture's Georgian charter.",
+      "type": "string",
+      "pattern": "^identities/roles/[a-z][a-z0-9-]*/charter\\.md$"
+    },
+    "translates_digest": {
+      "description": "sha256 of the source's body (frontmatter stripped) at the time of translation; lint reports a translation whose digest no longer matches its source — the translation lags.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   }
 }

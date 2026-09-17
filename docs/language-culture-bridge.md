@@ -115,8 +115,8 @@ engines):
 
 - `web_search` — Google's results through SerpAPI (serpapi.com), with
   `gl`, `hl`, `google_domain` and `lr` fixed from the file: the locale
-  as a browser there would have it (`ge`: `google.ge`, `gl=ge`, `hl=ka`,
-  `lr=lang_ka`). Secret `SERPAPI_API_KEY`, which SerpAPI takes only as
+  as a browser there would have it (`ge`: `google.ge`, `gl=ge`, `hl=ka`;
+  not `lr=lang_ka` — SerpAPI refuses it, read back 2026-09-17). Secret `SERPAPI_API_KEY`, which SerpAPI takes only as
   its `api_key` query parameter — the one request whose URL carries a
   secret, built per call and never logged or returned. Google's own
   Custom Search JSON API was the first choice and is closed to new

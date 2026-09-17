@@ -87,7 +87,8 @@ out="$(status MOVETO_PREFIX="$SANDBOX/nowhere" 2>&1)"
 
 echo "fabric-status: memories written and not yet drained"
 WC="$SANDBOX/gzapp"; git init -q "$WC"; git -C "$WC" remote add origin git@github.com:gzapi-org/gzapp.git
-MEM="$SANDBOX/home/.claude/projects/$(printf '%s' "$WC" | tr / -)/memory"; mkdir -p "$MEM" "$WC/.agent-fabric/memory"
+MEM="$SANDBOX/home/.claude/projects/$(printf '%s' "$WC" | sed 's/[^A-Za-z0-9]/-/g')/memory"   # the harness's spelling: every non-alphanumeric is a dash
+mkdir -p "$MEM" "$WC/.agent-fabric/memory"
 printf '{"watermarks":{"%s":1000}}\n' "$(hostname -s)" > "$WC/.agent-fabric/memory/last-drain-report.json"
 printf -- '---\nname: a\ndescription: d\nmetadata:\n  type: project\n  roles_class: solution\n---\nfact\n' > "$MEM/a.md"
 printf -- '---\nname: b\ndescription: d\nmetadata:\n  type: user\n---\nmine\n' > "$MEM/b.md"

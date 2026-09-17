@@ -52,6 +52,7 @@ mkfabric() {
     cp -r "$REAL_ROOT/routing" "$FABRIC/routing"
     cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
     cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
+    mkdir -p "$FABRIC/runtime/mcp"; cp -r "$REAL_ROOT/runtime/mcp/websearch-locale" "$FABRIC/runtime/mcp/"   # the installer's MCP step reads its helper from the fabric
     cp "$REAL_ROOT/runtime/identity.py" "$FABRIC/runtime/"
     cp "$REAL_ROOT/tools/fabric/routing.py" "$REAL_ROOT/tools/fabric/workingcopy.py" "$FABRIC/tools/fabric/"
     # The role's system prompt: the assembler, the shared sections, and a

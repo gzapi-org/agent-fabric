@@ -70,13 +70,13 @@ export function table(op, rs) {
   if (op === 'script') {
     const top = s => !s || s.status !== 'ok' ? null : s;
     const fmt = sh => !sh || !sh.letters ? '-' : Object.entries(sh).filter(([k]) => k !== 'letters').slice(0, 3).map(([k, v]) => `${k} ${v}%`).join(', ') + ` (${sh.letters} letters)`;
-    const bins = b => !b ? '-' : `${b.only} only / ${b.mixed} mixed / ${b.latin} latin`;
-    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'turns'.padStart(5)}  ${'thinking blocks (non-Latin)'.padEnd(30)} ${'thinking, by script'.padEnd(40)} text, by script`);
+    const bins = b => !b ? '-' : `${b.only} only / ${b.mixed} mixed / ${b.latin} latin / ${b.empty} empty`;
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'turns'.padStart(5)}  ${'thinking blocks (non-Latin)'.padEnd(40)} ${'thinking, by script'.padEnd(40)} text, by script`);
     for (const r of rs) {
       if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const s = top(r.script);
       if (!s) { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${(r.script?.status ?? '-')}`); continue; }
-      lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${String(s.turns).padStart(5)}  ${bins(s.thinking_blocks).padEnd(30)} ${fmt(s.thinking).padEnd(40)} ${fmt(s.text)}`);
+      lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${String(s.turns).padStart(5)}  ${bins(s.thinking_blocks).padEnd(40)} ${fmt(s.thinking).padEnd(40)} ${fmt(s.text)}`);
     }
     return lines.join('\n');
   }

@@ -126,7 +126,10 @@ of those records by script and reports the shares to the coordinator
 (`fabric-ctl <login> script`; counts only, no text leaves the
 account). The criterion is per block of thinking, the CEO's: most
 blocks in the locale's script alone, some about half and half — a
-quoted term, a name, a path — and the count of each is what is read.
+quoted term, a name, a path — and the count of each is what is read — of the blocks whose text the API
+returned, which is a part of them; the count it could not read is
+reported beside, and a session with none readable is unmeasured, not
+clean.
 A holder that reasons in English and translates shows the opposite:
 Latin blocks, and the locale only in the text — and a rendering pass
 cannot hide it, because the translations are a small part of what a

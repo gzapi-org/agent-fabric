@@ -110,7 +110,12 @@ export function session(uid = process.getuid(), exec = execFileSync) {
 // reasons in English shows the opposite — so each thinking block is
 // also binned by the share of its dominant non-Latin script: `only`
 // (≥ 90 %), `mixed` (30–90 %), `latin` (< 30 %), and the bins are
-// reported as counts of blocks.
+// reported as counts of blocks. `empty` is the block the API returned
+// with a signature and no text: measured 2026-09-17 across the fleet,
+// most thinking blocks are stored that way (one org: about a fifth
+// carry text; the other: none on the same model), so the signature is
+// read from the blocks that carry text, and `empty` says how many did
+// not — a row of only empties is unmeasured, not clean.
 const SCRIPT_RANGES = [
   ['georgian', [[0x10A0, 0x10FF], [0x1C90, 0x1CBF], [0x2D00, 0x2D2F]]],
   ['cyrillic', [[0x0400, 0x052F], [0x2DE0, 0x2DFF], [0xA640, 0xA69F]]],

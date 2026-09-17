@@ -62,7 +62,8 @@ own session records — thinking and visible text apart — counted by
 Unicode script over the last 24 h: the signature of the language a
 session reasons in, asked for by the CEO for the language-culture role;
 counts and shares only, never text, and not part of `status` since it
-reads megabytes), `status` (all but `script`). A section that
+reads megabytes; most thinking blocks are stored with a signature and
+no text — the op reports how many it could not read), `status` (all but `script`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the

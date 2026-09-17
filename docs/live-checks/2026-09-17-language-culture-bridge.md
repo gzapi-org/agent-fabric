@@ -142,9 +142,22 @@ global search steered by the query, less than the "Georgian browser"
 asked for. Google's Custom Search JSON API was tried next and is
 **closed to new customers** (its overview page, 2026-09-17; existing
 customers until 2027-01-01; the full-web alternative is "contact us"),
-so Google's index is reachable only through a SERP proxy. Decides:
-Serper.dev (`gl=ge`, `hl=ka`) is the located `web_search`, and Brave
-stays as `web_search_global`, a second index (the CEO: keep both).
+so Google's index is reachable only through a SERP proxy; and a plain
+fetch of `google.com/search?q=…&gl=ge&hl=ka` with a browser user-agent
+answers HTTP 200, 92 KB, **no result at all** — an `enablejs` shell
+(Google serves search only to clients that run JavaScript). Decides: a
+SERP proxy is the located `web_search`, and Brave stays as
+`web_search_global`, a second index (the CEO: keep both).
+
+## Which SERP proxy the key was for
+
+The key the CEO set answered `403 Unauthorized.` at Serper.dev — the
+same answer as a wrong key — while being 64 hex characters and
+byte-identical between Doppler and the synced file. "250 free
+searches" is SerpAPI's free plan, not Serper's (2 500): the same value
+at `serpapi.com/search.json?engine=google&gl=ge&hl=ka` answers **HTTP
+200, 9 organic results**. Decides: the located engine is SerpAPI;
+the secret is `SERPAPI_API_KEY` (renamed in Doppler, same value).
 
 ## The bridge, live — after the ge holder's relaunch (`ab7355a` on every account)
 

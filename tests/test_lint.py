@@ -486,15 +486,15 @@ def case_locale_file_shape() -> None:
     in the locale. Kills: an unchecked file the server would refuse at start."""
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
-        good = ('{"timezone": "Asia/Tbilisi", "serper": {"gl": "ge", "hl": "ka", "tool_description": "ვებ-ძიება ქართულად"},'
+        good = ('{"timezone": "Asia/Tbilisi", "serpapi": {"gl": "ge", "hl": "ka", "google_domain": "google.ge", "lr": "lang_ka", "tool_description": "ვებ-ძიება ქართულად"},'
                 ' "brave": {"country": "ALL", "tool_description": "გლობალური ვებ-ძიება"}}')
         write(ident(fabric, "locale", "ge", "locale.json"), good)
         code, out = run_lint(fabric)
         assert code == 0, out
-        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"ge"', '"GE"').replace('"hl": "ka"', '"hl": "KA-"').replace("ვებ-ძიება ქართულად", "Web search in Georgian").replace('"ALL"', '"all"'))
+        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"gl": "ge"', '"gl": "GE"').replace('"hl": "ka"', '"hl": "KA-"').replace('"lr": "lang_ka"', '"lr": "ka"').replace("ვებ-ძიება ქართულად", "Web search in Georgian").replace('"ALL"', '"all"'))
         code, out = run_lint(fabric)
         assert code == 1, out
-        for phrase in ("serper.gl 'GE'", "serper.hl 'KA-'", "serper.tool_description is not in the locale", "brave.country 'all'"):
+        for phrase in ("serpapi.gl 'GE'", "serpapi.hl 'KA-'", "serpapi.lr 'ka'", "serpapi.tool_description is not in the locale", "brave.country 'all'"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
         write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi", "brave": {"country": "US", "search_lang": "en", "ui_lang": "en-US", "tool_description": "ძიება"}}')
         code, out = run_lint(fabric)

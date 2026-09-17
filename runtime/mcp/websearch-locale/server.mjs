@@ -10,14 +10,19 @@
 // (identities/roles/language-culture/locale/<suffix>/locale.json, kept
 // by the CEO: "keep both engines"):
 //
-//   web_search         Google's results through Serper.dev, with `gl`
-//                      (the country) and `hl` (the language) fixed from
-//                      the file — the locale as a browser there would
-//                      have it. Google's own Custom Search JSON API is
-//                      closed to new customers (its overview page,
-//                      2026-09-17) and Google sells no other web-search
-//                      API, so a SERP proxy is the way to Google's index.
-//                      Secret SERPER_API_KEY (one request header).
+//   web_search         Google's results through SerpAPI (serpapi.com),
+//                      with `gl` (the country), `hl` (the language) and,
+//                      where the file names them, `google_domain` and
+//                      `lr` fixed from the file — the locale as a browser
+//                      there would have it. Google's own Custom Search
+//                      JSON API is closed to new customers (its overview
+//                      page, 2026-09-17) and Google sells no other
+//                      web-search API, so a SERP proxy is the way to
+//                      Google's index; the CEO's account is SerpAPI's.
+//                      Secret SERPAPI_API_KEY — SerpAPI takes it only as
+//                      the `api_key` query parameter, so this is the one
+//                      request whose URL carries a secret: the URL is
+//                      built per call and never logged or returned.
 //   web_search_global  Brave's Search API, `country` from the file (ALL
 //                      for a locale Brave lacks — it has no Georgian: GE,
 //                      ka and ka-GE each refused, 2026-09-17) and
@@ -38,28 +43,32 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syncedVar } from '../../../communication/gzcoord/scripts/inbox.mjs';
 
-export const SERPER_URL = 'https://google.serper.dev/search';
+export const SERPAPI_URL = 'https://serpapi.com/search.json';
 export const BRAVE_URL = 'https://api.search.brave.com/res/v1/web/search';
-export const SECRETS = { serper: ['SERPER_API_KEY'], brave: ['BRAVE_SEARCH_API_KEY'] };
-export const TOOL_NAMES = { serper: 'web_search', brave: 'web_search_global' };
-const REQUIRED = { serper: ['gl', 'hl', 'tool_description'], brave: ['country', 'tool_description'] };
+export const SECRETS = { serpapi: ['SERPAPI_API_KEY'], brave: ['BRAVE_SEARCH_API_KEY'] };
+const REQUIRED = { serpapi: ['gl', 'hl', 'tool_description'], brave: ['country', 'tool_description'] };
 
 export function readLocale(file = process.env.WEBSEARCH_LOCALE_FILE) {
   if (!file) throw new Error('WEBSEARCH_LOCALE_FILE is not set: the locale file decides the country and language');
   const l = JSON.parse(fs.readFileSync(file, 'utf8'));
   const engines = Object.keys(REQUIRED).filter(e => l[e]);
-  if (!engines.length) throw new Error(`locale file ${file}: no engine configured (serper, brave)`);
+  if (!engines.length) throw new Error(`locale file ${file}: no engine configured (serpapi, brave)`);
   for (const e of engines) for (const k of REQUIRED[e]) if (typeof l[e][k] !== 'string' || !l[e][k]) throw new Error(`locale file ${file}: ${e}.${k} missing`);
   return l;
 }
 
-// The request per engine: Serper takes a POST with a JSON body (the
-// query, gl, hl, num); Brave a GET with the parameters in the URL. A key
-// never rides in either.
-export function request(engine, query, locale, { count } = {}) {
-  if (engine === 'serper') {
-    const p = locale.serper;
-    return { url: SERPER_URL, method: 'POST', body: { q: query, gl: p.gl, hl: p.hl, num: Math.min(20, Math.max(1, Number(count) || 10)) } };
+// The request per engine, both GETs with the parameters in the URL.
+// SerpAPI's `api_key` is the secret itself (its only auth), added here
+// from `secrets` and nowhere else; Brave's key rides in a header.
+export function request(engine, query, locale, { count, secrets = {} } = {}) {
+  if (engine === 'serpapi') {
+    const u = new URL(SERPAPI_URL); const p = locale.serpapi;
+    u.searchParams.set('engine', 'google'); u.searchParams.set('q', query); u.searchParams.set('gl', p.gl); u.searchParams.set('hl', p.hl);
+    if (p.google_domain) u.searchParams.set('google_domain', p.google_domain);
+    if (p.lr) u.searchParams.set('lr', p.lr);
+    u.searchParams.set('num', String(Math.min(20, Math.max(1, Number(count) || 10))));
+    if (secrets.SERPAPI_API_KEY) u.searchParams.set('api_key', secrets.SERPAPI_API_KEY);
+    return { url: u.toString(), method: 'GET' };
   }
   const u = new URL(BRAVE_URL); const b = locale.brave;
   u.searchParams.set('q', query); u.searchParams.set('country', b.country);
@@ -76,27 +85,47 @@ const secretsOf = (engine, env = process.env) => Object.fromEntries(SECRETS[engi
 export async function search(engine, query, locale, { secrets = secretsOf(engine), fetchImpl = globalThis.fetch, count } = {}) {
   const missing = SECRETS[engine].find(n => !secrets[n]);
   if (missing) return { isError: true, text: `no ${missing} in the synced secrets: bin/fabric-secrets sync, after it is in Doppler for this login` };
-  const { url, method, body } = request(engine, query, locale, { count });
-  const headers = engine === 'serper' ? { Accept: 'application/json', 'Content-Type': 'application/json', 'X-API-KEY': secrets.SERPER_API_KEY }
-                                      : { Accept: 'application/json', 'X-Subscription-Token': secrets.BRAVE_SEARCH_API_KEY };
+  const { url, method } = request(engine, query, locale, { count, secrets });
+  const headers = engine === 'brave' ? { Accept: 'application/json', 'X-Subscription-Token': secrets.BRAVE_SEARCH_API_KEY } : { Accept: 'application/json' };
   let r;
-  try { r = await fetchImpl(url, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) }); }
+  try { r = await fetchImpl(url, { method, headers, signal: AbortSignal.timeout(20000) }); }
   catch (e) { return { isError: true, text: `search failed: ${e?.name === 'TimeoutError' ? 'timeout' : 'unreachable'}` }; }
   if (!r.ok) {
-    let why = ''; try { const j = await r.json(); why = j?.message ?? j?.error?.message ?? j?.error?.detail ?? ''; } catch { /* no body */ }
+    let why = ''; try { const j = await r.json(); why = typeof j?.error === 'string' ? j.error : (j?.message ?? j?.error?.message ?? j?.error?.detail ?? ''); } catch { /* no body */ }
     return { isError: true, text: `search refused: HTTP ${r.status}${why ? ` — ${String(why).slice(0, 200)}` : ''}` };
   }
   let j; try { j = await r.json(); } catch { return { isError: true, text: 'search answered something that is not JSON' }; }
-  const items = engine === 'serper' ? (j?.organic ?? []).map(x => [x.title, x.link, x.snippet]) : (j?.web?.results ?? []).map(x => [x.title, x.url, (x.description ?? '').replace(/<[^>]+>/g, '')]);
+  if (engine === 'serpapi' && j?.error) return { isError: true, text: `search refused: ${String(j.error).slice(0, 200)}` };
+  const items = engine === 'serpapi' ? (j?.organic_results ?? []).map(x => [x.title, x.link, x.snippet]) : (j?.web?.results ?? []).map(x => [x.title, x.url, (x.description ?? '').replace(/<[^>]+>/g, '')]);
   if (!items.length) return { isError: false, text: `no results (${engine})` };
   return { isError: false, text: items.map(([t, l, d], i) => `${i + 1}. ${t ?? ''}\n   ${l ?? ''}\n   ${(d ?? '').replace(/\s+/g, ' ')}`).join('\n\n') };
 }
 
+// The tools. `web_search` is the located search with Brave behind it:
+// the engines in order (SerpAPI, then Brave), the first that answers
+// wins, and the result's last line names the engine and — when SerpAPI
+// refused, its 250 searches a month spent or anything else — why, so the
+// holder sees the fall-back without the search failing (the CEO,
+// 2026-09-17: "use SerpAPI till it works, then switch to Brave
+// seamlessly"). `web_search_global` is Brave alone, explicitly.
+export const ORDER = ['serpapi', 'brave'];
 export function tools(locale) {
-  return Object.keys(REQUIRED).filter(e => locale[e]).map(e => ({
-    name: TOOL_NAMES[e], description: locale[e].tool_description,
-    inputSchema: { type: 'object', additionalProperties: false, required: ['query'],
-                   properties: { query: { type: 'string', minLength: 2 }, count: { type: 'integer', minimum: 1, maximum: 20 } } } }));
+  const schema = { type: 'object', additionalProperties: false, required: ['query'],
+                   properties: { query: { type: 'string', minLength: 2 }, count: { type: 'integer', minimum: 1, maximum: 20 } } };
+  const out = [];
+  const first = ORDER.find(e => locale[e]);
+  if (first) out.push({ name: 'web_search', description: locale[first].tool_description, inputSchema: schema });
+  if (locale.brave) out.push({ name: 'web_search_global', description: locale.brave.tool_description, inputSchema: schema });
+  return out;
+}
+export async function searchWithFallback(engines, query, locale, opts) {
+  const refused = [];
+  for (const engine of engines) {
+    const r = await search(engine, query, locale, { fetchImpl: opts?.fetchImpl, count: opts?.count, ...(opts?.secrets ? { secrets: opts.secrets[engine] ?? {} } : {}) });
+    if (!r.isError) return { isError: false, text: `${r.text}\n\n— ${engine}${refused.length ? ` (${refused.join('; ')})` : ''}` };
+    refused.push(`${engine}: ${r.text}`);
+  }
+  return { isError: true, text: refused.join('; ') };
 }
 
 // JSON-RPC 2.0 over stdio, newline-delimited, the MCP subset a tool
@@ -111,11 +140,11 @@ export async function handle(msg, ctx) {
   if (msg.method === 'ping') return reply({});
   if (msg.method === 'tools/list') return reply({ tools: tools(ctx.locale) });
   if (msg.method === 'tools/call') {
-    const engine = Object.keys(TOOL_NAMES).find(e => TOOL_NAMES[e] === msg.params?.name && ctx.locale[e]);
-    if (!engine) return error(-32602, `unknown tool ${msg.params?.name}`);
+    const engines = msg.params?.name === 'web_search' ? ORDER.filter(e => ctx.locale[e]) : msg.params?.name === 'web_search_global' && ctx.locale.brave ? ['brave'] : [];
+    if (!engines.length) return error(-32602, `unknown tool ${msg.params?.name}`);
     const q = msg.params?.arguments?.query;
     if (typeof q !== 'string' || q.length < 2) return error(-32602, 'query: a string of at least two characters');
-    const r = await search(engine, q, ctx.locale, { ...(ctx.secrets ? { secrets: ctx.secrets[engine] } : {}), fetchImpl: ctx.fetchImpl, count: msg.params?.arguments?.count });
+    const r = await searchWithFallback(engines, q, ctx.locale, { secrets: ctx.secrets, fetchImpl: ctx.fetchImpl, count: msg.params?.arguments?.count });
     return reply({ content: [{ type: 'text', text: r.text }], isError: r.isError });
   }
   return error(-32601, `method not found: ${msg.method}`);

@@ -113,14 +113,23 @@ an MCP server with one tool per engine its locale file configures
 (`locale/<suffix>/locale.json`, lint validates it; the CEO: keep both
 engines):
 
-- `web_search` — Google's results through Serper.dev, with `gl` and
-  `hl` fixed from the file: the locale as a browser there would have it
-  (`ge`: `gl=ge`, `hl=ka`). Secret `SERPER_API_KEY`, one request header.
-  Google's own Custom Search JSON API was the first choice and is
-  closed to new customers (its overview page, read 2026-09-17: existing
-  customers have until 2027-01-01, the only full-web alternative named
-  is "contact us"), and Google sells no other web-search API — so a
-  SERP proxy is the way to Google's index; Serper was the CEO's pick.
+- `web_search` — Google's results through SerpAPI (serpapi.com), with
+  `gl`, `hl`, `google_domain` and `lr` fixed from the file: the locale
+  as a browser there would have it (`ge`: `google.ge`, `gl=ge`, `hl=ka`,
+  `lr=lang_ka`). Secret `SERPAPI_API_KEY`, which SerpAPI takes only as
+  its `api_key` query parameter — the one request whose URL carries a
+  secret, built per call and never logged or returned. Google's own
+  Custom Search JSON API was the first choice and is closed to new
+  customers (its overview page, read 2026-09-17: existing customers
+  have until 2027-01-01, the only full-web alternative named is
+  "contact us"), and a plain fetch of google.com/search answers an
+  empty JavaScript shell — so a SERP proxy is the way to Google's
+  index; the CEO's account is SerpAPI's (250 free searches a month).
+  **When SerpAPI refuses — its 250 searches a month spent, or any other
+  refusal — the same call falls through to Brave**, and the result's
+  last line names the engine that answered and why it fell back, so the
+  holder sees it without the search failing (the CEO: "use SerpAPI till
+  it works, then switch to Brave seamlessly").
 - `web_search_global` — Brave's Search API as a second index, `country`
   from the file and a language only where Brave has it. Brave has no
   Georgian locale (`country=GE`, `search_lang=ka`, `ui_lang=ka-GE` each

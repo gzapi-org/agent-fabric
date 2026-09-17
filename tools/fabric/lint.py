@@ -304,14 +304,17 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
 
 
 # What each engine of the locale search tool takes, as it spells it
-# (runtime/mcp/websearch-locale): Serper's gl (a country, lower-case ISO
-# 3166-1 alpha-2) and hl (the language), Google's own spellings; Brave's
+# (runtime/mcp/websearch-locale): SerpAPI's gl (a country, lower-case ISO
+# 3166-1 alpha-2) and hl (the language), Google's own spellings, with
+# google_domain and lr where the file names them; Brave's
 # country (upper-case, or ALL) and, only where Brave has the language,
 # search_lang and ui_lang. Every engine block carries the tool's
 # description in the locale.
 LOCALE_ENGINES = {
-    "serper": ({"gl": re.compile(r"^[a-z]{2}$"),
-                "hl": re.compile(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")}, {}),
+    "serpapi": ({"gl": re.compile(r"^[a-z]{2}$"),
+                 "hl": re.compile(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")},
+                {"google_domain": re.compile(r"^google\.[a-z.]{2,6}$"),
+                 "lr": re.compile(r"^lang_[a-z]{2,3}(-[A-Za-z]{2,4})?$")}),
     "brave": ({"country": re.compile(r"^([A-Z]{2}|ALL)$")},
               {"search_lang": re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$"),
                "ui_lang": re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")}),
@@ -322,7 +325,7 @@ LOCALE_FILE_RE = {"timezone": re.compile(r"^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$
 def locale_file_findings(role: str, role_path: str) -> list[str]:
     """identities/roles/<role>/locale/<suffix>/locale.json: what the
     locale search tool fixes for a login of that suffix — an IANA
-    timezone and one block per engine (serper, brave; at least one), each
+    timezone and one block per engine (serpapi, brave; at least one), each
     with the parameters that engine takes and the tool's description in
     the locale, since its reader is the holder."""
     out: list[str] = []
@@ -349,7 +352,7 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
                 out.append(f"{rel}: {key} {value!r} does not match {pattern.pattern}")
         engines = [e for e in LOCALE_ENGINES if e in data]
         if not engines:
-            out.append(f"{rel}: no engine block (serper, brave) — the tool would have nothing to search with")
+            out.append(f"{rel}: no engine block (serpapi, brave) — the tool would have nothing to search with")
         for engine in engines:
             block = data[engine]
             if not isinstance(block, dict):

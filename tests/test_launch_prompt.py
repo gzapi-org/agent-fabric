@@ -220,7 +220,8 @@ def case_harness_translation_is_appended_last_and_replaces() -> None:
         assert other != text and "launch-dir" in text, "the memory directory follows the launch cwd, nothing else does"
         # --print renders for the real login (its suffix), so the locale is named after it.
         mine = os.path.join(f.root, "identities", "roles", "language-culture", "locale", LOGIN.rsplit("-", 1)[-1])
-        shutil.copytree(loc, mine, dirs_exist_ok=True)
+        if os.path.realpath(mine) != os.path.realpath(loc):   # on a login ending in -ge the two are one directory (the ge holder, 2026-09-17)
+            shutil.copytree(loc, mine, dirs_exist_ok=True)
         f.bind("language-culture")
         r = f.run("--print")
         assert r.returncode == 0 and "replace: yes" in r.stderr and "შენ ხარ Claude Code." in r.stdout, r.stderr

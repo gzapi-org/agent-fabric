@@ -99,7 +99,10 @@ test('handle: the MCP subset — initialize, initialized, ping, the two tools, w
 test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool error, not a crash; no secret on stderr or stdout', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-home-')); fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), `export GH_TOKEN='${B.BRAVE_SEARCH_API_KEY}'\n`);   // neither search key
-  const child = spawn('node', [SERVER], { env: { ...process.env, HOME: home, WEBSEARCH_LOCALE_FILE: localeFile() } });
+  // The synced file is the only source of a key here: a login that holds the
+  // search keys in its environment (the ge holder) must not lend them to the child.
+  const env = { ...process.env, HOME: home, WEBSEARCH_LOCALE_FILE: localeFile() }; delete env.SERPAPI_API_KEY; delete env.BRAVE_SEARCH_API_KEY;
+  const child = spawn('node', [SERVER], { env });
   let out = '', err = ''; child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
   for (const m of [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, { jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', id: 2, method: 'tools/list' },
                    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'მეტრო' } } }]) child.stdin.write(JSON.stringify(m) + '\n');

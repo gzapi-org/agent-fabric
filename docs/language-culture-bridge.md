@@ -196,7 +196,12 @@ named by lint until its holder re-renders it.
 **The translation is the holder's, entirely.** fabric-coordinator
 commits the English sources, the machinery and the tests, and authors
 no Georgian; the holder translates every piece in its own session and
-opens the PR it does not merge. The kill switch is a file's absence:
+opens the PR it does not merge — the fence's one carve-out
+(`policies/AUTHORITY.md`): a commit that stages nothing but
+`locale/<suffix>/`, from the holder of the role named for that suffix,
+passes the pre-commit hook and CI with `Fabric-Role: <role>`; the
+first attempt showed the docs promising a PR the fence refused
+(the ge holder, 2026-09-17). The kill switch is a file's absence:
 without `locale/<suffix>/harness.md` the launch is today's (append, the
 harness's English, the locale's charter); without any one piece, that
 piece's English.

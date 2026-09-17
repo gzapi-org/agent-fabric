@@ -36,6 +36,30 @@ held="$(python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || echo ""
 if [[ "$held" == "$owner_role" ]]; then
     exit 0
 fi
+# THE ONE CARVE-OUT. A locale's translations — identities/roles/<role>/
+# locale/<suffix>/* — are authored by the holder of <role> whose login is
+# named for <suffix> (language-culture-ge writes locale/ge/): the CEO's
+# rule of 2026-09-17 that no Georgian in the fabric has any author but
+# its holder, and the plane's read-only rule meeting it halfway. A commit
+# that stages nothing but that subtree, from a session bound to that role
+# on that login, passes; the commit-msg hook then records Fabric-Role:
+# <role>, and CI admits it for that subtree alone
+# (policies/check_agent_fabric_dir_authority.sh). Anything else staged
+# beside it, another role, another suffix, or an amend (no staged
+# paths to judge) is refused as before. See policies/AUTHORITY.md.
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/locale-carve-out.sh"
+if [[ -z "$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" ]] && locale_carve_out_role "${staged[@]}"; then
+    login="$(id -un)"
+    if [[ "$held" == "$locale_role" && ( "$login" == *-"$locale_suffix" || "$login" == "$locale_suffix" ) ]]; then
+        exit 0
+    fi
+    cat >&2 <<MSG
+pre-commit: this commit changes only identities/roles/$locale_role/locale/$locale_suffix/,
+  which the holder of $locale_role named for $locale_suffix may commit — this session's
+  binding holds ${held:-(no role bound)} on login $(id -un).
+MSG
+    exit 1
+fi
 cat >&2 <<MSG
 pre-commit: this commit changes $what, which only the $owner_role role writes.
   staged: $(printf '%s ' "${staged[@]:0:8}")$( (( ${#staged[@]} > 8 )) && echo "… (${#staged[@]} paths)")

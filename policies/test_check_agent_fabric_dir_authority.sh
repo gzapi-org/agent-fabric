@@ -84,6 +84,21 @@ commit_change src/a.txt $'code\n\nFabric-Role: corpus-keeper'
 commit_change .agent-fabric/memory/backend-dev/workflow.md "$DECLARED"
 [[ "$(rc_of)" == 1 ]] && pass "fabric-coordinator is refused where the owning role is corpus-keeper (role name read from authority.json)" || fail "role name not read"
 
+echo "the one carve-out: a commit changing only identities/roles/<role>/locale/<suffix>/ may declare Fabric-Role: <role>"
+new_repo; mkdir -p "$SANDBOX/policies"; printf '{"role_definitions":{"role":"fabric-coordinator","holders":[]}}\n' > "$SANDBOX/policies/authority.json"
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm 'authority' ; git -C "$SANDBOX" branch -f base-ref
+commit_change identities/roles/language-culture/locale/ge/harness.md $'ge harness\n\nFabric-Role: language-culture'
+[[ "$(rc_of)" == 0 ]] && grep -q "the locale carve-out" <<<"$(run_guard)" && pass "a locale commit declaring the role it translates: admitted, and said" || fail "carve-out refused" "$(run_guard)"
+commit_change identities/roles/language-culture/locale/ge/team.md $'ge team\n\nFabric-Role: backend-dev'
+[[ "$(rc_of)" == 1 ]] && pass "a locale commit declaring another role: refused" || fail "wrong role admitted"
+new_repo; mkdir -p "$SANDBOX/policies"; printf '{"role_definitions":{"role":"fabric-coordinator","holders":[]}}\n' > "$SANDBOX/policies/authority.json"
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -qm 'authority'; git -C "$SANDBOX" branch -f base-ref
+mkdir -p "$SANDBOX/identities/roles/language-culture/locale/ge"; printf 'x\n' > "$SANDBOX/identities/roles/language-culture/locale/ge/team.md"; printf 'y\n' >> "$SANDBOX/src/a.txt"
+git -C "$SANDBOX" add -A; git -C "$SANDBOX" commit -q -m $'locale and code\n\nFabric-Role: language-culture'
+[[ "$(rc_of)" == 1 ]] && pass "a locale file beside a code change, declaring the locale's role: refused" || fail "mixed commit admitted"
+commit_change identities/roles/language-culture/charter.md $'charter\n\nFabric-Role: language-culture'
+[[ "$(rc_of)" == 1 ]] && pass "the English charter is not the locale: refused" || fail "charter admitted"
+
 echo "unresolvable base: not enforced, not a failure"
 new_repo; commit_change .agent-fabric/memory/backend-dev/workflow.md
 rc="$( ( cd "$SANDBOX" && AGENT_FABRIC_CHARTER_BASE=no-such-ref GITHUB_BASE_REF= bash "$UNDER_TEST" >/dev/null 2>&1 ); echo $? )"

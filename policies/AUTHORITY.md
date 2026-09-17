@@ -48,6 +48,24 @@ apply to this whole repository.
 | `.agent-fabric/` in a managed repository — the project's distilled knowledge (`memory/<role>/`) | the `fabric-coordinator` ROLE, whoever holds it: the drain writes it, every other role reads it | a fence at the keyboard — `policies/githooks/pre-commit` refuses the commit unless the binding holds the role, `commit-msg` records it as `Fabric-Role:` — and a tripwire in CI, `policies/check_agent_fabric_dir_authority.sh`, which reads that trailer; `lint.py` demands provenance |
 | `recall.md` for a role | the role itself | authored, exempt from provenance; must stay under `identities/roles/` |
 
+## The one carve-out: a locale's translations
+
+`identities/roles/<role>/locale/<suffix>/` — a locale's rendering of
+the role's charter, of the shared prompt sections and of the harness's
+own text, its worker and its search locale — is authored by the holder
+of `<role>` whose login is named for `<suffix>` (`language-culture-ge`
+writes `locale/ge/`): the CEO's rule of 2026-09-17 that no text in a
+locale has any author but its holder. The fence meets it halfway: a
+commit that stages nothing but that subtree, from a session bound to
+that role on that login, passes the pre-commit hook and is recorded as
+`Fabric-Role: <role>`; CI admits such a commit for that subtree alone.
+Anything staged beside it, another role, another suffix, an amend, is
+refused as before, and the merge stays fabric-coordinator's — the
+holder opens the pull request and does not merge it. Lint holds the
+translation to its source (`tools/fabric/lint.py`, the digest, the
+budget, every protected identifier), so what the carve-out admits is
+prose in the locale, never a change to what a role is.
+
 ## `.agent-fabric/` in a managed repository
 
 A project's knowledge lives in the project's own repository, under

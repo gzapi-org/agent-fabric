@@ -60,7 +60,7 @@ echo "in agent-fabric itself, every commit needs the role"
 bind backend-dev; new_repo
 mkdir -p "$TMP/repo/policies"; printf '{"role_definitions":{"role":"fabric-coordinator","holders":[]}}\n' > "$TMP/repo/policies/authority.json"
 # The hooks recognise the fabric by their own location: point them at a copy living inside this repo.
-mkdir -p "$TMP/repo/policies/githooks" "$TMP/repo/runtime"; cp "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$HOOKS"/guarded-change.sh "$TMP/repo/policies/githooks/"
+mkdir -p "$TMP/repo/policies/githooks" "$TMP/repo/runtime"; cp "$HOOKS"/pre-commit "$HOOKS"/commit-msg "$HOOKS"/guarded-change.sh "$HOOKS"/locale-carve-out.sh "$TMP/repo/policies/githooks/"
 cp "$HOOKS/../../runtime/identity.py" "$TMP/repo/runtime/"   # the hooks read the binding through their own fabric's resolver
 git -C "$TMP/repo" config core.hooksPath "$TMP/repo/policies/githooks"
 git -C "$TMP/repo" add -A; git -C "$TMP/repo" -c core.hooksPath=/dev/null commit -qm "hooks in place"
@@ -69,6 +69,21 @@ grep -q "agent-fabric itself" "$TMP/err" && pass "the refusal names the whole re
 bind fabric-coordinator
 [[ "$(try_commit src/a.txt 'code')" == 0 ]] && pass "fabric-coordinator bound: allowed" || fail "coordinator refused in fabric" "$(cat "$TMP/err")"
 git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: fabric-coordinator$' && pass "…and every fabric commit declares the role" || fail "no trailer on a fabric commit"
+
+echo "the one carve-out: a locale's translations, by the holder of the role named for the suffix"
+SUFFIX="${LOGIN##*-}"; LOC="identities/roles/language-culture/locale/$SUFFIX"
+bind language-culture; mkdir -p "$TMP/repo/$LOC" "$TMP/repo/identities/roles/language-culture/locale/zz"
+[[ "$(try_commit "$LOC/team.md" 'ge team')" == 0 ]] && pass "language-culture bound on login *-$SUFFIX: locale/$SUFFIX/ commits" || fail "the holder's own locale refused" "$(cat "$TMP/err")"
+git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: language-culture$' && pass "…declaring its own role, not the coordinator's" || fail "trailer on a carve-out commit" "$(git -C "$TMP/repo" log -1 --format=%B)"
+[[ "$(try_commit "identities/roles/language-culture/locale/zz/team.md" 'another locale')" == 1 ]] && grep -q "named for zz" "$TMP/err" && pass "another suffix's locale: refused, naming the suffix" || fail "another locale admitted" "$(cat "$TMP/err")"
+mkdir -p "$TMP/repo/$LOC"; printf 'x\n' >> "$TMP/repo/$LOC/memory.md"; printf 'y\n' >> "$TMP/repo/src/a.txt"; git -C "$TMP/repo" add -A
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -qm 'locale plus code' 2>"$TMP/err" ); rc=$?; git -C "$TMP/repo" reset -q --hard
+[[ $rc -eq 1 ]] && grep -q "agent-fabric itself" "$TMP/err" && pass "a locale file beside any other path: the whole-repository refusal" || fail "mixed commit admitted" "$(cat "$TMP/err")"
+[[ "$(try_commit "identities/roles/language-culture/charter.md" 'the English charter')" == 1 ]] && pass "the role's English charter is not the locale: refused" || fail "charter admitted to the holder" "$(cat "$TMP/err")"
+bind backend-dev
+[[ "$(try_commit "$LOC/memory.md" 'ge memory')" == 1 ]] && pass "another role on the same login: refused" || fail "wrong role admitted to a locale" "$(cat "$TMP/err")"
+bind fabric-coordinator
+[[ "$(try_commit "$LOC/memory.md" 'ge memory')" == 0 ]] && pass "the coordinator still commits anywhere, the locale included" || fail "coordinator refused in a locale" "$(cat "$TMP/err")"
 
 echo "in agent-fabric itself an amend is a guarded change too"
 bind backend-dev

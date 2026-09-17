@@ -47,8 +47,16 @@ if (( ${#guarded[@]} )); then
 try: print(json.load(open(sys.argv[1]))["role_definitions"]["role"])
 except Exception: print("fabric-coordinator")' "$FABRIC_ROOT/policies/authority.json" 2>/dev/null || echo fabric-coordinator)"
     if [[ "$role" != "$owner_role" ]]; then
-        echo "commit-msg: a guarded change, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
-        exit 1
+        # The one carve-out (policies/AUTHORITY.md): a locale's translations,
+        # by the holder of the role named for the suffix — the same test
+        # pre-commit made; the trailer below then records that role.
+        . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/locale-carve-out.sh"
+        login="$(id -un)"
+        if [[ -n "$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" ]] || ! locale_carve_out_role "${guarded[@]}" \
+           || [[ "$role" != "$locale_role" ]] || [[ "$login" != *-"$locale_suffix" && "$login" != "$locale_suffix" ]]; then
+            echo "commit-msg: a guarded change, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
+            exit 1
+        fi
     fi
 fi
 # EVERY commit declares the role the account held when it was made — not

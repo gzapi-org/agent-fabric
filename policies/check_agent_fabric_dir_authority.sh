@@ -96,11 +96,22 @@ if (( ${#commits[@]} == 0 )); then
     exit 0
 fi
 
+# The one carve-out (policies/AUTHORITY.md): a commit that changes nothing
+# but identities/roles/<role>/locale/<suffix>/ may declare Fabric-Role:
+# <role> — the holder of the role a locale translates writes its
+# translations. The login is not visible here; the pre-commit hook held
+# it to the suffix at the keyboard.
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/githooks/locale-carve-out.sh"
 bad=()
 for c in "${commits[@]}"; do
     declared="$(git log -1 --format=%B "$c" | git interpret-trailers --parse 2>/dev/null \
         | awk -F': *' 'tolower($1)=="fabric-role" {print $2}' | tail -1)"
     if [[ "$declared" != "$owner_role" ]]; then
+        mapfile -t touched < <(git diff-tree --no-commit-id --name-only -r "$c" 2>/dev/null)
+        if locale_carve_out_role "${touched[@]}" && [[ "$declared" == "$locale_role" ]]; then
+            echo "check_agent_fabric_dir_authority: $(git log -1 --format='%h' "$c") changes only identities/roles/$locale_role/locale/$locale_suffix/, declaring Fabric-Role: $locale_role — the locale carve-out."
+            continue
+        fi
         bad+=("$(git log -1 --format='%h %s' "$c")  [Fabric-Role: ${declared:-none}]")
     fi
 done
@@ -115,7 +126,9 @@ echo "FAIL: $scope changed in ${#bad[@]} commit(s) that do not declare Fabric-Ro
 printf '       %s\n' "${bad[@]}" >&2
 cat >&2 <<MSG
 
-agent-fabric is read-only for every role but $owner_role; in a managed
+agent-fabric is read-only for every role but $owner_role — except a
+locale's translations, identities/roles/<role>/locale/<suffix>/, which
+the holder of <role> commits declaring its own role; in a managed
 project, .agent-fabric/ (the project's distilled knowledge) is. A commit
 there is made with that role bound (bin/fabric-role bind $owner_role,
 from a login shell, then a relaunch) and the

@@ -24,7 +24,9 @@ every managed project. This is a fence, not only a rule: the git hooks
 `bootstrap.sh` installs refuse a commit here unless the session's binding
 holds the role, and record the role they verified as a `Fabric-Role:`
 trailer that CI checks on every commit a branch adds
-(`policies/AUTHORITY.md`). Every commit an account makes carries that
+(`policies/AUTHORITY.md`). One carve-out: a locale's translations,
+`identities/roles/<role>/locale/<suffix>/`, are committed by the holder
+of that role named for that suffix, and merged by fabric-coordinator. Every commit an account makes carries that
 trailer — every account commits under one git author, so the trailer is
 what names the lane a commit came from. The login is irrelevant — a session becomes
 `fabric-coordinator` by being launched with it bound (`bin/fabric-role

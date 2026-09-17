@@ -191,3 +191,24 @@ venv built on all 15 other accounts, `pycld2==0.42` each); no account
 - `fabric-ctl language-culture-ge keys`: `SERPER_API_KEY` and
   `BRAVE_SEARCH_API_KEY` present, fingerprinted; the two `GOOGLE_CSE_*`
   names removed from Doppler by the CEO.
+
+## The locale search, live as the holder (`57944d1`)
+
+- `tools/list`: `web_search` and `web_search_global`, both described in
+  Georgian, no vendor named; the holder's user settings carry
+  `permissions.deny: ["WebSearch", "WebSearch(agent-fabric)"]`, written
+  by the installer; the launcher passes `--disallowedTools WebSearch` on
+  this login (its test reads it in the fake claude's argv; `--print`
+  does not echo argv).
+- `web_search` with `lr=lang_ka` in the locale: SerpAPI refused it
+  (`HTTP 400 — Unsupported values for lr parameter: lang_ka`) and the
+  same call answered from Brave with the last line
+  `— მეორე ინდექსი (ძირითადი ძრავა: search refused: …)` — the fall-back
+  seen live before the main engine ever worked. Decides: the `ge` block
+  is `gl=ge`, `hl=ka`, `google_domain=google.ge`, no `lr`.
+- `web_search` without `lr`: the main engine answers — first result
+  `ka.wikipedia.org/…/თბილისის_მეტროსადგურების_სია`, last line
+  `— ძირითადი ძრავა`. `web_search_global` (Brave, `country=ALL`)
+  answers the same query with madloba.info/ka and tbilisimetro.org.
+- The SerpAPI key: 250 searches a month on the CEO's free plan; the
+  fall-back is what happens on the 251st.

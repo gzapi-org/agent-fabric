@@ -46,6 +46,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "plan hold" bash runtime/claude-code/hooks/test_plan-hold.sh
     run "model fallback note" bash runtime/claude-code/hooks/test_model-fallback-note.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
+    run "install-agent-files (the locale worker)" bash runtime/claude-code/test_install-agent-files.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
     run "hostexec (local and ssh backends)" bash runtime/hostexec/test_hostexec.sh
     run "fabric-secrets" bash policies/run_suite.sh runtime/provisioning/secrets/test_fabric-secrets.sh

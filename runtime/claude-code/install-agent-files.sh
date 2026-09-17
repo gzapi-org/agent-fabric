@@ -3,7 +3,8 @@
 #
 # Install THIS account's capability-class agent files,
 # ~/.claude/agents/{code-low,code-medium,code-high,code-review}.md, from
-# runtime/claude-code/agents/, with the review pin applied.
+# runtime/claude-code/agents/, with the review pin applied — and, on a
+# language-culture login, the locale worker (below).
 #
 #   runtime/claude-code/install-agent-files.sh [--provider openrouter|anthropic] [--dry-run]
 #
@@ -71,6 +72,27 @@ for f in code-low.md code-medium.md code-high.md code-plan.md code-review.md; do
 done
 # The review class was installed as blind-reviewer.md until 2026-09-15; a
 # copy of ours left there would offer the retired type beside the new one.
+# The locale worker: the language-culture role's tool-less subagent whose
+# system prompt is the locale's language (docs/language-culture-bridge.md).
+# Installed as ~/.claude/agents/locale-worker.md on a login of that role
+# whose name ends in a locale the fabric authored
+# (identities/roles/language-culture/locale/<suffix>/worker.md); removed —
+# by the `agent-fabric` marker in its description, as blind-reviewer.md
+# below — from any other login, and from one whose locale has no worker,
+# so a rebind never serves another locale's worker. No per-provider pin:
+# the worker shares no alias with another class, so its model line rides
+# as authored (the reviewer's file pin exists only because fable is
+# code-plan's too).
+ROLE="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || true)"
+LOGIN_NAME="$(id -un)"; LOCALE_SUFFIX="${LOGIN_NAME##*-}"
+WORKER_SRC="$FABRIC_ROOT/identities/roles/language-culture/locale/$LOCALE_SUFFIX/worker.md"
+WORKER_DEST="$CLAUDE_HOME/agents/locale-worker.md"
+if [[ "$ROLE" == "language-culture" && -f "$WORKER_SRC" ]]; then
+    put "$WORKER_DEST" "$WORKER_SRC"
+elif [[ -f "$WORKER_DEST" ]] && grep -q "agent-fabric" "$WORKER_DEST" 2>/dev/null; then
+    if (( DRY_RUN )); then echo "  -  $WORKER_DEST (would remove: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"
+    else rm -f "$WORKER_DEST"; echo "  -  $WORKER_DEST (removed: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"; changed=$((changed+1)); fi
+fi
 old="$CLAUDE_HOME/agents/blind-reviewer.md"
 if [[ -f "$old" ]] && grep -q "agent-fabric" "$old" 2>/dev/null; then
     if (( DRY_RUN )); then echo "  -  $old (would remove: retired name of code-review)"

@@ -108,28 +108,32 @@ A holder must search as a reader of its locale would. The harness's
 `WebSearch` cannot: read back on 2026-09-17, its schema is `query`,
 `allowed_domains`, `blocked_domains` and nothing else, its description
 says US-only, and Anthropic's `user_location` lives on the Messages API
-only. So a language-culture login gets `runtime/mcp/websearch-locale`
-— one MCP tool, `web_search`, backed by the Brave Search API, whose
-`country`, `search_lang` and `ui_lang` are fixed from
-`locale/<suffix>/locale.json` (lint validates it): the holder chooses
-the query, never the locale, and the tool's description is in the
-locale, since its reader is the holder. **Brave has no Georgian
-locale** (read back 2026-09-17: `country=GE`, `search_lang=ka` and
-`ui_lang=ka-GE` are each refused with 422; a Georgian query with no
-locale returns Georgian pages — three of five `ka`, `.ge` hosts), so
-the `ge` file names `country: ALL` and no language, and the search is
-global, steered by the language of the query. That is less than the
-"Georgian browser" the CEO asked for; a backend with a Georgian locale
-(Google's Custom Search JSON API has `gl=ge`, `hl=ka`, `lr=lang_ka`) is
-the CEO's decision, and the server is one function away from it. `install-agent-files.sh` writes
-the entry into the login's user-scope configuration on a
-language-culture login with a locale file and removes it from any other,
-by the server path in its args; the key, `BRAVE_SEARCH_API_KEY`, is a
-synced secret read at call time into one header, and its fingerprint
-shows in `fabric-ctl <login> keys`. The Brave backend was the CEO's
-choice over Anthropic's `user_location` (country and timezone only,
-language effect undocumented) and over a charter-only rule (decided
-2026-09-17). The worker never sees this tool: search is the bridge's.
+only. So a language-culture login gets `runtime/mcp/websearch-locale`,
+an MCP server with one tool per engine its locale file configures
+(`locale/<suffix>/locale.json`, lint validates it; the CEO: keep both
+engines):
+
+- `web_search` — Google's Custom Search JSON API with `gl`, `hl` and
+  `lr` fixed from the file: the locale as a browser there would have it
+  (`ge`: `gl=ge`, `hl=ka`, `lr=lang_ka`). Secrets `GOOGLE_CSE_API_KEY`
+  (one request header) and `GOOGLE_CSE_CX`, the Programmable Search
+  Engine id — an engine over the whole web, made by the CEO.
+- `web_search_global` — Brave's Search API as a second index, `country`
+  from the file and a language only where Brave has it. Brave has no
+  Georgian locale (`country=GE`, `search_lang=ka`, `ui_lang=ka-GE` each
+  refused with 422, read back 2026-09-17), so `ge` names `country:
+  ALL`: a global search steered by the language of the query, which a
+  Georgian query does steer (three of five results `ka`). Secret
+  `BRAVE_SEARCH_API_KEY`.
+
+The holder chooses the query, never the locale; each tool's description
+is in the locale, since its reader is the holder. `install-agent-files.sh`
+writes the server into the login's user-scope configuration on a
+language-culture login with a locale file and removes it from any
+other, by the server path in its args. Every secret is a synced value
+read at call time, never in a URL, a log line or a result; the keys'
+fingerprints show in `fabric-ctl <login> keys`. The worker never sees
+these tools: search is the bridge's.
 
 ## The costs, stated
 

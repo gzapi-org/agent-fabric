@@ -61,7 +61,7 @@ test('keys: names and twelve-digit fingerprints, never a value; an absent key sa
   assert.equal(or.sha256_12, crypto.createHash('sha256').update(SECRETS.OPENROUTER_API_KEY).digest('hex').slice(0, 12));
   assert.deepEqual(k.find(x => x.name === 'OPENAI_API_KEY'), { name: 'OPENAI_API_KEY', present: false });
   assertNoSecret(k);
-  assert.deepEqual(keys('/nonexistent').map(x => x.present), [false, false, false, false, false]);
+  assert.deepEqual(keys('/nonexistent').map(x => x.present), [false, false, false, false, false, false]);
 });
 
 test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fails is said', async () => {

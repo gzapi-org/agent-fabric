@@ -136,8 +136,9 @@ As `language-culture-ge`, with its own key: `country=GE`,
 `country=US&search_lang=en&ui_lang=en-US` answers 200. A Georgian query
 with no locale parameter (or `country=ALL`) returns Georgian pages:
 three of five results `ka`, on `.ge` hosts and `ka.wikipedia.org`.
-Decides: the `ge` locale file names `country: ALL` and no language, the
-server sends only what a file names, and the search is global, steered
-by the language of the query — less than the "Georgian browser" asked
-for, which needs a backend with a Georgian locale (Google's Custom
-Search JSON API: `gl=ge`, `hl=ka`, `lr=lang_ka`), the CEO's decision.
+With `country: ALL` and no language the `ge` tool answered a Georgian
+query with Georgian results (madloba.info/ka, tbilisimetro.org) — a
+global search steered by the query, less than the "Georgian browser"
+asked for. Decides: Google's Custom Search JSON API, which has the three
+(`gl=ge`, `hl=ka`, `lr=lang_ka`), is the located `web_search`, and Brave
+stays as `web_search_global`, a second index (the CEO: keep both).

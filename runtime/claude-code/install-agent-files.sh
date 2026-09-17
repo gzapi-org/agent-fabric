@@ -91,8 +91,9 @@ elif [[ -f "$WORKER_DEST" ]] && grep -q "agent-fabric" "$WORKER_DEST" 2>/dev/nul
     if (( DRY_RUN )); then echo "  -  $WORKER_DEST (would remove: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"
     else rm -f "$WORKER_DEST"; echo "  -  $WORKER_DEST (removed: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"; changed=$((changed+1)); fi
 fi
-# The locale search tool: an MCP server whose country and language are
-# the locale's (runtime/mcp/websearch-locale), in the login's user-scope
+# The locale search tools: an MCP server with one tool per engine the
+# locale file configures — Google's Custom Search located in the locale,
+# Brave as a second index (runtime/mcp/websearch-locale), in the login's user-scope
 # configuration (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json) on a
 # language-culture login whose locale has a locale.json; removed — by the
 # server path in its args — from any other. The key it needs is synced,

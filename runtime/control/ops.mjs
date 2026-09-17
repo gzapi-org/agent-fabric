@@ -21,7 +21,7 @@ import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
 export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'memory', 'status'];
-export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'BRAVE_SEARCH_API_KEY'];
+export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'GOOGLE_CSE_API_KEY', 'BRAVE_SEARCH_API_KEY'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
 function readJson(file) {

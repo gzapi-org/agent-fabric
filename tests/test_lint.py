@@ -481,26 +481,30 @@ def case_locale_worker_shape_and_hygiene() -> None:
 
 
 def case_locale_file_shape() -> None:
-    """locale.json fixes the search tool's country and languages; lint
-    asserts the shapes the Brave API takes and a description in the
-    locale. Kills: an unchecked file the server would refuse at start."""
+    """locale.json fixes the search tools' country and languages, one block
+    per engine; lint asserts the shapes each engine takes and a description
+    in the locale. Kills: an unchecked file the server would refuse at start."""
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
-        good = '{"country": "GE", "search_lang": "ka", "ui_lang": "ka-GE", "timezone": "Asia/Tbilisi", "tool_description": "ვებ-ძიება ქართულად"}'
+        good = ('{"timezone": "Asia/Tbilisi", "google": {"gl": "ge", "hl": "ka", "lr": "lang_ka", "tool_description": "ვებ-ძიება ქართულად"},'
+                ' "brave": {"country": "ALL", "tool_description": "გლობალური ვებ-ძიება"}}')
         write(ident(fabric, "locale", "ge", "locale.json"), good)
         code, out = run_lint(fabric)
         assert code == 0, out
-        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"GE"', '"ge"').replace('"ka-GE"', '"ka"').replace("ვებ-ძიება ქართულად", "Web search in Georgian"))
+        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"ge"', '"GE"').replace('"lang_ka"', '"ka"').replace("ვებ-ძიება ქართულად", "Web search in Georgian").replace('"ALL"', '"all"'))
         code, out = run_lint(fabric)
         assert code == 1, out
-        for phrase in ("country 'ge'", "ui_lang 'ka'", "not in the locale"):
+        for phrase in ("google.gl 'GE'", "google.lr 'ka'", "google.tool_description is not in the locale", "brave.country 'all'"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
-        write(ident(fabric, "locale", "ge", "locale.json"), '{"country": "ALL", "timezone": "Asia/Tbilisi", "tool_description": "ვებ-ძიება ქართულად"}')
+        write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi", "brave": {"country": "US", "search_lang": "en", "ui_lang": "en-US", "tool_description": "ძიება"}}')
         code, out = run_lint(fabric)
-        assert code == 0, f"ALL and no language fields is a valid locale (Brave has no Georgian): {out}"
-        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "language": "ka"}')
+        assert code == 0, f"one engine alone, with the languages Brave has: {out}"
+        write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi"}')
         code, out = run_lint(fabric)
-        assert code == 1 and "unknown field(s) ['language']" in out, out
+        assert code == 1 and "no engine block" in out, out
+        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "country": "GE"}')
+        code, out = run_lint(fabric)
+        assert code == 1 and "unknown field(s) ['country']" in out, out
         write(ident(fabric, "locale", "ge", "locale.json"), "{not json")
         code, out = run_lint(fabric)
         assert code == 1 and "not JSON" in out, out

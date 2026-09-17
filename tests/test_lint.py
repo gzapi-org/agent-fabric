@@ -545,6 +545,12 @@ def case_protected_tokens_must_match() -> None:
                        "placeholder '{role}' appears 0", "file name 'MEMORY.md' appears 0", "backticked span '`Bash`' appears 1 time(s), 0 in the source"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
         assert "fabric-ctl <login> script" not in out, f"a wrapped span is the same span:\n{out}"
+        # An inflected locale glues a suffix to a name with a dash: the suffix is prose, the token is the name.
+        write(ident(fabric, "locale", "ge", "charter.md"), good.replace("`/compact` შემოწმების", "/compact-ით შემოწმების").replace("`docs/x.md`", "docs/x.md-ში"))
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        assert "backticked span '`/compact`' appears 0" in out and "slash command '/compact' appears 1 time(s), 0 in the source" in out, out
+        assert "/compact-ით" not in out and "x.md-ში" not in out and "path '/x.md'" not in out, f"the glued suffix is not part of the token:\n{out}"
 
 
 def case_each_translation_names_its_source_and_lags_when_it_moves() -> None:

@@ -19,6 +19,12 @@ reminders. What it drops is this text and the per-machine Memory
 section — which is why the Memory section is in here with its path as a
 placeholder.
 
+**As captured, verbatim.** The text carries the harness's own slips
+(build 2.1.274: "it's clickable.Write code that reads…" — two sentences
+glued at a lost newline), and they stay: the file is what the harness
+sends. The token list therefore counts that `Write` as a tool name, and
+a translation keeps a literal `Write` there (the ge holder, 2026-09-17).
+
 **Refreshing it.** No flag prints the default prompt; the text changes
 with the CLI build. The capture is a live-check duty: from a session on
 a new build, record the text as the live check did, update `en.md` and

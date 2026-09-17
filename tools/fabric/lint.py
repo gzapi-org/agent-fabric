@@ -245,8 +245,11 @@ def _source_digest(path: str) -> str:
 PROTECTED_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("fenced block", re.compile(r"```[\s\S]*?```")),
     ("backticked span", re.compile(r"`[^`]{1,200}`")),   # may wrap a line; whitespace inside is normalised
-    ("slash command", re.compile(r"(?<!\S)/[a-zA-Z][\w-]*\b")),
-    ("path", re.compile(r"~?/[\w.~-]+(?:/[\w.~-]+)+")),
+    # ASCII words joined by dashes: an inflected locale glues a suffix to a
+    # name with a dash ("/fast-ით", the ge holder, 2026-09-17), and the
+    # suffix is prose, not part of the command or the path.
+    ("slash command", re.compile(r"(?<!\S)/[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*")),
+    ("path", re.compile(r"~?/[A-Za-z0-9_.~]+(?:-[A-Za-z0-9_.~]+)*(?:/[A-Za-z0-9_.~]+(?:-[A-Za-z0-9_.~]+)*)+")),
     # A name with an underscore, or a short acronym (CLI, CTF, IDE); an
     # emphasised word (IMPORTANT) is prose and free.
     ("UPPER_SNAKE name", re.compile(r"\b(?:[A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{2,4})\b")),

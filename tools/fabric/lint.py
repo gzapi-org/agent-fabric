@@ -64,10 +64,17 @@ _wc_spec.loader.exec_module(workingcopy)
 BUDGET_TOKENS = 1800
 CHARS_PER_TOKEN = 4
 # A body written mostly in a non-Latin script tokenizes worse than the flat
-# four-characters-a-token estimate: two is the conservative divisor lint
-# uses for such a body, so the budget check tightens rather than loosens
-# (the live check of the first Georgian charter records the real count).
-NON_LATIN_CHARS_PER_TOKEN = 2
+# four-characters-a-token estimate. Measured on the first Georgian charter
+# (docs/live-checks/2026-09-17-language-culture-bridge.md): 11 041
+# characters cost 7 584 tokens — 1.46 a token, against 4.1 for the English
+# body it renders — so a full rendering is about three times the tokens
+# of its source. That is the cost the CEO accepted for the role; a locale
+# charter is budgeted at LOCALE_BUDGET_FACTOR times the tier-1 budget,
+# with the measured divisor, so a faithful rendering passes and a padded
+# one does not. The guess before the measurement was 2 a token and 1.35
+# times the budget, which no full rendering could meet.
+NON_LATIN_CHARS_PER_TOKEN = 1.5
+LOCALE_BUDGET_FACTOR = 3
 TIER1_BUDGET_TOKENS = 3000
 # identities/roles/<role>/locale/<suffix>/: a locale's translation of the
 # charter and the locale's worker prompt — authored files with their own
@@ -187,7 +194,8 @@ def locale_translation_findings(role: str, role_path: str, template_schema: dict
     ends in <suffix>. It is a charter slice (schema, class, role) that
     names its source and the source's digest; a digest that no longer
     matches is the lag finding — the translation is still served, and
-    this is where the lag is seen. Its budget uses the non-Latin divisor."""
+    this is where the lag is seen. Its budget uses the measured non-Latin
+    divisor and the locale factor."""
     out: list[str] = []
     base = os.path.join(role_path, LOCALE_DIRNAME)
     if not os.path.isdir(base):
@@ -224,10 +232,11 @@ def locale_translation_findings(role: str, role_path: str, template_schema: dict
         body = FRONTMATTER_RE.sub("", text)
         out += hygiene_findings(rel, body)
         divisor = NON_LATIN_CHARS_PER_TOKEN if _is_mostly_non_latin(body) else CHARS_PER_TOKEN
-        approx = len(body) // divisor
-        if approx > TIER1_BUDGET_TOKENS * 1.35:
-            out.append(f"{rel}: ~{approx} tokens (at {divisor} chars/token) exceeds the tier-1 budget "
-                       f"{TIER1_BUDGET_TOKENS} — a launch prompt pays every one of them")
+        approx = int(len(body) / divisor)
+        if approx > TIER1_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR:
+            out.append(f"{rel}: ~{approx} tokens (at {divisor} chars/token) exceeds the locale budget "
+                       f"{TIER1_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR} ({LOCALE_BUDGET_FACTOR}x the tier-1 budget, the measured "
+                       "cost of a full rendering) — a launch prompt pays every one of them")
     return out
 
 
@@ -241,8 +250,8 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
     ~/.claude/agents/locale-worker.md on a login of this role whose name
     ends in <suffix>, and removes it by the `agent-fabric` marker in its
     description, so the shape is asserted here: the name the dispatcher
-    uses, an English one-line description carrying the marker, no tools
-    (it must read nothing), and a body that passes hygiene."""
+    uses, a one-line description in the locale carrying the `agent-fabric`
+    marker, no tools (it must read nothing), and a body that passes hygiene."""
     out: list[str] = []
     base = os.path.join(role_path, LOCALE_DIRNAME)
     if not os.path.isdir(base):
@@ -271,8 +280,13 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
         else:
             if "agent-fabric" not in desc:
                 out.append(f"{rel}: description lacks the `agent-fabric` marker the installer removes it by")
-            if any(ord(ch) > 0x024F and ch.isalpha() for ch in desc):
-                out.append(f"{rel}: description is not English — the dispatcher (the bridge) reads it in English")
+            # The description never reaches the worker (the body is its
+            # system prompt); its reader is the dispatcher — the holder,
+            # who reasons in the locale — so it is written in the locale
+            # too, the marker and the name kept as identifiers (the CEO,
+            # 2026-09-17). An English description was the first shape.
+            if not _is_mostly_non_latin(desc.replace("agent-fabric", "").replace("locale-worker", "")):
+                out.append(f"{rel}: description is not in the locale — its only reader is the bridge, which reasons in the locale; keep `agent-fabric` as the marker")
         if fields.get("model", "") not in ("haiku", "sonnet", "opus", "fable"):
             out.append(f"{rel}: model {fields.get('model')!r}; a harness alias (haiku/sonnet/opus/fable)")
         if "tools" not in fields:

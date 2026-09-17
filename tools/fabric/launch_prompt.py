@@ -102,9 +102,12 @@ def _body(path: str) -> str:
 # a lag finding), and with none present every role renders as before,
 # byte-identical. A translation is served even when lint says it lags — a
 # launch never fails on a day's lag; lint is where the lag is seen. The
-# real cost is tokens: a Georgian body is ~1.3x the characters and two to
-# three times the tokens of the English, so a locale render is allowed
-# LOCALE_CHARS_FACTOR times MAX_CHARS, and the live check records the count.
+# real cost is tokens, not characters: measured on the first Georgian
+# charter, the rendering is about the characters of its English (11 041
+# against 10 931) and 2.9x the tokens (7 584 against 2 642;
+# docs/live-checks/2026-09-17-language-culture-bridge.md). The character
+# ceiling therefore needs little headroom — LOCALE_CHARS_FACTOR times
+# MAX_CHARS — and the token cost is the CEO's accepted price for the role.
 LOCALE_CHARS_FACTOR = 1.35
 
 

@@ -23,9 +23,14 @@ sees English**, and the holder in front of it as a **bridge**.
 ## What the worker sees
 
 `identities/roles/language-culture/locale/<suffix>/worker.md` is a
-Claude Code agent file — `name: locale-worker`, an English one-line
-description carrying the `agent-fabric` marker, a model alias, and
-**no tools** — whose body is the locale. `install-agent-files.sh`
+Claude Code agent file — `name: locale-worker`, a one-line description
+in the locale carrying the `agent-fabric` marker, a model alias, and
+**no tools** — whose body is the locale. The description never reaches
+the worker (the body is its system prompt); its reader is the
+dispatcher's agent listing, and the dispatcher is the holder, who
+reasons in the locale — so the description is in the locale too, the
+name and the marker kept as identifiers (the CEO, 2026-09-17; the first
+draft had it in English). `install-agent-files.sh`
 installs it as `~/.claude/agents/locale-worker.md` on a login whose
 bound role is `language-culture` and whose suffix has a `locale/`
 directory, and removes it from any other login (the `blind-reviewer.md`

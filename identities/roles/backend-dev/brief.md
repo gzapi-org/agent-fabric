@@ -87,7 +87,7 @@ nothing blocks on them, and answering them is a task.
   is a contract change, then yours, then theirs; you do not touch the
   clients, and a finding of yours in their files is handed over, not
   taken.
-- **product-i18n** — a change that adds user-facing text ships its keys
+- **language-culture** — a change that adds user-facing text ships its keys
   with it; completeness is gated, not negotiated.
 - **A sibling holding this role** — scan main for their work before a
   backend task, and message them before picking up a thread they hold.

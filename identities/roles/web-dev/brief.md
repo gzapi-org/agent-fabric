@@ -54,7 +54,7 @@ findings on them yourself.
   negotiate a shape client-side, and a shape that cannot render is
   their decision, not a client workaround. You hand back nothing under
   their tree.
-- **product-i18n** — working a screen is how missing and hardcoded keys
+- **language-culture** — working a screen is how missing and hardcoded keys
   get found; you hand those over rather than invent text, since client
   fallback is forbidden.
 - **architect-cto** — you cite the rule in the test rather than restate

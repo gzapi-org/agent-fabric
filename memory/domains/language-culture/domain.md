@@ -1,5 +1,5 @@
 ---
-role: "product-i18n"
+role: "language-culture"
 class: domain
 description: Intl.RelativeTimeFormat can silently fall back to another locale instead of erroring
 tier: 2

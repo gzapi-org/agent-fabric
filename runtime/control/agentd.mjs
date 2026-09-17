@@ -22,7 +22,10 @@
 // A `since_id_not_found` (the relay's history was cleared) re-primes.
 //
 // THE FENCE, v1. A request is answered only when its `from` is a host
-// operator's address as runtime/hosts/registry.json places it (a claim,
+// operator's address as runtime/hosts/registry.json places it — read
+// again for every record, so a pull that changes the registry counts at
+// once, and the identity section asks whoami() per request, so a rebind
+// shows without a restart (review, 2026-09-17) — (a claim,
 // not a proof — the relay verifies no sender; it stops any other session
 // from asking, and signing comes next: an Ed25519 `sig` the coordinator
 // makes with a key only its Doppler config holds), its op is one of the
@@ -129,15 +132,20 @@ export async function main(argv = process.argv.slice(2)) {
   const started = new Date().toISOString();
   let usageAt = 0, usageLast = null;
   const usageCached = async () => { if (Date.now() - usageAt > USAGE_CACHE_MS) { usageLast = await usage(); usageAt = Date.now(); } return usageLast; };
-  const ctx = { me, who, started, usageCached };
+  const ctx = { me, started, usageCached };   // no `who`: identity() resolves it per request
   if (self) { console.log(JSON.stringify(await answer({ id: 'self', op: 'status' }, ctx), null, 2)); return 0; }
 
   const root = inboxRoot(who);
   const gz = integrationConfig(who.project);
   let tok = gzToken(root, gz.configured ? gz : undefined) ?? syncedToken();
   if (!tok) { console.error('agentd: no CLAUDE_BRIDGE_AUTH_TOKEN (fabric-secrets sync) — nothing to read with'); return 3; }
-  const operators = operatorAddresses();
+  if (operatorAddresses().size === 0) { console.error('agentd: no host operator in runtime/hosts/registry.json — nothing could ever be answered; not starting'); return 3; }
   const seen = new Set();
+  // What is not logged: every reply on the channel (not a request), a
+  // request for another account (not for me) and a duplicate (seen) —
+  // fifteen daemons times fifteen replies per fabric-ctl would be noise.
+  // Every other refusal is one line, so a refused operator can be found.
+  const QUIET = new Set(['not a request', 'not for me', 'seen']);
   const q = o => new URLSearchParams(o).toString();
   const call = async (p, init) => {
     try { return await api(tok, p, { relayUrl: cfg.relay_url, ...init }); }
@@ -157,7 +165,7 @@ export async function main(argv = process.argv.slice(2)) {
     const up = await post({ v: 1, kind: 'up', from: me.address, ts: new Date().toISOString() });
     last = up.id;
   };
-  console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}`);
+  console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}; operators: ${[...operatorAddresses()].join(' ')}`);
   if (!once) watchSource(() => { console.error('agentd: source changed; exiting for systemd to restart on the new code'); process.exit(0); });
   for (;;) {
     try {
@@ -168,8 +176,8 @@ export async function main(argv = process.argv.slice(2)) {
       const rows = page.messages ?? [];
       for (const rec of rows) {
         last = rec.id;
-        const a = accept(rec, { me, operators, ttl_s: cfg.ttl_s, seen });
-        if (!a.ok) continue;
+        const a = accept(rec, { me, operators: operatorAddresses(), ttl_s: cfg.ttl_s, seen });
+        if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record (${a.why})`); continue; }
         remember(seen, a.request.id);
         const reply = await answer(a.request, ctx);
         await post(reply);

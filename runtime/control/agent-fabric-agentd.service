@@ -15,6 +15,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 Environment=AGENT_FABRIC_ROOT=%h/projects/agent-fabric
+# The user manager's PATH is minimal; node may be the account's own (~/.local/bin).
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=%h/projects/agent-fabric
 ExecStart=/usr/bin/env node %h/projects/agent-fabric/runtime/control/agentd.mjs
 Restart=always

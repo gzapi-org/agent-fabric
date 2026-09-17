@@ -152,19 +152,42 @@ test('agentd --once: a request from a non-operator, an unknown op and an expired
     const rs = replies(r);
     assert.equal(rs.length, 1, JSON.stringify(rs));
     assert.equal(rs[0].op, 'keys');
+    assert.match(out.stderr, /ignored a record \(from develop-qzapp\/backend-dev-01 is not an operator\)/, out.stderr);
+    assert.match(out.stderr, /ignored a record \(op rm -rf\)/); assert.match(out.stderr, /ignored a record \(expired\)/);
+    assert.ok(!/not for me|not a request/.test(out.stderr), `the quiet refusals stay quiet:\n${out.stderr}`);
     const k = rs[0].data.keys.find(x => x.name === 'OPENROUTER_API_KEY');
     assert.equal(k.present, true); assert.equal(k.sha256_12.length, 12);
     assert.ok(!JSON.stringify(rs).includes('sk-or-secret-value'), 'no key value in a reply');
   } finally { r.close(); }
 });
 
-test('agentd --once: an empty channel is primed with an up record; a stale since_id re-primes', async () => {
+test('agentd --once: an empty channel is primed with an up record; a cleared history (since_id_not_found) re-primes instead of spinning', async () => {
   const r = relay();
   await r.listen();
   try {
+    // The relay's history is cleared while the daemon waits: the wait comes
+    // back with the warning, the daemon primes again (a second limit=1
+    // read, a second up record) and waits after the new id.
+    r.waiting().then(() => { r.rows.length = 0; });
     const out = await runOnce(r.url());
     assert.equal(out.status, 0, out.stderr);
-    assert.equal(r.rows.length, 1); assert.equal(JSON.parse(r.rows[0].content).kind, 'up');
+    assert.equal(r.rows.length, 1, JSON.stringify(r.rows)); assert.equal(JSON.parse(r.rows[0].content).kind, 'up');
+    const primes = r.hits.filter(h => h.startsWith('/api/messages?') && h.includes('limit=1'));
+    assert.equal(primes.length, 2, `primed once at start and once after the warning: ${r.hits.join(' ')}`);
+    const waits = r.hits.filter(h => h.startsWith('/api/wait?'));
+    assert.ok(waits.length >= 2 && waits.length <= 3, `one wait per prime, no spin: ${waits.join(' ')}`);
+    assert.ok(waits[waits.length - 1].includes(`since_id=${r.rows[0].id}`), 'the last wait follows the new up record');
+  } finally { r.close(); }
+});
+
+test('agentd: a registry with no operator is a refusal to start, not a silent daemon', async () => {
+  const r = relay();
+  await r.listen();
+  try {
+    const out = await runOnce(r.url(), { AGENT_FABRIC_HOSTS_REGISTRY: '/nonexistent/registry.json' });
+    assert.equal(out.status, 3, out.stderr);
+    assert.match(out.stderr, /no host operator/);
+    assert.equal(r.hits.length, 0, 'the relay was never contacted');
   } finally { r.close(); }
 });
 

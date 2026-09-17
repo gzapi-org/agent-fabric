@@ -14,7 +14,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
@@ -64,15 +65,18 @@ export function keys(home = os.homedir(), names = KEY_NAMES) {
 
 // The fabric checkout the account runs on: head, branch, how far behind
 // origin/main, and whether the tree is clean. A fetch that cannot reach
-// origin is said, not hidden.
-export function fabric(root = process.env.AGENT_FABRIC_ROOT ?? path.join(os.homedir(), 'projects', 'agent-fabric'), exec = execFileSync) {
-  const git = (...a) => exec('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }).trim();
+// origin is said, not hidden. Asynchronous: the fetch may take its whole
+// 10 s budget and the daemon keeps reading the channel meanwhile (exec
+// may return a string or a {stdout}; a test passes a synchronous fake).
+const execFileP = promisify(execFile);
+export async function fabric(root = process.env.AGENT_FABRIC_ROOT ?? path.join(os.homedir(), 'projects', 'agent-fabric'), exec = execFileP) {
+  const git = async (...a) => { const r = await exec('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }); return (typeof r === 'string' ? r : r.stdout).trim(); };
   const out = { root };
-  try { out.head = git('rev-parse', '--short', 'HEAD'); } catch { return { ...out, status: 'not-a-checkout' }; }
-  try { out.branch = git('rev-parse', '--abbrev-ref', 'HEAD'); } catch { out.branch = null; }
-  try { out.dirty = git('status', '--porcelain').length > 0; } catch { out.dirty = null; }
-  try { git('fetch', '-q', 'origin', 'main'); out.fetch = 'ok'; } catch { out.fetch = 'failed'; }
-  try { out.behind = Number(git('rev-list', '--count', 'HEAD..origin/main')); } catch { out.behind = null; }
+  try { out.head = await git('rev-parse', '--short', 'HEAD'); } catch { return { ...out, status: 'not-a-checkout' }; }
+  try { out.branch = await git('rev-parse', '--abbrev-ref', 'HEAD'); } catch { out.branch = null; }
+  try { out.dirty = (await git('status', '--porcelain')).length > 0; } catch { out.dirty = null; }
+  try { await git('fetch', '-q', 'origin', 'main'); out.fetch = 'ok'; } catch { out.fetch = 'failed'; }
+  try { out.behind = Number(await git('rev-list', '--count', 'HEAD..origin/main')); } catch { out.behind = null; }
   return { status: 'ok', ...out };
 }
 
@@ -90,7 +94,7 @@ export async function collect(op, ctx = {}) {
   const data = {};
   const guard = async (name, fn) => { try { data[name] = await fn(); } catch (e) { data[name] = { status: 'failed', error: String(e?.message ?? e).slice(0, 200) }; } };
   await Promise.all(wants.map(name => {
-    if (name === 'identity') return guard(name, () => identity(ctx.home, ctx.who));
+    if (name === 'identity') return guard(name, () => identity(ctx.home, ctx.who));   // ctx.who unset: whoami() per request, so a rebind shows
     if (name === 'usage') return guard(name, () => ctx.usageCached ? ctx.usageCached() : usage(ctx.home, ctx.fetch));
     if (name === 'keys') return guard(name, () => keys(ctx.home));
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));

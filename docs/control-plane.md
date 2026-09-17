@@ -66,18 +66,25 @@ channel.
 ## The fence, v1 — and the signing that follows
 
 A daemon answers a request only when `from` is a host operator's address
-as `runtime/hosts/registry.json` places it, `op` is in the closed set,
+as `runtime/hosts/registry.json` places it (read again for every record,
+so a registry change counts at once), `op` is in the closed set,
 `ts + ttl_s` is not in the past, and `id` was not seen (an LRU of 256).
-That is a fence, not a proof: the relay verifies no sender, and any
-holder of the shared relay token can write the operator's address. It
-stops the accident — another session's watch, a typo, a replay of
-history — and it bounds what a forged request can obtain to the same
-non-secret facts. Signing is the next commit, as its own change: an
-Ed25519 key the coordinator alone holds (its Doppler config), the public
-key committed under `runtime/control/`, `sig` over the canonical request
-fields, and a daemon that finds the public key drops unsigned requests.
-Not HMAC: a shared secret in every account's config lets every account
-forge the coordinator.
+Every refusal but the routine ones (a reply, a request for another
+account, a duplicate) is one line in the daemon's journal, so a refused
+operator can be found. That is a fence, not a proof: the relay verifies
+no sender, and any holder of the shared relay token can write the
+operator's address — and, the other way, can post a *reply* in another
+account's name that `fabric-ctl` prints as that account's row. It stops
+the accident — another session's watch, a typo, a replay of history —
+and it bounds what a forged request can obtain to the same non-secret
+facts; the table is as honest as the least trusted holder of the relay
+token until replies are signed too. Signing is the next commit, as its
+own change: an Ed25519 key the coordinator alone holds (its Doppler
+config), the public key committed under `runtime/control/`, `sig` over
+the canonical request fields, and a daemon that finds the public key
+drops unsigned requests; replies get a per-account key the same way. Not
+HMAC: a shared secret in every account's config lets every account forge
+the coordinator.
 
 ## The coordinator's side
 
@@ -87,7 +94,8 @@ second until every placed address has answered or the timeout is spent
 (20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:
 a run leaves its request and the replies on the channel, nothing
 anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
-whose daemons are down.
+whose daemons are down. A run by a login that is not a host operator is
+refused before anything is posted: no daemon would answer it.
 
 ## Why the accounts had to be persisted first
 
@@ -103,9 +111,15 @@ one the host already used for `/tmp`: a boot script under
 `/rw/config/rc.local.d/` that re-adds the snapshotted lines
 (`runtime/provisioning/platform/qubes/agent-fabric-accounts.rc`), fed by
 `persist-accounts.sh` at every account's creation and by `bin/fabric-host
-<host> persist` for the ones that already existed. Linger is enabled in
-the same step, on every platform: that is what gives the account a user
-manager at boot, and the manager is what starts the daemon.
+<host> persist` for the ones that already existed — the six record files
+and the login's supplementary groups (`members`), a login whose uid the
+template has meanwhile taken skipped whole and named. Linger is enabled
+in the same step, on every platform: that is what gives the account a
+user manager at boot, and the manager is what starts the daemon. The
+Qubes marker is read on any distribution (`platform/detect.sh`:
+`fedora-qubes`, `debian-qubes`). Nothing removes a login from the
+snapshot yet: a `userdel` on such a host is undone at the next boot
+until a `--forget` exists, which waits for the first removal.
 
 ## A second host
 

@@ -39,6 +39,8 @@ printf 'db-admin:x:1004:1004:agent-fabric db-admin:/home/db-admin:/bin/bash\nbra
 printf 'db-admin:$6$hash:20000:0:99999:7:::\nbrand-comms-01:$6$hash2:20000:0:99999:7:::\n' > "$T/snap/shadow"
 printf 'db-admin:x:1004:\nbrand-comms-01:x:1014:\n' > "$T/snap/group"
 printf 'db-admin:!::\n' > "$T/snap/gshadow"
+printf 'db-admin:200000:65536\nbrand-comms-01:300000:65536\n' > "$T/snap/subuid"; cp "$T/snap/subuid" "$T/snap/subgid"
+printf 'db-admin:otscache,nosuchgroup\nbrand-comms-01:otscache\n' > "$T/snap/members"
 
 echo "boot script: re-adds what /etc lacks, verbatim, and enables linger"
 err="$(sh "$RC" 2>&1 >/dev/null)"; rc=$?
@@ -47,10 +49,16 @@ grep -qx 'db-admin:x:1004:1004:agent-fabric db-admin:/home/db-admin:/bin/bash' "
 grep -qx 'db-admin:$6$hash:20000:0:99999:7:::' "$T/etc/shadow" && ok "shadow line appended verbatim" || bad "shadow" "$(cat "$T/etc/shadow")"
 grep -qx 'db-admin:x:1004:' "$T/etc/group" && grep -qx 'db-admin:!::' "$T/etc/gshadow" && ok "group and gshadow appended" || bad "group/gshadow"
 ! grep -q '^brand-comms-01:' "$T/etc/passwd" && grep -q "uid 1000 is taken" <<<"$err" && ok "a uid the template took is skipped, loudly" || bad "collision not skipped" "$err"
+! grep -q '^brand-comms-01:' "$T/etc/shadow" "$T/etc/group" "$T/etc/subuid" "$T/etc/subgid" && ok "…and none of its other records go in" || bad "orphan records for the skipped login" "$(grep -n brand-comms-01 "$T/etc"/*)"
+grep -qx 'db-admin:200000:65536' "$T/etc/subuid" && grep -qx 'db-admin:200000:65536' "$T/etc/subgid" && ok "subuid and subgid appended" || bad "subids"
+grep -qx 'otscache:x:990:user,db-admin' "$T/etc/group" && ok "supplementary group membership restored (members)" || bad "members" "$(cat "$T/etc/group")"
+! grep -q 'brand-comms-01' "$T/etc/group" && ok "…not for the skipped login" || bad "skipped login joined a group"
+! grep -q nosuchgroup "$T/etc/group" && ok "…and a group the boot lacks is left alone" || bad "nosuchgroup"
 grep -qx 'enable-linger db-admin' "$LOGINCTL_LOG" && ! grep -q 'brand-comms-01' "$LOGINCTL_LOG" && ok "linger enabled for the re-added login only" || bad "linger" "$(cat "$LOGINCTL_LOG")"
 [[ "$(grep -c '^user:' "$T/etc/passwd")" == 1 && "$(grep -c '^root:' "$T/etc/passwd")" == 1 ]] && ok "the template's own lines untouched" || bad "template lines changed"
 n1="$(wc -l < "$T/etc/passwd")"; sh "$RC" 2>/dev/null; n2="$(wc -l < "$T/etc/passwd")"
 [[ "$n1" == "$n2" && "$(grep -c '^db-admin:' "$T/etc/passwd")" == 1 ]] && ok "a second boot appends nothing twice" || bad "duplicated on second run"
+grep -qx 'otscache:x:990:user,db-admin' "$T/etc/group" && ok "…nor a membership twice" || bad "membership duplicated" "$(cat "$T/etc/group")"
 : > "$LOGINCTL_LOG"; rm -rf "$T/snap"; sh "$RC"; [[ $? -eq 0 && ! -s "$LOGINCTL_LOG" ]] && ok "no snapshot: nothing done, exit 0" || bad "no snapshot"
 
 echo "writer: one line per login per file, replace-or-append, the boot script installed once"
@@ -59,6 +67,7 @@ mkdir -p "$T/snap"; : > "$LOGINCTL_LOG"
 printf 'edge-hosting:x:1011:1011:agent-fabric edge-hosting:/home/edge-hosting:/bin/bash\n' >> "$T/etc/passwd"
 printf 'edge-hosting:$6$eh:20001:0:99999:7:::\n' >> "$T/etc/shadow"
 printf 'edge-hosting:x:1011:\n' >> "$T/etc/group"
+sed -i 's/^otscache:x:990:user,db-admin$/otscache:x:990:user,db-admin,edge-hosting/' "$T/etc/group"
 # the platform: the Qubes profile (volatile root)
 export AGENT_FABRIC_PLATFORM=fedora-qubes     # detect.sh honours the override
 run_writer() { bash "$WRITER" "$@"; }
@@ -68,6 +77,10 @@ grep -qx 'edge-hosting:x:1011:1011:agent-fabric edge-hosting:/home/edge-hosting:
 grep -qx 'edge-hosting:$6$eh:20001:0:99999:7:::' "$T/snap/shadow" && ok "…and shadow" || bad "snapshot shadow"
 [[ "$(stat -c %a "$T/snap/passwd")" == 600 && "$(stat -c %a "$T/snap")" == 700 ]] && ok "snapshot files 600 in a 700 directory" || bad "modes" "$(stat -c '%a %n' "$T/snap" "$T/snap"/*)"
 [[ -x "$T/rcd/agent-fabric-accounts.rc" ]] && ok "the boot script is installed" || bad "boot script not installed"
+grep -qx 'edge-hosting:otscache' "$T/snap/members" && grep -qx 'db-admin:otscache' "$T/snap/members" && ok "supplementary groups snapshotted (members)" || bad "members" "$(cat "$T/snap/members")"
+echo '# stale' > "$T/rcd/agent-fabric-accounts.rc"; run_writer db-admin >/dev/null 2>&1
+cmp -s "$RC" "$T/rcd/agent-fabric-accounts.rc" && ok "an installed boot script that differs is refreshed" || bad "stale boot script kept"
+[[ -z "$(ls -A "$T/snap" | grep '^\.')" ]] && ok "no temporary file left in the snapshot" || bad "temp files" "$(ls -A "$T/snap")"
 grep -qx 'enable-linger db-admin' "$LOGINCTL_LOG" && grep -qx 'enable-linger edge-hosting' "$LOGINCTL_LOG" && ok "linger enabled for each" || bad "linger" "$(cat "$LOGINCTL_LOG")"
 sed -i 's|^edge-hosting:x:1011:1011:agent-fabric edge-hosting|edge-hosting:x:1011:1011:renamed|' "$T/etc/passwd"
 run_writer edge-hosting >/dev/null 2>&1

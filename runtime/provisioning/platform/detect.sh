@@ -10,9 +10,11 @@ platform_detect() {
     if [[ -r /etc/os-release ]]; then
         id="$(. /etc/os-release; echo "${ID:-}")"; like="$(. /etc/os-release; echo "${ID_LIKE:-}")"
     fi
+    local qubes=""
+    if [[ -d /usr/share/qubes || -n "${QUBES_ENV_SOURCED:-}" || -r /etc/qubes-release ]]; then qubes="-qubes"; fi
     case "$id $like" in
-        fedora*) if [[ -d /usr/share/qubes || -n "${QUBES_ENV_SOURCED:-}" || -r /etc/qubes-release ]]; then echo fedora-qubes; else echo fedora; fi ;;
-        debian*|*debian*|ubuntu*) echo debian ;;
+        fedora*) echo "fedora$qubes" ;;
+        debian*|*debian*|ubuntu*) echo "debian$qubes" ;;
         *) echo "" ;;
     esac
 }

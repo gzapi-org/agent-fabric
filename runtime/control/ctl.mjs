@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { OPS } from './ops.mjs';
-import { controlConfig, newId } from './agentd.mjs';
+import { controlConfig, newId, operatorAddresses } from './agentd.mjs';
 
 export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
@@ -40,6 +40,7 @@ export function parseArgs(argv) {
     else out.targets.push(a);
   }
   if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : 20;
+  if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
   return out;
 }
 
@@ -93,6 +94,7 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   }
   const who = whoami();
   const me = gzIdentity(who);
+  if (!operatorAddresses().has(me.address)) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
   const cfg = controlConfig();
   const gz = integrationConfig(who.project);
   const tok = gzToken(inboxRoot(who), gz.configured ? gz : undefined) ?? syncedToken();
@@ -114,6 +116,7 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
     let page;
     try { page = await call(`/api/messages?${q({ channel: cfg.channel, since_id: since, limit: '500', full: '1' })}`); }
     catch (e) { console.error(`fabric-ctl: relay read failed (${e.message})`); break; }
+    if (page.warning === 'since_id_not_found') { console.error('fabric-ctl: the relay no longer holds the request (history cleared); the replies cannot be read'); break; }
     for (const rec of page.messages ?? []) {
       since = rec.id;
       let r; try { r = JSON.parse(rec.content); } catch { continue; }

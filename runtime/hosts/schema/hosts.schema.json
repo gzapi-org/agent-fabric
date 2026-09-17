@@ -18,7 +18,7 @@
         "required": ["platform", "ssh", "operator", "fabric"],
         "additionalProperties": false,
         "properties": {
-          "platform": {"enum": ["fedora-qubes", "fedora", "debian"]},
+          "platform": {"enum": ["fedora-qubes", "fedora", "debian", "debian-qubes"]},
           "ssh": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._-]+@[A-Za-z0-9._:\\[\\]-]+$|^[A-Za-z0-9._:\\[\\]-]+$", "description": "An ssh destination for the operator account ([user@]host), or null: the host this registry is read on, reached directly."},
           "operator": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]*$", "description": "The login on that host that holds sudo and the fabric checkout; the ssh destination logs in as it."},
           "fabric": {"type": "string", "description": "The operator's fabric checkout on that host; ~ is the operator's home there."}

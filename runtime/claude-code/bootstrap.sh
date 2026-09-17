@@ -189,7 +189,7 @@ if (( ! DRY_RUN )); then
        && systemctl --user daemon-reload >/dev/null 2>&1; then
         systemctl --user enable --now "$UNIT_NAME" >/dev/null 2>&1 || true
         (( changed > before )) && systemctl --user restart "$UNIT_NAME" >/dev/null 2>&1 || true
-        echo "  *  $UNIT_NAME: $(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || echo unknown) (systemctl --user status $UNIT_NAME)"
+        echo "  *  $UNIT_NAME: $(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true) (systemctl --user status $UNIT_NAME)"
     else
         echo "  !  $UNIT_NAME: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus (loginctl enable-linger $(id -un), or the next login starts it)"
     fi

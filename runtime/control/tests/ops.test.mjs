@@ -63,7 +63,7 @@ test('keys: names and twelve-digit fingerprints, never a value; an absent key sa
   assert.deepEqual(keys('/nonexistent').map(x => x.present), [false, false, false, false]);
 });
 
-test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fails is said', () => {
+test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fails is said', async () => {
   const calls = [];
   const exec = (cmd, args) => { calls.push(args.slice(2).join(' '));
     const a = args.slice(2).join(' ');
@@ -73,8 +73,10 @@ test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fail
     if (a.startsWith('fetch')) throw new Error('offline');
     if (a.startsWith('rev-list')) return '3\n';
     return ''; };
-  assert.deepEqual(fabric('/some/root', exec), { status: 'ok', root: '/some/root', head: 'abc1234', branch: 'main', dirty: false, fetch: 'failed', behind: 3 });
-  assert.equal(fabric('/no/checkout', () => { throw new Error('not a git repository'); }).status, 'not-a-checkout');
+  assert.deepEqual(await fabric('/some/root', exec), { status: 'ok', root: '/some/root', head: 'abc1234', branch: 'main', dirty: false, fetch: 'failed', behind: 3 });
+  assert.equal((await fabric('/no/checkout', () => { throw new Error('not a git repository'); })).status, 'not-a-checkout');
+  const asyncExec = async (...a) => ({ stdout: exec(...a) });   // the real execFile shape
+  assert.equal((await fabric('/some/root', asyncExec)).head, 'abc1234');
 });
 
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {

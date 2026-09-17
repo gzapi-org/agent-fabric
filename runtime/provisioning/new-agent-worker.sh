@@ -110,13 +110,14 @@ if [[ "$PHASE" == prepare ]]; then
     # necessarily the login: user-private groups are a distribution choice).
     GROUP="$(id -gn "$LOGIN" 2>/dev/null || echo "$LOGIN")"
     must $SUDO -n chmod 700 "$HOME_DIR"
+    if probe getent group otscache >/dev/null && ! id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx otscache; then
+        best_effort $SUDO -n usermod -aG otscache "$LOGIN"; say "   otscache (the shared timestamp cache): joined"; fi
     # The account must survive this host's reboot: linger on every platform
     # (its user manager, and the control agent under it, run without a
     # login); on a Qubes AppVM the record itself is volatile and goes into
-    # the /rw snapshot the boot script re-adds (persist-accounts.sh).
+    # the /rw snapshot the boot script re-adds (persist-accounts.sh) —
+    # after the group join above, so the membership is in the snapshot.
     must $SUDO -n bash "$ROOT/runtime/provisioning/persist-accounts.sh" "$LOGIN"; say "   persisted across reboot (linger$( (( PERSISTS_ACROSS_REBOOT )) || printf '; record snapshot under /rw' ))"
-    if probe getent group otscache >/dev/null && ! id -nG "$LOGIN" 2>/dev/null | tr ' ' '\n' | grep -qx otscache; then
-        best_effort $SUDO -n usermod -aG otscache "$LOGIN"; say "   otscache (the shared timestamp cache): joined"; fi
 
 
     # ---- 2. the home skeleton and the two binaries ----------------------------

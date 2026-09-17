@@ -8,5 +8,5 @@ set -uo pipefail
 [[ -n "${1:-}" ]] && export AGENT_FABRIC_PLATFORM="$1"
 # shellcheck source=runtime/provisioning/platform/detect.sh
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/detect.sh"
-[[ "$PLATFORM_ID" != unknown ]] || { echo "packages.sh: unknown platform (AGENT_FABRIC_PLATFORM=fedora|fedora-qubes|debian)" >&2; exit 2; }
+[[ "$PLATFORM_ID" != unknown ]] || { echo "packages.sh: unknown platform (AGENT_FABRIC_PLATFORM=fedora|fedora-qubes|debian|debian-qubes)" >&2; exit 2; }
 for tool in "${FABRIC_HOST_TOOLS[@]}"; do pkg_for "$tool"; done | sort -u

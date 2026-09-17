@@ -8,12 +8,14 @@ const UNIT = new URL('../agent-fabric-agentd.service', import.meta.url).pathname
 
 test('agent-fabric-agentd.service: the keys the daemon relies on', () => {
   const text = fs.readFileSync(UNIT, 'utf8');
-  const kv = Object.fromEntries(text.split('\n').filter(l => /^[A-Za-z]+=/.test(l)).map(l => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1)]; }));
+  const kv = {};
+  for (const l of text.split('\n')) { if (!/^[A-Za-z]+=/.test(l)) continue; const i = l.indexOf('='); const k = l.slice(0, i); kv[k] = k in kv ? `${kv[k]}\n${l.slice(i + 1)}` : l.slice(i + 1); }
   assert.match(kv.ExecStart, /node %h\/projects\/agent-fabric\/runtime\/control\/agentd\.mjs$/);
   assert.equal(kv.Restart, 'always');
   assert.equal(kv.WantedBy, 'default.target');
   assert.equal(kv.StartLimitIntervalSec, '0', 'a relay outage never exhausts the restart budget');
-  assert.equal(kv.Environment, 'AGENT_FABRIC_ROOT=%h/projects/agent-fabric');
+  assert.match(kv.Environment, /^AGENT_FABRIC_ROOT=%h\/projects\/agent-fabric$/m);
+  assert.match(kv.Environment, /^PATH=%h\/.local\/bin:/m, 'the account\'s own node is on the PATH the user manager lacks');
   for (const section of ['[Unit]', '[Service]', '[Install]']) assert.ok(text.includes(section), section);
   assert.ok(!/--once|--self/.test(kv.ExecStart), 'the unit runs the daemon, not a one-shot');
 });

@@ -14,11 +14,15 @@
 # account records themselves are volatile too: each login's line from
 # /etc/{passwd,shadow,group,gshadow,subuid,subgid} is written into the
 # snapshot /rw/config/agent-fabric/accounts/ (root, 0600), replacing an
-# older line for the same name, and the boot script
-# platform/qubes/agent-fabric-accounts.rc is installed under
-# /rw/config/rc.local.d/ when absent. Nothing on a persistent platform
-# writes a snapshot. Secrets: the shadow line carries a hash, never a
-# password; the snapshot directory is root's alone.
+# older line for the same name — each file swapped into place whole, so a
+# crash mid-write leaves the previous snapshot, never a partial one — plus
+# the login's supplementary groups (`members`: login:g1,g2, from the live
+# /etc/group, so the shared-cache membership the worker grants comes back
+# too), and the boot script platform/qubes/agent-fabric-accounts.rc is
+# installed under /rw/config/rc.local.d/ and refreshed whenever this
+# checkout's copy differs. Nothing on a persistent platform writes a
+# snapshot. Secrets: the shadow line carries a hash, never a password; the
+# snapshot directory is root's alone.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 SNAP="${AGENT_FABRIC_ACCOUNTS_SNAPSHOT:-/rw/config/agent-fabric/accounts}"
@@ -35,17 +39,26 @@ for login in "$@"; do
     fi
     if (( PERSISTS_ACROSS_REBOOT == 0 )); then
         install -d -m 700 "$SNAP" || { rc=1; continue; }
+        put_line() {  # put_line <file> <line>: replace-or-append the login's line, atomically
+            local f="$1" line="$2" tmp
+            tmp="$(mktemp "$SNAP/.$f.XXXXXX")" || return 1
+            { [[ -f "$SNAP/$f" ]] && grep -v "^$login:" "$SNAP/$f"; printf '%s\n' "$line"; } > "$tmp"
+            chmod 600 "$tmp" && mv -f "$tmp" "$SNAP/$f"
+        }
         for f in passwd shadow group gshadow subuid subgid; do
             [[ -f "$ETC/$f" ]] || continue
             line="$(grep "^$login:" "$ETC/$f" | head -1)"
             [[ -n "$line" ]] || continue
-            tmp="$(mktemp "$SNAP/.$f.XXXXXX")"
-            { [[ -f "$SNAP/$f" ]] && grep -v "^$login:" "$SNAP/$f"; printf '%s\n' "$line"; } > "$tmp"
-            install -m 600 "$tmp" "$SNAP/$f"; rm -f "$tmp"
+            put_line "$f" "$line" || rc=1
         done
-        if [[ ! -f "$RCD/agent-fabric-accounts.rc" ]]; then
+        # Supplementary groups: every group whose member list names the
+        # login (otscache, for one), as one line: login:g1,g2.
+        groups="$(awk -F: -v u="$login" '{ n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == u) print $1 }' "$ETC/group" | paste -sd, -)"
+        put_line members "$login:$groups" || rc=1
+        src="$ROOT/runtime/provisioning/platform/qubes/agent-fabric-accounts.rc"
+        if ! cmp -s "$src" "$RCD/agent-fabric-accounts.rc"; then
             install -d -m 755 "$RCD"
-            install -m 755 "$ROOT/runtime/provisioning/platform/qubes/agent-fabric-accounts.rc" "$RCD/agent-fabric-accounts.rc"
+            install -m 755 "$src" "$RCD/agent-fabric-accounts.rc"
         fi
     fi
     "$LOGINCTL" enable-linger "$login" 2>/dev/null || { echo "persist-accounts: enable-linger failed for $login" >&2; rc=1; }

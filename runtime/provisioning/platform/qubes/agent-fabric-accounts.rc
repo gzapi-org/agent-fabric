@@ -19,36 +19,59 @@
 # gshadow,subuid,subgid}, one line per fabric account, written by
 # runtime/provisioning/persist-accounts.sh at provisioning and on demand.
 # A uid the template has meanwhile given to a system user is a collision:
-# that account is skipped with a line on stderr, never appended over it.
+# that account is skipped whole — none of its six lines — with a line on
+# stderr, never appended over it. `members` (login:g1,g2) puts each
+# re-added login back into the supplementary groups it had (the shared
+# cache group the worker grants), in /etc/group and /etc/gshadow.
 S="${AGENT_FABRIC_ACCOUNTS_SNAPSHOT:-/rw/config/agent-fabric/accounts}"
 ETC="${AGENT_FABRIC_ETC:-/etc}"
 LOGINCTL="${AGENT_FABRIC_LOGINCTL:-loginctl}"
 [ -d "$S" ] || exit 0
+skipped=" "   # logins whose passwd line collided: none of their other lines go in either
+skip() { case "$skipped" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 for f in passwd shadow group gshadow subuid subgid; do
     [ -f "$S/$f" ] || continue
     [ -f "$ETC/$f" ] || continue
     while IFS= read -r line || [ -n "$line" ]; do
         n="${line%%:*}"; [ -n "$n" ] || continue
+        skip "$n" && continue
         grep -q "^$n:" "$ETC/$f" && continue
         if [ "$f" = passwd ]; then
             uid="$(printf '%s' "$line" | cut -d: -f3)"
             if grep -q "^[^:]*:[^:]*:$uid:" "$ETC/passwd"; then
-                printf 'agent-fabric-accounts: uid %s is taken in /etc/passwd; not re-adding %s\n' "$uid" "$n" >&2
+                printf 'agent-fabric-accounts: uid %s is taken in /etc/passwd; not re-adding %s (none of its records)\n' "$uid" "$n" >&2
+                skipped="$skipped$n "
                 continue
             fi
         elif [ "$f" = group ]; then
             gid="$(printf '%s' "$line" | cut -d: -f3)"
             if grep -q "^[^:]*:[^:]*:$gid:" "$ETC/group"; then
-                printf 'agent-fabric-accounts: gid %s is taken in /etc/group; not re-adding %s\n' "$gid" "$n" >&2
+                printf 'agent-fabric-accounts: gid %s is taken in /etc/group; not re-adding group %s\n' "$gid" "$n" >&2
                 continue
             fi
         fi
         printf '%s\n' "$line" >> "$ETC/$f"
     done < "$S/$f"
 done
+# add_member <file> <group> <login>: the login into the group's member list, once
+add_member() {
+    [ -f "$1" ] || return 0
+    grep -q "^$2:" "$1" || return 0
+    awk -F: -v OFS=: -v g="$2" -v u="$3" '$1 == g { n = split($4, m, ","); f = 0; for (i = 1; i <= n; i++) if (m[i] == u) f = 1; if (!f) $4 = ($4 == "" ? u : $4 "," u) } { print }' "$1" > "$1.agent-fabric" \
+        && cat "$1.agent-fabric" > "$1"; rm -f "$1.agent-fabric"
+}
 if [ -f "$S/passwd" ]; then
     cut -d: -f1 "$S/passwd" | while IFS= read -r n; do
-        [ -n "$n" ] && grep -q "^$n:" "$ETC/passwd" && "$LOGINCTL" enable-linger "$n" 2>/dev/null
+        [ -n "$n" ] || continue
+        skip "$n" && continue
+        grep -q "^$n:" "$ETC/passwd" || continue
+        if [ -f "$S/members" ]; then
+            grep "^$n:" "$S/members" | head -1 | cut -d: -f2 | tr ',' '\n' | while IFS= read -r g; do
+                [ -n "$g" ] || continue
+                add_member "$ETC/group" "$g" "$n"; add_member "$ETC/gshadow" "$g" "$n"
+            done
+        fi
+        "$LOGINCTL" enable-linger "$n" 2>/dev/null
     done
 fi
 exit 0

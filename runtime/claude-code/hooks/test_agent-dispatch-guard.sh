@@ -105,6 +105,15 @@ ORPHAN="$(mktemp -d)"; mkdir -p "$ORPHAN/hooks"; cp "$UNDER_TEST" "$ORPHAN/hooks
 out="$(printf '{"tool_input":{"subagent_type":"code-low","model":"haiku","isolation":"worktree","description":"x"}}' | bash "$ORPHAN/hooks/guard.sh" 2>/dev/null)"; rm -rf "$ORPHAN"
 if grep -q '"deny"' <<<"$out" && grep -q "binds no alias" <<<"$out"; then pass "an unreadable aliases.json denies a class dispatch rather than allowing it"; else fail "an unreadable aliases.json denies a class dispatch rather than allowing it" "$out"; fi
 
+echo "the locale worker: model required, isolation refused, any alias allowed without an ask"
+expect "locale-worker on opus is allowed, no ask" allow '{"subagent_type":"locale-worker","model":"opus","description":"Translate the finding into Georgian"}'
+expect "locale-worker on fable is allowed, no ask" allow '{"subagent_type":"locale-worker","model":"fable","description":"x"}'
+expect "locale-worker on sonnet is allowed" allow '{"subagent_type":"locale-worker","model":"sonnet","description":"x"}'
+expect "locale-worker with model unset is denied" deny '{"subagent_type":"locale-worker","description":"x"}'
+expect "locale-worker with isolation is denied" deny '{"subagent_type":"locale-worker","model":"opus","isolation":"worktree","description":"x"}'
+r="$(reason '{"subagent_type":"locale-worker","model":"opus","isolation":"worktree","description":"x"}')"
+if grep -q "writes nothing" <<<"$r"; then pass "the isolation denial says why"; else fail "the isolation denial says why" "$r"; fi
+
 echo "a guard that cannot run asks; it never silently allows"
 out="$(printf '{"tool_input":{"model":"sonnet","isolation":"worktree","description":"x"}}' | env PATH=/nonexistent /bin/bash "$UNDER_TEST" 2>/dev/null)"
 if printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "ask"' >/dev/null 2>&1; then

@@ -54,6 +54,19 @@
 #                      about, as it would for a review. Found
 #                      2026-09-16: every Explore dispatch was denied
 #                      and the research was done by hand.
+#   locale-worker   -> the language-culture role's worker: a tool-less
+#                      subagent whose system prompt and every input are
+#                      the locale's language, so its reasoning cannot
+#                      start from English it never saw (the CEO,
+#                      2026-09-17; docs/language-culture-bridge.md).
+#                      Model required; isolation must be ABSENT (it
+#                      writes nothing, a worktree protects nothing);
+#                      any alias allowed and never asked — language
+#                      judgement is premium by design. The dispatcher's
+#                      role is not checked here (no branch checks it):
+#                      the agent file exists only on a language-culture
+#                      login (install-agent-files.sh), and an unknown
+#                      type fails in the harness before this hook runs.
 #   everything else -> model required; isolation "worktree" required;
 #                      opus/fable ask (per-dispatch authorisation).
 #
@@ -154,6 +167,12 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
         elif $type == "code-high" or $type == "code-plan" then
           ask("Agent dispatch names " + $type + ", a premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
         else empty end
+    elif $type == "locale-worker" then
+      if ($model | length) == 0 then
+        deny("locale-worker dispatch has no model set. The worker has no tools, but its tier is still a choice, and unset means the session model by accident. Set model explicitly (opus is the design: language judgement is premium work). See docs/language-culture-bridge.md.")
+      elif $iso != "" then
+        deny("locale-worker dispatch sets isolation. The worker writes nothing anywhere — no tools — so isolation protects nothing; omit it. See docs/language-culture-bridge.md.")
+      else empty end
     elif ($type | test("^(Explore|Plan|claude-code-guide)$")) then
       if ($model | length) == 0 then
         deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")

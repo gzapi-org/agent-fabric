@@ -8,57 +8,57 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { readLocale, searchUrl, search, handle, tools } from '../server.mjs';
+import { readLocale, request, search, handle, tools } from '../server.mjs';
 
 const SERVER = new URL('../server.mjs', import.meta.url).pathname;
 const LOCALE = { timezone: 'Asia/Tbilisi',
-                 google: { gl: 'ge', hl: 'ka', lr: 'lang_ka', tool_description: 'ვებ-ძიება ქართულად' },
+                 serper: { gl: 'ge', hl: 'ka', tool_description: 'ვებ-ძიება ქართულად' },
                  brave: { country: 'ALL', tool_description: 'გლობალური ვებ-ძიება' } };
-const G = { GOOGLE_CSE_API_KEY: 'AIza-secret-key-value-0123456789', GOOGLE_CSE_CX: '0123456789abcdef0' };
+const G = { SERPER_API_KEY: 'serper-secret-key-value-0123456789' };
 const B = { BRAVE_SEARCH_API_KEY: 'BSA-secret-key-value-0123456789' };
 const localeFile = (l = LOCALE) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'loc-')), 'locale.json'); fs.writeFileSync(f, JSON.stringify(l)); return f; };
 
-test('readLocale: an engine block is complete or absent; at least one; searchUrl per engine — the locale decides the parameters, the caller the query, no key in a URL', () => {
+test('readLocale: an engine block is complete or absent; at least one; request per engine — the locale decides the parameters, the caller the query, no key anywhere in it', () => {
   assert.deepEqual(readLocale(localeFile()), LOCALE);
-  assert.throws(() => readLocale(localeFile({ timezone: 'x', google: { ...LOCALE.google, lr: '' } })), /google\.lr missing/);
+  assert.throws(() => readLocale(localeFile({ timezone: 'x', serper: { ...LOCALE.serper, hl: '' } })), /serper\.hl missing/);
   assert.throws(() => readLocale(localeFile({ timezone: 'x' })), /no engine configured/);
   assert.deepEqual(Object.keys(readLocale(localeFile({ timezone: 'x', brave: LOCALE.brave }))), ['timezone', 'brave'], 'one engine alone is fine');
   assert.throws(() => readLocale(undefined), /WEBSEARCH_LOCALE_FILE/);
-  const g = new URL(searchUrl('google', 'თბილისის მეტრო', LOCALE, { cx: G.GOOGLE_CSE_CX, count: 5 }));
-  assert.equal(g.origin + g.pathname, 'https://www.googleapis.com/customsearch/v1');
-  assert.deepEqual(['q', 'gl', 'hl', 'lr', 'cx', 'num'].map(k => g.searchParams.get(k)), ['თბილისის მეტრო', 'ge', 'ka', 'lang_ka', G.GOOGLE_CSE_CX, '5']);
-  assert.ok(!g.searchParams.has('key'), 'the key never rides in the URL');
-  assert.equal(new URL(searchUrl('google', 'x', LOCALE, { cx: 'c', count: 99 })).searchParams.get('num'), '10', 'clamped to the API maximum');
-  const b = new URL(searchUrl('brave', 'თბილისის მეტრო', LOCALE, { count: 5 }));
-  assert.equal(b.origin + b.pathname, 'https://api.search.brave.com/res/v1/web/search');
-  assert.deepEqual(['q', 'country', 'count'].map(k => b.searchParams.get(k)), ['თბილისის მეტრო', 'ALL', '5']);
-  assert.ok(!b.searchParams.has('search_lang') && !b.searchParams.has('ui_lang'), 'a language Brave lacks is not sent');
-  const withLang = new URL(searchUrl('brave', 'x', { brave: { country: 'US', search_lang: 'en', ui_lang: 'en-US' } }));
+  const g = request('serper', 'თბილისის მეტრო', LOCALE, { count: 5 });
+  assert.equal(g.url, 'https://google.serper.dev/search'); assert.equal(g.method, 'POST');
+  assert.deepEqual(g.body, { q: 'თბილისის მეტრო', gl: 'ge', hl: 'ka', num: 5 });
+  assert.equal(request('serper', 'x', LOCALE, { count: 99 }).body.num, 20, 'clamped'); assert.equal(request('serper', 'x', LOCALE).body.num, 10);
+  const b = request('brave', 'თბილისის მეტრო', LOCALE, { count: 5 }); const bu = new URL(b.url);
+  assert.equal(b.method, 'GET'); assert.equal(bu.origin + bu.pathname, 'https://api.search.brave.com/res/v1/web/search');
+  assert.deepEqual(['q', 'country', 'count'].map(k => bu.searchParams.get(k)), ['თბილისის მეტრო', 'ALL', '5']);
+  assert.ok(!bu.searchParams.has('search_lang') && !bu.searchParams.has('ui_lang'), 'a language Brave lacks is not sent');
+  const withLang = new URL(request('brave', 'x', { brave: { country: 'US', search_lang: 'en', ui_lang: 'en-US' } }).url);
   assert.equal(withLang.searchParams.get('search_lang'), 'en'); assert.equal(withLang.searchParams.get('ui_lang'), 'en-US');
 });
 
 test('search: each secret in its one header and nowhere else; results as text from either shape; every failure named without a secret', async () => {
   const seen = [];
-  const google = async (url, init) => { seen.push({ url, init }); return { ok: true, status: 200, json: async () => ({ items: [{ title: 'მეტრო', link: 'https://example.ge/m', snippet: 'აღწერა\nხაზი  ორი' }] }) }; };
-  const r = await search('google', 'მეტრო', LOCALE, { secrets: G, fetchImpl: google });
+  const serper = async (url, init) => { seen.push({ url, init }); return { ok: true, status: 200, json: async () => ({ organic: [{ title: 'მეტრო', link: 'https://example.ge/m', snippet: 'აღწერა\nხაზი  ორი', position: 1 }] }) }; };
+  const r = await search('serper', 'მეტრო', LOCALE, { secrets: G, fetchImpl: serper });
   assert.equal(r.isError, false); assert.match(r.text, /1\. მეტრო\n   https:\/\/example\.ge\/m\n   აღწერა ხაზი ორი/);
-  assert.equal(seen[0].init.headers['x-goog-api-key'], G.GOOGLE_CSE_API_KEY); assert.ok(!seen[0].url.includes(G.GOOGLE_CSE_API_KEY)); assert.ok(seen[0].url.includes(`cx=${G.GOOGLE_CSE_CX}`));
+  assert.equal(seen[0].init.method, 'POST'); assert.equal(seen[0].init.headers['X-API-KEY'], G.SERPER_API_KEY);
+  assert.deepEqual(JSON.parse(seen[0].init.body), { q: 'მეტრო', gl: 'ge', hl: 'ka', num: 10 }); assert.ok(!seen[0].url.includes(G.SERPER_API_KEY) && !seen[0].init.body.includes(G.SERPER_API_KEY));
   const brave = async (url, init) => { seen.push({ url, init }); return { ok: true, status: 200, json: async () => ({ web: { results: [{ title: 't', url: 'u', description: 'd <strong>e</strong>' }] } }) }; };
   const rb = await search('brave', 'x', LOCALE, { secrets: B, fetchImpl: brave });
   assert.equal(rb.isError, false); assert.match(rb.text, /1\. t\n   u\n   d e/);
   assert.equal(seen[1].init.headers['X-Subscription-Token'], B.BRAVE_SEARCH_API_KEY); assert.ok(!seen[1].url.includes(B.BRAVE_SEARCH_API_KEY));
   for (const out of [r, rb]) assert.ok(![...Object.values(G), ...Object.values(B)].some(v => JSON.stringify(out).includes(v)));
-  assert.deepEqual(await search('google', 'x', LOCALE, { secrets: { GOOGLE_CSE_API_KEY: G.GOOGLE_CSE_API_KEY }, fetchImpl: google }), { isError: true, text: 'no GOOGLE_CSE_CX in the synced secrets: bin/fabric-secrets sync, after it is in Doppler for this login' });
+  assert.deepEqual(await search('serper', 'x', LOCALE, { secrets: {}, fetchImpl: serper }), { isError: true, text: 'no SERPER_API_KEY in the synced secrets: bin/fabric-secrets sync, after it is in Doppler for this login' });
   assert.deepEqual(await search('brave', 'x', LOCALE, { secrets: {}, fetchImpl: brave }), { isError: true, text: 'no BRAVE_SEARCH_API_KEY in the synced secrets: bin/fabric-secrets sync, after it is in Doppler for this login' });
-  assert.deepEqual(await search('google', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({ error: { message: 'API key not valid. Please pass a valid API key.' } }) }) }), { isError: true, text: 'search refused: HTTP 403 — API key not valid. Please pass a valid API key.' });
+  assert.deepEqual(await search('serper', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({ message: 'Unauthorized.' }) }) }), { isError: true, text: 'search refused: HTTP 403 — Unauthorized.' });
   assert.deepEqual(await search('brave', 'x', LOCALE, { secrets: B, fetchImpl: async () => ({ ok: false, status: 422, json: async () => ({ error: { detail: 'Unable to validate request parameter(s)' } }) }) }), { isError: true, text: 'search refused: HTTP 422 — Unable to validate request parameter(s)' });
-  assert.deepEqual(await search('google', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: false, status: 429, json: async () => { throw new Error('x'); } }) }), { isError: true, text: 'search refused: HTTP 429' });
-  assert.deepEqual(await search('google', 'x', LOCALE, { secrets: G, fetchImpl: async () => { throw new Error('ECONNREFUSED'); } }), { isError: true, text: 'search failed: unreachable' });
-  assert.deepEqual(await search('google', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }) }), { isError: false, text: 'no results (google)' });
+  assert.deepEqual(await search('serper', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: false, status: 429, json: async () => { throw new Error('x'); } }) }), { isError: true, text: 'search refused: HTTP 429' });
+  assert.deepEqual(await search('serper', 'x', LOCALE, { secrets: G, fetchImpl: async () => { throw new Error('ECONNREFUSED'); } }), { isError: true, text: 'search failed: unreachable' });
+  assert.deepEqual(await search('serper', 'x', LOCALE, { secrets: G, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }) }), { isError: false, text: 'no results (serper)' });
 });
 
 test('handle: the MCP subset — initialize, initialized, ping, one tool per engine in the locale, tools/call on each, and -32601 for the rest', async () => {
-  const ctx = { locale: LOCALE, secrets: { google: G, brave: B }, fetchImpl: async url => ({ ok: true, status: 200, json: async () => url.includes('googleapis') ? { items: [{ title: 'g', link: 'u', snippet: 'd' }] } : { web: { results: [{ title: 'b', url: 'u', description: 'd' }] } } }) };
+  const ctx = { locale: LOCALE, secrets: { serper: G, brave: B }, fetchImpl: async url => ({ ok: true, status: 200, json: async () => url.includes('serper') ? { organic: [{ title: 'g', link: 'u', snippet: 'd' }] } : { web: { results: [{ title: 'b', url: 'u', description: 'd' }] } } }) };
   const init = await handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, ctx);
   assert.equal(init.result.protocolVersion, '2025-06-18'); assert.deepEqual(init.result.capabilities, { tools: {} });
   assert.equal(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' }, ctx), null, 'a notification gets no reply');
@@ -70,7 +70,7 @@ test('handle: the MCP subset — initialize, initialized, ping, one tool per eng
   assert.equal(g.result.isError, false); assert.match(g.result.content[0].text, /^1\. g/);
   const b = await handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'web_search_global', arguments: { query: 'მეტრო' } } }, ctx);
   assert.match(b.result.content[0].text, /^1\. b/);
-  assert.equal((await handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'web_search_global', arguments: { query: 'x' } } }, { ...ctx, locale: { google: LOCALE.google } })).error.code, -32602, 'an engine the locale lacks is not a tool');
+  assert.equal((await handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'web_search_global', arguments: { query: 'x' } } }, { ...ctx, locale: { serper: LOCALE.serper } })).error.code, -32602, 'an engine the locale lacks is not a tool');
   assert.equal((await handle({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'x' } } }, ctx)).error.code, -32602);
   assert.equal((await handle({ jsonrpc: '2.0', id: 8, method: 'resources/list' }, ctx)).error.code, -32601);
   assert.equal((await handle({ id: 9, method: 'ping' }, ctx)).error.code, -32600);
@@ -78,7 +78,7 @@ test('handle: the MCP subset — initialize, initialized, ping, one tool per eng
 
 test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool error, not a crash; no secret on stderr or stdout', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-home-')); fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
-  fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), `export GOOGLE_CSE_API_KEY='${G.GOOGLE_CSE_API_KEY}'\n`);   // no cx, no brave key
+  fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), `export BRAVE_SEARCH_API_KEY='${B.BRAVE_SEARCH_API_KEY}'\n`);   // no serper key
   const child = spawn('node', [SERVER], { env: { ...process.env, HOME: home, WEBSEARCH_LOCALE_FILE: localeFile() } });
   let out = '', err = ''; child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
   for (const m of [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, { jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', id: 2, method: 'tools/list' },
@@ -88,7 +88,7 @@ test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool e
   const lines = out.trim().split('\n').map(l => JSON.parse(l));
   assert.equal(lines[0].result.serverInfo.name, 'websearch-locale');
   assert.deepEqual(lines[1].result.tools.map(t => t.name), ['web_search', 'web_search_global']);
-  assert.equal(lines[2].result.isError, true); assert.match(lines[2].result.content[0].text, /no GOOGLE_CSE_CX/);
+  assert.equal(lines[2].result.isError, true); assert.match(lines[2].result.content[0].text, /no SERPER_API_KEY/);
   assert.equal(lines[3].error.code, -32700);
-  assert.ok(!out.includes(G.GOOGLE_CSE_API_KEY) && !err.includes(G.GOOGLE_CSE_API_KEY));
+  assert.ok(!out.includes(B.BRAVE_SEARCH_API_KEY) && !err.includes(B.BRAVE_SEARCH_API_KEY));
 });

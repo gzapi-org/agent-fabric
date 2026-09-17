@@ -139,6 +139,9 @@ three of five results `ka`, on `.ge` hosts and `ka.wikipedia.org`.
 With `country: ALL` and no language the `ge` tool answered a Georgian
 query with Georgian results (madloba.info/ka, tbilisimetro.org) — a
 global search steered by the query, less than the "Georgian browser"
-asked for. Decides: Google's Custom Search JSON API, which has the three
-(`gl=ge`, `hl=ka`, `lr=lang_ka`), is the located `web_search`, and Brave
+asked for. Google's Custom Search JSON API was tried next and is
+**closed to new customers** (its overview page, 2026-09-17; existing
+customers until 2027-01-01; the full-web alternative is "contact us"),
+so Google's index is reachable only through a SERP proxy. Decides:
+Serper.dev (`gl=ge`, `hl=ka`) is the located `web_search`, and Brave
 stays as `web_search_global`, a second index (the CEO: keep both).

@@ -2,9 +2,11 @@
 
 *Build: `2.1.274 (Claude Code)`. Model in the session: Fable 5.1; permission mode: auto; launched by the fabric. Anthropic's text, recorded here as a live check of what a fabric session is launched into — the fabric's own prompt is `tools/fabric/launch_prompt.py --print`, and the boundary between the two is marked below. Anthropic revises this text with the build; a different model, mode or build can receive different text, so the date and build are the claim.*
 
-CLAUDE.md contents, the memory index and the skill/agent listings arrive
-separately (a tool block and `<system-reminder>` blocks), not in this
-text. Section order and wording as received; nothing edited.
+What follows is the text the harness puts BEFORE the fabric's appended
+prompt. Tool definitions (JSON schemas), the CLAUDE.md contents, the
+memory index and the skill/agent listings arrive separately (a tool
+block and `<system-reminder>` blocks), not in this text. Section order
+and wording as received; nothing edited.
 
 ---
 

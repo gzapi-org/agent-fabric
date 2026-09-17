@@ -793,6 +793,7 @@ def main() -> int:
     taxonomy_schema = load_schema(root, os.path.join("projects", "schemas"), "taxonomy")
     projects_root = os.path.join(root, "projects")
     project_ids: list[str] = []
+    taxonomy_roles: dict[str, set[str]] = {}   # project id -> the roles its taxonomy binds
     registry_ids: list[str] = []
     try:
         registry_ids = sorted((json.load(open(os.path.join(projects_root, "registry.json"), encoding="utf-8"))
@@ -818,6 +819,8 @@ def main() -> int:
                 findings.append(f"{where}: names project {tax.get('project')!r} but lives under {pid}/")
             for r in tax.get("roles", []) or []:
                 rid = r.get("id") if isinstance(r, dict) else None
+                if rid:
+                    taxonomy_roles.setdefault(pid, set()).add(rid)
                 if known_roles and rid not in known_roles:
                     findings.append(f"{where}: role {rid!r} is not in identities/roles/catalog.json")
                 for prefix in (r.get("paths") if isinstance(r, dict) else None) or []:
@@ -980,14 +983,21 @@ def main() -> int:
     # files knowledge for: once a project's memory lives in its repository,
     # a lint run that cannot see that working copy sees no index for it —
     # which is absence of evidence, not drift.
-    # So: judged whenever some managed project's memory (other than this
-    # repository's own) is visible to this run; silent otherwise.
-    projects_visible = any(pid != layout.FABRIC_PROJECT_ID for pid in layout.list_projects())
+    # So: judged for a domain only when some VISIBLE project's taxonomy
+    # binds that role — that project's index is where the slices must be
+    # listed. A project this run cannot see (another repository's CI passes
+    # only its own working copy) says nothing about the roles it does not
+    # bind: one project's merge queue failed on every PR the day a new
+    # role's slices landed here, indexed by a repository that project's
+    # lint never sees (flutter-dev's observation, relay seq 1076,
+    # 2026-09-17).
+    visible = [pid for pid in layout.list_projects() if pid != layout.FABRIC_PROJECT_ID]
     for domain, slices in domain_slices.items():
-        if slices and domain not in indexed_domains and projects_visible:
+        bound_by = [pid for pid in visible if domain in taxonomy_roles.get(pid, set())]
+        if slices and domain not in indexed_domains and bound_by:
             findings.append(f"memory/domains/{domain}: {len(slices)} slice(s) indexed by no project — "
-                            f"no project's .agent-fabric/memory/{domain}/INDEX.md lists them "
-                            "(pass --working-copy for a project whose memory lives in its repository)")
+                            f"{', '.join(bound_by)} binds the role and its "
+                            f".agent-fabric/memory/{domain}/INDEX.md does not list them")
 
     # --- shared ----------------------------------------------------------------
     shared_root = layout.shared_dir()

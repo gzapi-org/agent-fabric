@@ -369,6 +369,33 @@ def case_index_lists_domain_slices() -> None:
         assert code == 1 and "indexed by no project" in out, out
 
 
+def case_domain_bound_by_an_unseen_project_is_not_judged() -> None:
+    """A domain whose role no VISIBLE project binds is not required to be
+    indexed: another repository's CI passes only its own working copy and
+    must not fail on a role that repository never holds. Kills: judging
+    every domain whenever any project is visible (the 2026-09-17 queue
+    failure)."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        # the fixture project binds web-dev and indexes it; a second role's
+        # domain has slices and no index anywhere this run can see
+        write(dom(fabric, "domain", "good.md"), SLICE)
+        write(proj(fabric, "INDEX.md"), index_for(
+            "- [`../agent-fabric/memory/domains/web-dev/domain/good.md`](../agent-fabric/memory/domains/web-dev/domain/good.md) — A good slice\n"))
+        other = os.path.join(fabric, "memory", "domains", "db-admin", "domain", "plan.md")
+        write(other, SLICE.replace('role: "web-dev"', 'role: "db-admin"'))
+        cat = json.load(open(os.path.join(fabric, "identities", "roles", "catalog.json"), encoding="utf-8"))
+        cat["roles"].append({"id": "db-admin", "title": "DB"})
+        write(os.path.join(fabric, "identities", "roles", "catalog.json"), json.dumps(cat))
+        code, out = run_lint(fabric)
+        assert "indexed by no project" not in out, f"a role the visible project does not bind was judged:\n{out}"
+        # …and once the visible project binds that role, the missing index is named.
+        tax = dict(TAXONOMY); tax["roles"] = TAXONOMY["roles"] + [{"id": "db-admin", "paths": ["infra/db/"]}]
+        write(os.path.join(fabric, "projects", PROJECT, "taxonomy.json"), json.dumps(tax))
+        code, out = run_lint(fabric)
+        assert code == 1 and "memory/domains/db-admin" in out and "indexed by no project" in out, out
+
+
 def case_quoted_description_round_trips() -> None:
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
@@ -707,6 +734,7 @@ def main() -> int:
         case_prompt_templates_are_linted,
         case_knowledge_not_in_identities,
         case_taxonomy_roles_are_catalogued,
+        case_domain_bound_by_an_unseen_project_is_not_judged,
         case_model_profiles_layered_file_passes,
         case_model_profiles_cheap_review_is_refused,
         case_model_profiles_agents_are_logins,

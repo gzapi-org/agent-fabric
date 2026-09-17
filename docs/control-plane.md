@@ -58,12 +58,16 @@ token, which goes into one request header and nowhere else), `keys`
 enough to tell two keys apart, never a value), `fabric` (head, branch,
 how far behind `origin/main`, dirty), `session` (Claude processes as the
 login; whether one is planning), `script` (the letters of the account's
-own session records — thinking and visible text apart — counted by
-Unicode script over the last 24 h: the signature of the language a
-session reasons in, asked for by the CEO for the language-culture role;
-counts and shares only, never text, and not part of `status` since it
-reads megabytes; most thinking blocks are stored with a signature and
-no text — the op reports how many it could not read), `status` (all but `script`). A section that
+own notes — `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/notes/`,
+which the language-culture charter requires in the locale's language —
+and of its session records, visible text and stored thinking apart,
+counted by Unicode script over the last 24 h and binned per paragraph
+or block: the signature of the language a holder works in, asked for by
+the CEO for that role; counts and shares only, never text, and not part
+of `status` since it reads megabytes. The reasoning itself is not on
+disk — most thinking blocks are stored with no text and the rest as
+short summaries — which is why the notes are the signature and the
+transcript's text share the second number), `status` (all but `script`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the

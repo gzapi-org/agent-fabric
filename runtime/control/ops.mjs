@@ -104,6 +104,18 @@ export function session(uid = process.getuid(), exec = execFileSync) {
 // counts and percentages only. Records touched in the last `hours`
 // (default 24), newest `limit` files (default 5).
 //
+// Measured 2026-09-17: the reasoning itself is NOT on disk — the API
+// returns most thinking blocks with a signature and no text, and the
+// ones that carry text are 120–400-character summaries; one session
+// with 117k thinking tokens had no stored thinking text at all. So the
+// signature the charter names is the holder's NOTES: the directory
+// `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/notes/`,
+// where the role keeps the translated request, its working notes and
+// the original answer in the locale's language, one file per day. The
+// op counts those files (touched in the window) the same way, by
+// script, and bins their paragraphs; that is the artifact the holder
+// controls and the transcript's text share is the second number.
+//
 // The CEO's criterion (2026-09-17) is per BLOCK, not per total: most
 // thinking blocks must be in the locale's script alone, some will be
 // about half and half (a term quoted, a name), and a session that
@@ -143,7 +155,10 @@ const shares = counts => {
   for (const [k, v] of Object.entries(counts).sort((a, b) => b[1] - a[1])) out[k] = Math.round(1000 * v / total) / 10;
   return out;
 };
-export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.now() } = {}) {
+export function notesDir(home = os.homedir(), env = process.env, login = (() => { try { return os.userInfo().username; } catch { return 'unknown'; } })()) {
+  return path.join(env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'agent-fabric', 'agents', login, 'notes');
+}
+export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.now(), notes = notesDir(home) } = {}) {
   const root = path.join(home, '.claude', 'projects');
   let files = [];
   try {
@@ -159,16 +174,31 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
     }
   } catch { return { status: 'no-records' }; }
   files.sort((a, b) => b.mtime - a.mtime); files = files.slice(0, limit);
-  if (!files.length) return { status: 'no-records', hours };
-  const thinking = {}, text = {}; let turns = 0;
-  const blocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
-  const bin = counts => {
+  // The notes: every file under the notes directory touched in the window,
+  // its paragraphs binned like thinking blocks.
+  const noteCounts = {}; const noteBlocks = { only: 0, mixed: 0, latin: 0, empty: 0 }; let noteFiles = 0;
+  const binInto = (blocks, counts) => {
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     if (total < 20) { blocks.empty += 1; return; }
     const nonLatin = total - (counts.latin ?? 0) - (counts.other ?? 0);
     const share = nonLatin / total;
     blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
   };
+  try {
+    for (const n of fs.readdirSync(notes)) {
+      const f = path.join(notes, n);
+      let st; try { st = fs.statSync(f); } catch { continue; }
+      if (!st.isFile() || now - st.mtimeMs > hours * 3600000) continue;
+      let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      noteFiles += 1;
+      for (const para of body.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(noteBlocks, c); for (const [k, v] of Object.entries(c)) noteCounts[k] = (noteCounts[k] ?? 0) + v; }
+    }
+  } catch { /* no notes directory: reported as none */ }
+  const notesOut = noteFiles ? { status: 'ok', files: noteFiles, ...shares(noteCounts), blocks: noteBlocks } : { status: 'none', dir: notes };
+  if (!files.length) return { status: 'no-records', hours, notes: notesOut };
+  const thinking = {}, text = {}; let turns = 0;
+  const blocks = { only: 0, mixed: 0, latin: 0, empty: 0 };
+  const bin = counts => binInto(blocks, counts);
   for (const { f } of files) {
     let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
     for (const line of body.split('\n')) {
@@ -182,7 +212,7 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
       }
     }
   }
-  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text) };
+  return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut };
 }
 
 // Everything, for `status`; the sections a request names, otherwise.

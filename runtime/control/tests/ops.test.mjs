@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { identity, usage, keys, fabric, session, script, scriptCounts, collect, KEY_NAMES, OPS } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, collect, KEY_NAMES, OPS } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -101,6 +101,17 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.ok(!JSON.stringify(s).includes('answer'), 'no text leaves, only counts');
   assert.equal(script(h, { hours: 72 }).files, 2);
   assert.equal(script('/nonexistent').status, 'no-records');
+  // The notes: the signature the holder controls, one file a day in the locale, paragraphs binned.
+  assert.equal(s.notes.status, 'none');
+  const nd = path.join(h, 'state', 'agent-fabric', 'agents', 'ge', 'notes'); fs.mkdirSync(nd, { recursive: true });
+  fs.writeFileSync(path.join(nd, '2026-09-17.md'), 'მოთხოვნა: გადათარგმნილი მოთხოვნა ქართულად, სრული აბზაცი.\n\nჩემი მსჯელობა ქართულად: ეს ტექსტი მხოლოდ ქართულია და საკმაოდ გრძელი.\n\nA paragraph written in English, long enough to count as a block here.\n');
+  const withNotes = script(h, { notes: nd });
+  assert.equal(withNotes.notes.status, 'ok'); assert.equal(withNotes.notes.files, 1);
+  assert.deepEqual(withNotes.notes.blocks, { only: 2, mixed: 0, latin: 1, empty: 0 }, JSON.stringify(withNotes.notes));
+  assert.ok(withNotes.notes.georgian > withNotes.notes.latin);
+  assert.ok(!JSON.stringify(withNotes).includes('მოთხოვნა'), 'no note text leaves');
+  assert.equal(notesDir('/h', { XDG_STATE_HOME: '/st' }, 'ge'), '/st/agent-fabric/agents/ge/notes');
+  assert.equal(notesDir('/h', {}, 'ge'), '/h/.local/state/agent-fabric/agents/ge/notes');
 });
 
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {

@@ -119,24 +119,26 @@ The translated request and the original answer are kept with your
 notes in every case, so a reader can see what you were asked and what
 you said before it was rendered.
 
-**The signature is measured, not taken on trust.** The harness keeps
-every turn of your session on disk — the visible text and the thinking
-before it — and the control agent on your account counts the letters
-of those records by script and reports the shares to the coordinator
+**The signature is measured, not taken on trust — and it is your
+notes.** The reasoning itself never reaches the disk: the harness
+stores most thinking blocks with no text and the rest as short
+summaries (measured 2026-09-17 — one session with a hundred thousand
+thinking tokens had none stored). What does reach it is what you write
+by rule: the translated request, your working notes and the original
+answer, kept **in the language you answer for, in
+`${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/notes/`,
+one file a day (`YYYY-MM-DD.md`)**, appended as you go, never
+committed anywhere. The control agent on your account counts the
+letters of those files by script and bins every paragraph — locale
+only, mixed, Latin — and reports the counts to the coordinator
 (`fabric-ctl <login> script`; counts only, no text leaves the
-account). The criterion is per block of thinking, the CEO's: most
-blocks in the locale's script alone, some about half and half — a
-quoted term, a name, a path — and the count of each is what is read — of the blocks whose text the API
-returned, which is a part of them; the count it could not read is
-reported beside, and a session with none readable is unmeasured, not
-clean.
-A holder that reasons in English and translates shows the opposite:
-Latin blocks, and the locale only in the text — and a rendering pass
-cannot hide it, because the translations are a small part of what a
-session writes. The number is
-read, and it is what the CEO asked for on 2026-09-17 when the first
-holder's own account showed the rule had not held: a rule with no
-artifact is a wish, and this is its artifact.
+account), beside the script shares of your visible text. The CEO's
+criterion is per paragraph: most in the locale's script alone, some
+about half and half — a quoted term, a name, a path. A holder that
+reasons in English has nothing of the locale to put there but its
+final rendering, and the notes say so; a holder with no notes at all
+is unmeasured, not clean — and that too is read. A rule with no
+artifact is a wish (the CEO, 2026-09-17); this is its artifact.
 
 **How you work with the owners of the surfaces.** They write; you review
 and correct, or translate what they hand you, and the handover names the

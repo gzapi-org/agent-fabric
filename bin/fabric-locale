@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# bin/fabric-locale — what a locale's translator needs from the fabric.
+#
+#   fabric-locale tokens <source.md>   the protected tokens of an English source: every
+#                                      identifier a translation keeps byte-identical, with
+#                                      its count (tools/fabric/lint.py checks the same list)
+#   fabric-locale digest <source.md>   the source's body digest, what the translation's
+#                                      frontmatter records as translates_digest
+#
+# A translation is authored by the locale's holder and checked by lint;
+# this prints the two things lint will hold it to, so the holder checks
+# itself before opening the PR (docs/language-culture-bridge.md).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+case "${1:-}" in
+    tokens) [[ $# -eq 2 ]] || { echo "usage: fabric-locale tokens <source.md>" >&2; exit 2; }; exec python3 "$ROOT/tools/fabric/lint.py" --tokens "$2" ;;
+    digest) [[ $# -eq 2 ]] || { echo "usage: fabric-locale digest <source.md>" >&2; exit 2; }; exec python3 "$ROOT/tools/fabric/lint.py" --digest "$2" ;;
+    *) echo "usage: fabric-locale tokens|digest <source.md>" >&2; exit 2 ;;
+esac

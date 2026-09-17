@@ -480,6 +480,118 @@ def case_locale_worker_shape_and_hygiene() -> None:
         assert code == 1 and "credential" in out, f"a credential in the worker body passed:\n{out}"
 
 
+EN_WITH_TOKENS = """---
+role: "web-dev"
+class: charter
+description: "The web sub-apps."
+tier: 1
+distilled_at: "2026-09-06"
+---
+
+# web-dev
+
+Run `bin/fabric-status` first, then read `docs/x.md` under
+`identities/roles/web-dev/`. Ask `fabric-ctl <login>
+script` for the notes. Never `/compact` mid-review; the model is
+`claude-fable-5-1`. See [[blind-review-loop]] and MEMORY.md; the
+placeholder {role} is filled at render. Every OBSERVATION names its lane.
+
+```markdown
+---
+name: <slug>
+---
+```
+"""
+KA_WITH_TOKENS = """
+# web-dev — წესდება
+
+ჯერ გაუშვი `bin/fabric-status`, მერე წაიკითხე `docs/x.md`
+`identities/roles/web-dev/`-ის ქვეშ. ჩანაწერებისთვის ჰკითხე `fabric-ctl <login> script`.
+არასოდეს `/compact` შემოწმების შუაში; მოდელია `claude-fable-5-1`.
+იხილე [[blind-review-loop]] და MEMORY.md; ჩანაცვლება {role} რენდერისას ივსება.
+ყოველი OBSERVATION თავის ზოლს ასახელებს.
+
+```markdown
+---
+name: <slug>
+---
+```
+"""
+
+
+def _translation_of(source_rel: str, klass: str, digest: str, body: str, role: str | None = "web-dev") -> str:
+    head = f'---\nclass: {klass}\n' + (f'role: "{role}"\ndescription: "თარგმანი"\ntier: 1\ndistilled_at: "2026-09-17"\n' if role else '')
+    return head + f'translates: {source_rel}\ntranslates_digest: {digest}\n---\n' + body
+
+
+def case_protected_tokens_must_match() -> None:
+    """A translation keeps every identifier the source quotes, the same
+    number of times: a span that wraps at another column is the same
+    span; a dropped path, a renamed command, a lost placeholder, an added
+    span are each one finding naming the category. Kills: comparing prose,
+    or splitting a wrapped backticked span at the newline."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(ident(fabric, "charter.md"), EN_WITH_TOKENS)
+        good = _translation_of("identities/roles/web-dev/charter.md", "charter", _digest_of_body(ident(fabric, "charter.md")), KA_WITH_TOKENS)
+        write(ident(fabric, "locale", "ge", "charter.md"), good)
+        code, out = run_lint(fabric)
+        assert code == 0, out
+        bad = good.replace("`docs/x.md`", "`docs/y.md`").replace("`/compact`", "`/შეკუმშვა`").replace("{role}", "{როლი}").replace("MEMORY.md", "MEMORY-ის ფაილი") + "\nდამატებული `Bash` ბრძანება.\n"
+        write(ident(fabric, "locale", "ge", "charter.md"), bad)
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        for phrase in ("backticked span '`docs/x.md`' appears 0 time(s), 1 in the source", "backticked span '`/compact`' appears 0",
+                       "placeholder '{role}' appears 0", "file name 'MEMORY.md' appears 0", "backticked span '`Bash`' appears 1 time(s), 0 in the source"):
+            assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        assert "fabric-ctl <login> script" not in out, f"a wrapped span is the same span:\n{out}"
+
+
+def case_each_translation_names_its_source_and_lags_when_it_moves() -> None:
+    """Every prompt piece a locale may translate — header, brief-missing,
+    team, memory, harness — names its source and its digest; a source
+    that moved is a lag finding; a wrong source path is named. Kills: a
+    table that only knows the charter."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        prompt = os.path.join(fabric, "identities", "prompt")
+        for name in ("header", "brief-missing", "team", "memory"):
+            src = os.path.join(prompt, f"{name}.md")
+            body = open(src, encoding="utf-8").read()
+            ka = "\n".join("ქართული " * 8 if not line.strip() or line.startswith("#") else line for line in body.splitlines())   # keep every token line, translate nothing else
+            write(ident(fabric, "locale", "ge", f"{name}.md"), _translation_of(f"identities/prompt/{name}.md", "prompt-translation", _digest_of_body(src), ka, role=None))
+        code, out = run_lint(fabric)
+        assert code == 0, out
+        write(os.path.join(prompt, "team.md"), open(os.path.join(prompt, "team.md"), encoding="utf-8").read() + "\nOne more English sentence about {role}.\n")
+        code, out = run_lint(fabric)
+        assert code == 1 and "locale/ge/team.md: translates identities/prompt/team.md at sha256:" in out and "the translation lags" in out, out
+        write(ident(fabric, "locale", "ge", "memory.md"), _translation_of("identities/prompt/team.md", "prompt-translation", "sha256:" + "0" * 64, "x {role}\n", role=None))
+        code, out = run_lint(fabric)
+        assert "locale/ge/memory.md: translates 'identities/prompt/team.md', not identities/prompt/memory.md" in out, out
+
+
+def case_harness_translation_shape_digest_and_tokens() -> None:
+    """locale/<suffix>/harness.md translates runtime/claude-code/harness/en.md:
+    class harness-translation, the source's digest, every protected token
+    including {memory_dir}, the flat harness budget."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        lc = os.path.join(fabric, "docs", "live-checks", "2026-09-17-x.md"); os.makedirs(os.path.dirname(lc), exist_ok=True); write(lc, "# x\n")
+        src = os.path.join(fabric, "runtime", "claude-code", "harness", "en.md")
+        write(src, "---\nclass: harness-source\nbuild: \"2.1.274 (Claude Code)\"\ncaptured_at: 2026-09-17\nsource: docs/live-checks/2026-09-17-x.md\n---\n"
+                   "You are Claude Code. Use `Skill` for a `/<skill-name>`; load `ToolSearch(\"select:EndConversation\")` first.\n\n# Memory\n\nYour memory is at `{memory_dir}`.\n")
+        ka = "შენ ხარ Claude Code. გამოიყენე `Skill` `/<skill-name>`-სთვის; ჯერ ჩატვირთე `ToolSearch(\"select:EndConversation\")`.\n\n# მეხსიერება\n\nშენი მეხსიერება არის `{memory_dir}`.\n"
+        write(ident(fabric, "locale", "ge", "harness.md"), _translation_of("runtime/claude-code/harness/en.md", "harness-translation", _digest_of_body(src), ka, role=None))
+        code, out = run_lint(fabric)
+        assert code == 0, out
+        write(ident(fabric, "locale", "ge", "harness.md"), _translation_of("runtime/claude-code/harness/en.md", "harness-translation", _digest_of_body(src), ka.replace("`{memory_dir}`", "`/home/ge/.claude/projects/x/memory/`"), role=None))
+        code, out = run_lint(fabric)
+        assert code == 1 and "backticked span '`{memory_dir}`' appears 0 time(s), 1 in the source" in out, out
+        write(ident(fabric, "locale", "ge", "harness.md"), _translation_of("runtime/claude-code/harness/en.md", "prompt-translation", _digest_of_body(src), ka, role=None))
+        code, out = run_lint(fabric)
+        assert code == 1 and "class 'prompt-translation'; a locale harness is class harness-translation" in out, out
+
+
 def case_harness_source_shape() -> None:
     """runtime/claude-code/harness/en.md, when a fabric carries it: class,
     build, captured_at, an existing live check as its source, the
@@ -913,6 +1025,9 @@ def main() -> int:
         case_locale_translation_is_a_charter_with_a_digest,
         case_translation_lag_is_reported,
         case_locale_worker_shape_and_hygiene,
+        case_protected_tokens_must_match,
+        case_each_translation_names_its_source_and_lags_when_it_moves,
+        case_harness_translation_shape_digest_and_tokens,
         case_harness_source_shape,
         case_prompt_templates_carry_their_placeholders,
         case_locale_file_shape,

@@ -43,6 +43,7 @@ clean machine can still run it.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import importlib.util
 import json
@@ -230,55 +231,146 @@ def _source_digest(path: str) -> str:
     return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+# THE PROTECTED TOKENS. A translated prompt may reword every sentence
+# and must keep byte-identical every literal the harness or a reader
+# matches by name: tool and skill names in backticks, slash commands,
+# paths, UPPER_SNAKE names, model ids, tags such as <system-reminder>,
+# [[links]], dotted file names, the fenced frontmatter example, and the
+# {placeholders} the renderer fills. Read back from the docs and a live
+# session on 2026-09-17: a tool is dispatched by its name against the
+# schemas the harness sends beside the prompt, never by prose — so prose
+# is free and identifiers are the whole risk. Each category is its own
+# pattern so a finding names which kind moved; a translation keeps every
+# token the same number of times as its source.
+PROTECTED_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("fenced block", re.compile(r"```[\s\S]*?```")),
+    ("backticked span", re.compile(r"`[^`]{1,200}`")),   # may wrap a line; whitespace inside is normalised
+    ("slash command", re.compile(r"(?<!\S)/[a-zA-Z][\w-]*\b")),
+    ("path", re.compile(r"~?/[\w.~-]+(?:/[\w.~-]+)+")),
+    ("UPPER_SNAKE name", re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")),
+    ("model id", re.compile(r"\bclaude-[a-z0-9.-]+\b")),
+    ("tag", re.compile(r"<[A-Za-z][\w-]*>")),
+    ("[[link]]", re.compile(r"\[\[[^\]]+\]\]")),
+    ("file name", re.compile(r"\b[A-Za-z][\w-]*\.(?:md|json|py|sh|mjs)\b")),
+    ("placeholder", re.compile(r"\{[a-z_]+\}")),
+)
+
+
+def _protected_tokens(text: str) -> "collections.Counter[tuple[str, str]]":
+    """Every protected token of `text` with its category, counted. A fenced
+    block is one token and its contents are not matched again; a
+    backticked span likewise."""
+    counts: "collections.Counter[tuple[str, str]]" = collections.Counter()
+    rest = text
+    for category, pattern in PROTECTED_PATTERNS[:2]:
+        for m in pattern.findall(rest):
+            counts[(category, re.sub(r"\s+", " ", m))] += 1   # a span wrapped at another column is the same span
+        rest = pattern.sub(" ", rest)
+    for category, pattern in PROTECTED_PATTERNS[2:]:
+        for m in pattern.findall(rest):
+            counts[(category, m)] += 1
+    return counts
+
+
+def protected_token_findings(rel: str, source_body: str, translation_body: str) -> list[str]:
+    """One finding per protected token whose count differs between the
+    English source and the translation, naming the category and both counts."""
+    want, got = _protected_tokens(source_body), _protected_tokens(translation_body)
+    out: list[str] = []
+    for key in sorted(set(want) | set(got)):
+        if want[key] != got[key]:
+            category, token = key
+            shown = token if len(token) <= 60 else token[:57] + "..."
+            out.append(f"{rel}: {category} {shown!r} appears {got[key]} time(s), {want[key]} in the source — "
+                       "an identifier the harness or a reader matches by name stays byte-identical")
+    return out
+
+
+# THE TRANSLATIONS a locale may carry under identities/roles/<role>/locale/
+# /<suffix>/: each names its English source and the digest of the source's
+# body; a digest that no longer matches is the lag finding — the
+# translation is still served (a launch never fails on a day's lag), and
+# this is where the lag is seen. The class a translation declares, the
+# schema it must pass (the charter's), and its budget — the measured
+# non-Latin divisor against LOCALE_BUDGET_FACTOR times the source's budget,
+# or a flat cap for the harness text (measured ~7 700 tokens in Georgian).
+HARNESS_BUDGET_TOKENS = 9000
+LOCALE_TRANSLATIONS: dict[str, tuple[str, str, str, bool]] = {
+    # name: (source path with {role}, class the translation declares, budget key, schema-validated)
+    "header": (os.path.join(layout.PROMPT_DIR_NAME, "header.md"), "prompt-translation", "template", False),
+    "brief-missing": (os.path.join(layout.PROMPT_DIR_NAME, "brief-missing.md"), "prompt-translation", "template", False),
+    "team": (os.path.join(layout.PROMPT_DIR_NAME, "team.md"), "prompt-translation", "template", False),
+    "memory": (os.path.join(layout.PROMPT_DIR_NAME, "memory.md"), "prompt-translation", "template", False),
+    "charter": ("identities/roles/{role}/charter.md", "charter", "tier1", True),
+    "brief": ("identities/roles/{role}/brief.md", "brief", "tier1", True),
+    "harness": (HARNESS_SOURCE, "harness-translation", "harness", False),
+}
+
+
+def _locale_budget(key: str) -> int:
+    if key == "harness":
+        return HARNESS_BUDGET_TOKENS
+    if key == "template":
+        return layout.PROMPT_TEMPLATE_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR
+    return TIER1_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR
+
+
 def locale_translation_findings(role: str, role_path: str, template_schema: dict[str, Any] | None) -> list[str]:
-    """identities/roles/<role>/locale/<suffix>/charter.md: a translation of
-    the role's charter that launch_prompt renders for a login whose name
-    ends in <suffix>. It is a charter slice (schema, class, role) that
-    names its source and the source's digest; a digest that no longer
-    matches is the lag finding — the translation is still served, and
-    this is where the lag is seen. Its budget uses the measured non-Latin
-    divisor and the locale factor."""
+    """identities/roles/<role>/locale/<suffix>/<name>.md for every name in
+    LOCALE_TRANSLATIONS: a translation launch_prompt renders for a login
+    whose name ends in <suffix> in place of the English. The charter and
+    the brief are slices (schema, class, role); every translation names
+    its source and the source's digest, passes hygiene, keeps every
+    protected token, and fits its budget."""
     out: list[str] = []
     base = os.path.join(role_path, LOCALE_DIRNAME)
     if not os.path.isdir(base):
         return out
-    source = os.path.join(role_path, "charter.md")
+    root = layout.FABRIC_ROOT
     for suffix in sorted(os.listdir(base)):
-        path = os.path.join(base, suffix, "charter.md")
-        if not os.path.isfile(path):
-            continue
-        rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/charter.md"
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-        meta = parse_frontmatter(text)
-        if meta is None:
-            out.append(f"{rel}: no frontmatter — a translation carries its source and digest")
-            continue
-        if template_schema:
-            out += validate_json(template_schema, meta, rel)
-        if meta.get("class") != "charter":
-            out.append(f"{rel}: class {meta.get('class')!r}; a locale charter is class charter")
-        if meta.get("role") != role:
-            out.append(f"{rel}: role {meta.get('role')!r} but lives under {role}/")
-        of, digest = meta.get("translates"), meta.get("translates_digest")
-        if not of or not digest:
-            out.append(f"{rel}: no `translates` / `translates_digest` — which English charter, and at what digest")
-        else:
-            if of != f"identities/roles/{role}/charter.md":
-                out.append(f"{rel}: translates {of!r}, not identities/roles/{role}/charter.md")
+        for name, (source_rel, klass, budget_key, with_schema) in LOCALE_TRANSLATIONS.items():
+            path = os.path.join(base, suffix, f"{name}.md")
+            if not os.path.isfile(path):
+                continue
+            rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/{name}.md"
+            source_rel = source_rel.replace("{role}", role)
+            source = os.path.join(root, source_rel)
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            meta = parse_frontmatter(text)
+            if meta is None:
+                out.append(f"{rel}: no frontmatter — a translation carries its source and digest")
+                continue
+            if with_schema and template_schema:
+                out += validate_json(template_schema, meta, rel)
+            if meta.get("class") != klass:
+                out.append(f"{rel}: class {meta.get('class')!r}; a locale {name} is class {klass}")
+            if with_schema and meta.get("role") != role:
+                out.append(f"{rel}: role {meta.get('role')!r} but lives under {role}/")
+            of, digest = meta.get("translates"), meta.get("translates_digest")
+            if not of or not digest:
+                out.append(f"{rel}: no `translates` / `translates_digest` — which English source, and at what digest")
+            else:
+                if of != source_rel:
+                    out.append(f"{rel}: translates {of!r}, not {source_rel}")
+                if os.path.isfile(source):
+                    now = _source_digest(source)
+                    if digest != now:
+                        out.append(f"{rel}: translates {source_rel} at {digest}, but it is now {now} "
+                                   "— the translation lags; update the body and its digest")
+            body = FRONTMATTER_RE.sub("", text)
+            out += hygiene_findings(rel, body)
             if os.path.isfile(source):
-                now = _source_digest(source)
-                if digest != now:
-                    out.append(f"{rel}: translates the English charter at {digest}, but it is now {now} "
-                               "— the translation lags; update the body and its digest")
-        body = FRONTMATTER_RE.sub("", text)
-        out += hygiene_findings(rel, body)
-        divisor = NON_LATIN_CHARS_PER_TOKEN if _is_mostly_non_latin(body) else CHARS_PER_TOKEN
-        approx = int(len(body) / divisor)
-        if approx > TIER1_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR:
-            out.append(f"{rel}: ~{approx} tokens (at {divisor} chars/token) exceeds the locale budget "
-                       f"{TIER1_BUDGET_TOKENS * LOCALE_BUDGET_FACTOR} ({LOCALE_BUDGET_FACTOR}x the tier-1 budget, the measured "
-                       "cost of a full rendering) — a launch prompt pays every one of them")
+                with open(source, encoding="utf-8") as fh:
+                    out += protected_token_findings(rel, FRONTMATTER_RE.sub("", fh.read()), body)
+            else:
+                out.append(f"{rel}: its source {source_rel} does not exist")
+            divisor = NON_LATIN_CHARS_PER_TOKEN if _is_mostly_non_latin(body) else CHARS_PER_TOKEN
+            approx = int(len(body) / divisor)
+            cap = _locale_budget(budget_key)
+            if approx > cap:
+                out.append(f"{rel}: ~{approx} tokens (at {divisor} chars/token) exceeds the locale budget {cap} "
+                           "— a launch prompt pays every one of them")
     return out
 
 
@@ -1004,6 +1096,8 @@ def flat_and_dir_findings(base: str, label: str) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Lint the committed corpus.")
     ap.add_argument("--fabric", default=None, help="agent-fabric root (default: this checkout)")
+    ap.add_argument("--tokens", metavar="FILE", help="print FILE's protected tokens (what a translation keeps byte-identical) and exit")
+    ap.add_argument("--digest", metavar="FILE", help="print FILE's body digest (what a translation records as translates_digest) and exit")
     ap.add_argument("--working-copy", action="append", default=[], metavar="[PROJECT=]DIR",
                     help="a managed project's checkout whose .agent-fabric/memory/ is linted too "
                          "(repeatable; the project is resolved from the checkout's remote unless "
@@ -1014,6 +1108,16 @@ def main() -> int:
     if args.fabric:
         layout.FABRIC_ROOT = os.path.abspath(args.fabric)
     root = layout.FABRIC_ROOT
+    if args.tokens or args.digest:
+        target = args.tokens or args.digest
+        with open(target, encoding="utf-8") as fh:
+            body = FRONTMATTER_RE.sub("", fh.read())
+        if args.digest:
+            print(_source_digest(target))
+            return 0
+        for (category, token), n in sorted(_protected_tokens(body).items()):
+            print(f"{n:3d}  {category:16s} {token}")
+        return 0
     if not os.path.isdir(os.path.join(root, "identities")):
         print(f"lint: no agent-fabric checkout at {root}", file=sys.stderr)
         return 2

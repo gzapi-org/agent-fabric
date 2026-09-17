@@ -33,3 +33,34 @@ difference in total input (`input_tokens` + `cache_creation_input_tokens`
 - The launch prompt for `language-culture-ge` renders at 17 862
   characters with the English charter (ceiling 20 000) — the Georgian
   render is measured after the roll-out, below.
+
+## After the roll-out (`2de43d3` on every account)
+
+- `fabric-ctl all fabric`: 16 accounts, every head `2de43d3`, every
+  daemon restarted on the pull (uptimes 2–54 s). Decides: a pull is the
+  distribution; nothing else needs a hand.
+- **The drain over the control plane.** `fabric-ctl all memory --out
+  <dir>`: 3.1 s for the fleet; 16 bundles written and every one opened
+  by `assemble.open_bundle` with its manifest digests verified — the
+  first drain that read no home but the account's own. Two rows were
+  not bundles, and both are named, not lost: `backend-dev-02`
+  `harvest-failed` (one memory with `roles_class: backend-dev`, a role
+  rather than a class; the harvester refuses the whole drain by design —
+  an OBSERVATION to that role), and, on the first run, every dotted
+  working copy (`gzapi.ge`, `gzapp.decks`) as `no-working-copy`: the
+  harness spells a launch directory with every non-alphanumeric
+  character as `-`, and both slug derivations mapped `/` alone. Fixed in
+  `2de43d3`; the second run bundled them (brand-comms-01: 8 claims).
+- **The installer.** `install-agent-files.sh --dry-run` as
+  `language-culture-ge`: `+ ~/.claude/agents/locale-worker.md (would
+  write)`; as `db-admin`: no mention. The launcher writes it at the
+  holder's next launch.
+- **The launch prompt.** `launch_prompt.py --print` as
+  `language-culture-ge`: 17 972 characters (ceiling 27 000), the charter
+  section is `# language-culture — ქარტია`; measured as above, the whole
+  prompt is **9 387 tokens** against 4 609 for fabric-coordinator's
+  English one of 18 275 characters — 2.0× overall, the charter's 2.9×
+  diluted by the shared sections, which stay English.
+- Not yet read back: a live `locale-worker` dispatch under the guard,
+  and `fabric-ctl language-culture-ge script` with a `workers` column —
+  both need the holder's next launch; asked of it in the review REQUEST.

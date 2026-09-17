@@ -74,6 +74,8 @@ CHARS_PER_TOKEN = 4
 # one does not. The guess before the measurement was 2 a token and 1.35
 # times the budget, which no full rendering could meet.
 NON_LATIN_CHARS_PER_TOKEN = 1.5
+# The locale worker's one tool: inert, so the harness spawns it and it reads nothing.
+WORKER_TOOL = "TaskStop"
 LOCALE_BUDGET_FACTOR = 3
 TIER1_BUDGET_TOKENS = 3000
 # identities/roles/<role>/locale/<suffix>/: a locale's translation of the
@@ -251,7 +253,8 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
     ends in <suffix>, and removes it by the `agent-fabric` marker in its
     description, so the shape is asserted here: the name the dispatcher
     uses, a one-line description in the locale carrying the `agent-fabric`
-    marker, no tools (it must read nothing), and a body that passes hygiene."""
+    marker, exactly one inert tool (it must read nothing, and the harness
+    spawns no agent with none), and a body that passes hygiene."""
     out: list[str] = []
     base = os.path.join(role_path, LOCALE_DIRNAME)
     if not os.path.isdir(base):
@@ -289,10 +292,13 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
                 out.append(f"{rel}: description is not in the locale — its only reader is the bridge, which reasons in the locale; keep `agent-fabric` as the marker")
         if fields.get("model", "") not in ("haiku", "sonnet", "opus", "fable"):
             out.append(f"{rel}: model {fields.get('model')!r}; a harness alias (haiku/sonnet/opus/fable)")
-        if "tools" not in fields:
-            out.append(f"{rel}: no `tools:` line — the worker must declare it has none")
-        elif fields["tools"].strip("[] \"'"):
-            out.append(f"{rel}: tools {fields['tools']!r}; the worker reads nothing — tools must be empty")
+        # Read back 2026-09-17 (docs/live-checks/2026-09-17-language-culture-bridge.md):
+        # an empty `tools:` inherits EVERY tool, and the harness refuses to
+        # spawn an agent whose list resolves to none — so the worker carries
+        # exactly one tool that reads and writes nothing.
+        if fields.get("tools", "").strip("[] \"'") != WORKER_TOOL:
+            out.append(f"{rel}: tools {fields.get('tools')!r}; the worker reads nothing — its one tool is {WORKER_TOOL} "
+                       "(an empty list inherits every tool; none at all is refused by the harness)")
         out += hygiene_findings(rel, text[m.end():])
     return out
 

@@ -70,12 +70,14 @@ short summaries — which is why the notes are the signature and the
 transcript's text share the second number. `workers`, in the same
 reply: the locale worker's transcripts — the subagent records stored
 beside each session, `<session>/subagents/agent-*.jsonl`, of which the
-worker's are the ones with no `tool_use` block, since it has no tools;
-one that used a tool is counted as skipped, not read. Its user records
-are the worker's input, composed by the bridge, so a Latin paragraph
-there is English that reached the worker — the leak the construction of
-`docs/language-culture-bridge.md` exists to prevent; its text blocks are
-the answers. Both binned per paragraph like the notes), `memory` (the drain: the
+worker's are the ones whose sidecar `agent-*.meta.json` says
+`agentType: locale-worker`; every other subagent is counted, not read.
+Its user records are the worker's input, composed by the bridge — less
+the `<system-reminder>` spans the harness injects into every subagent —
+so a Latin paragraph there is English that reached the worker, the leak
+the construction of `docs/language-culture-bridge.md` exists to prevent;
+its text blocks are the answers; a `tool_use` other than the hand-back
+is `tool_uses`. Both binned per paragraph like the notes), `memory` (the drain: the
 account's own daemon runs `tools/fabric/harvest_memory.py --bundle`
 over each memory directory the harness keeps for it, matched to the
 working copy it was written from by slug, and answers with each bundle
@@ -84,9 +86,12 @@ message limit is 128 KiB — after a first record carrying the sizes, the
 sha256 of every tar and the harvest report: claims, `needs_rendering`,
 the skipped names. The way out of god mode (the CEO, 2026-09-17): until
 this op a drain read another account's home through sudo; now only the
-account reads its memory, and the coordinator receives the result. A
-memory directory with no working copy beside it is named and left where
-it is; not part of `status`), `status` (all but `script` and `memory`). A section that
+account reads its memory, and the coordinator receives the result. The
+harvester refuses the whole drain when a memory carries a credential by
+shape, so no secret reaches the channel; a memory directory with no
+working copy beside it, or with two that share its slug, is named and
+left where it is; the op passes `--all`, so the watermark governs only
+the sudo fallback; not part of `status`), `status` (all but `script` and `memory`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
@@ -129,11 +134,17 @@ refused before anything is posted: no daemon would answer it.
 `bin/fabric-ctl <login|all> memory --out <dir>` is the drain (timeout
 120 s): a reply counts as complete only when every part it announced has
 arrived; the parts are reassembled by slug and order, gunzipped and
-checked against the sha256 the first record named, and each verified tar
-lands at `<dir>/<login>/<working copy>.tar` — the shape
+checked against the sha256 the first record named and against the
+login: a reply is only a record any token holder could write, so a tar
+whose manifest names another agent is `wrong-agent`, never filed under
+a name it did not come from. A duplicated or replayed part record is
+ignored. Each verified tar lands at `<dir>/<login>/<working copy>.tar`
+(directory 0700, file 0600 — other people's memory) — the shape
 `tools/fabric/assemble.py --bundle` takes. A bundle that is short,
 unreadable or wrong is a status in the row (`incomplete`, `unreadable`,
-`sha-mismatch`) and no file; exit 1 when any account is silent or short.
+`sha-mismatch`, `wrong-agent`, `harvest-failed` with the harvester's
+reason) and no file; exit 1 when any account is silent or any bundle
+refused.
 `bin/fabric-host <host> drain <login>` stays as the sudo fallback for a
 host whose daemons are down. The drain cycle is in `memory/README.md`.
 

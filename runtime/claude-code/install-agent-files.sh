@@ -70,9 +70,7 @@ for f in code-low.md code-medium.md code-high.md code-plan.md code-review.md; do
         put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
     fi
 done
-# The review class was installed as blind-reviewer.md until 2026-09-15; a
-# copy of ours left there would offer the retired type beside the new one.
-# The locale worker: the language-culture role's tool-less subagent whose
+# The locale worker: the language-culture role's subagent, one inert tool, whose
 # system prompt is the locale's language (docs/language-culture-bridge.md).
 # Installed as ~/.claude/agents/locale-worker.md on a login of that role
 # whose name ends in a locale the fabric authored
@@ -93,6 +91,8 @@ elif [[ -f "$WORKER_DEST" ]] && grep -q "agent-fabric" "$WORKER_DEST" 2>/dev/nul
     if (( DRY_RUN )); then echo "  -  $WORKER_DEST (would remove: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"
     else rm -f "$WORKER_DEST"; echo "  -  $WORKER_DEST (removed: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"; changed=$((changed+1)); fi
 fi
+# The review class was installed as blind-reviewer.md until 2026-09-15; a
+# copy of ours left there would offer the retired type beside the new one.
 old="$CLAUDE_HOME/agents/blind-reviewer.md"
 if [[ -f "$old" ]] && grep -q "agent-fabric" "$old" 2>/dev/null; then
     if (( DRY_RUN )); then echo "  -  $old (would remove: retired name of code-review)"

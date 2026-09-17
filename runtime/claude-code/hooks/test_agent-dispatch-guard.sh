@@ -111,6 +111,7 @@ expect "locale-worker on fable is allowed, no ask" allow '{"subagent_type":"loca
 expect "locale-worker on sonnet is allowed" allow '{"subagent_type":"locale-worker","model":"sonnet","description":"x"}'
 expect "locale-worker with model unset is denied" deny '{"subagent_type":"locale-worker","description":"x"}'
 expect "locale-worker with isolation is denied" deny '{"subagent_type":"locale-worker","model":"opus","isolation":"worktree","description":"x"}'
+expect "locale-worker whose description begins with review is allowed: reviewing text is its job" allow '{"subagent_type":"locale-worker","model":"opus","description":"Review the Georgian rendering of the finding"}'
 r="$(reason '{"subagent_type":"locale-worker","model":"opus","isolation":"worktree","description":"x"}')"
 if grep -q "writes nothing" <<<"$r"; then pass "the isolation denial says why"; else fail "the isolation denial says why" "$r"; fi
 

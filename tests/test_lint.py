@@ -416,7 +416,7 @@ WORKER = """---
 name: locale-worker
 description: ენის როლის მხოლოდ ქართულენოვანი მუშაკი (agent-fabric) — იღებს ქართულს, პასუხობს ქართულად
 model: opus
-tools:
+tools: TaskStop
 ---
 
 შენ ხარ ქართული ენის რედაქტორი. პასუხობ მხოლოდ ქართულად.
@@ -456,17 +456,21 @@ def case_translation_lag_is_reported() -> None:
 def case_locale_worker_shape_and_hygiene() -> None:
     """The worker file is not a slice, but its shape is asserted (the
     dispatcher's name, a description in the locale with the installer's
-    marker, an alias, no tools) and hygiene still runs over its body."""
+    marker, an alias, one inert tool) and hygiene still runs over its body."""
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         write(ident(fabric, "locale", "ge", "worker.md"), WORKER)
         assert run_lint(fabric)[0] == 0
-        bad = WORKER.replace("name: locale-worker", "name: ka-worker").replace("(agent-fabric)", "").replace("tools:\n", "tools: Read, Bash\n")
+        bad = WORKER.replace("name: locale-worker", "name: ka-worker").replace("(agent-fabric)", "").replace("tools: TaskStop\n", "tools: Read, Bash\n")
         write(ident(fabric, "locale", "ge", "worker.md"), bad)
         code, out = run_lint(fabric)
         assert code == 1, out
-        for phrase in ("locale-worker", "agent-fabric` marker", "tools must be empty"):
+        for phrase in ("locale-worker", "agent-fabric` marker", "its one tool is TaskStop"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        # An empty tools line is the trap: it inherits every tool.
+        write(ident(fabric, "locale", "ge", "worker.md"), WORKER.replace("tools: TaskStop\n", "tools:\n"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "inherits every tool" in out, out
         # An English description is the leak: its only reader is the bridge, which reasons in the locale.
         write(ident(fabric, "locale", "ge", "worker.md"), WORKER.replace("description: ენის როლის მხოლოდ ქართულენოვანი მუშაკი (agent-fabric) — იღებს ქართულს, პასუხობს ქართულად", "description: The Georgian-only worker (agent-fabric): receives Georgian, answers Georgian"))
         code, out = run_lint(fabric)

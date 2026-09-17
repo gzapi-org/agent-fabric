@@ -258,6 +258,18 @@ not determine" whether a finding was pre-existing — the exact question
 it had been dispatched to answer. Read-only git is now explicit in the
 agent definition.
 
+### The locale worker (language-culture logins only)
+
+`locale-worker` is not a class: it is the language-culture bridge's
+subagent (`docs/language-culture-bridge.md`), whose agent file exists
+only on a login of that role (`install-agent-files.sh` writes and
+removes it). The guard's branch for it sits before the review-
+description branch — reviewing a text in the locale is its job — and
+asks: a model set (any alias, no ask: language judgement is premium by
+design), no isolation (its one inert tool writes nothing). Read back
+2026-09-17: an empty `tools:` inherits every tool and the harness
+refuses an agent with none, so the file says `tools: TaskStop`.
+
 ## What the hook cannot see: `Workflow` scripts
 
 The `PreToolUse` hook matches the tool name `Agent`. A `Workflow`

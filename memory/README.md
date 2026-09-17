@@ -175,15 +175,21 @@ memory directory the harness keeps for it, and `fabric-ctl` reassembles
 and verifies what came back — no sudo, no read of another home.
 
 ```sh
-bin/fabric-ctl all memory --out /tmp/drain            # <login>/<working copy>.tar per account, plus each report
-tools/fabric/assemble.py --bundle /tmp/drain/<login>/<wc>.tar --project <project> --working-copy ~/projects/<wc> --stamp $(date +%F)
+bin/fabric-ctl all memory --out ~/drain               # <login>/<working copy>.tar per account (0700/0600), plus each report
+bin/fabric-ctl all memory --out ~/drain --json         # the same, with every name the table only counts
+tools/fabric/assemble.py --bundle ~/drain/<login>/<wc>.tar --project <project> --working-copy ~/projects/<wc> --stamp $(date +%F)
 ```
 
-The table is the dry run: each row carries the harvest report — the
-claim count, the `needs_rendering` names to send the holder, the skipped
-names — beside the bundle's status, so the language-culture step above
-reads from the same run that fetched the bundles. A bundle whose parts
-are short or whose digest is wrong is refused with a status and no file.
+The run is also the dry run: each row carries the harvest report —
+the claim count, how many memories need rendering, how many were
+skipped — beside the bundle's status, and `--json` carries the names,
+so the `needs_rendering` list for the holder comes from the same run
+that fetched the bundles. The op always harvests every memory (`--all`);
+the watermark below governs the sudo fallback. A memory carrying a
+credential by shape refuses that account's whole drain at the
+harvester, named in the row. A bundle whose parts are short, whose
+digest is wrong or whose manifest names another agent is refused with a
+status and no file.
 `bin/fabric-host <host> drain <login> > drain.tar` remains only as the
 sudo fallback for a host whose daemons are down.
 

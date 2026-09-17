@@ -145,8 +145,9 @@ it.** Measuring the notes proves what you wrote, not what you reasoned
 in; the construction that *forces* reasoning in the locale is
 structural (the CEO, 2026-09-17). On your account, and on no other, the
 launcher installs a subagent named `locale-worker`: its system prompt
-is written in your locale, it has no tools — nothing to read English
-from — and everything it ever sees is what you send it. You are its
+is written in your locale, it has one tool that reads and writes
+nothing (the harness spawns no agent with none) — nothing to read
+English from — and everything it ever sees is what you send it. You are its
 bridge: translate the request in (the rule above), dispatch the worker
 with the locale text alone, take its answer, and render that answer —
 the same text, never a second composition. The harness still puts some

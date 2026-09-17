@@ -25,7 +25,12 @@ sees English**, and the holder in front of it as a **bridge**.
 `identities/roles/language-culture/locale/<suffix>/worker.md` is a
 Claude Code agent file — `name: locale-worker`, a one-line description
 in the locale carrying the `agent-fabric` marker, a model alias, and
-**no tools** — whose body is the locale. The description never reaches
+**one inert tool** (`tools: TaskStop`) — whose body is the locale. Not
+none: read back on 2026-09-17, an empty `tools:` line inherits every
+tool, and the harness refuses to spawn an agent whose list resolves to
+none ("would be spawned with zero tools — refusing"); `TaskStop` stops a
+background task the worker never has and returns nothing to read. The
+live check has the four probes. The description never reaches
 the worker (the body is its system prompt); its reader is the
 dispatcher's agent listing, and the dispatcher is the holder, who
 reasons in the locale — so the description is in the locale too, the
@@ -57,12 +62,17 @@ composes; the bridge carries.
 
 The control plane reads the seam. `fabric-ctl <login> script` gained a
 `workers` column (`37bc6a5`): the subagent transcripts stored beside
-each session (`<session>/subagents/agent-*.jsonl`) whose records carry
-no `tool_use` block — the worker's, since it has no tools — with their
-user records counted as the worker's **input** and their text blocks as
-its answers, per paragraph, by script. A Latin paragraph in the input
-is English that reached the worker: the bridge leaked. Counts only;
-no text leaves the account.
+each session (`<session>/subagents/agent-*.jsonl`) whose sidecar
+(`agent-*.meta.json`, written by the harness) says `agentType:
+locale-worker`, with their user records counted as the worker's
+**input** — less the `<system-reminder>` spans the harness injects into
+every subagent, which are English and not the bridge's — and their text
+blocks as its answers, per paragraph, by script; a `tool_use` other than
+the hand-back is counted as `tool_uses`. A Latin paragraph in the input
+is English that reached the worker: the bridge leaked. Counts only; no
+text leaves the account. (The first cut identified the worker as "the
+transcript with no `tool_use` block"; the blind review showed the
+hand-back itself is one, `SubagentHandback`.)
 
 ## The charter and the memory
 
@@ -96,10 +106,10 @@ takes the claims. `memory/README.md` has the cycle.
 
 - **Tokens.** A locale render of the charter is allowed 1.35× the
   launch prompt's character ceiling, and the real cost is higher than
-  the characters say: a non-Latin script tokenizes at roughly two
-  characters a token against four for English, so the Georgian launch
-  prompt costs about twice what the English one does. The CEO's choice
-  for this role; the live check records the measured count.
+  the characters say: measured, Georgian tokenizes at 1.46 characters a
+  token against 4.1 for English — the charter is 2.9× its source, the
+  whole launch prompt 2.0× (the shared sections stay English). The
+  CEO's choice for this role; the live check records the counts.
 - **The residue.** The harness's base prompt and hand-back reminder
   reach the worker in English. Named, not removed.
 - **A second model call per request.** The bridge dispatches a worker

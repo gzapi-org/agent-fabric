@@ -64,3 +64,37 @@ difference in total input (`input_tokens` + `cache_creation_input_tokens`
 - Not yet read back: a live `locale-worker` dispatch under the guard,
   and `fabric-ctl language-culture-ge script` with a `workers` column —
   both need the holder's next launch; asked of it in the review REQUEST.
+
+## What "no tools" means on this harness (after the blind review)
+
+The review's one unproven risk — does an empty `tools:` line mean no
+tools? — settled by four probes: a throwaway agent file on this login,
+dispatched from a fresh headless session (`claude -p --model haiku`,
+each dispatch on `haiku` with a worktree), asked to run `id -un` and
+read a file and to list its tools.
+
+| frontmatter | result |
+|---|---|
+| `tools:` (empty) | spawned with **every** tool: `bash`, `read_file`; `id -un` → `user` |
+| `tools: []` | the same |
+| `tools: none` | refused: "would be spawned with zero tools — refusing. Its tools list resolved to nothing: unrecognized [none]" |
+| `disallowedTools: <17 names>` | spawned with what the list missed: `EnterWorktree`, `ExitWorktree`, `Monitor`, `SendMessage`, the MCP tools |
+| `tools: TodoWrite` | refused: unrecognized — not a tool of this harness |
+| `tools: ExitWorktree` | spawned with that one tool; could run nothing, read nothing |
+| `tools: TaskStop` | spawned with that one tool; could run nothing, read nothing |
+
+- Decides: the worker carries `tools: TaskStop` — one tool that stops a
+  background task it never has and returns nothing to read — and lint
+  requires exactly that; the charter, the Georgian charter and the
+  docs say "one tool that reads and writes nothing" where they said
+  "no tools".
+- The sidecar `agent-<id>.meta.json` beside each subagent transcript
+  carries `agentType` (seen: `code-review`, `claude-code-guide`, the
+  probes) — the `workers` measure keys on it. Every transcript also
+  carries the hand-back as a `tool_use` named `SubagentHandback` and an
+  injected `<system-reminder>` user record in English; the measure
+  ignores the first and strips the second.
+- The review's P1 — a credential in a memory would have crossed the
+  channel — was real: the harvester had no hygiene step (the comment
+  claiming one was wrong). It now refuses the whole drain on a
+  credential-shaped hit, before any claim is built.

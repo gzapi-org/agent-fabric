@@ -54,7 +54,7 @@
 #                      about, as it would for a review. Found
 #                      2026-09-16: every Explore dispatch was denied
 #                      and the research was done by hand.
-#   locale-worker   -> the language-culture role's worker: a tool-less
+#   locale-worker   -> the language-culture role's worker: a one-inert-tool
 #                      subagent whose system prompt and every input are
 #                      the locale's language, so its reasoning cannot
 #                      start from English it never saw (the CEO,
@@ -154,6 +154,15 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
           permissionDecisionReason:("Review dispatch under a fabric launch: model fable checked, then removed so the reviewer runs on its pinned model " + $pinned["code-review"] + " (the agent file, from routing) while fable itself stays the tier of code-plan."),
           updatedInput:($t | del(.model))}}
       else empty end
+    elif $type == "locale-worker" then
+      # Before the review-description branch: reviewing a text in the locale
+      # is the job of the worker itself, and its description is in the locale;
+      # a description that begins with review names no reviewer class here.
+      if ($model | length) == 0 then
+        deny("locale-worker dispatch has no model set. The worker reads nothing, but its tier is still a choice, and unset means the session model by accident. Set model explicitly (opus is the design: language judgement is premium work). See docs/language-culture-bridge.md.")
+      elif $iso != "" then
+        deny("locale-worker dispatch sets isolation. The worker writes nothing anywhere — its one tool reads and writes no file — so isolation protects nothing; omit it. See docs/language-culture-bridge.md.")
+      else empty end
     elif $review_desc then
       deny("Description begins with review but subagent_type is \"" + $type + "\". A code review is the code-review class (fable, no isolation, no session context) -- not a general agent on a cheaper tier. If this is not a code review, re-word the description (Audit ..., Check ..., Inspect ...). See CLAUDE.md - Subagent dispatch.")
     elif ($type | test("^code-(low|medium|high|plan)$")) then
@@ -167,12 +176,6 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
         elif $type == "code-high" or $type == "code-plan" then
           ask("Agent dispatch names " + $type + ", a premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
         else empty end
-    elif $type == "locale-worker" then
-      if ($model | length) == 0 then
-        deny("locale-worker dispatch has no model set. The worker has no tools, but its tier is still a choice, and unset means the session model by accident. Set model explicitly (opus is the design: language judgement is premium work). See docs/language-culture-bridge.md.")
-      elif $iso != "" then
-        deny("locale-worker dispatch sets isolation. The worker writes nothing anywhere — no tools — so isolation protects nothing; omit it. See docs/language-culture-bridge.md.")
-      else empty end
     elif ($type | test("^(Explore|Plan|claude-code-guide)$")) then
       if ($model | length) == 0 then
         deny("Agent dispatch has no model set. Omitting it is not a neutral default - the subagent INHERITS the session model, so a premium session silently spawns premium agents. Set model explicitly: haiku for mechanical work (extraction, pattern-following edits, structured search), sonnet for judgement work (multi-file reasoning, convention-holding prose). See CLAUDE.md - Subagent dispatch.")

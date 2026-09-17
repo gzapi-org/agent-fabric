@@ -480,6 +480,29 @@ def case_locale_worker_shape_and_hygiene() -> None:
         assert code == 1 and "credential" in out, f"a credential in the worker body passed:\n{out}"
 
 
+def case_locale_file_shape() -> None:
+    """locale.json fixes the search tool's country and languages; lint
+    asserts the shapes the Brave API takes and a description in the
+    locale. Kills: an unchecked file the server would refuse at start."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        good = '{"country": "GE", "search_lang": "ka", "ui_lang": "ka-GE", "timezone": "Asia/Tbilisi", "tool_description": "ვებ-ძიება ქართულად"}'
+        write(ident(fabric, "locale", "ge", "locale.json"), good)
+        code, out = run_lint(fabric)
+        assert code == 0, out
+        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"GE"', '"ge"').replace('"ka-GE"', '"ka"').replace("ვებ-ძიება ქართულად", "Web search in Georgian"))
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        for phrase in ("country 'ge'", "ui_lang 'ka'", "not in the locale"):
+            assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "language": "ka"}')
+        code, out = run_lint(fabric)
+        assert code == 1 and "unknown field(s) ['language']" in out, out
+        write(ident(fabric, "locale", "ge", "locale.json"), "{not json")
+        code, out = run_lint(fabric)
+        assert code == 1 and "not JSON" in out, out
+
+
 def case_non_latin_translation_budget_is_stricter() -> None:
     """A Georgian body is budgeted at the measured 1.5 characters a token,
     not four, against three times the tier-1 budget (the measured cost of
@@ -843,6 +866,7 @@ def main() -> int:
         case_locale_translation_is_a_charter_with_a_digest,
         case_translation_lag_is_reported,
         case_locale_worker_shape_and_hygiene,
+        case_locale_file_shape,
         case_non_latin_translation_budget_is_stricter,
         case_model_profiles_layered_file_passes,
         case_model_profiles_cheap_review_is_refused,

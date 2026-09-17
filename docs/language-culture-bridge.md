@@ -102,6 +102,27 @@ a language-culture login the table is the dry run: the
 the holder renders them and answers with the count, and the next run
 takes the claims. `memory/README.md` has the cycle.
 
+## Search in the locale
+
+A holder must search as a reader of its locale would. The harness's
+`WebSearch` cannot: read back on 2026-09-17, its schema is `query`,
+`allowed_domains`, `blocked_domains` and nothing else, its description
+says US-only, and Anthropic's `user_location` lives on the Messages API
+only. So a language-culture login gets `runtime/mcp/websearch-locale`
+— one MCP tool, `web_search`, backed by the Brave Search API, whose
+`country`, `search_lang` and `ui_lang` are fixed from
+`locale/<suffix>/locale.json` (lint validates it): the holder chooses
+the query, never the locale, and the tool's description is in the
+locale, since its reader is the holder. `install-agent-files.sh` writes
+the entry into the login's user-scope configuration on a
+language-culture login with a locale file and removes it from any other,
+by the server path in its args; the key, `BRAVE_SEARCH_API_KEY`, is a
+synced secret read at call time into one header, and its fingerprint
+shows in `fabric-ctl <login> keys`. The Brave backend was the CEO's
+choice over Anthropic's `user_location` (country and timezone only,
+language effect undocumented) and over a charter-only rule (decided
+2026-09-17). The worker never sees this tool: search is the bridge's.
+
 ## The costs, stated
 
 - **Tokens.** A locale render of the charter is allowed 1.35× the

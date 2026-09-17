@@ -91,6 +91,22 @@ elif [[ -f "$WORKER_DEST" ]] && grep -q "agent-fabric" "$WORKER_DEST" 2>/dev/nul
     if (( DRY_RUN )); then echo "  -  $WORKER_DEST (would remove: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"
     else rm -f "$WORKER_DEST"; echo "  -  $WORKER_DEST (removed: role is ${ROLE:-unbound}, or no worker authored for locale $LOCALE_SUFFIX)"; changed=$((changed+1)); fi
 fi
+# The locale search tool: an MCP server whose country and language are
+# the locale's (runtime/mcp/websearch-locale), in the login's user-scope
+# configuration (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json) on a
+# language-culture login whose locale has a locale.json; removed — by the
+# server path in its args — from any other. The key it needs is synced,
+# never written here (docs/language-culture-bridge.md, "Search in the locale").
+LOCALE_FILE="$FABRIC_ROOT/identities/roles/language-culture/locale/$LOCALE_SUFFIX/locale.json"
+CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+MCP_INSTALL="$FABRIC_ROOT/runtime/mcp/websearch-locale/install.py"
+mcp_flags=(); (( DRY_RUN )) && mcp_flags=(--dry-run)
+if [[ "$ROLE" == "language-culture" && -f "$LOCALE_FILE" ]]; then
+    out="$(python3 "$MCP_INSTALL" "$CLAUDE_JSON" set "$FABRIC_ROOT/runtime/mcp/websearch-locale/server.mjs" "$LOCALE_FILE" "${mcp_flags[@]}")"
+else
+    out="$(python3 "$MCP_INSTALL" "$CLAUDE_JSON" remove "${mcp_flags[@]}")"
+fi
+if [[ -n "$out" ]]; then echo "$out"; [[ "$out" == *"  +  "* && "$out" != *"would write"* ]] && changed=$((changed+1)); [[ "$out" == *"  =  "* ]] && same=$((same+1)); fi
 # The review class was installed as blind-reviewer.md until 2026-09-15; a
 # copy of ours left there would offer the retired type beside the new one.
 old="$CLAUDE_HOME/agents/blind-reviewer.md"

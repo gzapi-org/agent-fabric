@@ -303,6 +303,53 @@ def locale_worker_findings(role: str, role_path: str) -> list[str]:
     return out
 
 
+LOCALE_FILE_RE = {
+    "country": re.compile(r"^[A-Z]{2}$"),
+    "search_lang": re.compile(r"^[a-z]{2,3}$"),
+    "ui_lang": re.compile(r"^[a-z]{2,3}-[A-Z]{2}$"),
+    "timezone": re.compile(r"^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$"),
+}
+
+
+def locale_file_findings(role: str, role_path: str) -> list[str]:
+    """identities/roles/<role>/locale/<suffix>/locale.json: what the
+    locale search tool (runtime/mcp/websearch-locale) fixes for a login of
+    that suffix — country (ISO 3166-1 alpha-2), search_lang and ui_lang
+    (BCP 47, as the Brave API spells them), an IANA timezone, and the
+    tool's description in the locale, since its reader is the holder."""
+    out: list[str] = []
+    base = os.path.join(role_path, LOCALE_DIRNAME)
+    if not os.path.isdir(base):
+        return out
+    for suffix in sorted(os.listdir(base)):
+        path = os.path.join(base, suffix, "locale.json")
+        if not os.path.isfile(path):
+            continue
+        rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/locale.json"
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            out.append(f"{rel}: not JSON ({exc})")
+            continue
+        if not isinstance(data, dict):
+            out.append(f"{rel}: not an object")
+            continue
+        for key, pattern in LOCALE_FILE_RE.items():
+            value = data.get(key)
+            if not isinstance(value, str) or not pattern.match(value):
+                out.append(f"{rel}: {key} {value!r} does not match {pattern.pattern}")
+        desc = data.get("tool_description")
+        if not isinstance(desc, str) or not desc.strip():
+            out.append(f"{rel}: no tool_description — the holder reads it")
+        elif not _is_mostly_non_latin(desc):
+            out.append(f"{rel}: tool_description is not in the locale — its reader is the holder, who reasons in the locale")
+        extra = sorted(set(data) - set(LOCALE_FILE_RE) - {"tool_description"})
+        if extra:
+            out.append(f"{rel}: unknown field(s) {extra}; the search tool reads none of them")
+    return out
+
+
 def payload_shape_findings(role: str, role_path: str) -> list[str]:
     """Assert what role.py can actually install, where it is authored.
 
@@ -1034,6 +1081,7 @@ def main() -> int:
                                             findings, shared_owner_count, descriptions)
         findings += locale_translation_findings(role, role_path, template_schema)
         findings += locale_worker_findings(role, role_path)
+        findings += locale_file_findings(role, role_path)
         for rel in identity_slices[role]:
             klass = (parse_frontmatter(open(os.path.join(root, rel), encoding="utf-8").read()) or {}).get("class")
             if klass not in layout.IDENTITY_CLASSES:

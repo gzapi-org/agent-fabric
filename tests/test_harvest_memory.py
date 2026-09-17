@@ -439,6 +439,48 @@ def test_the_memory_slug_is_the_harness_s_spelling(tmp: str) -> None:
     assert harvest.default_memory_dir("/home/x/projects/gzapi.ge").endswith("/.claude/projects/-home-x-projects-gzapi-ge/memory")
 
 
+def test_a_credential_refuses_the_whole_drain_at_the_harvester(tmp: str) -> None:
+    """A memory whose body carries a credential by shape refuses the WHOLE
+    drain and is named, before any claim is built — the bundle travels
+    over the control channel, so the fence is here, not at the assembler.
+    Kills: harvesting the memory and leaving hygiene to assemble.py."""
+    mem = os.path.join(tmp, "cred-mem"); out = os.path.join(tmp, "cred-out")
+    os.makedirs(mem)
+    write_memory(mem, "clean", "project", "a fact", roles_class="solution")
+    write_memory(mem, "leaky", "project", "use GH_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 for it", roles_class="solution")
+    r = run(mem, out, "--all")
+    assert r.returncode == 1, (r.returncode, r.stderr)
+    assert "leaky.md: carries a credential" in r.stderr and "nothing of it leaves the account" in r.stderr, r.stderr
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in r.stderr + r.stdout, "the value must not be echoed"
+    assert not os.path.exists(os.path.join(out, "claims")), "no partial claims file"
+    b = subprocess.run([sys.executable, TOOL, "--role", "architect-cto", "--memory", mem, "--bundle", os.path.join(tmp, "cred.tar"), "--all"],
+                       capture_output=True, text=True)
+    assert b.returncode == 1 and not os.path.exists(os.path.join(tmp, "cred.tar")), f"no bundle either: {b.returncode} {b.stderr}"
+    # A memory without roles_class is the agent's own: not a claim, not inspected here, and named as skipped.
+    os.remove(os.path.join(mem, "leaky.md"))
+    write_memory(mem, "private", "user", "token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    r = run(mem, out, "--all", "--dry-run")
+    assert r.returncode == 0 and json.loads(r.stdout)["skipped_no_roles_class"] == ["private.md"], r.stderr + r.stdout
+
+
+def test_the_watermark_never_passes_an_unrendered_memory(tmp: str) -> None:
+    """A non-Latin memory without its English rendering yields no claim and
+    is named under needs_rendering; the next watermark stays below it, so
+    the next drain without --all names it again (the charter: named in
+    every report until rendered, never dropped). Kills: advancing next_ms
+    before the rendering check."""
+    mem = os.path.join(tmp, "wm-mem"); out = os.path.join(tmp, "wm-out")
+    os.makedirs(mem)
+    write_memory(mem, "older", "project", "an English fact", roles_class="solution")
+    write_memory(mem, "georgian", "project", "ქართული ფაქტი ინგლისური გადმოცემის გარეშე", roles_class="solution")
+    old = os.path.join(mem, "older.md"); ka = os.path.join(mem, "georgian.md")
+    os.utime(old, (1_700_000_000, 1_700_000_000)); os.utime(ka, (1_700_000_100, 1_700_000_100))
+    r = run(mem, out, "--all", "--dry-run")
+    rep = json.loads(r.stdout)
+    assert rep["needs_rendering"] == ["georgian.md"] and rep["claims"] == 1, rep
+    assert rep["next_watermark"] == 1_700_000_000_000, f"the watermark stops at the last memory that drained: {rep['next_watermark']}"
+
+
 def main() -> int:
     cases = [
         test_the_watermark_round_trips_through_the_committed_report,
@@ -461,6 +503,8 @@ def main() -> int:
         test_assemble_gets_the_files_it_requires,
         test_the_assembler_actually_consumes_the_drain,
         test_the_memory_slug_is_the_harness_s_spelling,
+        test_a_credential_refuses_the_whole_drain_at_the_harvester,
+        test_the_watermark_never_passes_an_unrendered_memory,
     ]
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:

@@ -99,6 +99,21 @@ def _load(name: str, path: str):
 
 layout = _load("fabric_layout", os.path.join(HERE, "layout.py"))
 identity = _load("fabric_identity", os.path.join(layout.FABRIC_ROOT, "runtime", "identity.py"))
+
+# THE SECRET FENCE, at the harvester. The assembler substitutes a person's
+# name and redacts a secret when it files a claim — but a bundle travels
+# before it is assembled, and since the control plane carries it
+# (runtime/control/ops.mjs `memory`) it travels as records on a channel
+# every account's daemon reads and the relay keeps. So a memory whose body
+# carries a credential by shape never leaves the account: the whole drain
+# is refused and the file named, as a bad roles_class is. Names are left
+# to the assembler's substitution, as designed (policies/hygiene.json).
+CREDENTIAL_PATTERNS = [(pattern, label) for pattern, label, _refer_as in layout.load_hygiene_patterns()
+                       if "credential" in label]
+
+
+def credential_hits(text: str) -> list[str]:
+    return [label for pattern, label in CREDENTIAL_PATTERNS if pattern.search(text)]
 SCHEMA_PATH = os.path.join(layout.FABRIC_ROOT, "identities", "schemas", "claims.schema.json")
 
 
@@ -167,9 +182,9 @@ def memory_slug(directory: str) -> str:
     """The name Claude Code gives a launch directory under
     ~/.claude/projects/: the absolute path with every character that is
     not a letter or a digit turned into `-` — `/` and `.` alike, read
-    back on 2026-09-17 (`~/projects/gzapp.decks` is
-    `-home-user-projects-gzapp-decks`; a `/` alone left every dotted
-    working copy without its memory). Two directories that differ only
+    back on 2026-09-17 (`~/projects/foo.bar` is `-home-…-projects-foo-bar`;
+    a `/` alone left every dotted working copy without its memory). Two
+    directories that differ only
     in such a character share a slug; the harness does not tell them
     apart either."""
     return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(directory))
@@ -318,11 +333,11 @@ def main() -> int:
         if parsed["mtime_ms"] <= since_ms:
             before_watermark.append(name)   # drained already; merge mode would no-op it
             continue
-        next_ms = max(next_ms, parsed["mtime_ms"])
         mtype = parsed["type"]
         klass = parsed["roles_class"]
         if not klass:
             skipped.append(name)        # not role knowledge, or not yet said so
+            next_ms = max(next_ms, parsed["mtime_ms"])
             continue
         # Hand-authored FIRST: charter and recall are not in CLAIM_CLASSES,
         # so a validity check ahead of this one reports them as unknown and
@@ -338,11 +353,17 @@ def main() -> int:
         if klass not in CLAIM_CLASSES:
             refusals.append(f"{name}: roles_class {klass!r} is not a claim class")
             continue
+        hits = credential_hits(parsed["body"])
+        if hits:
+            refusals.append(f"{name}: carries a {hits[0]} by shape; nothing of it leaves the account")
+            continue
         # A memory in another language drains through its English rendering.
         text, language = parsed["body"], None
         original, rendering = split_rendering(parsed["body"])
         if is_mostly_non_latin(original):
             if not rendering or is_mostly_non_latin(rendering):
+                # Named in every report until rendered: the watermark does
+                # not pass it (the charter: "never dropped").
                 needs_rendering.append(name)
                 continue
             text, language = rendering, "non-latin"
@@ -367,6 +388,7 @@ def main() -> int:
             "created_at_epoch": parsed["mtime"],
             **({"language": language} if language else {}),
         })
+        next_ms = max(next_ms, parsed["mtime_ms"])
         claims.append({
             "topic": parsed["name"],
             "title": parsed["description"] or parsed["name"],

@@ -326,8 +326,9 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
     """identities/roles/<role>/locale/<suffix>/locale.json: what the
     locale search tool fixes for a login of that suffix — an IANA
     timezone and one block per engine (serpapi, brave; at least one), each
-    with the parameters that engine takes and the tool's description in
-    the locale, since its reader is the holder."""
+    with the parameters that engine takes, the tool's description and,
+    optionally, the engine's label — both in the locale, since their
+    reader is the holder; no vendor's name reaches it."""
     out: list[str] = []
     base = os.path.join(role_path, LOCALE_DIRNAME)
     if not os.path.isdir(base):
@@ -371,7 +372,10 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
                 out.append(f"{rel}: {engine}.tool_description missing — the holder reads it")
             elif not _is_mostly_non_latin(desc):
                 out.append(f"{rel}: {engine}.tool_description is not in the locale — its reader is the holder, who reasons in the locale")
-            extra = sorted(set(block) - set(required) - set(optional) - {"tool_description"})
+            label = block.get("label")
+            if label is not None and (not isinstance(label, str) or not label.strip() or not _is_mostly_non_latin(label)):
+                out.append(f"{rel}: {engine}.label {label!r} — the name the holder sees for the engine, in the locale")
+            extra = sorted(set(block) - set(required) - set(optional) - {"tool_description", "label"})
             if extra:
                 out.append(f"{rel}: {engine}: unknown field(s) {extra}; the search tool reads none of them")
         extra = sorted(set(data) - set(LOCALE_FILE_RE) - set(LOCALE_ENGINES))

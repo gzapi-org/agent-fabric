@@ -127,7 +127,8 @@ engines):
   index; the CEO's account is SerpAPI's (250 free searches a month).
   **When SerpAPI refuses — its 250 searches a month spent, or any other
   refusal — the same call falls through to Brave**, and the result's
-  last line names the engine that answered and why it fell back, so the
+  last line names the engine that answered — by the label the locale
+  file gives it, in the locale, no vendor — and why it fell back, so the
   holder sees it without the search failing (the CEO: "use SerpAPI till
   it works, then switch to Brave seamlessly").
 - `web_search_global` — Brave's Search API as a second index, `country`
@@ -139,7 +140,18 @@ engines):
   `BRAVE_SEARCH_API_KEY`.
 
 The holder chooses the query, never the locale; each tool's description
-is in the locale, since its reader is the holder. `install-agent-files.sh`
+is in the locale, since its reader is the holder — and no vendor's name
+reaches it: the tools and the result's last line speak of "the main
+engine" and "the second index", by the labels the locale file gives
+(the CEO: a vendor's name is a technicality the holder has no use for).
+**These are the login's only web search.** The harness's own
+`WebSearch` — US-only, no locale — is removed from the session: the
+launcher passes `--disallowedTools WebSearch` at exec on a
+language-culture login whose locale has a search authored, and
+`install-agent-files.sh` writes the same as a `permissions.deny` in the
+login's user settings (marked as the fabric's, removed from any other
+login, never touching a deny the login wrote itself), the fence for a
+session launched without the launcher (the CEO, 2026-09-17). `install-agent-files.sh`
 writes the server into the login's user-scope configuration on a
 language-culture login with a locale file and removes it from any
 other, by the server path in its args. Every secret is a synced value

@@ -45,6 +45,7 @@ mkdir -p "$FABRIC/runtime/mcp/websearch-locale"; cp "$REAL_ROOT/runtime/mcp/webs
 printf '{"theme": "dark", "mcpServers": {"mine": {"command": "x"}}}' > "$HOME/.claude.json"
 out="$(run_install)"; grep -q "mcpServers.websearch-locale" <<<"$out" && python3 -c "import json,sys; d=json.load(open('$HOME/.claude.json')); e=d['mcpServers']['websearch-locale']; assert e['command']=='node' and e['args'][0].endswith('runtime/mcp/websearch-locale/server.mjs') and e['env']['WEBSEARCH_LOCALE_FILE'].endswith('/locale.json') and d['theme']=='dark' and 'mine' in d['mcpServers'], d" && ok "the entry is written beside what was there" || bad "mcp entry" "$out"
 out="$(run_install)"; grep -q "=  $HOME/.claude.json mcpServers.websearch-locale" <<<"$out" && ok "a second run leaves it" || bad "mcp idempotence" "$out"
+python3 -c "import json; d=json.load(open('$HOME/.claude/settings.json')); assert d['permissions']['deny']==['WebSearch','WebSearch(agent-fabric)'], d" && ok "the harness's WebSearch is denied in the user settings, marked as the fabric's" || bad "websearch deny" "$(cat "$HOME/.claude/settings.json" 2>&1)"
 
 echo "another role: the worker is removed by its marker"
 bind backend-dev
@@ -52,6 +53,9 @@ out="$(run_install --dry-run)"; grep -q "would remove: role is backend-dev" <<<"
 out="$(run_install)"; [[ ! -e "$DEST" ]] && grep -q "removed: role is backend-dev" <<<"$out" && ok "removed" || bad "removal" "$out"
 out="$(run_install)"; ! grep -q "locale-worker" <<<"$out" && ok "nothing to remove the second time, nothing said" || bad "second removal" "$out"
 python3 -c "import json; d=json.load(open('$HOME/.claude.json')); assert 'websearch-locale' not in d['mcpServers'] and 'mine' in d['mcpServers'], d" && ok "the MCP entry went with the role; the login's own stayed" || bad "mcp removal" "$(cat "$HOME/.claude.json")"
+python3 -c "import json; d=json.load(open('$HOME/.claude/settings.json')); assert d['permissions']['deny']==[], d" && ok "the WebSearch deny went with it" || bad "websearch allow" "$(cat "$HOME/.claude/settings.json")"
+printf '{"permissions": {"deny": ["WebSearch"]}, "theme": "dark"}' > "$HOME/.claude/settings.json"
+out="$(run_install)"; python3 -c "import json; d=json.load(open('$HOME/.claude/settings.json')); assert d['permissions']['deny']==['WebSearch'] and d['theme']=='dark', d" && ok "a WebSearch the login denied itself is left alone" || bad "own deny touched" "$(cat "$HOME/.claude/settings.json")"
 
 echo "a language-culture login whose locale has no authored worker: removed, never another locale's"
 bind language-culture

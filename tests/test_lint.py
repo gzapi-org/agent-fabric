@@ -499,6 +499,9 @@ def case_locale_file_shape() -> None:
         write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi", "brave": {"country": "US", "search_lang": "en", "ui_lang": "en-US", "tool_description": "ძიება"}}')
         code, out = run_lint(fabric)
         assert code == 0, f"one engine alone, with the languages Brave has: {out}"
+        write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"tool_description": "ვებ-ძიება ქართულად"', '"label": "main engine", "tool_description": "ვებ-ძიება ქართულად"'))
+        code, out = run_lint(fabric)
+        assert code == 1 and "serpapi.label 'main engine'" in out, f"a label not in the locale is refused: {out}"
         write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi"}')
         code, out = run_lint(fabric)
         assert code == 1 and "no engine block" in out, out

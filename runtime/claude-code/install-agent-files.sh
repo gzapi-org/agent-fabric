@@ -102,12 +102,20 @@ LOCALE_FILE="$FABRIC_ROOT/identities/roles/language-culture/locale/$LOCALE_SUFFI
 CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
 MCP_INSTALL="$FABRIC_ROOT/runtime/mcp/websearch-locale/install.py"
 mcp_flags=(); (( DRY_RUN )) && mcp_flags=(--dry-run)
+# …and, on that login, the harness's own WebSearch denied in the user
+# settings (the launcher removes it at exec; this is the fence for a
+# session launched otherwise): a login that searches through its locale
+# searches through that alone (the CEO, 2026-09-17).
+USER_SETTINGS="$CLAUDE_HOME/settings.json"
 if [[ "$ROLE" == "language-culture" && -f "$LOCALE_FILE" ]]; then
     out="$(python3 "$MCP_INSTALL" "$CLAUDE_JSON" set "$FABRIC_ROOT/runtime/mcp/websearch-locale/server.mjs" "$LOCALE_FILE" "${mcp_flags[@]}")"
+    out+="${out:+$'\n'}$(python3 "$MCP_INSTALL" "$USER_SETTINGS" deny-websearch "${mcp_flags[@]}")"
 else
     out="$(python3 "$MCP_INSTALL" "$CLAUDE_JSON" remove "${mcp_flags[@]}")"
+    out+="${out:+$'\n'}$(python3 "$MCP_INSTALL" "$USER_SETTINGS" allow-websearch "${mcp_flags[@]}")"
 fi
-if [[ -n "$out" ]]; then echo "$out"; [[ "$out" == *"  +  "* && "$out" != *"would write"* ]] && changed=$((changed+1)); [[ "$out" == *"  =  "* ]] && same=$((same+1)); fi
+out="$(printf '%s' "$out" | sed '/^$/d')"
+if [[ -n "$out" ]]; then echo "$out"; while IFS= read -r line; do [[ "$line" == "  +  "* && "$line" != *"would write"* ]] && changed=$((changed+1)); [[ "$line" == "  =  "* ]] && same=$((same+1)); done <<<"$out"; fi
 # The review class was installed as blind-reviewer.md until 2026-09-15; a
 # copy of ours left there would offer the retired type beside the new one.
 old="$CLAUDE_HOME/agents/blind-reviewer.md"

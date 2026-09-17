@@ -12,7 +12,7 @@ import { readLocale, request, search, handle, tools } from '../server.mjs';
 
 const SERVER = new URL('../server.mjs', import.meta.url).pathname;
 const LOCALE = { timezone: 'Asia/Tbilisi',
-                 serpapi: { gl: 'ge', hl: 'ka', google_domain: 'google.ge', tool_description: 'ვებ-ძიება ქართულად' },
+                 serpapi: { gl: 'ge', hl: 'ka', google_domain: 'google.ge', tool_description: 'ვებ-ძიება ქართულად', label: 'ძირითადი ძრავა' },
                  brave: { country: 'ALL', tool_description: 'გლობალური ვებ-ძიება' } };
 const G = { SERPAPI_API_KEY: 'serpapi-secret-key-value-0123456789' };
 const B = { BRAVE_SEARCH_API_KEY: 'BSA-secret-key-value-0123456789' };
@@ -75,17 +75,17 @@ test('handle: the MCP subset — initialize, initialized, ping, the two tools, w
   assert.deepEqual(tools({ serpapi: LOCALE.serpapi }).map(t => t.name), ['web_search']);
   // SerpAPI answers: its result, named.
   const g = await handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'მეტრო' } } }, ctx);
-  assert.equal(g.result.isError, false); assert.match(g.result.content[0].text, /^1\. g[\s\S]*\n\n— serpapi$/); assert.deepEqual(calls, ['serpapi']);
+  assert.equal(g.result.isError, false); assert.match(g.result.content[0].text, /^1\. g[\s\S]*\n\n— ძირითადი ძრავა$/, 'the last line is the engine\'s label in the locale'); assert.deepEqual(calls, ['serpapi']);
   // SerpAPI refuses (the 250 spent): Brave answers the same call, and the last line says so.
   calls.length = 0;
   const fb = await handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'მეტრო' } } }, { ...ctx, fetchImpl: fetchImpl(429) });
-  assert.equal(fb.result.isError, false); assert.match(fb.result.content[0].text, /^1\. b[\s\S]*\n\n— brave \(serpapi: search refused: HTTP 429 — Your account has run out of searches\.\)$/); assert.deepEqual(calls, ['serpapi', 'brave']);
+  assert.equal(fb.result.isError, false); assert.match(fb.result.content[0].text, /^1\. b[\s\S]*\n\n— brave \(ძირითადი ძრავა: search refused: HTTP 429 — Your account has run out of searches\.\)$/, 'no label for Brave in this fixture: the key'); assert.deepEqual(calls, ['serpapi', 'brave']);
   // No SerpAPI key at all: the fall-back is the same, with that reason.
   const nk = await handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'მეტრო' } } }, { ...ctx, secrets: { brave: B } });
-  assert.equal(nk.result.isError, false); assert.match(nk.result.content[0].text, /— brave \(serpapi: no SERPAPI_API_KEY/);
+  assert.equal(nk.result.isError, false); assert.match(nk.result.content[0].text, /— brave \(ძირითადი ძრავა: no SERPAPI_API_KEY/);
   // Both refuse: an error naming both.
   const both = await handle({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'web_search', arguments: { query: 'მეტრო' } } }, { ...ctx, secrets: {} });
-  assert.equal(both.result.isError, true); assert.match(both.result.content[0].text, /serpapi: no SERPAPI_API_KEY.*; brave: no BRAVE_SEARCH_API_KEY/);
+  assert.equal(both.result.isError, true); assert.match(both.result.content[0].text, /ძირითადი ძრავა: no SERPAPI_API_KEY.*; brave: no BRAVE_SEARCH_API_KEY/);
   // web_search_global is Brave alone, whatever SerpAPI would say.
   calls.length = 0;
   const b = await handle({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'web_search_global', arguments: { query: 'მეტრო' } } }, ctx);
@@ -108,7 +108,7 @@ test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool e
   const lines = out.trim().split('\n').map(l => JSON.parse(l));
   assert.equal(lines[0].result.serverInfo.name, 'websearch-locale');
   assert.deepEqual(lines[1].result.tools.map(t => t.name), ['web_search', 'web_search_global']);
-  assert.equal(lines[2].result.isError, true); assert.match(lines[2].result.content[0].text, /serpapi: no SERPAPI_API_KEY.*; brave: no BRAVE_SEARCH_API_KEY/);
+  assert.equal(lines[2].result.isError, true); assert.match(lines[2].result.content[0].text, /ძირითადი ძრავა: no SERPAPI_API_KEY.*; brave: no BRAVE_SEARCH_API_KEY/);
   assert.equal(lines[3].error.code, -32700);
   assert.ok(!out.includes(B.BRAVE_SEARCH_API_KEY) && !err.includes(B.BRAVE_SEARCH_API_KEY));
 });

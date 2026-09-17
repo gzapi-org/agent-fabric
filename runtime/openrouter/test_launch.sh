@@ -250,6 +250,18 @@ mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-EXECCED:--model claude-opus-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
+! grep -q -- "--disallowedTools" <<<"$out" && ok "no tool removed from a login that is not language-culture" || bad "WebSearch removed from the wrong login" "$out"
+# A language-culture login whose locale has a search: the harness's WebSearch is removed at exec.
+mkdir -p "$FABRIC/identities/roles/language-culture"; cp -r "$FABRIC/identities/roles/backend-dev/." "$FABRIC/identities/roles/language-culture/"   # a charter to render
+mkdir -p "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"; printf '{"timezone":"Asia/Tbilisi","brave":{"country":"ALL","tool_description":"ძიება"}}' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/locale.json"
+printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"language-culture","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+outlc="$(run --provider anthropic -- --version 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--disallowedTools WebSearch .*--version" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch" || bad "WebSearch not removed on the language-culture login" "$outlc"
+rm -rf "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"
+outlc="$(run --provider anthropic -- --version 2>&1)"
+! grep -q -- "--disallowedTools" <<<"$outlc" && ok "…and not when its locale has no search authored" || bad "WebSearch removed without a locale" "$outlc"
+rm -rf "$FABRIC/identities/roles/language-culture"
+printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 grep -q "CLAUDE-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "tab-title writer off on plain claude too" || bad "terminal-title switch missing on plain claude" "$out"
 grep -q "CLAUDE-ENV:TMPDIR=/var/tmp/agent-fabric-$LOGIN" <<<"$out" && [[ -d "/var/tmp/agent-fabric-$LOGIN" && "$(stat -c %a "/var/tmp/agent-fabric-$LOGIN")" == 700 ]] && ok "TMPDIR is a per-login directory under /var/tmp, created 700" || bad "TMPDIR not exported under /var/tmp" "$out"
 mkdir -p "$SANDBOX/own-tmp"

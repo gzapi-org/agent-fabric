@@ -4,13 +4,22 @@ search tool in a login's Claude Code user configuration.
 
     install.py <claude.json> set <server.mjs> <locale.json> [--dry-run]
     install.py <claude.json> remove [--dry-run]
+    install.py <settings.json> deny-websearch [--dry-run]
+    install.py <settings.json> allow-websearch [--dry-run]
 
 `set` writes (or leaves, when identical) mcpServers["websearch-locale"]
 as a stdio server running <server.mjs> with WEBSEARCH_LOCALE_FILE set to
 <locale.json>; `remove` deletes an entry that runs this fabric's server —
 recognised by the path in its args — and never one the login wrote
-itself. Prints one line in the installer's shape (+ = -) and exits 0.
-The file is Claude Code's own: every other key is kept as read.
+itself. `deny-websearch` adds "WebSearch" to permissions.deny in the
+login's user settings — the harness's own search is not for a login
+that searches through its locale (the launcher removes the tool at exec;
+this is the fence for a session launched otherwise) — and records that
+the fabric did, in permissions.deny's sibling marker
+"WebSearch # agent-fabric"; `allow-websearch` removes both, and never a
+"WebSearch" the login denied itself (no marker). Prints one line in the
+installer's shape (+ = -) and exits 0. Both files are Claude Code's own:
+every other key is kept as read.
 """
 from __future__ import annotations
 
@@ -20,6 +29,10 @@ import sys
 
 NAME = "websearch-locale"
 MARKER = "runtime/mcp/websearch-locale/server.mjs"
+DENY = "WebSearch"
+# The record that the fabric wrote the deny: a second entry the harness
+# reads as a rule that matches nothing, beside the real one.
+DENY_MARK = "WebSearch(agent-fabric)"
 
 
 def load(path: str) -> dict:
@@ -81,6 +94,33 @@ def main(argv: list[str]) -> int:
         data["mcpServers"] = servers
         save(path, data)
         print(f"  -  {path} mcpServers.{NAME} (removed: not a language-culture login with a locale)")
+        return 0
+    if op in ("deny-websearch", "allow-websearch"):
+        perms = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
+        deny = list(perms.get("deny") or []) if isinstance(perms.get("deny"), list) else []
+        mine = DENY_MARK in deny
+        if op == "deny-websearch":
+            if DENY in deny and mine:
+                print(f"  =  {path} permissions.deny {DENY}")
+                return 0
+            if dry:
+                print(f"  +  {path} permissions.deny {DENY} (would write)")
+                return 0
+            for entry in (DENY, DENY_MARK):
+                if entry not in deny:
+                    deny.append(entry)
+        else:
+            if not mine:
+                return 0   # not denied, or denied by the login itself: left alone
+            if dry:
+                print(f"  -  {path} permissions.deny {DENY} (would remove: not a language-culture login with a locale)")
+                return 0
+            deny = [e for e in deny if e not in (DENY, DENY_MARK)]
+        perms["deny"] = deny
+        data["permissions"] = perms
+        save(path, data)
+        sign = "+" if op == "deny-websearch" else "-"
+        print(f"  {sign}  {path} permissions.deny {DENY}" + ("" if sign == "+" else " (removed: not a language-culture login with a locale)"))
         return 0
     print(f"install.py: unknown op {op}", file=sys.stderr)
     return 2

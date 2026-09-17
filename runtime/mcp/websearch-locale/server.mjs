@@ -118,12 +118,16 @@ export function tools(locale) {
   if (locale.brave) out.push({ name: 'web_search_global', description: locale.brave.tool_description, inputSchema: schema });
   return out;
 }
+// The last line names the engine by the locale file's `label` for it —
+// in the locale, no vendor (the CEO, 2026-09-17: a vendor's name is a
+// technicality the holder has no use for) — falling back to the key.
 export async function searchWithFallback(engines, query, locale, opts) {
   const refused = [];
+  const label = e => locale[e]?.label || e;
   for (const engine of engines) {
     const r = await search(engine, query, locale, { fetchImpl: opts?.fetchImpl, count: opts?.count, ...(opts?.secrets ? { secrets: opts.secrets[engine] ?? {} } : {}) });
-    if (!r.isError) return { isError: false, text: `${r.text}\n\n— ${engine}${refused.length ? ` (${refused.join('; ')})` : ''}` };
-    refused.push(`${engine}: ${r.text}`);
+    if (!r.isError) return { isError: false, text: `${r.text}\n\n— ${label(engine)}${refused.length ? ` (${refused.join('; ')})` : ''}` };
+    refused.push(`${label(engine)}: ${r.text}`);
   }
   return { isError: true, text: refused.join('; ') };
 }

@@ -491,6 +491,15 @@ CMD=()
 [[ "$PROVIDER" == anthropic ]] || CMD+=(ori)
 CMD+=(claude)
 (( CALLER_MODEL )) || CMD+=(--model "$SESSION")
+# A language-culture login whose locale the fabric authored a search for
+# (identities/roles/language-culture/locale/<suffix>/locale.json, served
+# by runtime/mcp/websearch-locale) searches through that alone: the
+# harness's own WebSearch — US-only, no locale — is removed from the
+# session at exec (the CEO, 2026-09-17). install-agent-files.sh writes the
+# same as a permissions.deny in the login's user settings, the fence for
+# a session launched without this launcher.
+LOCALE_SEARCH="$FABRIC_ROOT/identities/roles/language-culture/locale/$(id -un | sed 's/.*-//')/locale.json"
+if [[ "$ROLE" == language-culture && -f "$LOCALE_SEARCH" ]]; then CMD+=(--disallowedTools WebSearch); fi
 CMD+=("${PROMPT_ARGS[@]}" "$@")
 
 goodbye() {  # goodbye <note> — best effort, once; never delays the exit by more than the send

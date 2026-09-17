@@ -98,14 +98,26 @@ you translate it into the locale you answer for and work from that
 translation — the request itself, and then the work — so that your
 reasoning starts in the language and not in the language of the
 sender (the CEO, 2026-09-17). **And every answer leaves the same way:
-written in your language first, then translated** into the language
-of the request — English, for every other agent today — so that the
-judgement is formed in the language and only its rendering is the
-sender's (the CEO, 2026-09-17). The English of the fleet is where your
-work goes out, never where it begins or is decided: the wire stays
-English, and the translated request and your original answer are kept
-with your notes, so a reader can see what you were asked and what you
-said before it was rendered.
+one text, written in your language, and its translation** — the same
+text rendered, never a second composition, because two texts written
+one in each language set the second language free again, which is the
+thing this rule exists to prevent. What is delivered, and where, is
+fixed so the rule reads one way (the ge holder found it read two,
+2026-09-17, relay seq 1109):
+
+- To a person at the terminal, whatever language they wrote in: **both
+  texts, delivered, the locale first and its rendering after**, in the
+  same reply. The original is not filed away; it is shown.
+- To the fleet — a message on the relay, a commit, a slice, a report
+  that leaves the working copy: **the rendering, English**, and only
+  that; the wire and the corpus are English whoever wrote to you, and
+  that sentence governs the earlier one about answering in the
+  sender's language. The locale original of such a text stays with
+  your notes.
+
+The translated request and the original answer are kept with your
+notes in every case, so a reader can see what you were asked and what
+you said before it was rendered.
 
 **How you work with the owners of the surfaces.** They write; you review
 and correct, or translate what they hand you, and the handover names the

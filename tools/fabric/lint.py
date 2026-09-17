@@ -247,7 +247,13 @@ PROTECTED_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("backticked span", re.compile(r"`[^`]{1,200}`")),   # may wrap a line; whitespace inside is normalised
     ("slash command", re.compile(r"(?<!\S)/[a-zA-Z][\w-]*\b")),
     ("path", re.compile(r"~?/[\w.~-]+(?:/[\w.~-]+)+")),
-    ("UPPER_SNAKE name", re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")),
+    # A name with an underscore, or a short acronym (CLI, CTF, IDE); an
+    # emphasised word (IMPORTANT) is prose and free.
+    ("UPPER_SNAKE name", re.compile(r"\b(?:[A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{2,4})\b")),
+    # The harness's tool names as the text quotes them, backticked or not
+    # (Skill, Agent, ToolSearch("select:EndConversation")): a reader's cue
+    # to a name the harness matches; CamelCase covers the rest.
+    ("tool name", re.compile(r"\b(?:Agent|Artifact|AskUserQuestion|Bash|Edit|Glob|Grep|Read|Skill|ToolSearch|Write|WebFetch|WebSearch|Workflow|Monitor|NotebookEdit|SendMessage|TaskStop|EndConversation|SubagentHandback)\b|\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b")),
     ("model id", re.compile(r"\bclaude-[a-z0-9.-]+\b")),
     ("tag", re.compile(r"<[A-Za-z][\w-]*>")),
     ("[[link]]", re.compile(r"\[\[[^\]]+\]\]")),

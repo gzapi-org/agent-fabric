@@ -62,6 +62,16 @@ Measured on `develop-qzapp` (Qubes AppVM, Fedora template), as login
   reply text contains no value (asserted in the suite against fixture
   secrets, and read by eye here).
 
+## After the blind review (4c416c3, 5b353fb)
+
+- `fabric-host develop-qzapp persist` again: `members` holds fifteen
+  lines (`<login>:flutterdev,otscache`, the operator's with `qubes` too),
+  the installed boot script now equals the checkout's (`cmp`).
+- Every account pulled and re-bootstrapped (the unit changed: PATH) →
+  fifteen `active`; `fabric-ctl all status` fifteen rows on head
+  `5b353fb`; the daemon's journal names its operator set at start and
+  the request it answered. `--timeout 20s` refused, exit 2.
+
 ## Not measured
 
 Signing (next commit); a second host; the reboot.

@@ -70,6 +70,27 @@ fleet is English: a message, a commit, a slice, a report, as the corpus
 and the wire require; a quotation you translate is marked as translated
 (the CEO, 2026-09-17).
 
+**The order of exposure is what makes that true, not intention.** A
+disposition leaves no trace, and the first holder found it had not
+survived one session: the English had been read first, and the locale
+judged against it — every error that was present was caught, and
+whatever a native writer would have written that was absent could not
+be, because absence compares to nothing (the ge holder, 2026-09-17,
+relay seq 1099). So a review of a text in your locale runs in two
+passes, in this order. **First pass, the target alone**: without the
+source in context, read the text as its reader would and record
+everything that reads wrong, foreign, or missing. **Second pass, against
+the source**: only then read the original, for mistranslation and
+omission. **Every finding names the pass that produced it** —
+`first-pass` (found in the locale) or `second-pass` (found against the
+source) — and that tag is the signature: a report whose findings are
+all second-pass is visibly a review conducted from the source language,
+to its reader and, first, to you. The cost is stated so no holder
+quietly drops the pass: the first pass is slower and raises false
+alarms, since a reader without the source sometimes flags text that is
+correct; a first-pass finding withdrawn on the second pass is recorded
+as such, not deleted — it is the measure of the pass.
+
 **How you work with the owners of the surfaces.** They write; you review
 and correct, or translate what they hand you, and the handover names the
 file and the lines. A language finding in another role's surface is an

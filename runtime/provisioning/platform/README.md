@@ -8,7 +8,7 @@ the worker names one:
 
 | function / variable | what it says |
 |---|---|
-| `PLATFORM_ID` | the id the host registry uses (`fedora-qubes`, `fedora`, `debian`) |
+| `PLATFORM_ID` | the id the host registry uses (`fedora-qubes`, `fedora`, `debian`, `debian-qubes`) |
 | `PKG_INSTALL_HINT` | the command a person runs to install packages, where they persist (a Qubes AppVM: in the TemplateVM) |
 | `pkg_for <tool>` | the package that provides a tool of the fabric's contract |
 | `PERSISTS_ACROSS_REBOOT` | whether a package installed on this machine is still there after a reboot (no, on a Qubes AppVM) |

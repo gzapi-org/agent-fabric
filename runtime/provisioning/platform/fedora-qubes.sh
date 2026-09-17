@@ -14,4 +14,4 @@
 PLATFORM_ID=fedora-qubes
 PERSISTS_ACROSS_REBOOT=0
 PKG_INSTALL_HINT="in the TemplateVM: sudo dnf install"
-SUDO_GROUP_NOTE="sudo is the qubes group's; role accounts are not in it (moveto/README.md)"
+SUDO_GROUP_NOTE="sudo is the qubes group's; role accounts are not in it (runtime/provisioning/moveto/README.md)"

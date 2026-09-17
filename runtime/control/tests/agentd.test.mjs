@@ -152,8 +152,8 @@ test('agentd --once: a request from a non-operator, an unknown op and an expired
     const rs = replies(r);
     assert.equal(rs.length, 1, JSON.stringify(rs));
     assert.equal(rs[0].op, 'keys');
-    assert.match(out.stderr, /ignored a record \(from develop-qzapp\/backend-dev-01 is not an operator\)/, out.stderr);
-    assert.match(out.stderr, /ignored a record \(op rm -rf\)/); assert.match(out.stderr, /ignored a record \(expired\)/);
+    assert.match(out.stderr, /ignored a record "from develop-qzapp\/backend-dev-01 is not an operator"/, out.stderr);
+    assert.match(out.stderr, /ignored a record "op rm -rf"/); assert.match(out.stderr, /ignored a record "expired"/);
     assert.ok(!/not for me|not a request/.test(out.stderr), `the quiet refusals stay quiet:\n${out.stderr}`);
     const k = rs[0].data.keys.find(x => x.name === 'OPENROUTER_API_KEY');
     assert.equal(k.present, true); assert.equal(k.sha256_12.length, 12);

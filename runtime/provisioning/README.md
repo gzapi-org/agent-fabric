@@ -51,7 +51,9 @@ runs), `probe` (a question) or `best_effort` (one warning) —
 `test_new-agent.sh` runs the whole sequence against fakes on both
 backends and injects a failure at each `must`. Idempotent — every step is checked before it is done, so it is also how
 an account that came out short is completed. In order: the Linux account
-(home 700, the shared-cache group); the home skeleton, then `claude` and `ori`
+(home 700, the shared-cache group, persisted across the host's reboot —
+linger, and on Qubes the record snapshot under `/rw`,
+`persist-accounts.sh`); the home skeleton, then `claude` and `ori`
 installed as the account the way their vendors say (`claude.ai/install.sh`
 on the vendor's latest — every account runs latest, the coordinator
 included, and the fabric is fixed where latest breaks it; `--claude`

@@ -177,7 +177,7 @@ export async function main(argv = process.argv.slice(2)) {
       for (const rec of rows) {
         last = rec.id;
         const a = accept(rec, { me, operators: operatorAddresses(), ttl_s: cfg.ttl_s, seen });
-        if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record (${a.why})`); continue; }
+        if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
         const reply = await answer(a.request, ctx);
         await post(reply);

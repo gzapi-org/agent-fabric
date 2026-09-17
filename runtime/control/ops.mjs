@@ -65,9 +65,11 @@ export function keys(home = os.homedir(), names = KEY_NAMES) {
 
 // The fabric checkout the account runs on: head, branch, how far behind
 // origin/main, and whether the tree is clean. A fetch that cannot reach
-// origin is said, not hidden. Asynchronous: the fetch may take its whole
-// 10 s budget and the daemon keeps reading the channel meanwhile (exec
-// may return a string or a {stdout}; a test passes a synchronous fake).
+// origin is said, not hidden. Asynchronous so the daemon's event loop
+// stays live through the fetch's 10 s budget (the source watch, signals,
+// the usage read of the same request); the read loop itself still
+// answers one record at a time (exec may return a string or a {stdout};
+// a test passes a synchronous fake).
 const execFileP = promisify(execFile);
 export async function fabric(root = process.env.AGENT_FABRIC_ROOT ?? path.join(os.homedir(), 'projects', 'agent-fabric'), exec = execFileP) {
   const git = async (...a) => { const r = await exec('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }); return (typeof r === 'string' ? r : r.stdout).trim(); };

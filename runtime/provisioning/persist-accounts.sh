@@ -33,6 +33,12 @@ LOGINCTL="${AGENT_FABRIC_LOGINCTL:-loginctl}"
 # shellcheck source=runtime/provisioning/platform/detect.sh
 . "$ROOT/runtime/provisioning/platform/detect.sh"
 rc=0
+# One writer at a time: the worker for one login and `fabric-host persist`
+# for another both read-modify-write the same snapshot files.
+if (( PERSISTS_ACROSS_REBOOT == 0 )); then
+    install -d -m 700 "$SNAP" || exit 1
+    exec 9>"$SNAP/.lock"; flock -w "${AGENT_FABRIC_LOCK_WAIT:-30}" 9 || { echo "persist-accounts: the snapshot is locked by another writer" >&2; exit 1; }
+fi
 for login in "$@"; do
     if ! getent passwd "$login" >/dev/null 2>&1 && ! grep -q "^$login:" "$ETC/passwd" 2>/dev/null; then
         echo "persist-accounts: no such account: $login" >&2; rc=1; continue

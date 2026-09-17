@@ -130,25 +130,65 @@ def prompt_template_findings() -> list[str]:
     the set must fit its budget — every session pays for these bytes."""
     findings: list[str] = []
     total = 0
-    for name in layout.PROMPT_TEMPLATES:
+    for name, placeholders in layout.PROMPT_TEMPLATE_PLACEHOLDERS.items():
         path = layout.prompt_template_path(name)
         rel = os.path.join(layout.PROMPT_DIR_NAME, name)
         if not os.path.isfile(path):
-            findings.append(f"{rel}: missing — every launch prompt appends it")
+            findings.append(f"{rel}: missing — every launch prompt renders it")
             continue
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         if not text.strip():
             findings.append(f"{rel}: empty")
-        if "{role}" not in text:
-            findings.append(f"{rel}: no {{role}} placeholder — it would read the same for every role")
+        for placeholder in placeholders:
+            if placeholder not in text:
+                findings.append(f"{rel}: no {placeholder} placeholder — it would read the same for every login")
         findings += hygiene_findings(rel, text)
         total += len(text)
     approx = total // CHARS_PER_TOKEN
     if approx > layout.PROMPT_TEMPLATE_BUDGET_TOKENS:
-        findings.append(f"{layout.PROMPT_DIR_NAME}: ~{approx} tokens across {', '.join(layout.PROMPT_TEMPLATES)} "
+        findings.append(f"{layout.PROMPT_DIR_NAME}: ~{approx} tokens across {', '.join(layout.PROMPT_TEMPLATE_PLACEHOLDERS)} "
                         f"exceeds the {layout.PROMPT_TEMPLATE_BUDGET_TOKENS} budget every session pays")
     return findings
+
+
+# runtime/claude-code/harness/en.md: the harness's own system prompt,
+# captured from a live build, kept as the English source a locale
+# translates (runtime/claude-code/harness/README.md). Fabric-wide, not a
+# role's; absent in a fixture fabric, present in this one.
+HARNESS_SOURCE = os.path.join("runtime", "claude-code", "harness", "en.md")
+HARNESS_PLACEHOLDER = "{memory_dir}"
+
+
+def harness_source_findings(root: str | None = None) -> list[str]:
+    """The capture's shape: frontmatter with its class, the build it was
+    captured from, the date, and the live check it came from (which must
+    exist — the capture is a claim about a build, and the live check is
+    its evidence); the memory-directory placeholder exactly once; hygiene."""
+    root = root or layout.FABRIC_ROOT   # at call time: --fabric may have moved it
+    path = os.path.join(root, HARNESS_SOURCE)
+    if not os.path.isfile(path):
+        return []
+    out: list[str] = []
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    meta = parse_frontmatter(text)
+    if meta is None:
+        return [f"{HARNESS_SOURCE}: no frontmatter — class, build, captured_at, source"]
+    if meta.get("class") != "harness-source":
+        out.append(f"{HARNESS_SOURCE}: class {meta.get('class')!r}; the capture is class harness-source")
+    for key in ("build", "captured_at", "source"):
+        if not meta.get(key):
+            out.append(f"{HARNESS_SOURCE}: no `{key}` — the build it was captured from, when, and the live check that shows it")
+    source = str(meta.get("source") or "")
+    if source and (not source.startswith("docs/live-checks/") or not os.path.isfile(os.path.join(root, source))):
+        out.append(f"{HARNESS_SOURCE}: source {source!r} is not an existing docs/live-checks/ note")
+    body = FRONTMATTER_RE.sub("", text)
+    n = body.count(HARNESS_PLACEHOLDER)
+    if n != 1:
+        out.append(f"{HARNESS_SOURCE}: {HARNESS_PLACEHOLDER} appears {n} time(s); the memory directory is the one login-specific span and must be the placeholder exactly once")
+    out += hygiene_findings(HARNESS_SOURCE, body)
+    return out
 
 
 def hygiene_findings(where: str, text: str) -> list[str]:
@@ -1245,6 +1285,7 @@ def main() -> int:
 
     # --- launch prompt sections --------------------------------------------
     findings += prompt_template_findings()
+    findings += harness_source_findings()
 
     if findings:
         print(f"corpus lint: {len(findings)} finding(s)\n", file=sys.stderr)

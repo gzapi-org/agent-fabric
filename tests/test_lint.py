@@ -480,6 +480,43 @@ def case_locale_worker_shape_and_hygiene() -> None:
         assert code == 1 and "credential" in out, f"a credential in the worker body passed:\n{out}"
 
 
+def case_harness_source_shape() -> None:
+    """runtime/claude-code/harness/en.md, when a fabric carries it: class,
+    build, captured_at, an existing live check as its source, the
+    memory-directory placeholder exactly once. Absent, nothing is said
+    (a fixture fabric). Kills: a capture with no build, or with the
+    login's real memory path left in."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        assert run_lint(fabric)[0] == 0, "no capture, no finding"
+        lc = os.path.join(fabric, "docs", "live-checks", "2026-09-17-x.md"); os.makedirs(os.path.dirname(lc), exist_ok=True); write(lc, "# x\n")
+        good = ("---\nclass: harness-source\nbuild: \"2.1.274 (Claude Code)\"\ncaptured_at: 2026-09-17\nsource: docs/live-checks/2026-09-17-x.md\n---\n"
+                "You are Claude Code.\n\n# Memory\n\nYou have a persistent file-based memory at `{memory_dir}`.\n")
+        write(os.path.join(fabric, "runtime", "claude-code", "harness", "en.md"), good)
+        code, out = run_lint(fabric)
+        assert code == 0, out
+        write(os.path.join(fabric, "runtime", "claude-code", "harness", "en.md"), good.replace("build: \"2.1.274 (Claude Code)\"\n", "").replace("{memory_dir}", "/home/x/.claude/projects/-home-x/memory/"))
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        for phrase in ("no `build`", "{memory_dir} appears 0 time(s)"):
+            assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        write(os.path.join(fabric, "runtime", "claude-code", "harness", "en.md"), good.replace("2026-09-17-x.md", "2026-09-17-missing.md"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "not an existing docs/live-checks/ note" in out, out
+
+
+def case_prompt_templates_carry_their_placeholders() -> None:
+    """identities/prompt/header.md names the login ({agent}, {host},
+    {role}); a header without {agent} would read the same for every login.
+    Kills: checking only {role} on every template."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        p = os.path.join(fabric, "identities", "prompt", "header.md")
+        write(p, open(p, encoding="utf-8").read().replace("{agent}", "someone"))
+        code, out = run_lint(fabric)
+        assert code == 1 and "header.md: no {agent} placeholder" in out, out
+
+
 def case_locale_file_shape() -> None:
     """locale.json fixes the search tools' country and languages, one block
     per engine; lint asserts the shapes each engine takes and a description
@@ -876,6 +913,8 @@ def main() -> int:
         case_locale_translation_is_a_charter_with_a_digest,
         case_translation_lag_is_reported,
         case_locale_worker_shape_and_hygiene,
+        case_harness_source_shape,
+        case_prompt_templates_carry_their_placeholders,
         case_locale_file_shape,
         case_non_latin_translation_budget_is_stricter,
         case_model_profiles_layered_file_passes,

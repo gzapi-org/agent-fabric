@@ -63,29 +63,29 @@ FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 # not something to ship with every request of a session.
 MAX_CHARS = 20_000
 
-HEADER = """\
-# Who you are
+# The header, the missing-brief line, the team and memory sections are
+# templates under identities/prompt/ (lint budgets them together): the
+# header carries {agent}, {host} and {role}; a role with no brief renders
+# brief-missing.md. Moved out of code on 2026-09-17 so a locale can carry
+# a translation of each (locale/<suffix>/<name>.md), rendered for the
+# login whose name ends in that locale.
+HEADER_TEMPLATE = "header.md"
+BRIEF_MISSING_TEMPLATE = "brief-missing.md"
 
-You are agent `{agent}` on host `{host}`, launched by agent-fabric holding
-the role **{role}**. `bin/fabric-whoami` and `bin/fabric-status` (under
-`agent-fabric/`, beside your working copies) are the authority on who you
-are; the directory you stand in, the repository, the branch and this
-session never are — changing directory changes your context, not your
-name. Another login in the same working copy is another agent.
-
-The role cannot change inside this session: it was bound before launch
-(`bin/fabric-role`, from a login shell) and a different role is a
-relaunch. What the role covers *in the project you are in* — its remit —
-is not here: the session-start hook gives it to you, and it follows your
-working copy.
-"""
-
-BRIEF_MISSING = "_No brief has been distilled for this role yet; the charter above is the whole definition._\n"
 
 
 def _read(path: str) -> str:
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+
+def _template(name: str) -> str:
+    """A prompt template under identities/prompt/, verbatim; a missing one
+    is the same failure lint names."""
+    path = layout.prompt_template_path(name)
+    if not os.path.isfile(path):
+        raise SystemExit(f"launch_prompt: {layout.root_rel(path)} is missing (tools/fabric/lint.py names it)")
+    return _read(path)
 
 
 def _body(path: str) -> str:
@@ -125,12 +125,12 @@ def build(agent: str, host: str, role: str) -> str:
     if not os.path.isfile(charter):
         raise SystemExit(f"launch_prompt: role {role!r} has no charter at {charter}")
     localized = charter != os.path.join(role_dir, "charter.md")
-    parts = [HEADER.format(agent=agent, host=host, role=role)]
+    parts = [_template(HEADER_TEMPLATE).replace("{agent}", agent).replace("{host}", host).replace("{role}", role)]
     # The charter and the brief carry their own H1 ("<role> — charter",
     # "<role> — brief"); only a missing brief needs a heading of its own.
     parts.append(_body(charter))
     brief = os.path.join(role_dir, "brief.md")
-    parts.append(_body(brief) if os.path.isfile(brief) else "# " + role + " — brief\n\n" + BRIEF_MISSING)
+    parts.append(_body(brief) if os.path.isfile(brief) else "# " + role + " — brief\n\n" + _template(BRIEF_MISSING_TEMPLATE))
     for name in layout.PROMPT_TEMPLATES:
         path = layout.prompt_template_path(name)
         if not os.path.isfile(path):

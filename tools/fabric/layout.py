@@ -75,8 +75,15 @@ IDENTITY_CLASSES = ("charter", "brief", "recall")
 # Not slices — no frontmatter, no provenance, no index line — so lint
 # checks them by name (`prompt_template_findings`).
 PROMPT_DIR_NAME = os.path.join("identities", "prompt")
-PROMPT_TEMPLATES = ("team.md", "memory.md")
-PROMPT_TEMPLATE_BUDGET_TOKENS = 1500  # both together: every session pays for them
+PROMPT_TEMPLATES = ("team.md", "memory.md")            # appended after the role's files, in this order
+# Every template under identities/prompt/ and the placeholders each must
+# carry: the header names the login; the shared sections the role; the
+# missing-brief line none. launch_prompt.py renders them; lint budgets them
+# together — every session pays for these bytes (the header and the
+# missing-brief line were code until 2026-09-17, and always paid).
+PROMPT_TEMPLATE_PLACEHOLDERS = {"header.md": ("{agent}", "{host}", "{role}"), "brief-missing.md": (),
+                                "team.md": ("{role}",), "memory.md": ("{role}",)}
+PROMPT_TEMPLATE_BUDGET_TOKENS = 1800
 DOMAIN_CLASSES = ("domain",)
 PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads")
 # Tier-1 knowledge, in load order: the charter, the project index, the

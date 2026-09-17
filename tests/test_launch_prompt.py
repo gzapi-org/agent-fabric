@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -158,6 +159,76 @@ def case_oversized_prompt_is_refused() -> None:
         assert r.returncode == 1 and "exceeds" in r.stderr, r.stderr
 
 
+def _build_launch_direct(f: "Fixture", agent: str, role: str, cwd: str) -> tuple[str, bool]:
+    """build_launch() with an explicit agent and cwd, inside the fixture."""
+    code = ("import importlib.util, os, sys, json; "
+            "spec = importlib.util.spec_from_file_location('lp', sys.argv[1]); m = importlib.util.module_from_spec(spec); "
+            "spec.loader.exec_module(m); t, r = m.build_launch(sys.argv[2], 'h', sys.argv[3], sys.argv[4]); sys.stdout.write(json.dumps([t, r]))")
+    r = subprocess.run([sys.executable, "-c", code, os.path.join(f.root, "tools", "fabric", "launch_prompt.py"), agent, role, cwd],
+                       env=f.env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    text, replace = json.loads(r.stdout)
+    return text, replace
+
+
+def case_every_piece_comes_from_the_locale_when_it_carries_one() -> None:
+    """locale/<suffix>/{header,brief-missing,team,memory}.md replace their
+    English for the login of that suffix, placeholders filled; another
+    suffix and a login without locale files render the English bytes.
+    Kills: a locale rule that knows only the charter."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Fixture(tmp, role="language-culture", brief=False)
+        loc = os.path.join(f.root, "identities", "roles", "language-culture", "locale", "ge")
+        fm = lambda src: f"---\nclass: prompt-translation\ntranslates: identities/prompt/{src}.md\ntranslates_digest: sha256:x\n---\n"
+        write(os.path.join(loc, "header.md"), fm("header") + "# ვინ ხარ\n\nშენ ხარ აგენტი `{agent}` ჰოსტზე `{host}`, როლი **{role}**.\n")
+        write(os.path.join(loc, "brief-missing.md"), fm("brief-missing") + "_ბრიფი ჯერ არ არის._\n")
+        write(os.path.join(loc, "team.md"), fm("team") + "# გუნდი\n\nროლი {role} გუნდში.\n")
+        write(os.path.join(loc, "memory.md"), fm("memory") + "# მეხსიერება\n\n{role}-ის მეხსიერება.\n")
+        text = _build_direct(f, "language-culture-ge", "language-culture")
+        assert text.startswith("# ვინ ხარ\n\nშენ ხარ აგენტი `language-culture-ge` ჰოსტზე `h`, როლი **language-culture**."), text[:200]
+        for piece in ("_ბრიფი ჯერ არ არის._", "# გუნდი\n\nროლი language-culture გუნდში.", "# მეხსიერება\n\nlanguage-culture-ის მეხსიერება."):
+            assert piece in text, piece
+        assert "# Who you are" not in text and "Working with the team" not in text, "no English piece survives where the locale has one"
+        assert text.index("# გუნდი") < text.index("# მეხსიერება"), "the shared sections keep their order"
+        ru = _build_direct(f, "language-culture-ru", "language-culture")
+        assert ru.startswith("# Who you are") and "# გუნდი" not in ru, "another suffix renders the English"
+        launched, replace = _build_launch_direct(f, "language-culture-ge", "language-culture", tmp)
+        assert launched == text and replace is False, "no harness translation: build()'s bytes, append"
+
+
+def case_harness_translation_is_appended_last_and_replaces() -> None:
+    """locale/<suffix>/harness.md: appended after the fabric's part, its
+    {memory_dir} filled with the harness's own directory for the launch
+    cwd, and the flag says the file replaces the whole prompt; --print
+    and --out say so on stderr. Kills: rendering the harness before the
+    charter, or leaving the placeholder in."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Fixture(tmp, role="language-culture", brief=False)
+        loc = os.path.join(f.root, "identities", "roles", "language-culture", "locale", "ge")
+        write(os.path.join(loc, "harness.md"), "---\nclass: harness-translation\ntranslates: runtime/claude-code/harness/en.md\ntranslates_digest: sha256:x\n---\n"
+                                              "შენ ხარ Claude Code.\n\n# მეხსიერება\n\nშენი მეხსიერება არის `{memory_dir}`.\n")
+        cwd = os.path.join(tmp, "launch.dir"); os.makedirs(cwd)
+        text, replace = _build_launch_direct(f, "language-culture-ge", "language-culture", cwd)
+        assert replace is True
+        fabric_part = _build_direct(f, "language-culture-ge", "language-culture")
+        assert text.startswith(fabric_part), "the fabric's part first"
+        tail = text[len(fabric_part):]
+        assert tail.startswith("\nშენ ხარ Claude Code.") and "{memory_dir}" not in tail, tail[:120]
+        expected_dir = os.path.expanduser("~/.claude/projects/" + re.sub(r"[^A-Za-z0-9]", "-", cwd) + "/memory")
+        assert f"`{expected_dir}`" in tail, tail
+        other, _ = _build_launch_direct(f, "language-culture-ge", "language-culture", tmp)
+        assert other != text and "launch-dir" in text, "the memory directory follows the launch cwd, nothing else does"
+        # --print renders for the real login (its suffix), so the locale is named after it.
+        mine = os.path.join(f.root, "identities", "roles", "language-culture", "locale", LOGIN.rsplit("-", 1)[-1])
+        shutil.copytree(loc, mine, dirs_exist_ok=True)
+        f.bind("language-culture")
+        r = f.run("--print")
+        assert r.returncode == 0 and "replace: yes" in r.stderr and "შენ ხარ Claude Code." in r.stdout, r.stderr
+        f2 = Fixture(tmp + "/2", role="backend-dev")
+        r2 = f2.run("--print")
+        assert r2.returncode == 0 and "replace: no" in r2.stderr and "Claude Code" not in r2.stdout, r2.stderr
+
+
 def _build_direct(f: "Fixture", agent: str, role: str) -> str:
     """build() called with an explicit agent (identity.current_agent() has
     no override), inside the fixture's environment."""
@@ -207,6 +278,8 @@ def case_locale_render_has_a_wider_ceiling() -> None:
 def main() -> int:
     cases = [
         case_locale_charter_is_rendered_for_the_login_suffix,
+        case_every_piece_comes_from_the_locale_when_it_carries_one,
+        case_harness_translation_is_appended_last_and_replaces,
         case_locale_render_has_a_wider_ceiling,
         case_header_names_agent_host_role,
         case_charter_and_brief_bodies_without_frontmatter,

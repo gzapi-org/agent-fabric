@@ -16,7 +16,7 @@ SANDBOX="$(mktemp -d)"; trap '[[ -n "${KEEP_SANDBOX:-}" ]] || rm -rf "$SANDBOX"'
 # A fixture fabric: the real roles and registry, a fake claude to copy from.
 FAB="$SANDBOX/fabric"; mkdir -p "$FAB/runtime/provisioning/secrets" "$FAB/identities" "$FAB/projects" "$SANDBOX/home/.local/bin"
 cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"
-cp "$UNDER_TEST" "$HERE/new-agent-worker.sh" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
+cp "$UNDER_TEST" "$HERE/new-agent-worker.sh" "$HERE/persist-accounts.sh" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
 cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"; cp -r "$ROOT/runtime/provisioning/platform" "$FAB/runtime/provisioning/"
 printf '#!/bin/sh\necho fake\n' > "$SANDBOX/home/.local/bin/claude"; chmod +x "$SANDBOX/home/.local/bin/claude"
 # The host registry the orchestrator reads: this host (direct) and a far
@@ -101,6 +101,10 @@ cat > "$BIN/useradd" <<STUB
 #!/usr/bin/env bash
 login="\${@: -1}"; mkdir -p "$HOMES/\$login"; echo "\$login" >> "$SEQ/passwd"; echo "useradd \$login" >> "$CALLS"
 STUB
+cat > "$BIN/loginctl" <<STUB
+#!/usr/bin/env bash
+echo "loginctl \$*" >> "$CALLS"
+STUB
 cat > "$BIN/getent" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
@@ -168,7 +172,9 @@ STUB
 chmod +x "$BIN/ssh"
 BACKEND=local
 seq_run() { rm -f "$CALLS"; local h=(); [[ "$BACKEND" == ssh ]] && h=(--host far-host)
-  SUDO="$BIN/sudo" SSH="$BIN/ssh" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" bash "$FAB/runtime/provisioning/new-agent.sh" "$@" "${h[@]}" 2>&1; }
+  SUDO="$BIN/sudo" SSH="$BIN/ssh" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" \
+  AGENT_FABRIC_ACCOUNTS_SNAPSHOT="$SANDBOX/persist/snap" AGENT_FABRIC_RC_LOCAL_D="$SANDBOX/persist/rcd" AGENT_FABRIC_ETC="$SANDBOX/persist/etc" AGENT_FABRIC_LOGINCTL="$BIN/loginctl" \
+  bash "$FAB/runtime/provisioning/new-agent.sh" "$@" "${h[@]}" 2>&1; }
 cp "$SEQ/enroll.sh" "$FAB/runtime/provisioning/secrets/enroll.sh"
 reset_seq() { rm -rf "$HOMES" "$SEQ/passwd" "$SEQ/enrolled" "$FAULT"; mkdir -p "$HOMES"; }
 
@@ -177,6 +183,7 @@ echo "new-agent: the real sequence on the $BACKEND backend"
 : > "$SSHLOG"
 reset_seq; out="$(seq_run seq-login backend-dev --project demo)"; rc=$?
 [[ $rc -eq 0 ]] && ok "the whole sequence exits 0" || bad "rc=$rc" "$out"
+grep -q "persist-accounts.sh seq-login" "$CALLS" && grep -q "^loginctl enable-linger seq-login" "$CALLS" && ok "the account is persisted: persist-accounts.sh through sudo, linger enabled" || bad "persist step missing" "$(grep -i "persist\|linger" "$CALLS")"
 H="$HOMES/seq-login"
 [[ -x "$H/.local/bin/claude" && -x "$H/.local/bin/ori" && -d "$H/projects/agent-fabric/.git" && -d "$H/projects/demo/.git" && -d "$H/projects/demo/node_modules" ]] \
   && [[ "$(grep -c "^github.com " "$H/.ssh/known_hosts")" == "$(grep -c . "$ROOT/runtime/provisioning/github-host-keys")" ]] && ! grep -q "^ssh-keyscan" "$CALLS" && grep -q "^enroll fill-from" "$CALLS" && grep -q "^enroll issue-openrouter-keys" "$CALLS" \

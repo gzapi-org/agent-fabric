@@ -6,6 +6,7 @@
 #   fabric-host <host> run [--as <login>] [--tty] -- <cmd>...   one command there (runtime/hostexec/hostexec)
 #   fabric-host <host> moveto <login> [<clone>]       an interactive shell as that account, in its workspace
 #   fabric-host <host> rename <login> <old> <new> [--dry-run]   rename-working-copy.sh, run there
+#   fabric-host <host> persist                        every placement survives the host's reboot (linger; the record snapshot on Qubes)
 #   fabric-host <host> drain <login> [harvest flags...] > drain.tar   the account's memory as a bundle (stdout)
 #
 # Every subcommand is the same operation on every host: the local one is
@@ -21,7 +22,7 @@ ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REGISTRY="${AGENT_FABRIC_HOSTS_REGISTRY:-$ROOT/runtime/hosts/registry.json}"
 HX="$ROOT/runtime/hostexec/hostexec"
 die() { printf 'fabric-host: %s\n' "$*" >&2; exit "${2:-2}"; }
-usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [[ $# -ge 1 ]] || { usage; exit 2; }
 case "$1" in
@@ -58,10 +59,17 @@ case "$sub" in
     rename)
         [[ $# -ge 3 ]] || die "rename needs <login> <old> <new>"
         exec "$HX" "$host" -- @fabric/runtime/provisioning/rename-working-copy.sh "$@" ;;
+    persist)
+        # Every placement on the host, made to survive its reboot: linger,
+        # and on a Qubes AppVM the account-record snapshot. The one-time
+        # migration of accounts provisioned before this existed.
+        mapfile -t logins < <(jq -r --arg h "$host" '.placement | to_entries[] | select(.value == $h) | .key' "$REGISTRY")
+        (( ${#logins[@]} )) || die "no placements on $host"
+        exec "$HX" "$host" -- sudo -n bash @fabric/runtime/provisioning/persist-accounts.sh "${logins[@]}" ;;
     drain)
         [[ $# -ge 1 ]] || die "drain needs the login"
         login="$1"; shift
         [[ -t 1 ]] && die "drain writes a tar to stdout; redirect it (> drain.tar) or pipe it to assemble.py --bundle -"
         exec "$HX" "$host" --as "$login" -- python3 @fabric/tools/fabric/harvest_memory.py --bundle - "$@" ;;
-    *) die "unknown subcommand $sub (list | check | run | moveto | rename | drain)" ;;
+    *) die "unknown subcommand $sub (list | check | run | moveto | rename | persist | drain)" ;;
 esac

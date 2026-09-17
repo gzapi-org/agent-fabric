@@ -1,0 +1,53 @@
+#!/bin/sh
+# agent-fabric: re-create the role accounts at boot, and their linger.
+#
+# In a Qubes AppVM the root volume is a volatile snapshot of the template:
+# /etc/passwd, /etc/shadow, /etc/group and /var/lib/systemd/linger are
+# reset at every boot, while /home and /rw persist. The fifteen accounts
+# provisioned on develop-qzapp had never met a reboot when this was found
+# (2026-09-17): their homes would have survived, their logins not.
+# Bind-dirs is not the answer — binding /etc/passwd makes it a mountpoint,
+# and shadow-utils writes passwd+ then rename(2), which fails with EBUSY
+# on a mountpoint, so every later useradd would break. This runs from
+# /rw/config/rc.local.d (qubes-misc-post.service, after logind is up)
+# and appends, verbatim, every snapshotted account record that the boot's
+# /etc lacks; then enables linger for each so its user manager, and the
+# control agent under it, come up without a login.
+#
+# The snapshot is /rw/config/agent-fabric/accounts/{passwd,shadow,group,
+# gshadow,subuid,subgid}, one line per fabric account, written by
+# runtime/provisioning/persist-accounts.sh at provisioning and on demand.
+# A uid the template has meanwhile given to a system user is a collision:
+# that account is skipped with a line on stderr, never appended over it.
+S="${AGENT_FABRIC_ACCOUNTS_SNAPSHOT:-/rw/config/agent-fabric/accounts}"
+ETC="${AGENT_FABRIC_ETC:-/etc}"
+LOGINCTL="${AGENT_FABRIC_LOGINCTL:-loginctl}"
+[ -d "$S" ] || exit 0
+for f in passwd shadow group gshadow subuid subgid; do
+    [ -f "$S/$f" ] || continue
+    [ -f "$ETC/$f" ] || continue
+    while IFS= read -r line || [ -n "$line" ]; do
+        n="${line%%:*}"; [ -n "$n" ] || continue
+        grep -q "^$n:" "$ETC/$f" && continue
+        if [ "$f" = passwd ]; then
+            uid="$(printf '%s' "$line" | cut -d: -f3)"
+            if grep -q "^[^:]*:[^:]*:$uid:" "$ETC/passwd"; then
+                printf 'agent-fabric-accounts: uid %s is taken in /etc/passwd; not re-adding %s\n' "$uid" "$n" >&2
+                continue
+            fi
+        elif [ "$f" = group ]; then
+            gid="$(printf '%s' "$line" | cut -d: -f3)"
+            if grep -q "^[^:]*:[^:]*:$gid:" "$ETC/group"; then
+                printf 'agent-fabric-accounts: gid %s is taken in /etc/group; not re-adding %s\n' "$gid" "$n" >&2
+                continue
+            fi
+        fi
+        printf '%s\n' "$line" >> "$ETC/$f"
+    done < "$S/$f"
+done
+if [ -f "$S/passwd" ]; then
+    cut -d: -f1 "$S/passwd" | while IFS= read -r n; do
+        [ -n "$n" ] && grep -q "^$n:" "$ETC/passwd" && "$LOGINCTL" enable-linger "$n" 2>/dev/null
+    done
+fi
+exit 0

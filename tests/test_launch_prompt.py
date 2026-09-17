@@ -158,8 +158,56 @@ def case_oversized_prompt_is_refused() -> None:
         assert r.returncode == 1 and "exceeds" in r.stderr, r.stderr
 
 
+def _build_direct(f: "Fixture", agent: str, role: str) -> str:
+    """build() called with an explicit agent (identity.current_agent() has
+    no override), inside the fixture's environment."""
+    code = ("import importlib.util, os, sys; "
+            "spec = importlib.util.spec_from_file_location('lp', sys.argv[1]); m = importlib.util.module_from_spec(spec); "
+            "spec.loader.exec_module(m); sys.stdout.write(m.build(sys.argv[2], 'h', sys.argv[3]))")
+    r = subprocess.run([sys.executable, "-c", code, os.path.join(f.root, "tools", "fabric", "launch_prompt.py"), agent, role],
+                       env=f.env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def case_locale_charter_is_rendered_for_the_login_suffix() -> None:
+    """language-culture-ge reads locale/ge/charter.md; a login with no
+    translation reads the English; both renders are byte-stable. Kills:
+    always reading charter.md."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Fixture(tmp, role="language-culture", brief=False)
+        write(os.path.join(f.root, "identities", "roles", "language-culture", "locale", "ge", "charter.md"),
+              "---\nrole: language-culture\nclass: charter\ndescription: \"x\"\ntier: 1\ndistilled_at: 2026-09-17\n"
+              "translates: identities/roles/language-culture/charter.md\ntranslates_digest: sha256:" + "0" * 64 + "\n---\n\n"
+              "# language-culture — წესდება\n\nGEORGIAN-BODY-LINE ქართულად.\n")
+        ge = _build_direct(f, "language-culture-ge", "language-culture")
+        assert "GEORGIAN-BODY-LINE" in ge and "CHARTER-BODY-LINE" not in ge, ge
+        assert "translates_digest" not in ge, "the translation's frontmatter leaked into the prompt"
+        ru = _build_direct(f, "language-culture-ru", "language-culture")
+        assert "CHARTER-BODY-LINE" in ru and "GEORGIAN-BODY-LINE" not in ru, ru
+        assert _build_direct(f, "language-culture-ge", "language-culture") == ge, "not byte-stable"
+
+
+def case_locale_render_has_a_wider_ceiling() -> None:
+    """A translation is ~1.3x the characters of its source; the locale
+    render is allowed MAX_CHARS * LOCALE_CHARS_FACTOR while the English
+    render keeps the ceiling. Kills: one ceiling for both."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Fixture(tmp, role="language-culture", brief=False)
+        pad = "ქართული ხაზი\n" * 1500      # ~19.5k characters of body
+        head = "---\nrole: language-culture\nclass: charter\ndescription: \"x\"\ntier: 1\ndistilled_at: 2026-09-17\n---\n\n"
+        write(os.path.join(f.root, "identities", "roles", "language-culture", "charter.md"), head + "# c\n\n" + pad)
+        r = f.run("--print")
+        assert r.returncode == 1 and "exceeds" in r.stderr, "the English render lost its ceiling"
+        write(os.path.join(f.root, "identities", "roles", "language-culture", "charter.md"), head + "# c\n\nshort\n")
+        write(os.path.join(f.root, "identities", "roles", "language-culture", "locale", "ge", "charter.md"), head + "# c\n\n" + pad)
+        assert "ქართული ხაზი" in _build_direct(f, "language-culture-ge", "language-culture")
+
+
 def main() -> int:
     cases = [
+        case_locale_charter_is_rendered_for_the_login_suffix,
+        case_locale_render_has_a_wider_ceiling,
         case_header_names_agent_host_role,
         case_charter_and_brief_bodies_without_frontmatter,
         case_shared_sections_are_rendered_for_the_role,

@@ -94,13 +94,34 @@ def _body(path: str) -> str:
     return text.strip("\n") + "\n"
 
 
+# A locale's translation of the charter is rendered for a login whose name
+# ends in that locale (language-culture-ge -> locale/ge/charter.md): the
+# CEO's rule of 2026-09-17 that a holder who thinks in its language reads
+# its own definition in it. Keyed by the login's suffix, not by role: a
+# locale/ directory is an authored thing lint validates (a source digest,
+# a lag finding), and with none present every role renders as before,
+# byte-identical. A translation is served even when lint says it lags — a
+# launch never fails on a day's lag; lint is where the lag is seen. The
+# real cost is tokens: a Georgian body is ~1.3x the characters and two to
+# three times the tokens of the English, so a locale render is allowed
+# LOCALE_CHARS_FACTOR times MAX_CHARS, and the live check records the count.
+LOCALE_CHARS_FACTOR = 1.35
+
+
+def _charter_path(role_dir: str, agent: str) -> str:
+    suffix = agent.rsplit("-", 1)[-1] if "-" in agent else agent
+    locale = os.path.join(role_dir, "locale", suffix, "charter.md")
+    return locale if os.path.isfile(locale) else os.path.join(role_dir, "charter.md")
+
+
 def build(agent: str, host: str, role: str) -> str:
     """The prompt text for one (agent, host, role). Pure: reads the
     repository, touches nothing else."""
     role_dir = layout.role_dir(role)
-    charter = os.path.join(role_dir, "charter.md")
+    charter = _charter_path(role_dir, agent)
     if not os.path.isfile(charter):
         raise SystemExit(f"launch_prompt: role {role!r} has no charter at {charter}")
+    localized = charter != os.path.join(role_dir, "charter.md")
     parts = [HEADER.format(agent=agent, host=host, role=role)]
     # The charter and the brief carry their own H1 ("<role> — charter",
     # "<role> — brief"); only a missing brief needs a heading of its own.
@@ -113,8 +134,9 @@ def build(agent: str, host: str, role: str) -> str:
             raise SystemExit(f"launch_prompt: {layout.root_rel(path)} is missing (tools/fabric/lint.py names it)")
         parts.append(_read(path).replace("{role}", role).strip("\n") + "\n")
     text = "\n".join(parts)
-    if len(text) > MAX_CHARS:
-        raise SystemExit(f"launch_prompt: {len(text)} characters for role {role!r} exceeds {MAX_CHARS}; "
+    ceiling = int(MAX_CHARS * LOCALE_CHARS_FACTOR) if localized else MAX_CHARS
+    if len(text) > ceiling:
+        raise SystemExit(f"launch_prompt: {len(text)} characters for role {role!r} exceeds {ceiling}; "
                          "shorten the charter or brief (tools/fabric/lint.py budgets them)")
     return text
 

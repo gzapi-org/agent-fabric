@@ -146,6 +146,17 @@ memory with no `roles_class` is skipped **and named** in the report.
 `charter`, `brief` and `recall` are refused as targets — they are authored
 identity, not derived knowledge.
 
+A holder that writes its memory in another language (language-culture,
+in the language it answers for) drains through the **English rendering**
+each drain-ready memory carries under a `## English` heading: the claim
+is the rendering, the original stays in the holder's home, the
+observation records the language. A non-Latin memory without one is
+named under `needs_rendering` in the report and yields no claim — so a
+drain of such a login is two steps: the coordinator's dry run, whose
+`needs_rendering` names go to the holder as a `REQUEST` on the relay;
+the holder — the fleet's translator — renders them and answers with the
+count; then the drain. Nothing translates a memory but its holder.
+
 ```sh
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain --dry-run
 tools/fabric/harvest_memory.py --role architect-cto --out /tmp/drain

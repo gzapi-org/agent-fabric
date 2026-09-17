@@ -136,6 +136,31 @@ GENERATED_CLASSES = frozenset({"index"})
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+# A memory written in another language (a language-culture holder writes
+# its own in the language it answers for, the CEO, 2026-09-17) reaches the
+# corpus — which is English, a slice travels into every project — through
+# the rendering it carries under this heading: the claim is what follows
+# it, the original stays in the holder's home, and the observation records
+# the language. A non-Latin memory without one is not lost and not
+# guessed at: it is named under `needs_rendering`, and the coordinator asks
+# the holder — the fleet's translator — to render it before the drain.
+RENDERING_RE = re.compile(r"^##\s+English\s*$", re.MULTILINE)
+
+
+def is_mostly_non_latin(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    return sum(1 for ch in letters if ord(ch) > 0x024F) * 2 >= len(letters)
+
+
+def split_rendering(body: str) -> tuple[str, str | None]:
+    """(original, rendering) — the rendering is what follows `## English`,
+    None when the body carries no such heading."""
+    m = RENDERING_RE.search(body)
+    if not m:
+        return body, None
+    return body[:m.start()].rstrip(), body[m.end():].strip()
 
 
 def default_memory_dir(working_copy: str) -> str:
@@ -270,6 +295,7 @@ def main() -> int:
     claims: list[dict[str, Any]] = []
     observations: list[dict[str, Any]] = []
     skipped: list[str] = []
+    needs_rendering: list[str] = []
     refusals: list[str] = []
 
     for name in sorted(os.listdir(memory_dir)):
@@ -302,6 +328,19 @@ def main() -> int:
         if klass not in CLAIM_CLASSES:
             refusals.append(f"{name}: roles_class {klass!r} is not a claim class")
             continue
+        # A memory in another language drains through its English rendering.
+        text, language = parsed["body"], None
+        original, rendering = split_rendering(parsed["body"])
+        if is_mostly_non_latin(original):
+            if not rendering or is_mostly_non_latin(rendering):
+                needs_rendering.append(name)
+                continue
+            text, language = rendering, "non-latin"
+            for script_name, lo, hi in (("ka", 0x10A0, 0x10FF), ("ru", 0x0400, 0x04FF), ("el", 0x0370, 0x03FF),
+                                        ("hy", 0x0530, 0x058F), ("he", 0x0590, 0x05FF), ("ar", 0x0600, 0x06FF)):
+                if any(lo <= ord(ch) <= hi for ch in original):
+                    language = script_name
+                    break
         cid = content_hash(parsed["name"], parsed["body"])
         observations.append({
             "content_hash": cid,
@@ -314,15 +353,16 @@ def main() -> int:
             "session": ctx.get("session"),
             "type": mtype,
             "title": parsed["name"],
-            "text": parsed["body"],
+            "text": text,
             "created_at_epoch": parsed["mtime"],
+            **({"language": language} if language else {}),
         })
         claims.append({
             "topic": parsed["name"],
             "title": parsed["description"] or parsed["name"],
             "class": klass,
             "knowledge_scope": "full",
-            "body": parsed["body"],
+            "body": text,
             # An OBJECT keyed by kind, not a list: assemble.py calls
             # .values() on this field. A memory's wikilinks are memory
             # slugs, so they get their own kind rather than being passed
@@ -348,6 +388,9 @@ def main() -> int:
         # NAMED, not counted. A count tells you something was left out; the
         # names tell you whether it should have been.
         "skipped_no_roles_class": skipped,
+        # Named too: a memory in another language that carries no English
+        # rendering yet — the holder renders it, then the drain takes it.
+        "needs_rendering": needs_rendering,
         # The window this drain read, in the shape the assembler carries
         # into the committed report (`harvest`, `watermarks`).
         "since_watermark": since_ms,

@@ -48,6 +48,31 @@ def claims_of(out: str) -> list[dict]:
         return json.load(fh)["claims"]
 
 
+def test_a_memory_in_another_language_drains_through_its_rendering(tmp: str) -> None:
+    """A Georgian memory with a `## English` section yields the English as
+    the claim and records the language on the observation; one without
+    is named under needs_rendering and yields no claim; an English memory
+    is untouched. Kills: taking the body verbatim, or dropping the list."""
+    mem, out = os.path.join(tmp, "m-ka"), os.path.join(tmp, "o-ka")
+    os.makedirs(mem)
+    ka = "ქართული ფაქტი: ხაზების აღნიშვნა ქართულია და ეს ავთენტურია.\n\n## English\n\nThe fact in English: the line labels are Georgian and that is authentic."
+    write_memory(mem, "rendered", "project", body=ka, roles_class="solution")
+    write_memory(mem, "unrendered", "project", body="მხოლოდ ქართული ტექსტი, თარგმანის გარეშე.", roles_class="solution")
+    write_memory(mem, "plain", "project", body="An English fact.", roles_class="solution")
+    r = run(mem, out)
+    assert r.returncode == 0, r.stderr
+    got = {c["topic"]: c["body"] for c in claims_of(out)}
+    assert got["rendered"].startswith("The fact in English"), got
+    assert "ქართული" not in got["rendered"], "the original leaked into the claim"
+    assert "unrendered" not in got and got["plain"] == "An English fact.", got
+    with open(os.path.join(out, "harvest-report.json"), encoding="utf-8") as fh:
+        report = json.load(fh)
+    assert report["needs_rendering"] == ["unrendered.md"], report   # filenames, like the skipped list
+    with open(os.path.join(out, "observations.jsonl"), encoding="utf-8") as fh:
+        obs = {o["title"]: o for o in (json.loads(l) for l in fh if l.strip())}
+    assert obs["rendered"]["language"] == "ka" and "language" not in obs["plain"], obs
+
+
 def test_role_knowledge_is_opt_in(tmp: str) -> None:
     """A memory reaches the shared corpus only if it says so. Nothing is
     inferred from `type`: memory has four types, .roles/ has nine classes,
@@ -404,6 +429,7 @@ def main() -> int:
         test_the_watermark_round_trips_through_the_committed_report,
         test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file,
         test_role_knowledge_is_opt_in,
+        test_a_memory_in_another_language_drains_through_its_rendering,
         test_the_class_is_taken_verbatim_not_mapped,
         test_a_generated_class_is_refused,
         test_a_skipped_memory_is_named_not_counted,

@@ -1,8 +1,0 @@
-{
-  "name": "lid.176.ftz",
-  "url": "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz",
-  "sha256": "8f3472cfe8738a7b6099e8e999c3cbfae0dcd15696aac7d7738a8039db603e83",
-  "bytes": 938013,
-  "predictor": "fasttext-predict==0.9.2.4",
-  "note": "fastText's compressed language-identification model, 176 languages, ~1 MB, somewhat lower accuracy than lid.176.bin (the CEO, 2026-09-17). Read back on this host: ka 0.81 on a Georgian paragraph (xmf second), en 0.96, it 0.95, ru 0.998; a code line 0.38 and a two-letter answer 0.63 (unsure below 0.5); Georgian in Latin letters unidentified."
-}

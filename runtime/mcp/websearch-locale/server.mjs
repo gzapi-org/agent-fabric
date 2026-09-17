@@ -28,7 +28,7 @@ import { syncedVar } from '../../../communication/gzcoord/scripts/inbox.mjs';
 
 export const BRAVE_URL = 'https://api.search.brave.com/res/v1/web/search';
 export const KEY_NAME = 'BRAVE_SEARCH_API_KEY';
-export const LOCALE_FIELDS = ['country', 'search_lang', 'ui_lang', 'timezone', 'tool_description'];
+export const LOCALE_FIELDS = ['country', 'timezone', 'tool_description'];   // required; search_lang and ui_lang only where Brave has the language
 
 export function readLocale(file = process.env.WEBSEARCH_LOCALE_FILE) {
   if (!file) throw new Error('WEBSEARCH_LOCALE_FILE is not set: the locale file decides the country and language');
@@ -41,8 +41,11 @@ export function searchUrl(query, locale, count = 10) {
   const u = new URL(BRAVE_URL);
   u.searchParams.set('q', query);
   u.searchParams.set('country', locale.country);
-  u.searchParams.set('search_lang', locale.search_lang);
-  u.searchParams.set('ui_lang', locale.ui_lang);
+  // Brave validates every locale parameter against its own lists (read
+  // back 2026-09-17: GE, ka and ka-GE are each a 422); a locale file names
+  // only the values Brave has, and a language it lacks is simply not sent.
+  if (locale.search_lang) u.searchParams.set('search_lang', locale.search_lang);
+  if (locale.ui_lang) u.searchParams.set('ui_lang', locale.ui_lang);
   u.searchParams.set('count', String(Math.min(20, Math.max(1, Number(count) || 10))));
   return u.toString();
 }
@@ -57,7 +60,7 @@ export async function search(query, locale, { key = syncedVar(KEY_NAME) ?? proce
   if (!r.ok) return { isError: true, text: `search refused: HTTP ${r.status}` };
   let j; try { j = await r.json(); } catch { return { isError: true, text: 'search answered something that is not JSON' }; }
   const results = j?.web?.results ?? [];
-  if (!results.length) return { isError: false, text: `no results (${locale.country}/${locale.search_lang})` };
+  if (!results.length) return { isError: false, text: `no results (${locale.country}${locale.search_lang ? '/' + locale.search_lang : ''})` };
   return { isError: false, text: results.map((x, i) => `${i + 1}. ${x.title ?? ''}\n   ${x.url ?? ''}\n   ${(x.description ?? '').replace(/<[^>]+>/g, '')}`).join('\n\n') };
 }
 

@@ -16,8 +16,11 @@ const localeFile = () => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdi
 
 test('readLocale: every field required; searchUrl: the locale decides country and language, the caller the query', () => {
   assert.deepEqual(readLocale(localeFile()), LOCALE);
-  const bad = localeFile(); fs.writeFileSync(bad, JSON.stringify({ ...LOCALE, ui_lang: '' }));
-  assert.throws(() => readLocale(bad), /missing ui_lang/);
+  const bad = localeFile(); fs.writeFileSync(bad, JSON.stringify({ ...LOCALE, country: '' }));
+  assert.throws(() => readLocale(bad), /missing country/);
+  const noLang = localeFile(); fs.writeFileSync(noLang, JSON.stringify({ country: 'ALL', timezone: 'Asia/Tbilisi', tool_description: 'x' }));
+  const un = new URL(searchUrl('x', readLocale(noLang)));
+  assert.equal(un.searchParams.get('country'), 'ALL'); assert.ok(!un.searchParams.has('search_lang') && !un.searchParams.has('ui_lang'), 'a language Brave lacks is not sent');
   assert.throws(() => readLocale(undefined), /WEBSEARCH_LOCALE_FILE/);
   const u = new URL(searchUrl('თბილისის მეტრო', LOCALE, 5));
   assert.equal(u.origin + u.pathname, 'https://api.search.brave.com/res/v1/web/search');

@@ -99,27 +99,45 @@ read a file and to list its tools.
   claiming one was wrong). It now refuses the whole drain on a
   credential-shaped hit, before any claim is built.
 
-## fastText on this host (the CEO: "use fastText, lid.176.ftz")
+## The language detector on this host (the CEO: fastText, then "look at CLD2 / pycld2")
 
-`fasttext-predict==0.9.2.4` installs on this host's Python 3.14 from a
-prebuilt wheel (no compiler); `lid.176.ftz` is 938 013 bytes, sha256
-`8f3472cf…603e83` (pinned in `runtime/langid/model.json`); it loads in
-0.06 s and predicts 2 000 paragraphs in 0.06 s. Read back on the
-paragraph shapes the op meets:
+fastText's `lid.176.ftz` was tried first (938 013 bytes, loads in
+0.06 s, 2 000 predictions in 0.06 s): `ka` 0.81 on a Georgian note, `en`
+0.96, `it` 0.95, `ru` 0.998 — but it is a single-label classifier: a
+half-Georgian, half-English paragraph came back `ka 0.83`, the English
+invisible, and a code line scored `en 0.38`, a bare `ok` `en 0.63`. The
+CEO asked for CLD2 instead. `pycld2==0.42` builds from source on this
+host (gcc/g++ present) and reads back:
 
-| paragraph | top label |
+| paragraph | CLD2 |
 |---|---|
-| a Georgian note line | `ka` 0.81 (`xmf` 0.19 second — same script) |
-| an English paragraph | `en` 0.96 |
-| an Italian paragraph | `it` 0.95 |
-| a Russian paragraph | `ru` 0.998 |
-| half Georgian, half English, with a path | `ka` 0.83 |
-| a code line (`ops.mjs:294 memory() exec …`) | `en` 0.38 |
-| `ok` | `en` 0.63 |
-| Georgian in Latin letters | `pl` 0.09 — unidentified |
+| a Georgian note line | reliable, `ka` 100 |
+| an English paragraph | reliable, `en` 98 |
+| an Italian paragraph | reliable, `it` 98 |
+| a Russian paragraph | reliable, `ru` 99 |
+| half Georgian, half English, with a path | reliable, **`ka` 56 / `en` 43** |
+| a code line (`ops.mjs:294 memory() exec …`) | unreliable |
+| `ok` | unreliable |
+| Georgian in Latin letters | unreliable |
 
-- Decides: the language section bins by top label with a 0.5 floor
-  (`unsure` below it — the code line and the two-letter answer fall
-  there), judges only paragraphs of twenty letters or more, and reports
-  `unavailable` without the venv or the model. Script shares stay: they
-  are what catches Latin-letter Georgian, which the model cannot.
+2 000 detections in 9 ms. Decides: the `language` section is CLD2's —
+shares per language weighted by letters, the dominant language per
+paragraph, the unreliable count — with no probability floor to tune; a
+paragraph under twenty letters is not sent; the script shares stay for
+Latin-letter Georgian, which neither detector reads. The binding needs
+a C++ compiler where it is installed; without one the section says
+`unavailable`.
+
+## Brave has no Georgian locale
+
+As `language-culture-ge`, with its own key: `country=GE`,
+`search_lang=ka` and `ui_lang=ka-GE` are each refused with HTTP 422
+("Unable to validate request parameter(s)"), together or alone;
+`country=US&search_lang=en&ui_lang=en-US` answers 200. A Georgian query
+with no locale parameter (or `country=ALL`) returns Georgian pages:
+three of five results `ka`, on `.ge` hosts and `ka.wikipedia.org`.
+Decides: the `ge` locale file names `country: ALL` and no language, the
+server sends only what a file names, and the search is global, steered
+by the language of the query — less than the "Georgian browser" asked
+for, which needs a backend with a Georgian locale (Google's Custom
+Search JSON API: `gl=ge`, `hl=ka`, `lr=lang_ka`), the CEO's decision.

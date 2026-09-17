@@ -106,10 +106,10 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.equal(s.notes.status, 'none');
   const nd = path.join(h, 'state', 'agent-fabric', 'agents', 'ge', 'notes'); fs.mkdirSync(nd, { recursive: true });
   fs.writeFileSync(path.join(nd, '2026-09-17.md'), 'მოთხოვნა: გადათარგმნილი მოთხოვნა ქართულად, სრული აბზაცი.\n\nჩემი მსჯელობა ქართულად: ეს ტექსტი მხოლოდ ქართულია და საკმაოდ გრძელი.\n\nA paragraph written in English, long enough to count as a block here.\n');
-  const fakeLang = paras => ({ status: 'ok', paragraphs: paras.length, counts: { ka: paras.length } });
+  const fakeLang = paras => ({ status: 'ok', paragraphs: paras.length, unreliable: 0, shares: { ka: 100 }, dominant: { ka: paras.length } });
   assert.equal(script(h, { notes: nd }).notes.language.status, 'unavailable', 'no venv on this scratch home: said, not guessed');
   const withNotes = script(h, { notes: nd, langid: fakeLang });
-  assert.deepEqual(withNotes.notes.language, { status: 'ok', paragraphs: 3, counts: { ka: 3 } }, 'every note paragraph reaches the predictor');
+  assert.deepEqual(withNotes.notes.language, { status: 'ok', paragraphs: 3, unreliable: 0, shares: { ka: 100 }, dominant: { ka: 3 } }, 'every note paragraph reaches the detector');
   assert.equal(withNotes.notes.status, 'ok'); assert.equal(withNotes.notes.files, 1);
   assert.deepEqual(withNotes.notes.blocks, { only: 2, mixed: 0, latin: 1, empty: 0 }, JSON.stringify(withNotes.notes));
   assert.ok(withNotes.notes.georgian > withNotes.notes.latin);
@@ -133,7 +133,7 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   fs.writeFileSync(path.join(sub, 'agent-bbb.jsonl'), reviewer.join('\n') + '\n'); meta('agent-bbb', 'code-review');
   fs.writeFileSync(path.join(sub, 'agent-nometa.jsonl'), user('a subagent with no sidecar, long enough to be a block') + '\n');
   const w = script(h, { langid: fakeLang }).workers;
-  assert.deepEqual(w.input.language, { status: 'ok', paragraphs: 2, counts: { ka: 2 } }); assert.deepEqual(w.text.language, { status: 'ok', paragraphs: 2, counts: { ka: 2 } });
+  assert.equal(w.input.language.paragraphs, 2); assert.equal(w.text.language.paragraphs, 2);
   assert.equal(w.status, 'ok'); assert.equal(w.files, 1, 'only the sidecar that says locale-worker'); assert.equal(w.other_subagents, 2); assert.equal(w.turns, 3);
   assert.equal(w.tool_uses, 0, 'the hand-back is not a tool use of the worker');
   assert.deepEqual(w.input.blocks, { only: 2, mixed: 0, latin: 0, empty: 0 }, `the injected reminder is not the bridge's input: ${JSON.stringify(w.input)}`);
@@ -217,19 +217,24 @@ test('memory: one harvester run per directory — the tar from stdout, the repor
   assert.equal(whole.bundles[0].parts, 1, 'a 3 KB tar is one part at the real size');
 });
 
-test('languages: the predictor judges only paragraphs of twenty letters, a low top label is unsure, no venv is unavailable, and the text reaches only the predictor', () => {
+test('languages: CLD2 judges only paragraphs of twenty letters; shares weighted by letters, dominant per paragraph, unreliable counted; no venv is unavailable', () => {
   const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lang-home-'));
-  assert.deepEqual(languages(['ქართული აბზაცი საკმაოდ გრძელი'], { home: h }).status, 'unavailable');
+  assert.equal(languages(['ქართული აბზაცი საკმაოდ გრძელი'], { home: h }).status, 'unavailable');
   const venvPy = langidCmd(h, '/r')[0]; fs.mkdirSync(path.dirname(venvPy), { recursive: true }); fs.writeFileSync(venvPy, '');
   assert.equal(langidCmd(h, '/r')[1], '/r/runtime/langid/langid.py');
   const seen = [];
-  const exec = (cmd, args, opts) => { seen.push({ cmd, args, input: JSON.parse(opts.input) }); return JSON.stringify([['ka', 0.81], ['en', 0.96], ['en', 0.38], ['it', 0.95]]); };
-  const l = languages(['ქართული აბზაცი, საკმაოდ გრძელი რომ განისაჯოს', 'An English paragraph long enough to be judged here', 'ops.mjs:294 memory() exec harvest --bundle', 'Un paragrafo italiano abbastanza lungo da essere giudicato', 'ok'], { home: h, root: '/r', exec });
-  assert.deepEqual(l, { status: 'ok', paragraphs: 4, counts: { en: 1, ka: 1, it: 1, unsure: 1 } });
+  const paras = ['ქართული აბზაცი, საკმაოდ გრძელი რომ განისაჯოს', 'An English paragraph long enough to be judged here', 'ops.mjs:294 memory() exec harvest --bundle -', 'ნახევარი ქართული ნახევარი and half of it English text', 'ok'];
+  const exec = (cmd, args, opts) => { seen.push({ cmd, args, input: JSON.parse(opts.input) }); return JSON.stringify([[true, 90, [['ka', 100]]], [true, 50, [['en', 98]]], [false, 40, []], [true, 60, [['ka', 56], ['en', 43]]]]); };
+  const l = languages(paras, { home: h, root: '/r', exec });
+  assert.equal(l.status, 'ok'); assert.equal(l.paragraphs, 4); assert.equal(l.unreliable, 1);
+  assert.deepEqual(l.dominant, { ka: 2, en: 1 });
+  assert.ok(l.shares.ka > l.shares.en && l.shares.ka + l.shares.en > 95 && l.shares.ka + l.shares.en <= 100, JSON.stringify(l.shares));
+  assert.deepEqual(Object.keys(l.shares), ['ka', 'en'], 'sorted by share');
   assert.equal(seen[0].cmd, venvPy); assert.deepEqual(seen[0].args, ['/r/runtime/langid/langid.py']); assert.equal(seen[0].input.length, 4, 'the two-letter answer is not sent');
-  assert.deepEqual(languages([], { home: h, root: '/r', exec }), { status: 'ok', paragraphs: 0, counts: {} });
-  assert.equal(languages(['An English paragraph long enough to be judged here'], { home: h, root: '/r', exec: () => { throw Object.assign(new Error('x'), { stderr: 'langid: no model at /m (runtime/langid/install.sh)\n' }); } }).why, 'langid: no model at /m (runtime/langid/install.sh)');
-  assert.equal(languages(['An English paragraph long enough to be judged here'], { home: h, root: '/r', exec: () => 'nope' }).status, 'unavailable');
+  assert.deepEqual(languages([], { home: h, root: '/r', exec }), { status: 'ok', paragraphs: 0, unreliable: 0, shares: {}, dominant: {} });
+  assert.equal(languages([paras[1]], { home: h, root: '/r', exec: () => { throw Object.assign(new Error('x'), { stderr: 'langid: no pycld2 in this interpreter (runtime/langid/install.sh)\n' }); } }).why, 'langid: no pycld2 in this interpreter (runtime/langid/install.sh)');
+  assert.equal(languages([paras[1]], { home: h, root: '/r', exec: () => 'nope' }).status, 'unavailable');
+  assert.equal(languages([paras[1]], { home: h, root: '/r', exec: () => '[]' }).status, 'unavailable', 'a verdict count that does not match is not read');
 });
 
 test('session: counts the harness processes of the uid; none is zero, not a throw', () => {

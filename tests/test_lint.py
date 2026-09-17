@@ -495,6 +495,9 @@ def case_locale_file_shape() -> None:
         assert code == 1, out
         for phrase in ("country 'ge'", "ui_lang 'ka'", "not in the locale"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
+        write(ident(fabric, "locale", "ge", "locale.json"), '{"country": "ALL", "timezone": "Asia/Tbilisi", "tool_description": "ვებ-ძიება ქართულად"}')
+        code, out = run_lint(fabric)
+        assert code == 0, f"ALL and no language fields is a valid locale (Brave has no Georgian): {out}"
         write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "language": "ka"}')
         code, out = run_lint(fabric)
         assert code == 1 and "unknown field(s) ['language']" in out, out

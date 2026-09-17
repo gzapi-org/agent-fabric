@@ -166,31 +166,45 @@ const binInto = (blocks, counts) => {
   blocks[share >= 0.9 ? 'only' : share >= 0.3 ? 'mixed' : 'latin'] += 1;
 };
 const paragraphs = (text, counts, blocks, sink) => { for (const para of text.split(/\n\s*\n/)) { const c = scriptCounts(para); binInto(blocks, c); for (const [k, v] of Object.entries(c)) counts[k] = (counts[k] ?? 0) + v; sink?.push(para); } };
-// THE LANGUAGE, not only the script (the CEO, 2026-09-17: use fastText).
-// Script shares cannot tell English from Italian or Russian from
-// Ukrainian; lid.176.ftz can, per paragraph. The predictor runs in the
-// account's own venv on the account's own text (runtime/langid/,
-// installed by bootstrap.sh); only the labels come back. A paragraph
-// under 20 letters is not judged, a top label under LANGID_FLOOR is
-// `unsure` (a code line scored en 0.38, a two-letter answer 0.63, read
-// back 2026-09-17). Without the venv or the model the section says
+// THE LANGUAGE, not only the script (the CEO, 2026-09-17: CLD2). Script
+// shares cannot tell English from Italian or Russian from Ukrainian, and
+// a single-label classifier cannot see the English inside a Georgian
+// paragraph (fastText named a half-and-half paragraph `ka 0.83`); CLD2
+// names up to three languages per paragraph with the share of each, and
+// says when it is unreliable. The detector runs in the account's own venv
+// on the account's own text (runtime/langid/, installed by bootstrap.sh);
+// only the verdicts come back. `shares` is the text by language, each
+// paragraph's percentages weighted by its letters; `dominant` counts
+// paragraphs by their first language; `unreliable` counts the paragraphs
+// CLD2 would only guess at (a code line, a two-letter answer, Georgian in
+// Latin letters — the script shares still see that one). A paragraph
+// under 20 letters is not sent. Without the venv the section says
 // `unavailable`, never a guess.
-export const LANGID_FLOOR = 0.5;
+const lettersOf = p => Object.values(scriptCounts(p)).reduce((a, b) => a + b, 0);
 export function langidCmd(home = os.homedir(), root = process.env.AGENT_FABRIC_ROOT ?? path.join(home, 'projects', 'agent-fabric')) {
   return [path.join(home, '.cache', 'agent-fabric', 'langid', 'venv', 'bin', 'python'), path.join(root, 'runtime', 'langid', 'langid.py')];
 }
-export function languages(paragraphs, { home, root, exec = execFileSync, floor = LANGID_FLOOR } = {}) {
-  const judged = paragraphs.filter(p => Object.values(scriptCounts(p)).reduce((a, b) => a + b, 0) >= 20);
+export function languages(paragraphs, { home, root, exec = execFileSync } = {}) {
+  const judged = paragraphs.filter(p => lettersOf(p) >= 20);
   const [py, script] = langidCmd(home, root);
-  if (!fs.existsSync(py)) return { status: 'unavailable', why: 'no predictor venv (runtime/langid/install.sh)' };
-  if (!judged.length) return { status: 'ok', paragraphs: 0, counts: {} };
+  if (!fs.existsSync(py)) return { status: 'unavailable', why: 'no detector venv (runtime/langid/install.sh)' };
+  if (!judged.length) return { status: 'ok', paragraphs: 0, unreliable: 0, shares: {}, dominant: {} };
   let out;
   try { out = exec(py, [script], { input: JSON.stringify(judged), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 60000 }); }
   catch (e) { return { status: 'unavailable', why: String(e?.stderr ?? e?.message ?? e).trim().split('\n').pop().slice(0, 160) }; }
-  let labels; try { labels = JSON.parse(out); } catch { return { status: 'unavailable', why: 'the predictor answered something that is not JSON' }; }
-  const counts = {};
-  for (const [label, prob] of labels) { const k = prob >= floor && label ? label : 'unsure'; counts[k] = (counts[k] ?? 0) + 1; }
-  return { status: 'ok', paragraphs: judged.length, counts: Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1])) };
+  let verdicts; try { verdicts = JSON.parse(out); } catch { return { status: 'unavailable', why: 'the detector answered something that is not JSON' }; }
+  if (!Array.isArray(verdicts) || verdicts.length !== judged.length) return { status: 'unavailable', why: 'the detector answered for a different number of paragraphs' };
+  const weight = {}, dominant = {}; let total = 0, unreliable = 0;
+  verdicts.forEach((v, i) => {
+    const [reliable, , details] = Array.isArray(v) ? v : [false, 0, []];
+    if (!reliable || !Array.isArray(details) || !details.length) { unreliable += 1; return; }
+    const n = lettersOf(judged[i]); total += n;
+    for (const [code, pct] of details) weight[code] = (weight[code] ?? 0) + n * pct / 100;
+    dominant[details[0][0]] = (dominant[details[0][0]] ?? 0) + 1;
+  });
+  const sorted = o => Object.fromEntries(Object.entries(o).sort((x, y) => y[1] - x[1]));
+  const shares = total ? sorted(Object.fromEntries(Object.entries(weight).map(([k, v]) => [k, Math.round(1000 * v / total) / 10]))) : {};
+  return { status: 'ok', paragraphs: judged.length, unreliable, shares, dominant: sorted(dominant) };
 }
 export function notesDir(home = os.homedir(), env = process.env, login = (() => { try { return os.userInfo().username; } catch { return 'unknown'; } })()) {
   return path.join(env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'agent-fabric', 'agents', login, 'notes');

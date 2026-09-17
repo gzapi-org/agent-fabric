@@ -113,7 +113,15 @@ only. So a language-culture login gets `runtime/mcp/websearch-locale`
 `country`, `search_lang` and `ui_lang` are fixed from
 `locale/<suffix>/locale.json` (lint validates it): the holder chooses
 the query, never the locale, and the tool's description is in the
-locale, since its reader is the holder. `install-agent-files.sh` writes
+locale, since its reader is the holder. **Brave has no Georgian
+locale** (read back 2026-09-17: `country=GE`, `search_lang=ka` and
+`ui_lang=ka-GE` are each refused with 422; a Georgian query with no
+locale returns Georgian pages — three of five `ka`, `.ge` hosts), so
+the `ge` file names `country: ALL` and no language, and the search is
+global, steered by the language of the query. That is less than the
+"Georgian browser" the CEO asked for; a backend with a Georgian locale
+(Google's Custom Search JSON API has `gl=ge`, `hl=ka`, `lr=lang_ka`) is
+the CEO's decision, and the server is one function away from it. `install-agent-files.sh` writes
 the entry into the login's user-scope configuration on a
 language-culture login with a locale file and removes it from any other,
 by the server path in its args; the key, `BRAVE_SEARCH_API_KEY`, is a

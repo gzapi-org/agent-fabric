@@ -1,0 +1,4 @@
+{
+  "package": "pycld2==0.42",
+  "note": "Google's Compact Language Detector 2 through its Python binding (the CEO, 2026-09-17, after fastText's lid.176.ftz proved to be a single-label classifier: it named a half-Georgian, half-English paragraph `ka 0.83` and could not see the English). CLD2 returns up to three languages per text with the share of each, and says when it is unreliable rather than guessing. Read back on this host: a mixed paragraph is ka 56 / en 43; a code line, a two-letter answer and Georgian in Latin letters are unreliable; 2 000 detections in 9 ms. The binding builds from source: it needs a C++ compiler on the host (gcc/g++ are on this one); where there is none the section says unavailable."
+}

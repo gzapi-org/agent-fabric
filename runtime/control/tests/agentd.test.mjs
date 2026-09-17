@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig } from '../agentd.mjs';
+import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource } from '../agentd.mjs';
 
 const AGENTD = new URL('../agentd.mjs', import.meta.url).pathname;
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
@@ -44,6 +44,20 @@ test('operatorAddresses and controlConfig read the fabric\'s own files', () => {
   const c = controlConfig({});
   assert.equal(c.channel, 'fabric:control'); assert.equal(c.ttl_s, 30);
   assert.equal(controlConfig({ FABRIC_CONTROL_CHANNEL: 'x:control', CLAUDE_BRIDGE_URL: 'http://h:1' }).relay_url, 'http://h:1');
+});
+
+test('watchSource: a changed .mjs in a watched directory fires once, after the quiet period; a .txt does not', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-src-'));
+  let fired = 0;
+  const ws = watchSource(() => { fired += 1; }, [dir]);
+  try {
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'x');
+    await new Promise(r => setTimeout(r, 2500));
+    assert.equal(fired, 0, 'a non-source file is not a change');
+    fs.writeFileSync(path.join(dir, 'a.mjs'), '1'); fs.writeFileSync(path.join(dir, 'b.mjs'), '2');   // a pull: several files
+    await new Promise(r => setTimeout(r, 2800));
+    assert.equal(fired, 1, 'one restart for one pull');
+  } finally { for (const w of ws) w?.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // A fake relay that keeps a channel in memory: /api/messages (newest N, or

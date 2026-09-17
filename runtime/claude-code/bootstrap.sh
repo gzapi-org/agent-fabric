@@ -20,6 +20,9 @@
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
 #   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md
 #                                      the dispatch policy as a loadable skill, from policies/
+#   ~/.config/systemd/user/agent-fabric-agentd.service
+#                                      the control agent (runtime/control/), enabled and started
+#                                      in this account's user manager when one is running
 #
 # Nothing here names an agent: the hooks ask the OS who is running at
 # session start. Nothing here makes projects/ a git repository. A managed
@@ -168,6 +171,29 @@ except Exception: print("")')"
         echo "  =  $wc ($pid): core.hooksPath"; same=$((same+1))
     fi
 done
+
+# 6. The control agent: a systemd user unit that answers the coordinator's
+#    fabric-ctl over the relay (runtime/control/). Enabled and started in
+#    this account's user manager — the one that exists because the account
+#    lingers (persist-accounts.sh); with no manager (a bare `sudo -u`, a
+#    scratch HOME in a test) the unit is only installed, and starts at the
+#    next login. Restarted only when the unit file itself changed: a pull
+#    that changes the daemon's code is the daemon's own business (it exits,
+#    Restart= brings it back).
+UNIT_NAME=agent-fabric-agentd
+before=$changed
+put "$HOME/.config/systemd/user/$UNIT_NAME.service" "$FABRIC_ROOT/runtime/control/$UNIT_NAME.service"
+if (( ! DRY_RUN )); then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [[ -S "$XDG_RUNTIME_DIR/bus" ]] && command -v systemctl >/dev/null 2>&1 \
+       && systemctl --user daemon-reload >/dev/null 2>&1; then
+        systemctl --user enable --now "$UNIT_NAME" >/dev/null 2>&1 || true
+        (( changed > before )) && systemctl --user restart "$UNIT_NAME" >/dev/null 2>&1 || true
+        echo "  *  $UNIT_NAME: $(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || echo unknown) (systemctl --user status $UNIT_NAME)"
+    else
+        echo "  !  $UNIT_NAME: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus (loginctl enable-linger $(id -un), or the next login starts it)"
+    fi
+fi
 
 echo "bootstrap: $changed written, $same already current."
 echo "Launch from $PROJECTS: cd \"$PROJECTS\" && claude   — the session starts as $(python3 "$FABRIC_ROOT/runtime/identity.py")."

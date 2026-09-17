@@ -95,6 +95,17 @@ export function accept(rec, { me, operators, ttl_s, seen, now = Date.now() }) {
   return { ok: true, request: r };
 }
 
+// A pull that changes the daemon's own code must reach the daemon: a
+// loaded module never reloads, so the process ends itself (after a 2 s
+// quiet period, a pull writes several files) and the unit's Restart=
+// starts the next one on the new tree. What is watched is the two
+// directories the daemon imports from, never a file's content.
+export function watchSource(onChange, dirs = [HERE, path.join(FABRIC_ROOT, 'communication', 'gzcoord', 'scripts')]) {
+  let timer = null;
+  const arm = (ev, name) => { if (!name || !/\.(mjs|json)$/.test(String(name))) return; clearTimeout(timer); timer = setTimeout(onChange, 2000); };
+  return dirs.map(d => { try { const w = fs.watch(d, arm); w.unref(); return w; } catch { return null; } });
+}
+
 export function remember(seen, id) {
   seen.add(id);
   if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
@@ -147,6 +158,7 @@ export async function main(argv = process.argv.slice(2)) {
     last = up.id;
   };
   console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}`);
+  if (!once) watchSource(() => { console.error('agentd: source changed; exiting for systemd to restart on the new code'); process.exit(0); });
   for (;;) {
     try {
       if (!last) await prime();

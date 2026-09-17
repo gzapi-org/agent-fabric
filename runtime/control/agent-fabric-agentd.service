@@ -1,0 +1,25 @@
+# runtime/control/agent-fabric-agentd.service — the control agent as a
+# systemd USER unit: one per account, run as the login, alive whether or
+# not a session is (the account lingers: persist-accounts.sh). Installed
+# by runtime/claude-code/bootstrap.sh to ~/.config/systemd/user/ at every
+# moveto entry. Static on purpose: every account's checkout is
+# ~/projects/agent-fabric, so %h is the only variable. The daemon exits by
+# itself when its source changes (a pull), and Restart= brings it back on
+# the new code; StartLimitIntervalSec=0 so a relay outage never exhausts
+# the restart budget.
+[Unit]
+Description=agent-fabric control agent: answers fabric-ctl over the relay
+Documentation=file:%h/projects/agent-fabric/docs/control-plane.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=AGENT_FABRIC_ROOT=%h/projects/agent-fabric
+WorkingDirectory=%h/projects/agent-fabric
+ExecStart=/usr/bin/env node %h/projects/agent-fabric/runtime/control/agentd.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

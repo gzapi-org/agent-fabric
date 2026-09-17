@@ -247,6 +247,9 @@ first="${PROJECTS[0]:-}"; where="~/projects${first:+/$first}"
 for prov in anthropic openrouter; do
     as_login "cd $where && AGENT_FABRIC_NO_ANNOUNCE=1 ~/projects/agent-fabric/runtime/openrouter/launch --provider $prov --print 2>&1 | grep -E '^launch:|resolved profile' | head -1" | sed "s/^/   launch ($prov): /" >&2
 done
+# The control agent bootstrap enabled in the account's user manager answers
+# the coordinator from here on: one ping, from this checkout, as the operator.
+"$ROOT/bin/fabric-ctl" "$LOGIN" ping 2>&1 | tail -n +2 | sed 's/^/   control plane: /' >&2 || true
 creds="$($SUDO -n test -f "$HOME_DIR/.claude/.credentials.json" && echo yes || echo no)"
 cat >&2 <<EOF
 new-agent: done. Left for a person, in a terminal (nothing here can do them):

@@ -174,10 +174,18 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     projects = os.path.join(tmp, "projects")
     home = os.path.join(tmp, "home")
     os.makedirs(projects); os.makedirs(home)
-    env = {**os.environ, "HOME": home, "AGENT_FABRIC_STATE_DIR": os.path.join(tmp, "state")}
+    # A runtime dir with no bus: the control agent's unit is installed and
+    # never handed to THIS account's real user manager.
+    runtime_dir = os.path.join(tmp, "run"); os.makedirs(runtime_dir)
+    env = {**os.environ, "HOME": home, "AGENT_FABRIC_STATE_DIR": os.path.join(tmp, "state"), "XDG_RUNTIME_DIR": runtime_dir}
     env.pop("CLAUDE_CONFIG_DIR", None)
+    proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects, "--dry-run"], capture_output=True, text=True, env=env)
+    assert "systemd/user/agent-fabric-agentd.service (would write)" in proc.stdout, proc.stdout
     proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    unit = os.path.join(home, ".config", "systemd", "user", "agent-fabric-agentd.service")
+    assert os.path.isfile(unit), "the control agent's unit is installed per account"
+    assert "agent-fabric-agentd: installed, not started" in proc.stdout and "no user manager" in proc.stdout, proc.stdout
     claude_md = open(os.path.join(projects, "CLAUDE.md"), encoding="utf-8").read()
     assert "@agent-fabric/CLAUDE.md" in claude_md and len(claude_md.splitlines()) <= 8, claude_md
     settings = json.load(open(os.path.join(projects, ".claude", "settings.json"), encoding="utf-8"))

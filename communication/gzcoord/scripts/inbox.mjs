@@ -254,10 +254,15 @@ export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {})
 // many times fabric-secrets sync runs (web-dev-01, 2026-09-14). On a 401
 // the inbox re-reads this file and retries once; only when the file
 // agrees with the refused value is the rotation reported.
-export function syncedToken(home = os.homedir()) {
+// One `export NAME=value` line of the synced secrets file, unquoted, or
+// undefined. The value is a secret: a caller prints it nowhere and uses it
+// in place (a header, a hash), which is what the control agent's key
+// fingerprints and the token below do.
+export function syncedVar(name, home = os.homedir()) {
   try {
+    const re = new RegExp(`^export ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=(.*)$`);
     for (const line of fs.readFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), 'utf8').split('\n')) {
-      const m = /^export CLAUDE_BRIDGE_AUTH_TOKEN=(.*)$/.exec(line);
+      const m = re.exec(line);
       if (!m) continue;
       let v = m[1].trim();
       if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) v = v.slice(1, -1);
@@ -265,6 +270,9 @@ export function syncedToken(home = os.homedir()) {
     }
   } catch { /* not enrolled, or no sync yet */ }
   return undefined;
+}
+export function syncedToken(home = os.homedir()) {
+  return syncedVar('CLAUDE_BRIDGE_AUTH_TOKEN', home);
 }
 
 // A 401 is not "unreachable": the relay answered and refused the token.

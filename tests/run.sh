@@ -23,6 +23,7 @@ if [[ "$what" == all || "$what" == python ]]; then
 fi
 if [[ "$what" == all || "$what" == gzcoord ]]; then
     run "gzcoord" bash -c 'cd communication/gzcoord && node --test tests/*.test.mjs 2>&1 | grep -E "^(not ok|# (tests|pass|fail))"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
+    run "control plane (ops, agentd, ctl)" bash -c 'node --test runtime/control/tests/*.test.mjs 2>&1 | grep -E "^(not ok|# (tests|pass|fail))"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
 fi
 if [[ "$what" == all || "$what" == bash ]]; then
     run "launcher" bash policies/run_suite.sh runtime/openrouter/test_launch.sh

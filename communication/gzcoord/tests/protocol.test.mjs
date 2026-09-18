@@ -426,7 +426,7 @@ test('exactly one of TO, TO-ROLE, BROADCAST; none on HELLO or GOODBYE', () => {
 // clone holding backend-dev with no slug in its name — an earlier cut of
 // this rule silenced it.
 test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to the role', () => {
-  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: architect-cto-01-0033\nTO: develop-qzapp/gzapp-gzcoord-coordinator\n', { taxonomy });
+  const ok = validate('[GZCOORD/1] INFO\nFROM: develop-qzapp/architect-cto-01\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: architect-cto-01-0033\nTO: develop-qzapp/gzapp-devex-tooling\n', { taxonomy });
   assert.deepEqual(ok.errors, []);
   assert.deepEqual(ok.warnings, [], 'a well-formed message under the profile warns about nothing');
   for (const role of ['Application Architect', 'Architect / CTO']) {
@@ -451,7 +451,7 @@ test('with a taxonomy, ROLE and TO-ROLE are slugs; the address is not bound to t
 
 test('slugOf finds the longest whole-token slug an instance carries', () => {
   assert.equal(slugOf('agent-fabric-coordinator', taxonomy), 'fabric-coordinator');
-  assert.equal(slugOf('legacy-gzcoord-coordinator', taxonomy), undefined);   // renamed role: the old slug is not in the catalogue
+  assert.equal(slugOf('legacy-old-role', taxonomy), undefined);   // renamed role: the old slug is not in the catalogue
   assert.equal(slugOf('architect-cto-01', taxonomy), 'architect-cto');
   assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
   assert.equal(slugOf('legacy-clone-2', taxonomy), undefined);

@@ -60,7 +60,7 @@ Do not create a nested Git repository, and do not vendor the subsystem.
 
 The agent's address is `<host>/<login>` (SPEC §3.1): the account the
 session runs under, not the working-copy directory. `gzapp-claude2` and
-`gzapp-gzcoord-coordinator` under the shared account are therefore one
+`gzapp-claude3` under the shared account are therefore one
 agent to their peers (`user`); the provisioned accounts
 (`architect-cto-01`, `backend-dev-02`, …) keep the addresses they already
 had.

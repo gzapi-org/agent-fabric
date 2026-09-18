@@ -4,7 +4,7 @@
   "role_definitions": {
     "role": "fabric-coordinator",
     "holders": [
-      "gzcoord-coordinator"
+      "user"
     ]
   }
 }

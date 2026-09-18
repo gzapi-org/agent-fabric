@@ -42,7 +42,7 @@ new_repo() {
   cp "$UNDER_TEST" "$SANDBOX/policies/"
   printf 'scope\n' > "$SANDBOX/identities/roles/flutter-dev/charter.md"
   printf '{"roles":[]}\n' > "$SANDBOX/identities/roles/catalog.json"
-  printf '{"role_definitions":{"role":"fabric-coordinator","holders":["gzcoord-coordinator"]}}\n' > "$SANDBOX/policies/authority.json"
+  printf '{"role_definitions":{"role":"fabric-coordinator","holders":["coord-01"]}}\n' > "$SANDBOX/policies/authority.json"
   printf '{"roles":[]}\n' > "$SANDBOX/projects/demo/taxonomy.json"
   printf 'other\n' > "$SANDBOX/memory/projects/demo/flutter-dev/workflow.md"
   git -C "$SANDBOX" init -q
@@ -77,7 +77,7 @@ out="$(check develop-qzapp/flutter-dev-01/feat/thing)"
 [[ "$out" == *"Propose it instead"* ]] && pass "says what to do instead" || fail "says what to do instead" "$out"
 
 echo "the same change by a recognised holder of fabric-coordinator"
-rc="$(rc_of develop-qzapp/gzcoord-coordinator/feat/x)"
+rc="$(rc_of develop-qzapp/coord-01/feat/x)"
 [[ "$rc" == 0 ]] && pass "allowed for a listed holder (exit 0)" || fail "allowed for a listed holder (exit 0)" "exit $rc"
 rc="$(rc_of develop-qzapp/fabric-coordinator-02/feat/x)"
 [[ "$rc" == 0 ]] && pass "allowed for an account named for the role" || fail "allowed for an account named for the role" "exit $rc"

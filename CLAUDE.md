@@ -154,10 +154,9 @@ Do not leave completed logical units of work uncommitted.
 **The repo authors its own history: no machine attribution, anywhere.**
 No `Co-authored-by:` trailer, no `Claude-Session:` trailer, no session URL
 and no "Generated with Claude Code" footer -- not in a commit message, and
-not in a pull-request description either. Two separate sessions lost this
-early on, days apart and in two different shapes, which is why it is a
-guard (`policies/ban_generated_by_attribution.sh`) and not only a rule.
-It runs three times: as the `commit-msg` hook in this checkout
+not in a pull-request description either. The guard
+(`policies/ban_generated_by_attribution.sh`) runs three times: as the
+`commit-msg` hook in this checkout
 (`policies/githooks/`, enabled by `bootstrap.sh` via `core.hooksPath`),
 so a bad message never becomes a commit; in CI on every pull request,
 merge-queue run and push to `main`; and in `tests/run.sh`. The CI guard

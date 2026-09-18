@@ -278,6 +278,22 @@ the file name alike, and every substitution is named in the drain
 report so the memory's owner fixes the source. Lint refuses a committed
 slice that still carries a hit, so nothing reaches `main` unsubstituted.
 
+**Where the rule stops** (three roles asked on the first fleet drain,
+2026-09-18): the lists ban a deployment's *place names* — its city, its
+country, a sibling project — as words in prose. A **language or script
+name is not banned**: "the Georgian script", "a Georgian interface",
+`ka-GE` name the locale's language, which is the fact itself for a
+locale rule, and hiding it would make the knowledge unreadable ("a
+[redacted] interface"). Say what the place is to the fact — the
+deployment, the market, the deployment's country — and name the
+language where the language is the point. A **path or identifier is
+not matched**: the patterns stop at word boundaries, so
+`tools/gtfs_<city>/…` passes as it is, and a `solution` slice cites
+the system's paths as the system spells them — project truth, kept in
+the project's own repository. Every substitution is a memory to fix at
+the source; a hit inside a path would be a name to change in the
+system, which is not the drain's call.
+
 ## What is not here yet
 
 Recall is deliberate: a session consults the index, or a skill surfaces

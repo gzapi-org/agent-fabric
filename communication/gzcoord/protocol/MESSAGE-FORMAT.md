@@ -110,9 +110,22 @@ what makes the piece done — copy: the key names, the caller's en-US
 draft, the surfaces that reference them; a migration: its reader and
 the columns; a check: what red and green mean
 
+FACT:
+for person-facing copy, the file:line, migration or contract that
+makes each technical claim in the text true in every reachable state
+— the supplier renders what is true, not what the draft assumed
+
 BY:
 when the branch is otherwise done, so the supplier knows the window
 ```
+
+A supply `REQUEST` carries `REPLY-EXPECTED: yes` written out: the
+caller's arming is gated on that `REPLY`, so the default is not left
+to be inferred. The `FACT` line exists because a draft's claim can be
+false in a state its author did not see — "no sign-in account" was
+false for a pending row that already carried its identity pair, and
+the copy shipped that way until the fact was named (gzapp #870,
+2026-09-18).
 
 The supplier's `REPLY` carries `REFERENCES` with the sha or range it
 delivered and one more section:
@@ -129,6 +142,36 @@ names the intended caller role in `DELIVER-TO` and a `FOLD-BY` date
 role once, then opens its own pull request under the count rule. The
 caller's acknowledgement is the fold and the line in the PR body naming
 whose range is which, not a message.
+
+**The flow, end to end.** One sequence, so a reader does not assemble
+it from three sections: an `OBSERVATION` names the gap → the caller's
+`REPLY` names the branch (the acknowledgement by reference) → the
+caller's `REQUEST` with `DELIVER-TO`, `ACCEPTANCE` (and `FACT` for
+copy), `BY`, `REPLY-EXPECTED: yes` → the supplier's `REPLY` with the
+sha range under `REFERENCES` and `SUPPLIER-REVIEW` → the caller's
+range line in the PR body → one blind review of the whole range, each
+finding routed to the lane whose `Fabric-Role:` the hunk's commit
+carries → a `DECISION` only to materialise what already landed. The
+worked example is gzapp #875 (2026-09-18): five lanes, one PR. Every
+supplier push is a `pull_request` run on the caller's PR, so a
+supplier batches its pushes where it can.
+
+## Carrying the owner's word
+
+A message never authorises anything (SEMANTICS.md), and twice in one
+day the same kind of relayed word was refused by one session and
+accepted by another. What makes the difference legible is how the
+word is carried. A `DECISION` that carries the owner's word states it
+verbatim, with the session it was given in and the time, under a
+fixed section:
+
+```text
+OWNER-WORD:
+"arm 871" — given in develop-qzapp/architect-cto-01, 2026-09-18T16:45Z
+```
+
+A paraphrase ("the owner agreed") is not an `OWNER-WORD`. What the
+recipient does with it is in SEMANTICS.md, "The owner's word, relayed".
 
 ## Asking for an undo
 

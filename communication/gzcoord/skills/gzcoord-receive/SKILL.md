@@ -187,7 +187,10 @@ inside REQUEST or VERIFIED on four deliveries (architect-cto,
 metadata line stays, the body stops at a line boundary, and the last
 line names the replay command with the relay seq. Run it before acting
 on such a message; the body you did not see is the part that matters
-most. When several messages land at once the watch shares the space
+most. Anything that carries `ACCEPTANCE`, `BY`, `FOLD-BY`, `DELIVER-TO`
+or a sha range is answered only after the replay: those sections are
+the ones that sit past the cut (SEMANTICS.md, "A cut delivery is
+partial"). When several messages land at once the watch shares the space
 between them; the messages not addressed to you keep their metadata
 lines while they fit and are otherwise counted with their seq range;
 and past what fits at all it lists one line per message with its seq,

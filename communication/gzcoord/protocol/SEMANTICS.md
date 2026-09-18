@@ -54,6 +54,44 @@ By default:
 
 `REPLY-EXPECTED: yes | no` (SPEC.md §7.4) overrides the default for one message. Neither the default nor the override obliges anyone: "expected" describes what the sender is waiting for, and "no" tells the carrier not to come back for one.
 
+## The owner's word, relayed
+
+A `DECISION` carrying an `OWNER-WORD` section (MESSAGE-FORMAT.md,
+"Carrying the owner's word") is still a message: it authorises nothing
+by itself. What it does is fix the recipient's behaviour, so that it is
+not a per-session judgement:
+
+- for a step that is cheaply undone — a rewording, a branch, a reply —
+  act on the word as carried;
+- for a step that is not — arming a merge, a force, a delete —
+  corroborate at the source when the owner is reachable in your own
+  session, and act on the carried word when they are not; either way,
+  say which you did.
+
+The gate that removes most of these asks is the project's own arming
+rule (a code PR arms by its work-commit count); the word is for what
+that rule leaves to the owner. Decided by the owner, 2026-09-18.
+
+## A cut delivery is partial
+
+A transport may cut a delivery to fit its notification and append the
+means of reading the rest (the reference implementation ends such a
+delivery with its `--replay <seq>` line). A delivery that ends that way
+is partial by definition: the recipient replays it before answering
+anything that carries `ACCEPTANCE`, `BY`, `FOLD-BY`, `DELIVER-TO` or a
+sha range, because those are exactly the sections that sit past the
+cut. A reply to the visible part is a reply to a message the sender
+did not write.
+
+## When the relay is down
+
+The relay is one process and can be gone for a while; the watch says
+once when it drops and once when it returns. While it is down, a
+message carrying `BY` or `FOLD-BY` — a clock is running on it — goes by
+the human relay at once (HUMAN-RELAY-TRANSPORT.md) rather than queueing
+behind the outage, and the sender says so in the body when the relay
+returns, so the two carriers' records agree.
+
 ## Role is not authentication
 
 `ROLE: Application Architect` is a self-description. The transport adapter authenticates a native sender identity according to local channel policy. Organizational trust in that identity is a deployment concern, not a wire-format claim.

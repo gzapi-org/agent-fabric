@@ -12,8 +12,7 @@
     },
     {
       "id": "brand-comms",
-      "title": "Brand and communications",
-      "candidate": true
+      "title": "Brand and communications"
     },
     {
       "id": "db-admin",
@@ -25,8 +24,7 @@
     },
     {
       "id": "domain-transit",
-      "title": "Transit domain",
-      "candidate": true
+      "title": "Transit domain"
     },
     {
       "id": "edge-hosting",
@@ -42,8 +40,7 @@
     },
     {
       "id": "language-culture",
-      "title": "Language, translation, localization and culture",
-      "candidate": true
+      "title": "Language, translation, localization and culture"
     },
     {
       "id": "p2p-network-dev",

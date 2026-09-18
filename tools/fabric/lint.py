@@ -1031,6 +1031,38 @@ def host_registry_findings(root: str) -> list[str]:
     return findings
 
 
+def candidate_role_findings(root: str, catalog: dict[str, Any] | None,
+                            taxonomy_roles: dict[str, set[str]]) -> list[str]:
+    """`candidate: true` in the catalogue means the role has not yet proved
+    it carries its own weight. The proof is structural, not remembered
+    (architect-cto's proposal, narrowed by the owner, 2026-09-18): a
+    project's taxonomy binds the role AND a login named for it is placed
+    on a host (runtime/hosts/registry.json). Such a role is not a
+    candidate; the flag must go in the same change that made it true."""
+    if not catalog:
+        return []
+    path = os.path.join(root, "runtime", "hosts", "registry.json")
+    try:
+        placement = (json.load(open(path, encoding="utf-8")).get("placement") or {})
+    except (OSError, ValueError):
+        return []
+    bound: dict[str, list[str]] = {}
+    for pid, roles in taxonomy_roles.items():
+        for rid in roles:
+            bound.setdefault(rid, []).append(pid)
+    out: list[str] = []
+    for r in catalog.get("roles", []) or []:
+        if not isinstance(r, dict) or not r.get("candidate"):
+            continue
+        rid = r.get("id") or ""
+        logins = sorted(l for l in placement if l == rid or l.startswith(rid + "-"))
+        if rid in bound and logins:
+            out.append(f"identities/roles/catalog.json: role {rid!r} is a candidate, yet "
+                       f"{', '.join(sorted(bound[rid]))} binds it and {', '.join(logins)} holds it — "
+                       "a proved role; drop `candidate`")
+    return out
+
+
 def load_schema(root: str, subdir: str, name: str) -> dict[str, Any] | None:
     path = os.path.join(root, subdir, f"{name}.schema.json")
     if not os.path.exists(path):
@@ -1232,6 +1264,9 @@ def main() -> int:
                     if os.path.isabs(prefix) or prefix.startswith("~"):
                         findings.append(f"{where}: role {rid!r} path {prefix!r} is machine-specific; "
                                         "paths must be repository-relative")
+
+    # --- a candidate that a project binds and a login holds is proved ------
+    findings += candidate_role_findings(root, catalog, taxonomy_roles)
 
     # --- licenses ----------------------------------------------------------
     findings += license_findings(root)

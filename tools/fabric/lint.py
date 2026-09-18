@@ -508,6 +508,32 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
     return out
 
 
+FABRIC_REF_NAME = "fabric-ref"
+FABRIC_REF_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def fabric_ref_findings(pid: str, wc: str) -> list[str]:
+    """<working copy>/.agent-fabric/fabric-ref names the agent-fabric commit
+    the project's indexes were assembled against — the one its CI checks
+    out, so the fabric moving cannot turn the project's check red
+    (memory/README.md, "Landing a drain"; 2026-09-18, after three reds in
+    a day). Optional; when present it is one line, one full commit id."""
+    path = os.path.join(wc, layout.PROJECT_DIRNAME, FABRIC_REF_NAME)
+    if not os.path.isfile(path):
+        return []
+    where = f"{pid}:{layout.PROJECT_DIRNAME}/{FABRIC_REF_NAME}"
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError as e:
+        return [f"{where}: unreadable ({e})"]
+    lines = text.split("\n")
+    if len(lines) != 2 or lines[1] != "":
+        return [f"{where}: must be exactly one line ending in a newline"]
+    if not FABRIC_REF_RE.match(lines[0]):
+        return [f"{where}: {lines[0]!r} is not a full lowercase commit id (40 hex)"]
+    return []
+
+
 def payload_shape_findings(role: str, role_path: str) -> list[str]:
     """Assert what role.py can actually install, where it is authored.
 
@@ -1178,6 +1204,8 @@ def main() -> int:
             project_ids.append(pid)
             where = (f"projects/{pid}/taxonomy.json" if tax_path.startswith(root)
                      else f"{pid}:{layout.PROJECT_DIRNAME}/taxonomy.json")
+            if not tax_path.startswith(root):
+                findings += fabric_ref_findings(pid, os.path.dirname(os.path.dirname(tax_path)))
             tax = load_json(tax_path, where, findings)
             if tax is None:
                 continue

@@ -352,6 +352,29 @@ def case_a_sibling_working_copy_is_linted_unasked() -> None:
         assert proc.returncode == 0, f"--no-siblings still looked beside the checkout:\n{proc.stdout}{proc.stderr}"
 
 
+def case_fabric_ref_is_one_full_commit_id() -> None:
+    """A project may record the fabric commit its indexes were assembled
+    against (.agent-fabric/fabric-ref), for its CI to check out instead of
+    the fabric's default branch. Absent is fine; present, it is one line,
+    one full lowercase commit id, newline-terminated — anything else is a
+    finding naming the project. Kills: skipping the file, accepting a
+    short id, or a second line."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(proj(fabric, "INDEX.md"), index_for())
+        ref = os.path.join(wc_demo(fabric), ".agent-fabric", "fabric-ref")
+        code, out = run_lint(fabric)
+        assert code == 0, f"no fabric-ref, yet a finding:\n{out}"
+        write(ref, "a" * 40 + "\n")
+        code, out = run_lint(fabric)
+        assert code == 0, f"a well-formed fabric-ref failed:\n{out}"
+        for bad, why in (("a" * 40, "no newline"), ("A" * 40 + "\n", "uppercase"), ("a" * 7 + "\n", "short id"),
+                         ("a" * 40 + "\n" + "b" * 40 + "\n", "two lines"), ("", "empty")):
+            write(ref, bad)
+            code, out = run_lint(fabric)
+            assert code != 0 and "fabric-ref" in out, f"{why} passed:\n{out}"
+
+
 def case_index_lists_domain_slices() -> None:
     """A role's domain slices live outside the project directory and must
     still be indexed there. Kills: indexing only the project directory."""

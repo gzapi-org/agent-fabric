@@ -221,6 +221,24 @@ fact, and the next drain merges it (`identities/prompt/memory.md` tells
 every session so). `bin/fabric-status` counts what an agent has written
 and not yet drained.
 
+**Landing a drain, in this order** (2026-09-18, after three gzapp
+reds in one day from the fabric moving under its check). The domain
+slices commit and push here first — a project index that lists a slice
+not yet on fabric main is the same drift finding, so the order is
+forced. Then, on each project's drain branch,
+`.agent-fabric/fabric-ref` is written with that commit
+(`git -C agent-fabric rev-parse origin/main >
+<wc>/.agent-fabric/fabric-ref`; one line, the full id — lint checks
+the shape) and the project pull requests are opened and armed at once.
+A project whose CI runs the fabric's guards checks out the commit that
+file names, never the fabric's default branch: a fabric change reaches
+the project's check only when the ref moves, in the pull request that
+carries the matching indexes, and a fabric defect stops the fabric's
+CI rather than the project's. Between the fabric push and the project
+merges the window is still open on a project whose CI has not yet
+pinned the ref — kept to minutes by arming the PRs in the same breath
+as the push, and said on the relay when a queue holds one for longer.
+
 **Merge mode is the default from cycle two onward.** New claims fold into
 existing slices; the existing file is the calibration anchor for what
 counts as good enough; **an empty delta is a correct outcome.** Never

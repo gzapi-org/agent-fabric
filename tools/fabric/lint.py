@@ -103,26 +103,9 @@ FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
 PAYLOAD_DIRS = frozenset({"skills", "commands"})
 
 
-def sibling_working_copies(root: str) -> dict[str, str]:
-    """Registered projects whose working copy sits beside this checkout
-    (the workspace layout: projects/<clone>/ for each), with a
-    .agent-fabric/memory/ to lint. Keyed by project id."""
-    out: dict[str, str] = {}
-    parent = os.path.dirname(os.path.abspath(root))
-    registry = workingcopy.load_registry(os.path.join(root, "projects", "registry.json"))
-    try:
-        names = sorted(os.listdir(parent))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(parent, name)
-        if path == os.path.abspath(root) or not os.path.isdir(os.path.join(path, layout.PROJECT_DIRNAME, "memory")):
-            continue
-        pid = workingcopy.resolve(path, registry).get("project")
-        if pid and pid != layout.FABRIC_PROJECT_ID and pid not in out:
-            out[pid] = path
-    return out
-
+# sibling_working_copies moved to workingcopy.py (2026-09-18): the
+# assembler needs the same reach for the hygiene lists.
+sibling_working_copies = workingcopy.sibling_working_copies
 
 def prompt_template_findings() -> list[str]:
     """The sections every launch prompt appends after the role's own files

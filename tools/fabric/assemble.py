@@ -73,6 +73,10 @@ _spec = importlib.util.spec_from_file_location(
     "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
 layout = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(layout)
+_wc_spec = importlib.util.spec_from_file_location(
+    "fabric_workingcopy", os.path.join(os.path.dirname(os.path.realpath(__file__)), "workingcopy.py"))
+workingcopy = importlib.util.module_from_spec(_wc_spec)
+_wc_spec.loader.exec_module(workingcopy)
 
 TIER1 = {"charter", "workflow", "index"}
 DEFAULT_SLICE_BUDGET_TOKENS = 1800
@@ -479,7 +483,18 @@ def main() -> int:
         layout.project_memory_root(project)
     except LookupError as exc:
         sys.exit(f"assemble: {exc}")
-    BANNED_PATTERNS[:] = layout.load_hygiene_patterns([project])
+    # Every project's list, not the target's alone: a slice travels into
+    # every repository through the fabric's domains, and lint holds it to
+    # every list — a name one project keeps out (a city, a deployment) is
+    # out of the corpus everywhere (found 2026-09-18: a slice admitted here
+    # carried a city name another project bans). The working copies
+    # beside the fabric are found the way lint finds them, so each list is
+    # actually read, not skipped for want of a known checkout.
+    for pid, path in workingcopy.sibling_working_copies(layout.FABRIC_ROOT).items():
+        if pid not in layout.explicit_working_copies():
+            layout.set_working_copy(pid, path)
+    BANNED_PATTERNS[:] = layout.load_hygiene_patterns(
+        sorted(set(layout.project_ids()) | set(layout.explicit_working_copies())))
 
     def base_for(role: str, klass: str) -> str:
         """The directory a slice of `klass` for `role` lives in."""

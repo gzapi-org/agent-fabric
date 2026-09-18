@@ -112,6 +112,16 @@ def default_memory_dir(working_copy: str) -> str:
     return os.path.expanduser(f"~/.claude/projects/{memory_slug(working_copy)}/memory")
 
 
+def project_ids() -> list[str]:
+    """Every project the registry knows, sorted — the set whose hygiene
+    lists a slice is held to, since a slice travels into every one."""
+    try:
+        with open(os.path.join(FABRIC_ROOT, "projects", "registry.json"), encoding="utf-8") as fh:
+            return sorted((json.load(fh).get("projects") or {}).keys())
+    except (OSError, ValueError):
+        return []
+
+
 def roles_dir() -> str:
     return os.path.join(FABRIC_ROOT, "identities", "roles")
 

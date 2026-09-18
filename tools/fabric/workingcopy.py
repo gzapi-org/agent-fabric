@@ -171,3 +171,25 @@ def resolve(path: str, registry: dict[str, Any] | None = None) -> dict[str, Any]
 if __name__ == "__main__":
     import sys
     print(json.dumps(resolve(sys.argv[1] if len(sys.argv) > 1 else os.getcwd()), indent=2, sort_keys=True))
+
+def sibling_working_copies(root: str, project_dirname: str = ".agent-fabric", fabric_project_id: str = "agent-fabric") -> dict[str, str]:
+    """Registered projects whose working copy sits beside this checkout
+    (the workspace layout: projects/<clone>/ for each), with a
+    .agent-fabric/memory/ to lint. Keyed by project id. Shared by lint
+    and the assembler (2026-09-18): what sits beside the fabric is what
+    every fabric run must see, the hygiene lists included."""
+    out: dict[str, str] = {}
+    parent = os.path.dirname(os.path.abspath(root))
+    registry = load_registry(os.path.join(root, "projects", "registry.json"))
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(parent, name)
+        if path == os.path.abspath(root) or not os.path.isdir(os.path.join(path, project_dirname, "memory")):
+            continue
+        pid = resolve(path, registry).get("project")
+        if pid and pid != fabric_project_id and pid not in out:
+            out[pid] = path
+    return out

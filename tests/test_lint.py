@@ -976,6 +976,34 @@ def case_the_class_list_a_reader_sees_is_the_real_one() -> None:
         assert code == 1 and "CLAUDE.md: does not name capability class 'code-high'" in out, f"CLAUDE.md drift passed:\n{out}"
 
 
+def case_a_bound_and_held_role_is_not_a_candidate() -> None:
+    """candidate: true is refused once a project taxonomy binds the role and
+    a login named for it is placed on a host — the proof is structural
+    (2026-09-18). Without a placed login, or with the flag gone, clean.
+    Kills: dropping the rule, or matching a login that is not the role's."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        cat_path = os.path.join(fabric, "identities", "roles", "catalog.json")
+        cat = json.load(open(cat_path, encoding="utf-8"))
+        for r in cat["roles"]:
+            if r["id"] == "web-dev":
+                r["candidate"] = True
+        write(cat_path, json.dumps(cat))
+        reg = os.path.join(fabric, "runtime", "hosts", "registry.json")
+        host = {"version": 1, "hosts": {"h1": {"platform": "debian", "ssh": None, "operator": "op", "fabric": "x"}}}
+        write(reg, json.dumps({**host, "placement": {"db-admin": "h1", "web-developer-x": "h1"}}))
+        code, out = run_lint(fabric)
+        assert code == 0, f"a candidate with no login of its own was refused (web-developer-x is not web-dev's):\n{out}"
+        write(reg, json.dumps({**host, "placement": {"web-dev-01": "h1"}}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "role 'web-dev' is a candidate" in out and "web-dev-01 holds it" in out, f"a bound and held candidate passed:\n{out}"
+        for r in cat["roles"]:
+            r.pop("candidate", None)
+        write(cat_path, json.dumps(cat))
+        code, out = run_lint(fabric)
+        assert code == 0, f"the flag dropped, still a finding:\n{out}"
+
+
 def case_the_host_registry_is_one_host_per_id_and_placements_are_known() -> None:
     def registry(hosts, placement):
         return json.dumps({"version": 1, "hosts": hosts, "placement": placement})
@@ -1101,6 +1129,7 @@ def main() -> int:
         case_the_repository_is_one_license,
         case_the_class_list_a_reader_sees_is_the_real_one,
         case_the_host_registry_is_one_host_per_id_and_placements_are_known,
+        case_a_bound_and_held_role_is_not_a_candidate,
         case_a_managed_projects_name_stays_out_of_generic_files,
         case_review_lenses_are_named_described_and_bounded,
     ]

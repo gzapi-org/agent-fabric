@@ -244,6 +244,8 @@ piece's English.
   against ≈ 12 000 today; and the harness text changes with the CLI
   build, so its capture is a live-check duty and every re-capture is a
   re-translation. The CEO's choice for this role.
-- **Only `ge` exists.** The construction is generic by login suffix;
-  the payload for a second locale is a second `locale/<suffix>/`
-  directory, reviewed by its holder.
+- **Two locales exist, `ge` and `ru`.** The construction is generic by
+  login suffix; a locale is a `locale/<suffix>/` directory, its first
+  rendering drafted from the English sources and owned by its holder
+  from the first session (`ru` landed 2026-09-18, the same way a third
+  would).

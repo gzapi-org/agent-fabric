@@ -463,6 +463,31 @@ def case_locale_translation_is_a_charter_with_a_digest() -> None:
         assert code == 1 and "is class charter" in out, out
 
 
+def case_locale_brief_translates_like_the_charter() -> None:
+    """A role with a brief gets a locale brief the same way as its
+    charter: class brief, translates naming the English brief, its
+    digest. The schema admitted only charter.md until 2026-09-18, when
+    the first brief translation was refused on arrival. Kills: narrowing
+    the pattern back, or a translation naming a file that is not an
+    authored identity file."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        write(ident(fabric, "brief.md"), CHARTER.replace("class: charter", "class: brief"))
+        write(proj(fabric, "INDEX.md"), index_for(
+            "- [`../agent-fabric/identities/roles/web-dev/brief.md`](../agent-fabric/identities/roles/web-dev/brief.md) — The web sub-apps.\n"))
+        digest = _digest_of_body(ident(fabric, "brief.md"))
+        write(ident(fabric, "locale", "ge", "brief.md"),
+              _translation(digest, "brief").replace("translates: identities/roles/web-dev/charter.md",
+                                                    "translates: identities/roles/web-dev/brief.md"))
+        code, out = run_lint(fabric)
+        assert code == 0, f"a locale brief naming its brief was refused:\n{out}"
+        write(ident(fabric, "locale", "ge", "brief.md"),
+              _translation(digest, "brief").replace("translates: identities/roles/web-dev/charter.md",
+                                                    "translates: identities/roles/web-dev/recall.md"))
+        code, out = run_lint(fabric)
+        assert code != 0 and "translates" in out, f"a translation of a non-identity file passed:\n{out}"
+
+
 def case_translation_lag_is_reported() -> None:
     """The English charter moves, the translation keeps the old digest:
     named, never silently served as current. Kills: dropping the digest
@@ -1036,6 +1061,7 @@ def main() -> int:
         case_index_description_drift_is_caught,
         case_a_sibling_working_copy_is_linted_unasked,
         case_index_lists_domain_slices,
+        case_fabric_ref_is_one_full_commit_id,
         case_quoted_description_round_trips,
         case_payload_is_exempt,
         case_hygiene_still_runs_over_payload,
@@ -1053,6 +1079,7 @@ def main() -> int:
         case_domain_bound_by_an_unseen_project_is_not_judged,
         case_locale_translation_is_a_charter_with_a_digest,
         case_translation_lag_is_reported,
+        case_locale_brief_translates_like_the_charter,
         case_locale_worker_shape_and_hygiene,
         case_protected_tokens_must_match,
         case_each_translation_names_its_source_and_lags_when_it_moves,

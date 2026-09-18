@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code status line: model · agent@host · working copy · git branch.
+# Claude Code status line: model · agent@host · pull request · working copy · git branch.
 #
 # The AGENT is the Linux login, from agent-fabric's canonical resolver
 # (bin/fabric-whoami); the directory is shown as the working copy the
@@ -35,5 +35,52 @@ if [ -n "$wc" ]; then
     fi
 fi
 
-printf '[%s] 👤 %s@%s 📁 %s' "$model" "$agent" "$host" "${wc:-$(basename "$dir")}"
+# THE PULL REQUEST the branch is in, before the folder (owner, 2026-09-18):
+# 🔀 #386 for an open one, ✅ #386 once merged (the branch is done — go
+# back to main), 🔀 N/A for a branch with no pull request, and nothing
+# on a detached HEAD or outside a repository (no branch, no question).
+# gh is asked at most once per TTL per (working copy, branch) — the
+# status line redraws on every turn and a network call each time would
+# be felt and rate-limited — through a small cache under XDG_CACHE_HOME;
+# a gh that is missing or fails reads as "?" (unknown), never as N/A,
+# because "no pull request" is a fact about GitHub and this line does
+# not invent facts it could not read.
+pr=""
+if [ -n "$wc" ] && [ -n "${branch:-}" ]; then
+    ttl="${AGENT_FABRIC_STATUSLINE_PR_TTL:-120}"
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/agent-fabric/statusline"
+    key="$(printf '%s\n%s' "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" "$branch" | sha256sum | cut -c1-16)"
+    cache="$cache_dir/pr-$key"
+    fresh=""
+    if [ -f "$cache" ]; then
+        now=$(date +%s); mtime=$(stat -c %Y "$cache" 2>/dev/null || echo 0)
+        [ $((now - mtime)) -lt "$ttl" ] && fresh="$(cat "$cache" 2>/dev/null)"
+    fi
+    if [ -z "$fresh" ]; then
+        if command -v gh >/dev/null 2>&1; then
+            # The newest PR for this head branch, open first; state and number.
+            found="$(cd "$dir" && gh pr list --head "$branch" --state all --limit 5 --json number,state 2>/dev/null \
+                | jq -r 'sort_by(if .state == "OPEN" then 0 else 1 end) | .[0] | if . == null then "none" else "\(.state) \(.number)" end' 2>/dev/null)"
+            [ -n "$found" ] || found="unknown"
+        else
+            found="unknown"
+        fi
+        fresh="$found"
+        # An unknown is not cached: the next redraw asks again.
+        if [ "$fresh" != "unknown" ]; then
+            mkdir -p "$cache_dir" 2>/dev/null && printf '%s' "$fresh" > "$cache" 2>/dev/null
+        fi
+    fi
+    case "$fresh" in
+        OPEN\ *)   pr="🔀 #${fresh#OPEN }" ;;
+        MERGED\ *) pr="✅ #${fresh#MERGED }" ;;
+        CLOSED\ *) pr="🚫 #${fresh#CLOSED }" ;;
+        none)      pr="🔀 N/A" ;;
+        *)         pr="🔀 #?" ;;
+    esac
+fi
+
+printf '[%s] 👤 %s@%s' "$model" "$agent" "$host"
+[ -z "$pr" ] || printf ' %s' "$pr"
+printf ' 📁 %s' "${wc:-$(basename "$dir")}"
 [ -z "$ref" ] || printf ' %s' "$ref"

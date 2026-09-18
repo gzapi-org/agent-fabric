@@ -12,23 +12,56 @@ failures=0
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 pass() { echo "  ok   $1"; }
 fail() { echo "  FAIL $1: $2" >&2; failures=$((failures + 1)); }
-line_of() { printf '{"workspace":{"current_dir":"%s"},"model":{"display_name":"M"}}' "$1" | bash "$UNDER_TEST" 2>/dev/null; }
+# gh is mocked on PATH: MOCK_PR holds "<STATE> <number>" lines or nothing,
+# MOCK_GH_FAIL makes it exit 1; the cache lives under the sandbox so no
+# real cache is read or written, and a TTL of 0 means every call asks.
+mkdir -p "$SANDBOX/bin"
+cat > "$SANDBOX/bin/gh" <<'GH'
+#!/usr/bin/env bash
+[ -f "$MOCK_GH_FAIL" ] && exit 1
+if [ -s "$MOCK_PR" ]; then
+  awk '{printf "%s{\"state\":\"%s\",\"number\":%s}", (NR>1?",":"["), $1, $2} END{print (NR?"]":"[]")}' "$MOCK_PR"
+else echo "[]"; fi
+GH
+chmod +x "$SANDBOX/bin/gh"
+export MOCK_PR="$SANDBOX/pr" MOCK_GH_FAIL="$SANDBOX/ghfail" XDG_CACHE_HOME="$SANDBOX/cache" AGENT_FABRIC_STATUSLINE_PR_TTL=0
+line_of() { printf '{"workspace":{"current_dir":"%s"},"model":{"display_name":"M"}}' "$1" | PATH="$SANDBOX/bin:$PATH" bash "$UNDER_TEST" 2>/dev/null; }
 g() { git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
 
 repo="$SANDBOX/clone"; mkdir -p "$repo"; g init -q; g commit -q --allow-empty -m one; g branch -M main
 out="$(line_of "$repo")"
-[[ "$out" == *"📁 clone 🌿 main" ]] && pass "inside a repository: the branch" || fail "branch" "$out"
+[[ "$out" == *"🔀 N/A 📁 clone 🌿 main" ]] && pass "inside a repository, no pull request: 🔀 N/A before the folder, then the branch" || fail "branch / no PR" "$out"
+printf 'OPEN 386\n' > "$MOCK_PR"
+out="$(line_of "$repo")"
+[[ "$out" == *"🔀 #386 📁 clone 🌿 main" ]] && pass "an open pull request: 🔀 #386 before the folder" || fail "open PR" "$out"
+printf 'MERGED 386\n' > "$MOCK_PR"
+out="$(line_of "$repo")"
+[[ "$out" == *"✅ #386 📁 clone 🌿 main" ]] && pass "a merged pull request: ✅ #386 (the branch is done)" || fail "merged PR" "$out"
+printf 'MERGED 380\nOPEN 386\n' > "$MOCK_PR"
+out="$(line_of "$repo")"
+[[ "$out" == *"🔀 #386 📁"* ]] && pass "an open PR wins over an older merged one on the same branch" || fail "open over merged" "$out"
+: > "$MOCK_PR"; : > "$MOCK_GH_FAIL"
+out="$(line_of "$repo")"
+[[ "$out" == *"🔀 #? 📁 clone"* ]] && pass "gh failing: #? (unknown), never N/A" || fail "gh fail" "$out"
+rm -f "$MOCK_GH_FAIL"
+# The cache: with a TTL the second draw does not ask gh at all (an
+# unknown from the failing gh above was NOT cached, so the first draw asks).
+printf 'OPEN 386\n' > "$MOCK_PR"; AGENT_FABRIC_STATUSLINE_PR_TTL=300 line_of "$repo" >/dev/null
+: > "$MOCK_GH_FAIL"
+out="$(AGENT_FABRIC_STATUSLINE_PR_TTL=300 line_of "$repo")"
+[[ "$out" == *"🔀 #386 📁"* ]] && pass "within the TTL the cached answer is drawn and gh is not asked" || fail "cache" "$out"
+rm -f "$MOCK_GH_FAIL"; : > "$MOCK_PR"; rm -rf "$SANDBOX/cache"
 git -C "$repo" checkout -q --detach main
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 out="$(line_of "$repo")"
-[[ "$out" == *"📁 clone 🔗 $sha" ]] && pass "a detached HEAD: a link and its short SHA, not the branch icon" || fail "detached" "$out"
+[[ "$out" == *"📁 clone 🔗 $sha" && "$out" != *"🔀"* && "$out" != *"N/A"* ]] && pass "a detached HEAD: a link and its short SHA, no branch icon and no pull-request segment" || fail "detached" "$out"
 [[ "$out" != *"🌿"* ]] && pass "…and no branch icon on a detached HEAD" || fail "branch icon on detached" "$out"
 plain="$SANDBOX/projects"; mkdir -p "$plain"
 out="$(line_of "$plain")"
-[[ "$out" == *"📁 projects" && "$out" != *"🌿"* && "$out" != *"🔗"* ]] && pass "outside a repository: no ref segment at all" || fail "no repo" "$out"
+[[ "$out" == *"📁 projects" && "$out" != *"🌿"* && "$out" != *"🔗"* && "$out" != *"🔀"* ]] && pass "outside a repository: no ref segment and no pull-request segment" || fail "no repo" "$out"
 unborn="$SANDBOX/fresh"; mkdir -p "$unborn"; git -C "$unborn" init -q -b main
 out="$(line_of "$unborn")"
-[[ "$out" == *"📁 fresh 🌿 main" ]] && pass "a repository with no commit yet: still its branch name" || fail "unborn" "$out"
+[[ "$out" == *"🔀 N/A 📁 fresh 🌿 main" ]] && pass "a repository with no commit yet: still its branch name, and N/A for the pull request" || fail "unborn" "$out"
 [[ "$out" != *detached* ]] && pass "…and the word 'detached' appears nowhere" || fail "detached word" "$out"
 
 if (( failures )); then echo "test_statusline: FAILED — $failures"; exit 1; fi

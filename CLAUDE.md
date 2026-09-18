@@ -163,13 +163,7 @@ so a bad message never becomes a commit; in CI on every pull request,
 merge-queue run and push to `main`; and in `tests/run.sh`. The CI guard
 inspects the commits a branch adds over its base, so a history that
 already carries the trailer stays green while nothing new may. Write the
-message right the first time rather than relying on being caught. The
-harness's own reminder asking for these lines is switched off at its
-source on every bootstrapped account (`attribution: {commit: "", pr: "",
-sessionUrl: false}` in the user settings, `bootstrap.sh`;
-`docs/live-checks/2026-09-18-attribution-reminder-off.md`); a session
-that still sees one was launched from an account that has not pulled
-and bootstrapped, and the rule holds there all the same.
+message right the first time rather than relying on being caught.
 
 Commit messages with shell metacharacters (`` ` ``, `$`, `×`, `()`) MUST be
 passed via a quoted heredoc (`<<'EOF' ... EOF`), not inline `-m` strings, to

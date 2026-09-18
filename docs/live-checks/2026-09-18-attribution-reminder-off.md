@@ -81,3 +81,22 @@ not add attribution", else answer NONE.
 - Outside the fabric the same key in `~/.claude/settings.json`, a
   repository's `.claude/settings.json`, or a managed-settings file does
   the same; a managed file's lines win over any CLAUDE.md.
+
+## The fleet, after PR #13 merged (77db31b)
+
+Every other placed account on develop-qzapp (15 logins,
+`runtime/hosts/registry.json` placement) was pulled to 77db31b and
+bootstrapped through the host executor as that login
+(`runtime/hostexec/hostexec develop-qzapp --as <login>`); each reported
+`+  /home/<login>/.claude/settings.json attribution off`. Announced as
+INFO seq 2722.
+
+4. As web-dev-01, build `2.1.277`, a fresh `claude -p --model sonnet`
+   inside its gzapp working copy, the same prompt: `NONE` — and asked
+   to print every sentence mentioning attribution, only the CLAUDE.md
+   text. On this build a session whose two texts are empty and that has
+   no session URL receives **no** attribution reminder at all on its
+   first turn, which is what the harness code says (`if (!U && !N && !Q)
+   return` before the attachment is built); 2.1.276 sent the "do not
+   add" form. Both are the outcome wanted: no session is asked for a
+   trailer. A read-back on a later build should expect either.

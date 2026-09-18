@@ -46,9 +46,12 @@ fi
 # <role>, and CI admits it for that subtree alone
 # (policies/check_agent_fabric_dir_authority.sh). Anything else staged
 # beside it, another role, another suffix, or an amend (no staged
-# paths to judge) is refused as before. See policies/AUTHORITY.md.
+# paths to judge) is refused as before; a merge that folds main into
+# such a branch is judged by what the branch adds over main. See
+# policies/AUTHORITY.md.
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/locale-carve-out.sh"
-if [[ -z "$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" ]] && locale_carve_out_role "${staged[@]}"; then
+mapfile -t own < <(locale_carve_out_paths)
+if locale_carve_out_role "${own[@]}"; then
     login="$(id -un)"
     if [[ "$held" == "$locale_role" && ( "$login" == *-"$locale_suffix" || "$login" == "$locale_suffix" ) ]]; then
         exit 0

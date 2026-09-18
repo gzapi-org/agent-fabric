@@ -80,6 +80,16 @@ mkdir -p "$TMP/repo/$LOC"; printf 'x\n' >> "$TMP/repo/$LOC/memory.md"; printf 'y
 ( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -qm 'locale plus code' 2>"$TMP/err" ); rc=$?; git -C "$TMP/repo" reset -q --hard
 [[ $rc -eq 1 ]] && grep -q "agent-fabric itself" "$TMP/err" && pass "a locale file beside any other path: the whole-repository refusal" || fail "mixed commit admitted" "$(cat "$TMP/err")"
 [[ "$(try_commit "identities/roles/language-culture/charter.md" 'the English charter')" == 1 ]] && pass "the role's English charter is not the locale: refused" || fail "charter admitted to the holder" "$(cat "$TMP/err")"
+# The holder folds main into its branch: main moved elsewhere (a code file), the branch adds only its locale — allowed; a merge that also hand-edits a code file is refused.
+git -C "$TMP/repo" checkout -q -b feat/ge; try_commit "$LOC/harness.md" 'ge harness' >/dev/null
+git -C "$TMP/repo" checkout -q - ; bind fabric-coordinator; try_commit src/a.txt 'main moved' >/dev/null; MAIN_BRANCH="$(git -C "$TMP/repo" branch --show-current)"
+git -C "$TMP/repo" checkout -q feat/ge; bind language-culture
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git merge -q --no-ff --no-edit "$MAIN_BRANCH" 2>"$TMP/err" ); rc=$?
+[[ $rc -eq 0 ]] && git -C "$TMP/repo" log -1 --format=%B | grep -q '^Fabric-Role: language-culture$' && pass "a merge of main into the holder's locale branch commits, declaring its role" || fail "the holder cannot fold main" "$(cat "$TMP/err")"
+try_commit src/a.txt 'x' >/dev/null 2>&1; git -C "$TMP/repo" reset -q --hard; bind fabric-coordinator; git -C "$TMP/repo" checkout -q "$MAIN_BRANCH"; try_commit src/a.txt 'main moved again' >/dev/null; git -C "$TMP/repo" checkout -q feat/ge; bind language-culture
+( cd "$TMP/repo" && AGENT_FABRIC_STATE_DIR="$TMP/state" git merge -q --no-ff --no-commit "$MAIN_BRANCH" >/dev/null 2>&1; printf 'edited during the merge\n' >> src/a.txt; git add src/a.txt; AGENT_FABRIC_STATE_DIR="$TMP/state" git commit -qm 'merge plus a hand edit' 2>"$TMP/err" ); rc=$?
+[[ $rc -eq 1 ]] && pass "a merge that also hand-edits outside the locale: refused" || fail "hand-edited merge admitted" "$(cat "$TMP/err")"
+( cd "$TMP/repo" && git merge --abort 2>/dev/null; git reset -q --hard ); git -C "$TMP/repo" checkout -q "$MAIN_BRANCH"
 bind backend-dev
 [[ "$(try_commit "$LOC/memory.md" 'ge memory')" == 1 ]] && pass "another role on the same login: refused" || fail "wrong role admitted to a locale" "$(cat "$TMP/err")"
 bind fabric-coordinator

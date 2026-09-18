@@ -60,8 +60,12 @@ commit that stages nothing but that subtree, from a session bound to
 that role on that login, passes the pre-commit hook and is recorded as
 `Fabric-Role: <role>`; CI admits such a commit for that subtree alone.
 Anything staged beside it, another role, another suffix, an amend, is
-refused as before, and the merge stays fabric-coordinator's — the
-holder opens the pull request and does not merge it. Lint holds the
+refused as before, and the merge into `main` stays
+fabric-coordinator's — the holder opens the pull request and does not
+merge it. A merge the other way, `main` folded into such a branch, is
+judged by what the branch adds over `main` (the ge holder,
+2026-09-18: the index of a merge carries everything, and a translation
+branch could never take `main` in once `main` had moved). Lint holds the
 translation to its source (`tools/fabric/lint.py`, the digest, the
 budget, every protected identifier), so what the carve-out admits is
 prose in the locale, never a change to what a role is.

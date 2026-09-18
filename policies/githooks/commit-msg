@@ -51,8 +51,8 @@ except Exception: print("fabric-coordinator")' "$FABRIC_ROOT/policies/authority.
         # by the holder of the role named for the suffix — the same test
         # pre-commit made; the trailer below then records that role.
         . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/locale-carve-out.sh"
-        login="$(id -un)"
-        if [[ -n "$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" ]] || ! locale_carve_out_role "${guarded[@]}" \
+        login="$(id -un)"; mapfile -t own < <(locale_carve_out_paths)
+        if ! locale_carve_out_role "${own[@]}" \
            || [[ "$role" != "$locale_role" ]] || [[ "$login" != *-"$locale_suffix" && "$login" != "$locale_suffix" ]]; then
             echo "commit-msg: a guarded change, but this agent's binding holds '${role:-no role}', not $owner_role." >&2
             exit 1

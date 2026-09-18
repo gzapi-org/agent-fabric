@@ -5,6 +5,19 @@
 # and `locale_suffix` and returns 0 when they do, 1 otherwise (any other
 # path, two roles, two suffixes, a path deeper than the locale directory,
 # or no path at all).
+# For a merge in progress (a holder folding main into its translation
+# branch), the paths to judge are what the result adds over the merged-in
+# side — the branch's own content — not the union the index shows: the ge
+# holder found a translation branch could never take main in once main
+# had moved (2026-09-18).
+locale_carve_out_paths() {
+    local merge_head; merge_head="$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" || merge_head=""
+    if [[ -n "$merge_head" ]]; then
+        git diff --cached --name-only --diff-filter=ACDMRT "$merge_head" 2>/dev/null
+    else
+        git diff --cached --name-only --diff-filter=ACDMRT 2>/dev/null
+    fi
+}
 locale_carve_out_role() {
     locale_role=""; locale_suffix=""
     (( $# )) || return 1

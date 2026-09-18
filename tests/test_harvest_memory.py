@@ -486,6 +486,32 @@ def test_the_watermark_never_passes_an_unrendered_memory(tmp: str) -> None:
     assert rep["next_watermark"] == 1_699_999_900_000 - 1, f"below the oldest unrendered memory: {rep['next_watermark']}"
 
 
+def test_co_owners_named_in_the_memory_reach_the_claim(tmp: str) -> None:
+    """`metadata.shared_with` is how a memory says other roles own the fact;
+    the assembler routes a claim with two or more owners to shared/, and
+    without the field on the claim that route is unreachable from a drain."""
+    mem, out = os.path.join(tmp, "m16"), os.path.join(tmp, "o16")
+    os.makedirs(mem)
+    with open(os.path.join(mem, "shared.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: shared\ndescription: d\nmetadata:\n  type: project\n"
+                 "  roles_class: domain\n  shared_with: web-dev, backend-dev web-dev\n---\n\nthe fact\n")
+    write_memory(mem, "own", "project", roles_class="domain")
+    assert run(mem, out).returncode == 0
+    by_topic = {c["topic"]: c for c in claims_of(out)}
+    assert by_topic["shared"]["shared_with"] == ["backend-dev", "web-dev"], by_topic["shared"]
+    assert "shared_with" not in by_topic["own"], "a memory with no co-owners carries no field"
+
+
+def test_a_co_owner_that_is_not_a_slug_refuses_the_drain(tmp: str) -> None:
+    mem, out = os.path.join(tmp, "m17"), os.path.join(tmp, "o17")
+    os.makedirs(mem)
+    with open(os.path.join(mem, "bad.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: bad\ndescription: d\nmetadata:\n  type: project\n"
+                 "  roles_class: domain\n  shared_with: Web Dev\n---\n\nthe fact\n")
+    r = run(mem, out)
+    assert r.returncode != 0 and "shared_with" in r.stderr, r.stderr
+
+
 def main() -> int:
     cases = [
         test_the_watermark_round_trips_through_the_committed_report,
@@ -510,6 +536,8 @@ def main() -> int:
         test_the_memory_slug_is_the_harness_s_spelling,
         test_a_credential_refuses_the_whole_drain_at_the_harvester,
         test_the_watermark_never_passes_an_unrendered_memory,
+        test_co_owners_named_in_the_memory_reach_the_claim,
+        test_a_co_owner_that_is_not_a_slug_refuses_the_drain,
     ]
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:

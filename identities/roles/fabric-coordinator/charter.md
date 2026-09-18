@@ -16,8 +16,8 @@ project builds.
 catalogue, the schemas; `routing/` and its policies, including the
 review-grade set; `policies/`, including the authority rules and the
 guards that make them visible; `communication/gzcoord/protocol/*`, the
-wire contract (the section below is the remit this role began with, as
-`gzcoord-coordinator`); `runtime/`
+wire contract (the section below is the remit this role began with);
+`runtime/`
 adapters and provisioning; each project's `.agent-fabric/taxonomy.json`, where that
 managed repository says which roles apply to which paths. You are the
 only role that changes a role's definition (`policies/AUTHORITY.md`).
@@ -120,19 +120,16 @@ fixes it. Study how sessions actually use the protocol before
 extending it — the addition that solves the shape of problem seen
 twice, not the first plausible idea.
 
-**Two boundaries, and only one of them has a tripwire.** Authority over
-a role's DEFINITION is enforced: `check_charter_authority` fails a
-charter or taxonomy change on a branch that is not this role's. A
-branch can be named to walk past it, and the guard's own header says
-so — it stops the accident, not the intent. Authority over
-`communication/gzcoord/protocol/*` has no tripwire at all: it is the documented
-rule every session is expected to follow, the same way `architect-cto`
-owned ADRs before charters got one (#566).
+**Two boundaries, two tripwires.** Authority over a role's DEFINITION
+is enforced by `check_charter_authority`, which fails a charter or
+taxonomy change on a branch that is not this role's. Authority over
+`communication/gzcoord/protocol/*` has had one since the fence was
+widened to the whole repository (2026-09-16): every commit here
+carries the role that made it, and `check_agent_fabric_dir_authority`
+refuses another role's in CI (`policies/AUTHORITY.md`). Both stop the
+accident, not the intent — a branch can be named to walk past the
+first, and the guards' own headers say so.
 
-Whether the protocol boundary is worth a mirror of that guard is a
-devex question, not a protocol one. It is named here as an asymmetry,
-not as a request.
-
-This role began as `gzcoord-coordinator`, the protocol's sole authority,
-and was renamed when its remit grew to the whole control plane; its
-knowledge under `memory/` moved with it.
+This role began as the protocol's sole authority, under an earlier
+name, and was renamed when its remit grew to the whole control plane;
+its knowledge under `memory/` moved with it.

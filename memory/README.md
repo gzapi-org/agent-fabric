@@ -144,7 +144,11 @@ one fact per file. A memory reaches this corpus only if it opts in with a
 `roles_class` in its `metadata:` block; nothing is inferred from `type`. A
 memory with no `roles_class` is skipped **and named** in the report.
 `charter`, `brief` and `recall` are refused as targets — they are authored
-identity, not derived knowledge.
+identity, not derived knowledge. A fact other roles own too names them
+on one line, `shared_with: web-dev, backend-dev`, in the same block: the
+drain carries the co-owners and the assembler files the claim once,
+under `shared/` (a `domain` claim here, a project claim in the project's
+own `shared/`), with every owner's index pointing at it.
 
 A holder that writes its memory in another language (language-culture,
 in the language it answers for) drains through the **English rendering**

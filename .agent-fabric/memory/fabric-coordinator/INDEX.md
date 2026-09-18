@@ -3,7 +3,7 @@ role: "fabric-coordinator"
 class: index
 description: "What fabric-coordinator knows and where it lives."
 tier: 1
-distilled_at: "2026-09-13"
+distilled_at: "2026-09-18"
 ---
 
 # fabric-coordinator — knowledge index
@@ -22,6 +22,10 @@ control plane checked out beside it.
 ## brief
 
 - [`identities/roles/fabric-coordinator/brief.md`](identities/roles/fabric-coordinator/brief.md) — How fabric-coordinator works day to day: the control plane's only writer — roles, routing, policy, the protocol, the launch — changed in small verified commits, distributed to every account, never project truth.
+
+## domain
+
+- [`memory/shared/domain-claude-code-attribution-reminder.md`](memory/shared/domain-claude-code-attribution-reminder.md) — Where Claude Code's Co-Authored-By / Generated-with reminder comes from, what switches it off, and what a session that still sees one means (shared)
 
 ## recall
 

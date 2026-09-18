@@ -211,9 +211,11 @@ piece's English.
 - **Tokens.** A locale render of the charter is allowed 1.35× the
   launch prompt's character ceiling, and the real cost is higher than
   the characters say: measured, Georgian tokenizes at 1.46 characters a
-  token against 4.1 for English — the charter is 2.9× its source, the
-  whole launch prompt 2.0× (the shared sections stay English). The
-  CEO's choice for this role; the live check records the counts.
+  token against 4.1 for English — the charter is 2.9× its source; with
+  every piece in the locale (the ge holder's #3) the whole prompt is
+  about 19 000–20 000 tokens against ≈ 12 000 for the English flow,
+  the harness text included. The CEO's choice for this role; the live
+  check records the counts.
 - **The residue.** The harness's base prompt and hand-back reminder
   reach the worker in English. Named, not removed.
 - **A second model call per request.** The bridge dispatches a worker

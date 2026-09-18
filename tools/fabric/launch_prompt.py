@@ -161,7 +161,7 @@ def build(agent: str, host: str, role: str) -> str:
     else:
         text, loc = _piece(role_dir, agent, "brief-missing", _template(BRIEF_MISSING_TEMPLATE))
         localized = localized or loc
-        parts.append("# " + role + " — brief\n\n" + text)
+        parts.append(text.replace("{role}", role).strip("\n") + "\n")   # the piece carries its own heading (blind review of #3: it was English in a Georgian prompt)
     for name in layout.PROMPT_TEMPLATES:
         path = layout.prompt_template_path(name)
         if not os.path.isfile(path):

@@ -564,7 +564,7 @@ def case_each_translation_names_its_source_and_lags_when_it_moves() -> None:
         for name in ("header", "brief-missing", "team", "memory"):
             src = os.path.join(prompt, f"{name}.md")
             body = open(src, encoding="utf-8").read()
-            ka = "\n".join("ქართული " * 8 if not line.strip() or line.startswith("#") else line for line in body.splitlines())   # keep every token line, translate nothing else
+            ka = "\n".join("ქართული " * 8 if (not line.strip() or line.startswith("#")) and "{" not in line else line for line in body.splitlines())   # keep every token line, translate nothing else
             write(ident(fabric, "locale", "ge", f"{name}.md"), _translation_of(f"identities/prompt/{name}.md", "prompt-translation", _digest_of_body(src), ka, role=None))
         code, out = run_lint(fabric)
         assert code == 0, out

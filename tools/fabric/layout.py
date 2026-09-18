@@ -81,7 +81,7 @@ PROMPT_TEMPLATES = ("team.md", "memory.md")            # appended after the role
 # missing-brief line none. launch_prompt.py renders them; lint budgets them
 # together — every session pays for these bytes (the header and the
 # missing-brief line were code until 2026-09-17, and always paid).
-PROMPT_TEMPLATE_PLACEHOLDERS = {"header.md": ("{agent}", "{host}", "{role}"), "brief-missing.md": (),
+PROMPT_TEMPLATE_PLACEHOLDERS = {"header.md": ("{agent}", "{host}", "{role}"), "brief-missing.md": ("{role}",),
                                 "team.md": ("{role}",), "memory.md": ("{role}",)}
 PROMPT_TEMPLATE_BUDGET_TOKENS = 1800
 DOMAIN_CLASSES = ("domain",)

@@ -217,7 +217,17 @@ piece's English.
   the harness text included. The CEO's choice for this role; the live
   check records the counts.
 - **The residue.** The harness's base prompt and hand-back reminder
-  reach the worker in English. Named, not removed.
+  reach the worker in English. Named, not removed. The holder's own
+  residue, read back from the ru holder's first session under the
+  replaced prompt (2026-09-18): the project layer — the remit
+  `.agent-fabric/roles/<role>.md` and the INDEX pointer, from the
+  session-start hook — the three CLAUDE.md files, the harness's
+  Environment block and attribution reminder, the tool, agent and
+  skill listings and MCP instructions (except `locale-worker` and the
+  search tool, whose descriptions are in the locale), and the inbox
+  drain (the wire is English). Of these only the remit is the role's
+  own prompt layer with no locale copy; whether it gets one is the
+  owner's call, not yet made.
 - **A second model call per request.** The bridge dispatches a worker
   for what it once did in one turn. The bridge's own turn is the
   translation and the rendering; the judgement is the worker's.

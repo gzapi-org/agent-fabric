@@ -1204,8 +1204,9 @@ def main() -> int:
             project_ids.append(pid)
             where = (f"projects/{pid}/taxonomy.json" if tax_path.startswith(root)
                      else f"{pid}:{layout.PROJECT_DIRNAME}/taxonomy.json")
-            if not tax_path.startswith(root):
-                findings += fabric_ref_findings(pid, os.path.dirname(os.path.dirname(tax_path)))
+            wc_root = layout.working_copy_for(pid)
+            if wc_root:
+                findings += fabric_ref_findings(pid, wc_root)
             tax = load_json(tax_path, where, findings)
             if tax is None:
                 continue

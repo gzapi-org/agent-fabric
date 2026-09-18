@@ -216,6 +216,13 @@ piece's English.
   about 19 000–20 000 tokens against ≈ 12 000 for the English flow,
   the harness text included. The CEO's choice for this role; the live
   check records the counts.
+- **A lag is a warning, not a red.** When an English source moves, its
+  translations lag until their holders re-render; lint names each one
+  as a warning and still passes, and their protected tokens are not
+  judged against a source they did not translate — the source has to
+  land before a holder can translate it, so a failing finding would
+  redden main on every such change (2026-09-18, the first time a
+  translated source moved: team.md).
 - **The residue.** The harness's base prompt and hand-back reminder
   reach the worker in English. Named, not removed. The holder's own
   residue, read back from the ru holder's first session under the

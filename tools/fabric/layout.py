@@ -83,7 +83,10 @@ PROMPT_TEMPLATES = ("team.md", "memory.md")            # appended after the role
 # missing-brief line were code until 2026-09-17, and always paid).
 PROMPT_TEMPLATE_PLACEHOLDERS = {"header.md": ("{agent}", "{host}", "{role}"), "brief-missing.md": ("{role}",),
                                 "team.md": ("{role}",), "memory.md": ("{role}",)}
-PROMPT_TEMPLATE_BUDGET_TOKENS = 1800
+# 1800 until 2026-09-18, when the owner's two rules on who owns a change
+# and when a PR is armed joined team.md: ~200 tokens every session pays
+# so that no holder has to learn them from a message.
+PROMPT_TEMPLATE_BUDGET_TOKENS = 2100
 DOMAIN_CLASSES = ("domain",)
 PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads")
 # Tier-1 knowledge, in load order: the charter, the project index, the

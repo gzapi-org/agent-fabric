@@ -490,15 +490,19 @@ def case_locale_brief_translates_like_the_charter() -> None:
 
 def case_translation_lag_is_reported() -> None:
     """The English charter moves, the translation keeps the old digest:
-    named, never silently served as current. Kills: dropping the digest
-    comparison."""
+    named as a warning, never silently served as current — and never a
+    failing finding, since the source must land before its holder can
+    re-render (2026-09-18). Its tokens are not judged against the moved
+    source. Kills: dropping the digest comparison, or failing on lag."""
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
         write(ident(fabric, "locale", "ge", "charter.md"), _translation(_digest_of_body(ident(fabric, "charter.md"))))
         assert run_lint(fabric)[0] == 0
-        write(ident(fabric, "charter.md"), CHARTER + "\nA paragraph the translation does not carry yet.\n")
+        write(ident(fabric, "charter.md"), CHARTER + "\nA paragraph with `a-new-span` the translation does not carry yet.\n")
         code, out = run_lint(fabric)
-        assert code == 1 and "the translation lags" in out, out
+        assert code == 0 and "the translation lags" in out and "warning:" in out, \
+            f"a lag must be named and still pass — the source lands before its holder can re-render:\n{out}"
+        assert "a-new-span" not in out, f"tokens of a source that moved were judged against the stale translation:\n{out}"
 
 
 def case_locale_worker_shape_and_hygiene() -> None:
@@ -618,7 +622,8 @@ def case_each_translation_names_its_source_and_lags_when_it_moves() -> None:
         assert code == 0, out
         write(os.path.join(prompt, "team.md"), open(os.path.join(prompt, "team.md"), encoding="utf-8").read() + "\nOne more English sentence about {role}.\n")
         code, out = run_lint(fabric)
-        assert code == 1 and "locale/ge/team.md: translates identities/prompt/team.md at sha256:" in out and "the translation lags" in out, out
+        assert code == 0 and "warning: identities/roles/web-dev/locale/ge/team.md: translates identities/prompt/team.md at sha256:" in out \
+            and "the translation lags" in out, f"a lag is named as a warning and does not fail (the source lands first):\n{out}"
         write(ident(fabric, "locale", "ge", "memory.md"), _translation_of("identities/prompt/team.md", "prompt-translation", "sha256:" + "0" * 64, "x {role}\n", role=None))
         code, out = run_lint(fabric)
         assert "locale/ge/memory.md: translates 'identities/prompt/team.md', not identities/prompt/memory.md" in out, out

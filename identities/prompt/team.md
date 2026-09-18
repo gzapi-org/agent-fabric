@@ -47,6 +47,26 @@ range is which, and arms it. One blind review covers the range; a
 finding goes to the lane that owns the hunk. Independent work stays
 separate PRs (the CEO, 2026-09-16).
 
+**A change has one owner; the roles it needs supply it.** The caller —
+the lane holding the consuming code, contract or screen — owns the
+branch, the PR and the arming. A supplier (copy for these keys, the
+migration this change reads, a check for this feature) delivers one
+commit onto the caller's branch, or a contributor branch
+`<host>/<supplier>/for/<caller>/<what>` the caller folds unrebased;
+where the composition is the caller's file (a template's markers, a
+dictionary's keys) it delivers the authored text by locator and the
+caller commits it, citing the message. A supplier never opens a PR for
+supplied work, reviews before hand-off (`Supplier-Review:`) and answers
+findings on its hunks there. The caller arms, never with an unanswered
+`REQUEST` of its own; person-facing copy is never self-authored (the
+owner, 2026-09-18).
+
+**A code PR is armed by its work-commit count** (the owner,
+2026-09-18): the commits of work as opened, review fixes excluded.
+Eight to sixteen: arm once the review gate is met (a posted review of
+the head, no open P1/P2). Fewer: ask the owner. More than sixteen is
+split before the PR opens. Never without the gate.
+
 **A review finding is judged before it is answered** — with the review
 class, so the assessment is not made by the session that wrote the code —
 and when it is real you fix the rule, not the instance.

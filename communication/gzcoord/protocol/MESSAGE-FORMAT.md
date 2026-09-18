@@ -88,6 +88,48 @@ repository's rules, not by this protocol.
 
 `examples/observation-diagnosis.txt` is a complete example.
 
+## Requesting a supplied piece
+
+A change has one owner — the caller, whose lane holds the consuming
+code, contract or screen — and the pieces it needs from other lanes
+(copy for a set of keys, the migration it reads, a check for its
+feature) are supplied as commits onto the caller's branch, never as a
+supplier's own pull request (the owner, 2026-09-18;
+`identities/prompt/team.md`). The exchange is a `REQUEST` and its
+`REPLY`; no new type. The recommended sections:
+
+```text
+REQUEST:
+what is asked for, as the caller will consume it
+
+DELIVER-TO:
+the caller's branch and the base sha the supplier starts from
+
+ACCEPTANCE:
+what makes the piece done — copy: the key names, the caller's en-US
+draft, the surfaces that reference them; a migration: its reader and
+the columns; a check: what red and green mean
+
+BY:
+when the branch is otherwise done, so the supplier knows the window
+```
+
+The supplier's `REPLY` carries `REFERENCES` with the sha or range it
+delivered and one more section:
+
+```text
+SUPPLIER-REVIEW:
+what was checked before hand-off — the review the Supplier-Review:
+trailer on the commit names
+```
+
+A hand-off ahead of any caller branch — the supplier finished first —
+names the intended caller role in `DELIVER-TO` and a `FOLD-BY` date
+(the next day by default): past it unclaimed, the supplier pings the
+role once, then opens its own pull request under the count rule. The
+caller's acknowledgement is the fold and the line in the PR body naming
+whose range is which, not a message.
+
 ## Asking for an undo
 
 Every message arrives late — read after an unknown delay, against a tree

@@ -75,6 +75,7 @@ CHARS_PER_TOKEN = 4
 # one does not. The guess before the measurement was 2 a token and 1.35
 # times the budget, which no full rendering could meet.
 NON_LATIN_CHARS_PER_TOKEN = 1.5
+WARNINGS: list[str] = []   # named, not failing: a translation lagging its source (see locale_translation_findings)
 # The locale worker's one tool: inert, so the harness spawns it and it reads nothing.
 WORKER_TOOL = "TaskStop"
 LOCALE_BUDGET_FACTOR = 3
@@ -326,6 +327,7 @@ def locale_translation_findings(role: str, role_path: str, template_schema: dict
                 continue
             rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/{name}.md"
             source_rel = source_rel.replace("{role}", role)
+            lagging = False
             source = os.path.join(root, source_rel)
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
@@ -348,13 +350,19 @@ def locale_translation_findings(role: str, role_path: str, template_schema: dict
                 if os.path.isfile(source):
                     now = _source_digest(source)
                     if digest != now:
-                        out.append(f"{rel}: translates {source_rel} at {digest}, but it is now {now} "
-                                   "— the translation lags; update the body and its digest")
+                        # Served, never a failed launch (launch_prompt.py): the
+                        # source has to land before its holder can re-render, so
+                        # a lag is a warning that names the file, not a finding
+                        # that reddens main until the holder's PR (2026-09-18).
+                        lagging = True
+                        WARNINGS.append(f"{rel}: translates {source_rel} at {digest}, but it is now {now} "
+                                        "— the translation lags; the holder re-renders it and its digest")
             body = FRONTMATTER_RE.sub("", text)
             out += hygiene_findings(rel, body)
             if os.path.isfile(source):
-                with open(source, encoding="utf-8") as fh:
-                    out += protected_token_findings(rel, FRONTMATTER_RE.sub("", fh.read()), body)
+                if not lagging:   # tokens are judged against the source it translated, not one that moved under it
+                    with open(source, encoding="utf-8") as fh:
+                        out += protected_token_findings(rel, FRONTMATTER_RE.sub("", fh.read()), body)
             else:
                 out.append(f"{rel}: its source {source_rel} does not exist")
             divisor = NON_LATIN_CHARS_PER_TOKEN if _is_mostly_non_latin(body) else CHARS_PER_TOKEN
@@ -1412,13 +1420,16 @@ def main() -> int:
     findings += prompt_template_findings()
     findings += harness_source_findings()
 
+    for warning in WARNINGS:
+        print(f"  warning: {warning}", file=sys.stderr)
     if findings:
         print(f"corpus lint: {len(findings)} finding(s)\n", file=sys.stderr)
         for finding in findings:
             print(f"  {finding}", file=sys.stderr)
         return 1
     print(f"corpus lint: clean ({len(role_ids)} roles, {len(domain_slices)} domains, "
-          f"{len(layout.list_projects())} project(s))")
+          f"{len(layout.list_projects())} project(s)"
+          + (f", {len(WARNINGS)} warning(s)" if WARNINGS else "") + ")")
     return 0
 
 

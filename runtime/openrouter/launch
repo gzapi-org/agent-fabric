@@ -522,8 +522,11 @@ CMD+=(claude)
 # same as a permissions.deny in the login's user settings, the fence for
 # a session launched without this launcher.
 LOCALE_SEARCH="$FABRIC_ROOT/identities/roles/language-culture/locale/$SUFFIX/locale.json"
-if [[ "$ROLE" == language-culture && -f "$LOCALE_SEARCH" ]]; then CMD+=(--disallowedTools WebSearch); fi
 CMD+=("${PROMPT_ARGS[@]}" "$@")
+# Last, after the caller's own arguments: --disallowedTools is variadic
+# and swallows whatever follows it that is not an option (read back
+# 2026-09-18: it ate a positional prompt in a -p probe).
+if [[ "$ROLE" == language-culture && -f "$LOCALE_SEARCH" ]]; then CMD+=(--disallowedTools WebSearch); fi
 
 goodbye() {  # goodbye <note> — best effort, once; never delays the exit by more than the send
     [[ -n "${GOODBYE_SENT:-}" ]] && return 0; GOODBYE_SENT=1

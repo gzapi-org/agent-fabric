@@ -256,7 +256,7 @@ mkdir -p "$FABRIC/identities/roles/language-culture"; cp -r "$FABRIC/identities/
 mkdir -p "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"; printf '{"timezone":"Asia/Tbilisi","brave":{"country":"ALL","tool_description":"ძიება"}}' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/locale.json"
 printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"language-culture","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 outlc="$(run --provider anthropic -- --version 2>&1)"
-grep -q "CLAUDE-EXECCED:.*--disallowedTools WebSearch .*--version" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch" || bad "WebSearch not removed on the language-culture login" "$outlc"
+grep -q "CLAUDE-EXECCED:.*--version --disallowedTools WebSearch$" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch — the variadic flag last, after the caller's arguments" || bad "WebSearch not removed on the language-culture login, or not last" "$outlc"
 grep -q "CLAUDE-EXECCED:.*--append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outlc" && grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$" <<<"$outlc" && ok "…with the prompt still appended and no build stamp: the locale carries no harness text" || bad "append expected without a harness translation" "$outlc"
 # The locale carries the harness text: the whole prompt is replaced, the build stamped, on both providers.
 printf -- '---\nclass: harness-translation\ntranslates: runtime/claude-code/harness/en.md\ntranslates_digest: sha256:x\n---\nშენ ხარ Claude Code. მეხსიერება: `{memory_dir}`.\n' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/harness.md"

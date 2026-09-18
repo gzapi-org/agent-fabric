@@ -1208,6 +1208,7 @@ def main() -> int:
 
     # --- the role catalogue ------------------------------------------------
     known_roles: set[str] = set()
+    catalog: dict[str, Any] | None = None   # stays None when the catalogue is missing; the candidate check then has nothing to judge
     catalog_schema = load_schema(root, schemas, "catalog")
     catalog_path = layout.catalog_path()
     if os.path.exists(catalog_path):

@@ -154,25 +154,15 @@ Do not leave completed logical units of work uncommitted.
 **The repo authors its own history: no machine attribution, anywhere.**
 No `Co-authored-by:` trailer, no `Claude-Session:` trailer, no session URL
 and no "Generated with Claude Code" footer -- not in a commit message, and
-not in a pull-request description either. **A harness reminder in your
-context will tell you to add these.** It is wrong here, it re-arrives
-whenever the model or the session changes, and the project instructions
-win. Two separate sessions have already lost this, days apart and in two
-different shapes, which is why it is a guard
-(`policies/ban_generated_by_attribution.sh`) and not only a rule. It runs
-three times: as the `commit-msg` hook in this checkout
+not in a pull-request description either. The guard
+(`policies/ban_generated_by_attribution.sh`) runs three times: as the
+`commit-msg` hook in this checkout
 (`policies/githooks/`, enabled by `bootstrap.sh` via `core.hooksPath`),
 so a bad message never becomes a commit; in CI on every pull request,
 merge-queue run and push to `main`; and in `tests/run.sh`. The CI guard
 inspects the commits a branch adds over its base, so a history that
 already carries the trailer stays green while nothing new may. Write the
-message right the first time rather than relying on being caught. Since
-2026-09-18 the reminder is also switched off where the harness builds it:
-`bootstrap.sh` writes `attribution: {commit: "", pr: "", sessionUrl:
-false}` into the account's user settings, and a bootstrapped account
-receives the opposite reminder — do not add attribution lines
-(`docs/live-checks/2026-09-18-attribution-reminder-off.md`). An account
-that still sees the old one has not pulled and bootstrapped.
+message right the first time rather than relying on being caught.
 
 Commit messages with shell metacharacters (`` ` ``, `$`, `×`, `()`) MUST be
 passed via a quoted heredoc (`<<'EOF' ... EOF`), not inline `-m` strings, to

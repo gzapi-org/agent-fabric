@@ -106,6 +106,21 @@ if [[ "$PHASE" == prepare ]]; then
     if getent passwd "$LOGIN" >/dev/null; then say "1. account $LOGIN exists"
     else must $SUDO -n useradd -m -s /bin/bash -c "agent-fabric $ROLE" "$LOGIN"; say "1. account $LOGIN created"; fi
     HOME_DIR="$(getent passwd "$LOGIN" | cut -d: -f6)"; HOME_DIR="${HOME_DIR:-/home/$LOGIN}"
+    # A subordinate uid AND gid range, or rootless podman can unpack no image
+    # and every Testcontainers suite fails on the login: useradd allocates one
+    # by default (login.defs SUB_UID_COUNT), but an account made another way
+    # has none — architect-cto-01 was that account, found 2026-09-19 with
+    # 2716 fixture failures. The next free block above every range in the
+    # file (SUB_UID_MIN when the file is empty), the same block for both.
+    ETC="${AGENT_FABRIC_ETC:-/etc}"
+    if grep -qs "^$LOGIN:" "$ETC/subuid" && grep -qs "^$LOGIN:" "$ETC/subgid"; then say "   subuid/subgid: $(grep "^$LOGIN:" "$ETC/subuid" | cut -d: -f2-)"
+    else
+        sub_min="$(awk '/^SUB_UID_MIN/{print $2}' "$ETC/login.defs" 2>/dev/null)"; sub_min="${sub_min:-524288}"
+        sub_count="$(awk '/^SUB_UID_COUNT/{print $2}' "$ETC/login.defs" 2>/dev/null)"; sub_count="${sub_count:-65536}"
+        sub_start="$(cat "$ETC/subuid" "$ETC/subgid" 2>/dev/null | awk -F: -v m="$sub_min" 'BEGIN{e=m} $2+$3>e{e=$2+$3} END{print e}')"
+        if (( DRY )); then say "would: usermod --add-subuids $sub_start-$((sub_start + sub_count - 1)) --add-subgids (the same) $LOGIN"
+        else must $SUDO -n usermod --add-subuids "$sub_start-$((sub_start + sub_count - 1))" --add-subgids "$sub_start-$((sub_start + sub_count - 1))" "$LOGIN"; say "   subuid/subgid: $sub_start:$sub_count allocated (rootless podman needs both)"; fi
+    fi
     # The account's primary group, whatever the host's policy names it (not
     # necessarily the login: user-private groups are a distribution choice).
     GROUP="$(id -gn "$LOGIN" 2>/dev/null || echo "$LOGIN")"

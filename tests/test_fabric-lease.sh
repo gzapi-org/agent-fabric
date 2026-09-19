@@ -92,7 +92,10 @@ lease backend-test --who >/dev/null; [[ $? -eq 0 ]] && ok "…and the lease is f
 out="$(lease backend-test -- record 2>&1)"; rc=$?; [[ $rc -eq 127 ]] && ok "a function of the script is not a command (exit 127)" || bad "function ran as command" "rc=$rc $out"
 out="$(lease backend-test -- -v ls 2>&1)"; rc=$?; [[ $rc -eq 127 ]] && ok "a first word of -v is not an option of command (exit 127)" || bad "-v taken as command's option" "rc=$rc $out"
 out="$(echo hello-from-stdin | lease backend-test -- cat)"; [[ "$out" == "hello-from-stdin" ]] && ok "the command inherits the wrapper's stdin" || bad "stdin lost" "$out"
-out="$(lease backend-test -- grep SigIgn /proc/self/status)"; [[ "$out" =~ SigIgn:[[:space:]]+0+$ ]] && ok "the command runs with no signal ignored (INT and QUIT reach it)" || bad "signals ignored in the command" "$out"
+# INT (2) and QUIT (3) — bits 0x6 — must not be ignored in the command: a
+# plain `&` in a script sets both to SIG_IGN. Other bits are the caller's
+# own inheritance (a CI runner ignores PIPE, 0x1000) and pass through.
+mask="$(lease backend-test -- grep SigIgn /proc/self/status | awk '{print $2}')"; (( (16#$mask & 16#6) == 0 )) && ok "INT and QUIT are not ignored in the command (SigIgn $mask)" || bad "INT/QUIT ignored in the command" "SigIgn $mask"
 # The teardown: a child whose TERM handler takes time and exits 7. The
 # lease must stay held while it runs, and the wrapper must return 7.
 AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "sleep 1.5; echo child-done; exit 7" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &

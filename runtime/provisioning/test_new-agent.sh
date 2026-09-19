@@ -101,6 +101,15 @@ cat > "$BIN/useradd" <<STUB
 #!/usr/bin/env bash
 login="\${@: -1}"; mkdir -p "$HOMES/\$login"; echo "\$login" >> "$SEQ/passwd"; echo "useradd \$login" >> "$CALLS"
 STUB
+# usermod: the subordinate-range allocation records itself and writes the
+# range where the worker reads it back (AGENT_FABRIC_ETC), so the second
+# run finds it and allocates nothing.
+cat > "$BIN/usermod" <<STUB
+#!/usr/bin/env bash
+echo "usermod \$*" >> "$CALLS"
+login="\${@: -1}"; r=""; while [[ \$# -gt 0 ]]; do [[ "\$1" == --add-subuids ]] && r="\$2"; shift; done
+[[ -n "\$r" ]] && mkdir -p "$SANDBOX/persist/etc" && printf '%s:%s:%s\n' "\$login" "\${r%-*}" "\$(( \${r#*-} - \${r%-*} + 1 ))" | tee -a "$SANDBOX/persist/etc/subuid" >> "$SANDBOX/persist/etc/subgid"
+STUB
 cat > "$BIN/loginctl" <<STUB
 #!/usr/bin/env bash
 echo "loginctl \$*" >> "$CALLS"
@@ -174,9 +183,10 @@ BACKEND=local
 seq_run() { rm -f "$CALLS"; local h=(); [[ "$BACKEND" == ssh ]] && h=(--host far-host)
   SUDO="$BIN/sudo" SSH="$BIN/ssh" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" \
   AGENT_FABRIC_ACCOUNTS_SNAPSHOT="$SANDBOX/persist/snap" AGENT_FABRIC_RC_LOCAL_D="$SANDBOX/persist/rcd" AGENT_FABRIC_ETC="$SANDBOX/persist/etc" AGENT_FABRIC_LOGINCTL="$BIN/loginctl" \
+  AGENT_FABRIC_LEASES="$SANDBOX/persist/leases" AGENT_FABRIC_TMPFILES_D="$SANDBOX/persist/tmpfiles.d" \
   bash "$FAB/runtime/provisioning/new-agent.sh" "$@" "${h[@]}" 2>&1; }
 cp "$SEQ/enroll.sh" "$FAB/runtime/provisioning/secrets/enroll.sh"
-reset_seq() { rm -rf "$HOMES" "$SEQ/passwd" "$SEQ/enrolled" "$FAULT"; mkdir -p "$HOMES"; }
+reset_seq() { rm -rf "$HOMES" "$SEQ/passwd" "$SEQ/enrolled" "$FAULT" "$SANDBOX/persist/etc/subuid" "$SANDBOX/persist/etc/subgid"; mkdir -p "$HOMES"; }
 
 for BACKEND in local ssh; do
 echo "new-agent: the real sequence on the $BACKEND backend"
@@ -192,6 +202,7 @@ $(cat "$CALLS")"
 [[ "$(ssh-keygen -lf "$H/.ssh/known_hosts" | awk '{print $2, $4}' | tr -d '()' | sort)" == "$(sort "$ROOT/runtime/provisioning/github-host-keys.fingerprints")" ]] \
   && ok "the account's known_hosts carries exactly the committed fingerprints" || bad "known_hosts fingerprints differ from the committed list" "$(ssh-keygen -lf "$H/.ssh/known_hosts")"
 grep -q "chown seq-login:staff" "$CALLS" && ok "chown uses the account's primary group, not the login" || bad "chown assumed group == login" "$(grep chown "$CALLS")"
+grep -q "^usermod --add-subuids 524288-589823 --add-subgids 524288-589823 seq-login" "$CALLS" && grep -qx "seq-login:524288:65536" "$SANDBOX/persist/etc/subuid" "$SANDBOX/persist/etc/subgid" && ok "a subordinate uid and gid range is allocated for the new account (rootless podman)" || bad "subuid/subgid" "$(grep usermod "$CALLS"; cat "$SANDBOX/persist/etc/subuid" 2>&1)"
 grep -q "new-agent: done" <<<"$out" && ok "…and the person's list is printed" || bad "no closing list" "$out"
 if [[ "$BACKEND" == ssh ]]; then
   grep -q "new-agent-worker.sh host-check seq-login" "$SSHLOG" && grep -q "new-agent-worker.sh prepare seq-login backend-dev" "$SSHLOG" && grep -q "new-agent-worker.sh finish seq-login backend-dev --clone demo=" "$SSHLOG" \
@@ -202,7 +213,7 @@ else
   [[ ! -s "$SSHLOG" ]] && ok "local: ssh never called" || bad "ssh called on the local backend" "$(cat "$SSHLOG")"
 fi
 out="$(seq_run seq-login backend-dev --project demo)"
-grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude 9.9.9 present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" \
+grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude 9.9.9 present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" && ! grep -q "^usermod --add-subuids" "$CALLS" && grep -q "subuid/subgid: 524288:65536" <<<"$out" \
   && ok "a second run skips every step already true" || bad "not idempotent" "$out"
 
 for fault in useradd "git" "enroll seq-login" "enroll fill-from" curl; do

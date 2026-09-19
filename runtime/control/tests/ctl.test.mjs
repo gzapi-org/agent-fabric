@@ -52,6 +52,29 @@ test('rows and table: an answered account and a silent one', () => {
   assert.match(none, /db-admin\s+ok\s+none.*unreadable\s+-\s*$/m);
 });
 
+test('host table: one row per host from whichever account answered first, the others counted; a silent host is a row; the leases and the largest processes under it', () => {
+  const expected = [{ login: 'a', host: 'h1', address: 'h1/a' }, { login: 'b', host: 'h1', address: 'h1/b' }, { login: 'c', host: 'h2', address: 'h2/c' }];
+  const machine = { status: 'ok', cpus: 6, loadavg: [0.9, 1.2, 0.8], mem_mb: { total: 18152, available: 12685, swap_total: 9216, swap_free: 9216 }, balloon_mb: { current: 18345, target: 18345, static_max: 18363 }, disk: [{ mount: '/rw', size_gb: 295, avail_gb: 41, use_pct: 87 }], leases: [{ name: 'backend-test', holder: 'db-admin', pid: 42, since: '2026-09-19T08:26:43Z' }], top_rss: [{ user: 'backend-dev-02', pid: 1, rss_mb: 2140, comm: 'dotnet' }] };
+  const rs = rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: machine } }, { kind: 'reply', from: 'h1/b', op: 'host', data: { host: { ...machine, loadavg: [9, 9, 9] } } }]);
+  assert.deepEqual(rs[0].machine, machine);
+  const t = table('host', rs);
+  assert.match(t, /^h1\s+2\/2\s+0\.90 1\.20 0\.80\s+6\s+12685\/18152\s+9216\s+18345\/18363\s+\/rw 41G free \(87%\)$/m, 'the first answer speaks for the host');
+  assert.equal((t.match(/^h1\s/gm) ?? []).length, 1, 'one row per host, not per account');
+  assert.match(t, /leases: backend-test: db-admin pid 42 since 08:26Z/);
+  assert.match(t, /largest: dotnet backend-dev-02 2140 MB/);
+  assert.match(t, /^h2\s+0\/1\s+no answer$/m);
+  const partial = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: machine } }]));
+  assert.match(partial, /^h1\s+1\/2\s/m); assert.match(partial, /^\s+b: no answer$/m, 'the silent account is named under its host');
+  assert.match(table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: { ...machine, balloon_mb: null } } }])), /\s+none\s+\/rw/, 'no balloon: none');
+  // every account failed: the failure text and each account's line, not a bare word
+  const failed = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: { status: 'failed', error: 'EACCES /proc' } } }]));
+  assert.match(failed, /^h1\s+1\/2\s+failed: EACCES \/proc$/m); assert.match(failed, /^\s+a: failed$/m); assert.match(failed, /^\s+b: no answer$/m);
+  // the row with the balloon's static-max speaks for the host, whichever account answered first
+  const noMax = { ...machine, balloon_mb: { current: 18345, target: 18345, static_max: null } };
+  const pref = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: noMax } }, { kind: 'reply', from: 'h1/b', op: 'host', data: { host: machine } }]));
+  assert.match(pref, /18345\/18363/, 'the operator\'s row (the one that can read xenstore) is preferred');
+});
+
 test('tokens table: grouped by Claude account, each login\'s share of the visible direct-path spend, the broker column apart, a login without records named', () => {
   const expected = [{ login: 'a', host: 'h', address: 'h/a' }, { login: 'b', host: 'h', address: 'h/b' }, { login: 'c', host: 'h', address: 'h/c' }, { login: 'd', host: 'h', address: 'h/d' }];
   const tok = (claude, broker, top) => ({ status: 'ok', days: 7, files: 1, requests: { session: 1, subagent: 0 }, models: { [top]: { equiv: claude, requests: 1, input: 0, cache_write: 0, cache_read: 0, output: 0, path: 'claude' } },

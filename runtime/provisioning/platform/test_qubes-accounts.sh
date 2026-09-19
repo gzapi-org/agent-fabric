@@ -27,6 +27,7 @@ F
 chmod +x "$T/bin/loginctl"
 export LOGINCTL_LOG="$T/loginctl.log"
 export AGENT_FABRIC_ETC="$T/etc" AGENT_FABRIC_ACCOUNTS_SNAPSHOT="$T/snap" AGENT_FABRIC_RC_LOCAL_D="$T/rcd" AGENT_FABRIC_LOGINCTL="$T/bin/loginctl"
+export AGENT_FABRIC_LEASES="$T/run/lock/agent-fabric" AGENT_FABRIC_TMPFILES_D="$T/tmpfiles.d"
 
 # a boot's /etc: the template's users, none of ours
 printf 'root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000::/home/user:/bin/bash\n' > "$T/etc/passwd"
@@ -48,6 +49,7 @@ printf 'web-dev-02:$6$hash3:20000:0:99999:7:::\n' >> "$T/snap/shadow"; printf 'w
 echo "boot script: re-adds what /etc lacks, verbatim, and enables linger"
 err="$(sh "$RC" 2>&1 >/dev/null)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$err"
+[[ -d "$T/run/lock/agent-fabric" && "$(stat -c %a "$T/run/lock/agent-fabric")" == 1777 ]] && ok "the lease directory is made, 1777 (bin/fabric-lease)" || bad "lease dir" "$(ls -ld "$T/run/lock/agent-fabric" 2>&1)"
 grep -qx 'db-admin:x:1004:1004:agent-fabric db-admin:/home/db-admin:/bin/bash' "$T/etc/passwd" && ok "passwd line appended verbatim" || bad "passwd" "$(cat "$T/etc/passwd")"
 grep -qx 'db-admin:$6$hash:20000:0:99999:7:::' "$T/etc/shadow" && ok "shadow line appended verbatim" || bad "shadow" "$(cat "$T/etc/shadow")"
 grep -qx 'db-admin:x:1004:' "$T/etc/group" && grep -qx 'db-admin:!::' "$T/etc/gshadow" && ok "group and gshadow appended" || bad "group/gshadow"
@@ -64,7 +66,13 @@ grep -qx 'enable-linger db-admin' "$LOGINCTL_LOG" && ! grep -q 'brand-comms-01' 
 n1="$(wc -l < "$T/etc/passwd")"; sh "$RC" 2>/dev/null; n2="$(wc -l < "$T/etc/passwd")"
 [[ "$n1" == "$n2" && "$(grep -c '^db-admin:' "$T/etc/passwd")" == 1 ]] && ok "a second boot appends nothing twice" || bad "duplicated on second run"
 grep -qx 'otscache:x:990:user,db-admin' "$T/etc/group" && ok "…nor a membership twice" || bad "membership duplicated" "$(cat "$T/etc/group")"
-: > "$LOGINCTL_LOG"; rm -rf "$T/snap"; sh "$RC"; [[ $? -eq 0 && ! -s "$LOGINCTL_LOG" ]] && ok "no snapshot: nothing done, exit 0" || bad "no snapshot"
+: > "$LOGINCTL_LOG"; rm -rf "$T/snap" "$T/run"; sh "$RC"; [[ $? -eq 0 && ! -s "$LOGINCTL_LOG" ]] && ok "no snapshot: nothing done, exit 0" || bad "no snapshot"
+[[ -d "$T/run/lock/agent-fabric" ]] && ok "…but the lease directory is made even then" || bad "lease dir needs a snapshot"
+# install absent: mkdir+chmod gives the same mode; both failing is said on stderr
+mkdir -p "$T/noinstall"; for t in mkdir chmod sh grep cut awk cp mv rm tr head paste cat printf; do ln -sf "$(command -v $t)" "$T/noinstall/$t"; done
+rm -rf "$T/run"; PATH="$T/noinstall" sh "$RC" 2>/dev/null; [[ "$(stat -c %a "$T/run/lock/agent-fabric" 2>/dev/null)" == 1777 ]] && ok "without install(1) the fallback still makes it 1777" || bad "fallback mode" "$(stat -c %a "$T/run/lock/agent-fabric" 2>&1)"
+err="$(AGENT_FABRIC_LEASES="$T/nowhere/deep/leases" PATH="$T/noinstall" sh -c 'chmod() { return 1; }; . "$0"' "$RC" 2>&1 >/dev/null || true)"
+grep -q "not made 1777" <<<"$err" && ok "a fallback that cannot set the mode says so" || bad "quiet fallback" "$err"
 
 echo "writer: one line per login per file, replace-or-append, the boot script installed once"
 mkdir -p "$T/snap"; : > "$LOGINCTL_LOG"
@@ -84,6 +92,7 @@ grep -qx 'edge-hosting:$6$eh:20001:0:99999:7:::' "$T/snap/shadow" && ok "…and 
 ( exec 9>"$T/snap/.lock"; flock 9; out="$(AGENT_FABRIC_LOCK_WAIT=1 bash "$WRITER" db-admin 2>&1)"; [[ $? -ne 0 ]] && grep -q "locked by another writer" <<<"$out" ) && ok "a second writer waits for the lock and says so when it does not come" || bad "no lock"
 
 [[ -x "$T/rcd/agent-fabric-accounts.rc" ]] && ok "the boot script is installed" || bad "boot script not installed"
+[[ -d "$T/run/lock/agent-fabric" && ! -e "$T/tmpfiles.d" ]] && ok "the lease directory made for this boot; no tmpfiles.d on a volatile /etc" || bad "leases on qubes" "$(ls -la "$T")"
 grep -qx 'edge-hosting:otscache' "$T/snap/members" && grep -qx 'db-admin:otscache' "$T/snap/members" && ok "supplementary groups snapshotted (members)" || bad "members" "$(cat "$T/snap/members")"
 echo '# stale' > "$T/rcd/agent-fabric-accounts.rc"; run_writer db-admin >/dev/null 2>&1
 cmp -s "$RC" "$T/rcd/agent-fabric-accounts.rc" && ok "an installed boot script that differs is refreshed" || bad "stale boot script kept"
@@ -96,9 +105,11 @@ run_writer edge-hosting >/dev/null 2>&1
 out="$(run_writer no-such-login 2>&1)"; [[ $? -ne 0 ]] && grep -q "no such account" <<<"$out" && ok "an unknown login is refused, named" || bad "unknown login" "$out"
 
 echo "writer on a persistent platform: linger only, no snapshot"
-rm -rf "$T/snap" "$T/rcd"; : > "$LOGINCTL_LOG"; export AGENT_FABRIC_PLATFORM=fedora
+rm -rf "$T/snap" "$T/rcd" "$T/run"; : > "$LOGINCTL_LOG"; export AGENT_FABRIC_PLATFORM=fedora
 run_writer db-admin >/dev/null 2>&1
 [[ ! -e "$T/snap" && ! -e "$T/rcd" ]] && grep -qx 'enable-linger db-admin' "$LOGINCTL_LOG" && ok "no snapshot written; linger enabled" || bad "persistent platform" "$(ls -la "$T"; cat "$LOGINCTL_LOG")"
+[[ -d "$T/run/lock/agent-fabric" ]] && cmp -s "$ROOT/runtime/provisioning/platform/agent-fabric.tmpfiles.conf" "$T/tmpfiles.d/agent-fabric.conf" && ok "the lease directory made now, and its tmpfiles.d entry installed for the next boot" || bad "leases on a persistent platform" "$(ls -laR "$T/tmpfiles.d" "$T/run" 2>&1)"
+grep -q '^d /run/lock/agent-fabric 1777 root root -$' "$T/tmpfiles.d/agent-fabric.conf" && ok "…the entry says 1777, root, no age" || bad "tmpfiles entry" "$(cat "$T/tmpfiles.d/agent-fabric.conf")"
 
 if (( failures )); then echo "qubes accounts: $failures failure(s)" >&2; exit 1; fi
 echo "qubes accounts: OK — all assertions passed."

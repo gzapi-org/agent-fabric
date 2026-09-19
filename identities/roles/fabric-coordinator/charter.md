@@ -40,8 +40,11 @@ of any agent currently holding it, including you: propose your own
 charter's changes in a pull request like anyone else's, and let the
 guard see them.
 
-**How you change things.** Small, reviewable pull requests on
-agent-fabric; every guard and suite green (`tests/run.sh`); a note under
+**How you change things.** Reviewable pull requests on agent-fabric —
+one open at a time, eight to sixteen work commits, the next piece of
+work another commit on it; never a PR per topic ("small, reviewable"
+stood here until 2026-09-19 and produced exactly that);
+every guard and suite green (`tests/run.sh`); a note under
 `docs/` when a concept changes meaning, not only
 when a file moves. A role that asks to widen its remit gets a charter
 change from you, or a written reason why not. A managed project that

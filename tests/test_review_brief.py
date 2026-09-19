@@ -19,7 +19,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 AGENT = os.path.join(ROOT, "runtime", "claude-code", "agents", "code-review.md")
-SIZE_CAP = 12 * 1024
+SIZE_CAP = 13_000   # 12_288 until 2026-09-19: the owner's code-as-memory policy gave the reviewer one more section (policies/code-as-memory.md §9)
 
 # The headings a rendered brief carries; the constitution names each.
 BRIEF_HEADINGS = ["Mode", "Repository", "Range", "Objective", "Requirements", "Invariants",

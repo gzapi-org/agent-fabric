@@ -23,16 +23,33 @@
 # checkout's copy differs. Nothing on a persistent platform writes a
 # snapshot. Secrets: the shadow line carries a hash, never a password; the
 # snapshot directory is root's alone.
+#
+# Also on every platform: the host-wide lease directory the accounts
+# share, /run/lock/agent-fabric (bin/fabric-lease, docs/resources.md) —
+# made now, 1777, and made to come back after a reboot: by the boot
+# script above on a Qubes AppVM, by a tmpfiles.d entry
+# (platform/agent-fabric.tmpfiles.conf -> /etc/tmpfiles.d/) where /etc
+# persists.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 SNAP="${AGENT_FABRIC_ACCOUNTS_SNAPSHOT:-/rw/config/agent-fabric/accounts}"
 RCD="${AGENT_FABRIC_RC_LOCAL_D:-/rw/config/rc.local.d}"
 ETC="${AGENT_FABRIC_ETC:-/etc}"
+LEASES="${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}"
+TMPFILES_D="${AGENT_FABRIC_TMPFILES_D:-/etc/tmpfiles.d}"
 LOGINCTL="${AGENT_FABRIC_LOGINCTL:-loginctl}"
 [[ $# -ge 1 ]] || { echo "usage: persist-accounts.sh <login>..." >&2; exit 2; }
 # shellcheck source=runtime/provisioning/platform/detect.sh
 . "$ROOT/runtime/provisioning/platform/detect.sh"
 rc=0
+# The lease directory, for this boot; and for the next one where /etc persists.
+install -d -m 1777 "$LEASES" || { echo "persist-accounts: cannot make the lease directory $LEASES" >&2; rc=1; }
+if (( PERSISTS_ACROSS_REBOOT )); then
+    src="$ROOT/runtime/provisioning/platform/agent-fabric.tmpfiles.conf"
+    if ! cmp -s "$src" "$TMPFILES_D/agent-fabric.conf"; then
+        install -d -m 755 "$TMPFILES_D" && install -m 644 "$src" "$TMPFILES_D/agent-fabric.conf" || rc=1
+    fi
+fi
 # One writer at a time: the worker for one login and `fabric-host persist`
 # for another both read-modify-write the same snapshot files.
 if (( PERSISTS_ACROSS_REBOOT == 0 )); then

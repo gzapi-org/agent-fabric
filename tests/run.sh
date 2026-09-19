@@ -36,6 +36,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
+    run "fabric-lease (one holder per host resource)" bash tests/test_fabric-lease.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh
     run "new-agent (the sequence, its refusals, a failure at each step)" bash runtime/provisioning/test_new-agent.sh
     run "account persistence (the Qubes boot script, the snapshot writer)" bash runtime/provisioning/platform/test_qubes-accounts.sh
@@ -56,6 +57,10 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "enroll (fault injection)" bash runtime/provisioning/secrets/test_enroll.sh
     run "github pr-reply" bash runtime/github/test_pr-reply.sh
     run "github pr-sessions" bash runtime/github/test_pr-sessions.sh
+    run "github commit-class (work, review fix, merge)" bash runtime/github/test_commit-class.sh
+    run "github pr-review-status" bash runtime/github/test_pr-review-status.sh
+    run "github post-substitute-review" bash runtime/github/test_post-substitute-review.sh
+    run "github pr-gate (the count rule, the verdict)" bash runtime/github/test_pr-gate.sh
 fi
 
 echo

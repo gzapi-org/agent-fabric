@@ -34,6 +34,11 @@ A good message answers:
 
 ## Reporting a finding
 
+A finding that asks the owning lane to *fix* something is an assignment:
+it is addressed `TO` one login, never `TO-ROLE` (§Direct versus role
+addressing below). A finding that only informs — the lane decides
+whether anything follows — may go to the role.
+
 An `OBSERVATION` or `REVIEW` is complete when it diagnoses and stops. The
 recommended shape:
 
@@ -188,7 +193,7 @@ the reader is right to refuse it.
 [GZCOORD/1] REQUEST
 FROM: develop-qzapp/backend-dev-01
 ROLE: backend-dev
-TO-ROLE: fabric-coordinator
+TO: develop-qzapp/user
 PROJECT: gzapp
 MESSAGE-ID: 01a09fc1-…
 SUBJECT: Revert the index refresh in 21a8714f: it dropped two entries
@@ -297,7 +302,8 @@ directory, not repeated in the message:
 TO: develop-gzapp/architect-cto
 ```
 
-Unknown concrete peer — the role alone:
+What only the role decides, or every holder applies — the role alone
+(never an assignment: below):
 
 ```text
 TO-ROLE: architect-cto
@@ -315,3 +321,28 @@ party to act while others watch, send the ask to that party; its
 acknowledgement by reference and the pull request are how the others
 learn of it. `HELLO` and `GOODBYE` are broadcasts by definition and carry
 none of the three.
+
+**An assignment goes `TO` one login, never `TO-ROLE`** (SPEC.md §13; the
+owner, 2026-09-19, after both holders of `backend-dev` executed one
+`OBSERVATION` with a `REQUEST:` section as gzapp #897 and #899, the same
+hunk twice). A `REQUEST`, a finding to fix, a supply, a decision to
+record — anything with a `REQUEST:`, `ACCEPTANCE:` or `DELIVER-TO:`
+section — names a login; the validator refuses it otherwise. `TO-ROLE`
+is for what every holder applies or only the role decides: an `INFO`,
+a `DECISION`, a `QUESTION` to whoever holds it.
+
+When you do not know which holder, choose in this order and say in the
+body which rule chose: (1) the holder whose open branch or pull request
+already touches the path — `tools/gh/pr-gate.sh --all` or
+`pr-sessions.sh --all` lists every open PR by owner; (2) the holder
+whose `HELLO` is the most recent on the channel — the inbox's metadata
+lines carry them; (3) the lowest-numbered login of the role. A wrong
+choice costs one `REPLY` ("not mine — it is `<login>`'s") and nothing
+else; a role address costs a duplicate of the work.
+
+If an assignment reaches a role anyway — a sender on an older text — the
+first holder to act sends its `REPLY` naming the branch or PR before
+any other step; every other holder, on seeing that `REPLY` or an open PR
+on the path by a sibling (`pr-gate.sh --all`), stands down silently: no
+message, no branch. Two who acted before seeing each other: the later-
+opened PR closes, naming the earlier.

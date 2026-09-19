@@ -12,6 +12,25 @@ const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
             { encoding: 'utf8' });
 
+// The format document's own inline examples are copied as much as the
+// files under examples/: every fenced block that opens with the protocol
+// header must validate under the deployment's catalogue, ids elided
+// ("01a0…") tolerated. The one under "Asking for an undo" was a REQUEST
+// addressed TO-ROLE — the shape §13 now refuses — for a day after the rule.
+test('every inline GZCOORD example in MESSAGE-FORMAT.md validates', () => {
+  const doc = fs.readFileSync(new URL('../protocol/MESSAGE-FORMAT.md', import.meta.url), 'utf8');
+  // The §Shape template ("[GZCOORD/1] TYPE", placeholder keys) is the grammar shown, not a message.
+  const blocks = [...doc.matchAll(/```text\n(\[GZCOORD\/1\] (?!TYPE\b)[^\n]*\n[\s\S]*?)```/g)].map(m => m[1]);
+  assert.ok(blocks.length >= 2, `expected the document's inline examples, found ${blocks.length}`);
+  for (const b of blocks) {
+    // [ \t]*, never \s*: with the m flag \s* eats the newline and the blank
+    // line that separates metadata from body, gluing NOTES: onto the block.
+    const text = b.replace(/^(MESSAGE-ID|IN-REPLY-TO): .*…[ \t]*$/gm, (line, key) => `${key}: 01a09fc1-0000-7000-8000-000000000000`);
+    const r = validate(text, { taxonomy });
+    assert.deepEqual(r.errors, [], `${b.split('\n')[0]} / ${b.match(/^SUBJECT: (.*)$/m)?.[1] ?? '(no subject)'}: ${r.errors}`);
+  }
+});
+
 for (const name of ['hello','observation','observation-diagnosis','reply','review']) {
   test(`${name} example is valid`, () => {
     const text = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');
@@ -396,6 +415,27 @@ test('normalize CLI prints the normalised message for validate to read', () => {
     assert.equal(run.stdout, '[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Tester\nPROJECT: gzapp\nMESSAGE-ID: test-0001\n');
     assert.deepEqual(validate(run.stdout).errors, []);
   } finally { fs.unlinkSync(file); }
+});
+
+// SPEC §13: an assignment goes TO one instance. Both holders of a role
+// executed one OBSERVATION with a REQUEST: section (2026-09-19, two PRs on
+// the same hunk); a REQUEST type or a REQUEST:/ACCEPTANCE:/DELIVER-TO:
+// section addressed TO-ROLE is refused, and the same body TO an instance
+// or an INFO/DECISION/QUESTION TO-ROLE without those sections passes.
+test('an assignment TO-ROLE is refused; the same TO an instance, and a non-assignment TO-ROLE, pass', () => {
+  const head = t => `[GZCOORD/1] ${t}\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nMESSAGE-ID: test-0001\n`;
+  let r = validate(`${head('REQUEST')}TO-ROLE: Web Engineer\n\nREQUEST:\nmove the line\n`);
+  assert.ok(r.errors.some(e => e.includes('a REQUEST is an assignment')), r.errors);
+  assert.deepEqual(validate(`${head('REQUEST')}TO: develop-gzapp/web\n\nREQUEST:\nmove the line\n`).errors, []);
+  for (const section of ['REQUEST', 'ACCEPTANCE', 'DELIVER-TO']) {
+    r = validate(`${head('OBSERVATION')}TO-ROLE: Web Engineer\n\nOBSERVATION:\nseen\n\n${section}:\nfix it\n`);
+    assert.ok(r.errors.some(e => e.includes(`${section} section`) && e.includes('never TO-ROLE')), `${section}: ${r.errors}`);
+    assert.deepEqual(validate(`${head('OBSERVATION')}TO: develop-gzapp/web\n\nOBSERVATION:\nseen\n\n${section}:\nfix it\n`).errors, [], section);
+  }
+  r = validate(`${head('OBSERVATION')}TO-ROLE: Web Engineer\n\nOBSERVATION:\nseen\n\nREQUEST:\nfix it\n\nACCEPTANCE:\nit is fixed\n`);
+  assert.ok(r.errors.some(e => e.includes('REQUEST and ACCEPTANCE sections')), r.errors);
+  for (const [type, body] of [['INFO', 'INFO:\nfyi\n'], ['DECISION', 'DECISION:\nso decided\n'], ['QUESTION', 'QUESTION:\nwhich?\n'], ['OBSERVATION', 'OBSERVATION:\nseen, no ask\n']])
+    assert.deepEqual(validate(`${head(type)}TO-ROLE: Web Engineer\n\n${body}`).errors, [], type);
 });
 
 // SPEC §7.1: one addressing field, the delivery scope. Live traffic

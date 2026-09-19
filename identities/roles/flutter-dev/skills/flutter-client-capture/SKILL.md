@@ -7,7 +7,7 @@ description: See what a running Flutter client actually shows — capture its wi
 
 What a Flutter app draws is evidence the widget tree is not. These are
 the ways that evidence goes wrong, each learned by a holder of this
-role on a Linux desktop build (flutter-dev-01, 2026-09-16, one project,
+role on a Linux desktop build (one holder, one project,
 two apps); the ones marked *one place* have not been seen elsewhere yet.
 Where the app runs, what its windows are called, which ports and
 binaries the host has and how the launcher is driven are the project's

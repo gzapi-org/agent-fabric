@@ -20,16 +20,16 @@ Two standing exceptions exist, both named in the root file, both
 review: step 26 of the canonical lifecycle (judging an automated review
 claim with a subagent, added after two findings were dismissed by hand
 in a row and both dismissals were wrong), and the substitute review
-dispatched when the project's review-status tooling (gzapp:
-`tools/gh/pr-review-status.sh`) reports a DECLINE. Nothing else.
+dispatched when the project's review-status tooling
+(`pr-review-status.sh`, the fabric's, reached through the project's
+`tools/gh/` forwarder) reports a DECLINE. Nothing else.
 
 ## The `model` field — the ~40-agent bill
 
 Omitting `model` is not a neutral default: the agent **inherits the
-session model**. On 2026-08-05 the ADR-075 fold dispatched a wave of
-roughly forty agents with the field unset, from a session running a
-premium model — every one of them ran premium, for work that was mostly
-mechanical. Fan-out multiplies the per-agent cost by the count, so the
+session model**. A fold once dispatched a wave of roughly forty agents
+with the field unset, from a session running a premium model — every
+one of them ran premium, for work that was mostly mechanical. Fan-out multiplies the per-agent cost by the count, so the
 tier decision is where the bill is actually made:
 
 | class (`subagent_type`) | alias (`model`) | for |
@@ -50,7 +50,7 @@ harness resolves and what a launch binds per session. A class whose
 tier a call could override would be a label — `code-high` on `sonnet`
 is high-consequence work on the cheap tier with nothing saying so — and
 a guard that inferred the alias from the class would move a routing
-decision into a hook that cannot read `routing/`. Decided 2026-09-13.
+decision into a hook that cannot read `routing/`.
 
 Pinning the tier on every call is also what keeps a campaign
 reproducible: if the session model changes while a batch is in flight,
@@ -62,7 +62,7 @@ class on the wrong alias, and prompts on a premium one.
 One role escapes the premium ban without a per-dispatch ask: a
 **substitute reviewer**, dispatched either at step 26 (judging an
 automated review claim) or when the project's review-status tooling
-(gzapp: `tools/gh/pr-review-status.sh`) reports a
+(`pr-review-status.sh`) reports a
 DECLINE and no automated review is coming at all.
 
 **`fable` is a tier alias, and the target is agent-fabric's routing.**
@@ -81,8 +81,8 @@ process env, which every subagent inherits — on the broker and on plain
 `claude` alike. The review class rides `fable` with `code-plan`, and one
 alias carries one export, so its model is NOT the fable export (through
 it the reviewer would follow code-plan, as it once followed code-high on
-`opus`: a reviewer dispatched on `opus` on the broker path ran on GLM,
-2026-09-13); it is written into the reviewer's agent file at launch, for
+`opus`: a reviewer dispatched on `opus` on the broker path once ran on
+the cheap tier's model); it is written into the reviewer's agent file at launch, for
 that launch's provider, and the guard drops the dispatch's alias under a
 fabric launch so the file decides. The Agent tool accepts only the tier
 aliases, so a full model id cannot be named at dispatch.
@@ -96,8 +96,8 @@ OpenRouter: `openrouter/pareto-code` + a dashboard-default
 `min_coding_score` is a quality tier (cheapest model above the bar —
 the phase-2 opus target), `~vendor/family-latest` is a stable family
 alias, `:floor` and `provider.sort: "price"` tune cost within one
-model. Verified against OpenRouter's docs and live catalog on
-2026-09-12; the launcher+registry shipped 2026-09-12 under Shape D.
+model. Verified against the broker's docs and live catalog when the
+launcher and registry shipped (`docs/live-checks/`).
 
 The tier table above optimises for cost because, for ordinary work, a
 cheaper agent that does the job is strictly better. Review inverts
@@ -197,7 +197,7 @@ Two properties of the guard matter and are pinned by the test file:
   — need `model` and must NOT set isolation: they have no writing tool,
   the clone guard fences their Bash in the session clone, and a
   worktree (`baseRef: head`) would hide the uncommitted work a search
-  is usually about. Added 2026-09-16, after every Explore dispatch of a
+  is usually about. Before this exemption every Explore dispatch of a
   planning session was denied and the research done by hand.
 
 Pass `model: "opus"` explicitly anyway, even though the agent
@@ -267,8 +267,8 @@ removes it). The guard's branch for it sits before the review-
 description branch — reviewing a text in the locale is its job — and
 asks: a model set (any alias, no ask: language judgement is premium by
 design), no isolation (its one inert tool writes nothing). Read back
-2026-09-17: an empty `tools:` inherits every tool and the harness
-refuses an agent with none, so the file says `tools: TaskStop`.
+live: an empty `tools:` inherits every tool and the harness refuses an
+agent with none, so the file says `tools: TaskStop`.
 
 ## What the hook cannot see: `Workflow` scripts
 
@@ -277,7 +277,7 @@ script's agents are created by `agent(prompt, opts)` inside the script,
 and never reach it. Both fields are optional in that API and both
 default the wrong way — `model` inherits the session, `isolation` runs
 in the session's clone — and a workflow can be dozens of agents in one
-call, so the 2026-08-05 failure recurs multiplied. No hook can close
+call, so the forty-agent failure above recurs multiplied. No hook can close
 this at dispatch: `Workflow`'s tool input is the script *text*, so any
 guard there would be string-matching rather than a structural check.
 The rule in the root file is the only place it exists.
@@ -301,13 +301,12 @@ Every WRITING dispatch runs in its own worktree under `.claude/worktrees/`. Four
 things about that were learned by probing, not by reading docs:
 
 - **`worktree.baseRef` defaults to `fresh`, which branches from
-  `origin/<default-branch>`.** Two agents dispatched on 2026-08-04 to
-  extend an ADR and its source found neither, because the unmerged task
-  branch was invisible to them; a probe on 2026-08-07 reproduced it
-  unchanged. This repo pins `"baseRef": "head"` in
+  `origin/<default-branch>`.** Two agents dispatched to extend a
+  decision record and its source found neither, because the unmerged
+  task branch was invisible to them; a probe reproduced it unchanged. This repo pins `"baseRef": "head"` in
   `.claude/settings.json`, and a re-probe confirmed the agent then sees
   the full branch. Check it before diagnosing a "blind" agent.
-- **`head` means the committed HEAD.** Verified 2026-08-07, and re-verified 2026-09-11 with a haiku probe (untracked file and unstaged edit both absent inside the worktree; the devex-tooling thread slice that records this as contradictory is the stale record): an untracked
+- **`head` means the committed HEAD.** Verified, and re-verified with a cheap-tier probe (untracked file and unstaged edit both absent inside the worktree): an untracked
   file and an unstaged edit to a tracked file both came back MISSING
   from the agent's view. An agent asked to extend uncommitted work
   silently reads the previous version and reports success against it.
@@ -318,9 +317,9 @@ things about that were learned by probing, not by reading docs:
   worktree plus a `worktree-agent-<id>` branch for the session to remove.
   `.claude/worktrees/` sits inside the repo and each entry holds a `.git`
   file; without the gitignore, `git add -A` staged one as an embedded
-  repository and committed a broken gitlink (observed 2026-08-07).
+  repository and committed a broken gitlink.
 - **Parallel worktree creation from one non-main branch is safe** —
-  verified 2026-08-07 with eight simultaneous adds, each with an
+  verified with eight simultaneous adds, each with an
   independent `HEAD`, index and tree. This is why the old "no builds in
   parallel" demand is gone: build artifacts were the shared state that
   disjoint source paths did not protect, and a worktree has its own.

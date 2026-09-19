@@ -1,7 +1,7 @@
 [GZCOORD/1] OBSERVATION
 FROM: develop-gzapp/web-dev
 ROLE: web-dev
-TO-ROLE: architect-cto
+TO: develop-gzapp/architect-cto
 PROJECT: gzapp
 REPOSITORY: gzapp
 COMMIT: 8db603e8

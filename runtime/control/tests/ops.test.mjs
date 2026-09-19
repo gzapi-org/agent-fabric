@@ -7,7 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { execFileSync } from 'node:child_process';
+import { identity, usage, keys, fabric, session, host, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -297,4 +298,68 @@ test('collect: status is every section, a single op its own, and a failing secti
   assert.ok(!('memory' in all), 'a drain is asked for, never part of status');
   const mem = await collect('memory', { home: h, exec: () => { throw new Error('never runs'); } });
   assert.deepEqual(mem, { memory: { status: 'ok', bundles: [] } }, 'a home with no memory answers an empty drain');
+});
+
+test('host: the machine from a scratch /proc and /sys — load, memory, the balloon, disks once per device, leases probed with flock, the largest processes; nothing but numbers, logins and program names', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-host-'));
+  const proc = path.join(root, 'proc'), sys = path.join(root, 'sys'), leases = path.join(root, 'leases');
+  fs.mkdirSync(proc); fs.mkdirSync(leases, { recursive: true });
+  fs.writeFileSync(path.join(proc, 'loadavg'), '3.37 3.44 3.22 5/1200 999\n');
+  fs.writeFileSync(path.join(proc, 'meminfo'), 'MemTotal:       31563000 kB\nMemFree:         9750000 kB\nMemAvailable:   21901000 kB\nSwapTotal:       9437176 kB\nSwapFree:        9437176 kB\n');
+  // two mounts of one device (/ and /usr/lib/modules) and one of another: two rows
+  fs.writeFileSync(path.join(proc, 'mounts'), '/dev/mapper/dmroot / ext4 rw 0 0\nnone /usr/lib/modules ext4 ro 0 0\n/dev/mapper/dmroot /usr/lib/modules ext4 ro 0 0\n/dev/xvdb /rw ext4 rw 0 0\ntmpfs /run tmpfs rw 0 0\n');
+  const xm = path.join(sys, 'devices', 'system', 'xen_memory', 'xen_memory0'); fs.mkdirSync(path.join(xm, 'info'), { recursive: true });
+  fs.writeFileSync(path.join(xm, 'target_kb'), '31900000\n'); fs.writeFileSync(path.join(xm, 'info', 'current_kb'), '31899000\n');
+  fs.writeFileSync(path.join(leases, 'backend-test'), 'db-admin 4242 2026-09-19T08:26:43Z backend-test\n');
+  fs.writeFileSync(path.join(leases, 'free-one'), 'user 1 2026-09-19T00:00:00Z free-one\n');
+  fs.writeFileSync(path.join(leases, '.lock'), '');
+  fs.writeFileSync(path.join(leases, 'not a lease; $(id)'), 'x 1 t n\n');   // outside fabric-lease's name grammar: never probed
+  const calls = [];
+  const exec = (cmd, args, opts = {}) => {
+    calls.push([cmd, ...args, opts.stdio?.[3] != null ? fs.readlinkSync(`/proc/self/fd/${opts.stdio[3]}`) : null]);
+    if (cmd === 'xenstore-read') return '31916000\n';
+    if (cmd === 'ps') return 'USER PID RSS COMMAND\nbackend-dev-02 667140 2191360 VBCSCompiler\np2p-network-dev-01 674834 159744 rustc\n';
+    if (cmd === 'flock') { const target = fs.readlinkSync(`/proc/self/fd/${opts.stdio[3]}`); if (target.endsWith('backend-test') || target.endsWith('big-one')) { const e = new Error('held'); e.status = 1; throw e; } return ''; }
+    throw new Error('unexpected ' + cmd);
+  };
+  const statfs = mnt => ({ bsize: 4096, blocks: mnt === '/rw' ? 77332480 : 10485760, bavail: mnt === '/rw' ? 22020096 : 5505024 });
+  // A fifo with no writer under a grammar-conforming name, and a symlink:
+  // neither hangs the probe nor becomes a row (O_NONBLOCK, O_NOFOLLOW, fstat).
+  execFileSync('mkfifo', [path.join(leases, 'a-fifo')]);
+  fs.symlinkSync(path.join(leases, 'backend-test'), path.join(leases, 'a-link'));
+  // a record grown past the bound: only the first line's first 256 bytes are read
+  fs.writeFileSync(path.join(leases, 'big-one'), 'db-admin 7 2026-09-19T00:00:00Z big-one' + ' '.repeat(5000) + '\n' + 'x'.repeat(100000));
+  const before = fs.readdirSync('/proc/self/fd').length;
+  const h = host({ proc, sys, leases, exec, cpus: 6, statfs });
+  assert.equal(fs.readdirSync('/proc/self/fd').length, before, 'every probed descriptor is closed, on the held path and the free path alike');
+  assert.equal(h.status, 'ok'); assert.equal(h.cpus, 6);
+  assert.deepEqual(h.loadavg, [3.37, 3.44, 3.22]);
+  assert.deepEqual(h.mem_mb, { total: 30823, available: 21388, swap_total: 9216, swap_free: 9216 });
+  assert.deepEqual(h.balloon_mb, { current: 31151, target: 31152, static_max: 31168 });
+  assert.deepEqual(h.disk.map(d => d.mount), ['/', '/rw'], 'one row per block device, tmpfs and none excluded');
+  assert.deepEqual(h.disk[1], { mount: '/rw', size_gb: 295, avail_gb: 84, use_pct: 72 });
+  assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }, { name: 'big-one', holder: 'db-admin', pid: 7, since: '2026-09-19T00:00:00Z' }], 'the held leases only; the free one, the dotfile, the fifo, the symlink and the name outside the grammar are not rows; the grown record is read bounded');
+  assert.ok(!calls.some(c => c[0] === 'flock' && (String(c[4]).endsWith('/a-fifo') || String(c[4]).endsWith('/a-link'))), 'a fifo or a symlink never reaches flock');
+  assert.ok(!calls.some(c => c[0] === 'flock' && String(c[4]).includes('not a lease')), 'a name outside the grammar never reaches the probe');
+  assert.ok(calls.some(c => c[0] === 'flock' && c[1] === '-s' && c[2] === '-n' && c[3] === '3' && String(c[4]).endsWith('/backend-test')), 'the probe hands flock an already-open read-only descriptor as fd 3 and asks for a SHARED lock — no shell, no O_CREAT, never the exclusive lock a caller needs');
+  // a file the probe cannot open is not a lease row, and flock is never asked about it
+  fs.chmodSync(path.join(leases, 'free-one'), 0o000);
+  if (process.getuid() !== 0) {
+    calls.length = 0;
+    const unreadable = host({ proc, sys, leases, exec, cpus: 6, statfs });
+    assert.ok(!calls.some(c => String(c[4]).endsWith('/free-one')), 'an unopenable file never reaches flock');
+    assert.deepEqual(unreadable.leases.map(l => l.name), ['backend-test', 'big-one']);
+  }
+  fs.chmodSync(path.join(leases, 'free-one'), 0o644);
+  // half a balloon in sysfs: the missing half is null, never 0
+  fs.rmSync(path.join(xm, 'info', 'current_kb'));
+  const half = host({ proc, sys, leases, exec, cpus: 6, statfs });
+  assert.equal(half.balloon_mb.current, null); assert.equal(half.balloon_mb.target, 31152);
+  fs.writeFileSync(path.join(xm, 'info', 'current_kb'), '31899000\n');
+  assert.deepEqual(h.top_rss[0], { user: 'backend-dev-02', pid: 667140, rss_mb: 2140, comm: 'VBCSCompiler' });
+  assert.equal(JSON.stringify(h).includes('/home/'), false, 'no path of a home in the record');
+  // not a Xen guest, no lease directory, no ps: null and empty, never a throw
+  const bare = host({ proc, sys: path.join(root, 'nosys'), leases: path.join(root, 'noleases'), exec: () => { throw new Error('no such command'); }, cpus: 2, statfs });
+  assert.equal(bare.balloon_mb, null); assert.deepEqual(bare.leases, []); assert.deepEqual(bare.top_rss, []);
+  assert.ok(OPS.includes('host'));
 });

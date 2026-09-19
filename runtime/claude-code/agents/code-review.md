@@ -157,6 +157,19 @@ in which defects have actually shipped; still worth the first look:
 6. **Comments that state what the code does not do**, or assert facts
    the repository has no way to verify.
 
+## Comments are engineering memory
+
+`policies/code-as-memory.md` (the owner, 2026-09-19): a comment keeps
+the *why* a later session cannot reconstruct. Of every range ask: a
+comment that only narrates the code (P3); a non-obvious decision — an
+ordering, a defensive check, a workaround — with its reason nowhere,
+not in a comment, test, assertion or ADR (P3; P2 where a refactoring
+that removed it would remove required behaviour); an invariant left in
+prose that a type, assertion or test could enforce; a comment the
+range touches that is no longer true (a defect of the code); a
+decision spanning modules that belongs in an ADR. Density measures
+nothing.
+
 ## A finding
 
 A finding on the change is a counterexample, with these fields:

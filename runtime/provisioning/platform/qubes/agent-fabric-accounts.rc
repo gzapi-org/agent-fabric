@@ -23,6 +23,19 @@
 # stderr, never appended over it. `members` (login:g1,g2) puts each
 # re-added login back into the supplementary groups it had (the shared
 # cache group the worker grants), in /etc/group and /etc/gshadow.
+#
+# One more thing the volatile root loses: the host-wide lease directory,
+# /run/lock/agent-fabric (bin/fabric-lease, docs/resources.md), where
+# the accounts take one flock per shared host resource — the backend
+# suite's postgres, for one. 1777 like /tmp: every login creates its own
+# lease files, none removes another's. On a persistent platform tmpfiles.d
+# makes it; here it is made before anything else, so it exists even on a
+# boot with no snapshot.
+LEASES="${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}"
+# The mode is the point: a 0755 fallback would leave every login unable to
+# create its lease file, and /run is volatile, so nothing before the next
+# boot could repair it — a failure here is said, never quiet.
+install -d -m 1777 "$LEASES" 2>/dev/null || { mkdir -p "$LEASES" && chmod 1777 "$LEASES"; } || echo "agent-fabric-accounts: lease directory $LEASES not made 1777; fabric-lease will refuse every login until the next boot" >&2
 S="${AGENT_FABRIC_ACCOUNTS_SNAPSHOT:-/rw/config/agent-fabric/accounts}"
 ETC="${AGENT_FABRIC_ETC:-/etc}"
 LOGINCTL="${AGENT_FABRIC_LOGINCTL:-loginctl}"

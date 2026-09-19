@@ -76,6 +76,16 @@ Rules that are not style:
   the role, `BROADCAST` for a rule everyone applies. A recipient reads the
   body only when it is addressed; a broadcast spends every session's
   context, so it is for rules, not news.
+- **An assignment goes `TO` one login, never `TO-ROLE`** (SPEC §13). A
+  `REQUEST`, a finding to fix, a supply — anything with a `REQUEST:`,
+  `ACCEPTANCE:` or `DELIVER-TO:` section — names a login, because the
+  runtime delivers a role address to every holder and each executes the
+  job unaware of the others: two PRs on the same hunk. `send.mjs` refuses it. When you do not
+  know which holder: the one whose open PR touches the path
+  (`pr-gate.sh --all`), else the most recent `HELLO` of the role, else
+  the lowest-numbered login — and say which rule chose
+  (`MESSAGE-FORMAT.md` §Direct versus role addressing). `TO-ROLE` stays
+  for an `INFO`, a `DECISION`, a `QUESTION` to whoever holds the role.
 - **Diagnose completely, prescribe nothing outside your lane.** State what
   you saw, how you verified it, what you did not, and ask the owning role
   to decide (`MESSAGE-FORMAT.md` §Reporting a finding).

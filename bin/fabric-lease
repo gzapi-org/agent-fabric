@@ -13,7 +13,7 @@
 # ballooned to 8.6 GiB, 166,000 postgres files in ninety seconds, and
 # the VM was gone (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
 # The fix is not a role that runs suites for everyone: it is mutual
-# exclusion where the suite is started (docs/host-leases.md).
+# exclusion where the suite is started (docs/resources.md).
 #
 # A lease is a flock(2) on ${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}/<name>,
 # a directory every account can create files in (1777, made at boot by
@@ -36,7 +36,13 @@
 set -uo pipefail
 LEASES="${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}"
 MEMINFO="${AGENT_FABRIC_MEMINFO:-/proc/meminfo}"
-usage() { sed -n '5,6p' "$0" | sed 's/^# //'; exit 2; }
+usage() {
+    cat >&2 <<'U'
+usage: fabric-lease <name> [--wait SECS] [--need-mem MB] -- <cmd> [args...]
+       fabric-lease <name> --who              who holds it, if anyone; exit 0 free, 1 held
+U
+    exit 2
+}
 NAME=""; WAIT=0; NEED=0; WHO=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -61,7 +67,7 @@ L="$LEASES/$NAME"
 # exists with tighter modes (made by hand) still locks, and the record is
 # best effort. The lock is taken on a READ-ONLY descriptor and the record
 # written by dd with conv=nocreat: in a sticky world-writable directory
-# fs.protected_regular (2 on Fedora) refuses an O_CREAT open of a file
+# fs.protected_regular (1 on Fedora's default, 2 elsewhere) refuses an O_CREAT open of a file
 # another login owns, and every bash write redirection carries O_CREAT —
 # found live on develop-qzapp, 2026-09-19, the second account locked out
 # of the first one's lease file (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
@@ -85,11 +91,23 @@ fi
 # Held. Memory, checked under the lease so two callers do not both pass.
 if (( NEED > 0 )); then
     avail_kb="$(awk '/^MemAvailable:/{print $2}' "$MEMINFO" 2>/dev/null)"
-    if [[ -n "$avail_kb" ]] && (( avail_kb / 1024 < NEED )); then
+    # A floor that cannot be evaluated is refused, never skipped.
+    [[ "$avail_kb" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --need-mem asked, and MemAvailable cannot be read from $MEMINFO" >&2; exit 2; }
+    if (( avail_kb / 1024 < NEED )); then
         echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $(( $(awk '/^MemTotal:/{print $2}' "$MEMINFO") / 1024 )) MB) — the largest processes:" >&2
         ps -eo user:20,pid,rss,comm --sort=-rss 2>/dev/null | head -6 | awk 'NR==1{print "   "$0; next}{printf "   %-20s %7s %6d MB %s\n", $1, $2, $3/1024, $4}' >&2
         exit 75
     fi
 fi
 record
-"$@" 9>&-
+# The command in the background with the lease's descriptor closed, and
+# TERM/INT forwarded to it: a wrapper killed alone would release the
+# lease while the suite — and its postgres — were still running. Its
+# exit status is ours; `command` so a name never resolves to a function
+# of this script.
+command "$@" 9>&- &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' TERM INT
+wait "$child"; rc=$?
+trap - TERM INT
+exit "$rc"

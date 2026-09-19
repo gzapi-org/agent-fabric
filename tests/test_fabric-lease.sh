@@ -15,7 +15,8 @@ D="$SANDBOX/leases"; mkdir -m 1777 "$D"
 lease() { AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" "$@"; }
 
 echo "fabric-lease: usage"
-lease 2>/dev/null; [[ $? -eq 2 ]] && ok "no name: exit 2" || bad "no name"
+out="$(lease 2>&1 >/dev/null)"; rc=$?; [[ $rc -eq 2 ]] && grep -q "^usage:" <<<"$out" && ok "no name: exit 2, usage on stderr" || bad "no name" "rc=$rc $out"
+[[ -z "$(lease 2>/dev/null)" ]] && ok "…and nothing on stdout" || bad "usage leaked to stdout"
 lease "bad name" -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a name with a space is refused" || bad "bad name accepted"
 lease x --wait abc -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "--wait must be a number" || bad "--wait abc"
 out="$(AGENT_FABRIC_LEASES="$SANDBOX/absent" bash "$ROOT/bin/fabric-lease" x -- true 2>&1)"; rc=$?
@@ -56,6 +57,19 @@ out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo" lease backend-test --need-mem 409
 lease backend-test --who >/dev/null; [[ $? -eq 0 ]] && ok "…and the lease released" || bad "lease kept after memory refusal"
 out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo" lease backend-test --need-mem 1024 -- echo ran 2>&1)"
 [[ "$out" == "ran" ]] && ok "enough memory: runs" || bad "need-mem pass" "$out"
+out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/absent" lease backend-test --need-mem 1024 -- echo ran 2>&1)"; rc=$?
+[[ $rc -eq 2 ]] && ! grep -q '^ran$' <<<"$out" && grep -q "MemAvailable cannot be read" <<<"$out" && ok "MemAvailable unreadable: refused, exit 2, never skipped" || bad "unreadable meminfo" "rc=$rc $out"
+printf 'MemTotal:       18152000 kB\n' > "$SANDBOX/meminfo-noavail"
+out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo-noavail" lease backend-test --need-mem 1024 -- echo ran 2>&1)"; rc=$?
+[[ $rc -eq 2 ]] && ! grep -q '^ran$' <<<"$out" && ok "no MemAvailable line: the same refusal" || bad "missing MemAvailable" "rc=$rc $out"
+
+echo "fabric-lease: signals and names"
+AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "echo child-got-term; exit 0" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+kill -TERM "$HOLDER"; wait "$HOLDER" 2>/dev/null; HOLDER=""
+sleep 0.5; grep -q child-got-term "$SANDBOX/holder.out" && ok "TERM to the wrapper reaches the command" || bad "TERM not forwarded" "$(cat "$SANDBOX/holder.out")"
+lease backend-test --who >/dev/null; [[ $? -eq 0 ]] && ok "…and the lease is free afterwards" || bad "lease held after TERM"
+out="$(lease backend-test -- record 2>&1)"; rc=$?; [[ $rc -eq 127 ]] && ok "a function of the script is not a command (exit 127)" || bad "function ran as command" "rc=$rc $out"
 
 echo
 if (( FAIL )); then echo "fabric-lease: $FAIL failure(s), $PASS passed"; exit 1; fi

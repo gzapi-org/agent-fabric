@@ -86,7 +86,7 @@ PROMPT_TEMPLATE_PLACEHOLDERS = {"header.md": ("{agent}", "{host}", "{role}"), "b
 # 1800 until 2026-09-18, when the owner's two rules on who owns a change
 # and when a PR is armed joined team.md: ~200 tokens every session pays
 # so that no holder has to learn them from a message.
-PROMPT_TEMPLATE_BUDGET_TOKENS = 2100
+PROMPT_TEMPLATE_BUDGET_TOKENS = 2400   # 2100 until 2026-09-19: the one-open-PR rule and its exceptions joined team.md (the owner); MAX_CHARS in launch_prompt.py moved with it
 DOMAIN_CLASSES = ("domain",)
 PROJECT_CLASSES = ("solution", "intersection", "rationale", "workflow", "threads")
 # Tier-1 knowledge, in load order: the charter, the project index, the

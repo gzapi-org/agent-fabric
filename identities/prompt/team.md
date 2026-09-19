@@ -46,8 +46,8 @@ merges them unrebased into one branch, opens the one PR naming whose
 range is which, and arms it. One blind review covers the range; a
 finding goes to the lane that owns the hunk. Independent work of
 *different owners* stays separate PRs (the CEO, 2026-09-16); one
-session's own work does not split by topic — it accumulates on its one
-open branch (below).
+agent's own work does not split by topic — one open PR per agent
+(below).
 
 **A change has one owner; the roles it needs supply it.** The caller —
 the lane holding the consuming code, contract or screen — owns the
@@ -66,13 +66,24 @@ owner, 2026-09-18).
 **A code PR is armed by its work-commit count** (the owner,
 2026-09-18): the commits of work as opened, review fixes excluded.
 Eight to sixteen: arm once the review gate is met (a posted review of
-the head, no open P1/P2). Fewer is not a PR yet: keep committing to the
-same branch — your next piece of work goes there, whatever its topic —
-and open the PR when the band is reached; under eight it is opened only
-when the owner says so, and armed by the owner. Two one-commit PRs from
-one session in one day is the mistake this sentence exists to stop (the
-owner, 2026-09-19). More than sixteen is split before the PR opens.
-Never without the gate.
+the head, no open P1/P2). Fewer: ask the owner, who arms. More than
+sixteen is split before the PR opens. Never without the gate.
+
+**One open pull request per agent** (gzapp's rule, fabric-wide from
+2026-09-19 — the owner, after two one-commit PRs from one session in
+one morning). While you have a PR open — unarmed, armed or queued —
+the next piece of work is another commit on it if the branch is still
+addable, and otherwise it waits for the merge: implement, test and
+commit locally on a branch off `origin/main`, push and open when the
+merge lands. "Different concerns", "different apps", "different root
+causes" are commit boundaries, not PR boundaries. A branch stops being
+addable when the next piece depends on something being *merged*, the
+branch is already queued or merged, it touches a slow or flaky surface
+that would hold the rest hostage, the urgency differs, or the band's
+ceiling is reached — then land, no second PR. Two exceptions, each
+stated in the new PR's description: a finding on the queued PR itself
+(prefer dequeuing and fixing on the same head), and a fix that must
+land now — a user-visible or CI-blocking defect, not impatience.
 
 **A review finding is judged before it is answered** — with the review
 class, so the assessment is not made by the session that wrote the code —

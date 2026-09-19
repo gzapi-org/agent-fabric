@@ -61,7 +61,7 @@ FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 # ~5 000 tokens: fabric-coordinator's 7 KB charter (13 KB rendered with no
 # brief) plus a full brief fits; anything larger is a lint problem upstream,
 # not something to ship with every request of a session.
-MAX_CHARS = 21_500   # 20_000 until 2026-09-18, when team.md grew by the owner's two rules (layout.PROMPT_TEMPLATE_BUDGET_TOKENS moved with it)
+MAX_CHARS = 23_000   # 20_000 until 2026-09-18 (the owner's two rules), 21_500 until 2026-09-19 (one open PR per agent, its exceptions); layout.PROMPT_TEMPLATE_BUDGET_TOKENS moves with it
 
 # The header, the missing-brief line, the team and memory sections are
 # templates under identities/prompt/ (lint budgets them together): the

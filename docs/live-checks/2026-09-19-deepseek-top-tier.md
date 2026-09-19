@@ -3,8 +3,12 @@
 The owner's decision, in the coordinator's session: the broker path's
 session model, `code-high`, `code-plan` and the review class move to
 `deepseek/deepseek-v4-pro-0813`; `code-low` and `code-medium` stay GLM.
-The reason for the review class is independence — a reviewer on a
-different model family from the coding classes it reviews. Admissibility
+The reason for the review class is the tier: the owner runs adversarial
+local review and wants the reviewer on the strongest admissible broker
+model. It is the same model the session, `code-high` and `code-plan`
+ride, so the reviewer's independence is the blind brief and a fresh
+context — a different family it is only from `code-low` and
+`code-medium`. Admissibility
 rests on `2026-09-14-deepseek.md`; this note is the read-back of the
 routing change itself.
 
@@ -30,8 +34,13 @@ not by sharing).
 
 Headless, `launch -p …`, session `86f4cbd3`: a two-step task (one shell
 command, one line of answer, read nothing else). Three turns, the command
-run, the count right, the answer written unprompted and naming the model;
-`modelUsage` carries one key, the DeepSeek composite; `is_error: false`.
+run, the count right, the answer written unprompted and naming the model
+("6 files under routing/; I am deepseek/deepseek-v4-pro-0813 (DeepSeek V4
+Pro)"); `modelUsage` carries one key,
+`deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim`; `is_error:
+false`. The `/generation` read-backs of the 2026-09-14 check are the
+per-request evidence; this run's purpose was to show the composite still
+serves through the launcher as committed today.
 The harness logs `unrecognized_model` for the non-Anthropic id, as it
 does for every broker model.
 

@@ -27,7 +27,7 @@ agent-fabric contains agent infrastructure
 | **HOST** | Which machine is the account on, and how does the coordinator reach it? | `runtime/hosts/registry.json` — hosts by short hostname, each account's placement; `runtime/hostexec/` runs one command there, directly on this host or over ssh with the same worker; `bin/fabric-host`. Placement is where an account is, never who it is |
 | **CAPABILITY** | How much reasoning does a task require? | `routing/capabilities.json` classes: `code-low`, `code-medium`, `code-high`, `code-plan`, `code-review` |
 | **MODEL ROUTING** | Which concrete model satisfies that capability now? | `routing/capabilities.json` providers, layered by `routing/profiles.json` (per role, per login) |
-| **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today only `z-ai/glm-*` → `@preset/glm2claude-shim` |
+| **COMPATIBILITY** | What shim does that model family need for this harness? | `routing/shims.json` — today `z-ai/glm-*` → `@preset/glm2claude-shim` and `deepseek/deepseek-v4*` → `@preset/deepseek2claude-shim`, each live-tested |
 | **COMMUNICATION** | How do independent agents exchange work and knowledge? | `communication/gzcoord/` — GZCOORD/1; the address is `<host>/<login>` |
 | **PROJECT BINDING** | Which roles, domains and path rules apply to each managed repository? | `<working copy>/.agent-fabric/taxonomy.json` in the project itself (`projects/registry.json` names the project); the fabric's own is `.agent-fabric/taxonomy.json` here |
 | **RUNTIME ADAPTER** | How does all of this become Claude Code / OpenRouter / another harness's configuration? | `runtime/claude-code/` (hooks, agent files, bootstrap), `bin/fabric-role`, `runtime/openrouter/launch`, `runtime/provisioning/` |

@@ -10,7 +10,7 @@
         "session": "claude-opus-5"
       }
     },
-    "notes": "The session model is the main agent's, per provider: Sonnet 5 on the broker (a provider switch, not a cost switch), Opus 5 on plain claude (the owner, 2026-09-15); the capability classes come from routing/capabilities.json unless a layer overrides one."
+    "notes": "The session model is the main agent's, per provider: DeepSeek V4 Pro on the broker — the top tier, so the main conversation runs on the strongest admissible broker model (the owner, 2026-09-19; Sonnet 5 until then) — and Opus 5 on plain claude (the owner, 2026-09-15). the capability classes come from routing/capabilities.json unless a layer overrides one."
   },
   "roles": {},
   "agents": {}

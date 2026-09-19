@@ -90,7 +90,7 @@ grep -q "session : deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<
 grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "code-high -> deepseek v4 pro + its shim -> opus alias" || bad "code-high wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" <<<"$out" && ok "code-plan -> deepseek v4 pro + its shim -> fable alias, its own export" || bad "review wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" <<<"$out" && ok "code-plan -> deepseek v4 pro + its shim -> fable alias, its own export" || bad "code-plan (fable) wrong" "$out"
 [[ "$(grep -c 'export ANTHROPIC_DEFAULT_' <<<"$out")" == 4 ]] && ok "four aliases, four exports: the review class never shares code-high's" || bad "export count" "$out"
 
 echo "launch: a non-GLM override receives no shim; a GLM override keeps it"

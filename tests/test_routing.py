@@ -45,8 +45,9 @@ DS_SHIM = "@preset/deepseek2claude-shim"
 
 def test_current_broker_policy() -> None:
     """The broker column as decided: GLM on the cheap tiers, DeepSeek V4
-    Pro on the top tier and the session (the owner, 2026-09-19) — the
-    reviewer on a different family from the coding classes it reviews."""
+    Pro on the top tier, the session and the review class (the owner,
+    2026-09-19) — the reviewer is the strongest admissible model, and its
+    independence is the blind brief, not a different family."""
     expected = {
         "code-low": ("z-ai/glm-5.3-flash", GLM_SHIM, "z-ai/glm-5.3-flash@preset/glm2claude-shim"),
         "code-medium": ("z-ai/glm-5.2", GLM_SHIM, "z-ai/glm-5.2@preset/glm2claude-shim"),
@@ -129,7 +130,7 @@ def test_a_layer_is_per_provider() -> None:
         ex["ANTHROPIC_DEFAULT_FABLE_MODEL"]["class"] == "code-plan", ex
     # A class-named session on the broker carries the class's shim.
     s = routing.resolve_session(local={"session": "code-high"}, provider="openrouter")
-    assert (s["composite"], s["capability"]) == ("z-ai/glm-5.3@preset/glm2claude-shim", "code-high"), s
+    assert (s["composite"], s["capability"]) == ("deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim", "code-high"), s
     s = routing.resolve_session(local={"session": "code-high"}, provider="anthropic")
     assert (s["model"], s["capability"]) == ("claude-opus-5", "code-high"), "a flat class-named session serves both providers"
     # A flat layer over a per-provider one: the nearest layer wins per key.

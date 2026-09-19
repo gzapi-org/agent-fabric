@@ -4,7 +4,7 @@
   "defaults": {
     "providers": {
       "openrouter": {
-        "session": "anthropic/claude-sonnet-5"
+        "session": "deepseek/deepseek-v4-pro-0813"
       },
       "anthropic": {
         "session": "claude-opus-5"

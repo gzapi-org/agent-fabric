@@ -40,13 +40,19 @@ def set_model(root: str, provider: str, klass: str, model: str) -> None:
     json.dump(d, open(path, "w", encoding="utf-8"))
 
 
-def test_current_glm_policy() -> None:
+DS_SHIM = "@preset/deepseek2claude-shim"
+
+
+def test_current_broker_policy() -> None:
+    """The broker column as decided: GLM on the cheap tiers, DeepSeek V4
+    Pro on the top tier and the session (the owner, 2026-09-19) — the
+    reviewer on a different family from the coding classes it reviews."""
     expected = {
         "code-low": ("z-ai/glm-5.3-flash", GLM_SHIM, "z-ai/glm-5.3-flash@preset/glm2claude-shim"),
         "code-medium": ("z-ai/glm-5.2", GLM_SHIM, "z-ai/glm-5.2@preset/glm2claude-shim"),
-        "code-high": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
-        "code-plan": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
-        "code-review": ("z-ai/glm-5.3", GLM_SHIM, "z-ai/glm-5.3@preset/glm2claude-shim"),
+        "code-high": ("deepseek/deepseek-v4-pro-0813", DS_SHIM, "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim"),
+        "code-plan": ("deepseek/deepseek-v4-pro-0813", DS_SHIM, "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim"),
+        "code-review": ("deepseek/deepseek-v4-pro-0813", DS_SHIM, "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim"),
     }
     for klass, (model, shim, comp) in expected.items():
         res = routing.resolve(klass, "openrouter")
@@ -115,7 +121,7 @@ def test_a_layer_is_per_provider() -> None:
     assert routing.resolve("code-low", "anthropic", local=local)["model"] == "claude-haiku-4-5-20251001", "the broker override stays on the broker"
     hi = routing.resolve("code-high", "anthropic", local=local)
     assert (hi["model"], hi["via"], hi["source"], hi["alias"]) == ("claude-opus-5[1m]", "export", "local", "opus")
-    assert routing.resolve("code-high", "openrouter", local=local)["model"] == "z-ai/glm-5.3", "the native pin stays on plain claude"
+    assert routing.resolve("code-high", "openrouter", local=local)["model"] == "deepseek/deepseek-v4-pro-0813", "the native pin stays on plain claude"
     rv = routing.resolve("code-review", "anthropic", local=local)
     assert (rv["model"], rv["source"], rv["via"]) == ("claude-opus-5", "local", "file"), rv
     ex = routing.exports("anthropic", local=local)
@@ -200,7 +206,7 @@ def test_a_non_glm_model_gets_no_shim(tmp: str) -> None:
     res = routing.resolve("code-medium", "openrouter", root=root)
     assert res["composite"] == "z-ai/glm-5.2@preset/glm2claude-shim", res
     # And the real files are untouched.
-    assert routing.resolve("code-high", "openrouter")["composite"] == "z-ai/glm-5.3@preset/glm2claude-shim"
+    assert routing.resolve("code-high", "openrouter")["composite"] == "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim"
 
 
 def test_shim_follows_the_family_of_the_merged_model(tmp: str) -> None:
@@ -321,7 +327,7 @@ def test_real_files_are_clean() -> None:
 
 def main() -> int:
     cases = [
-        test_current_glm_policy,
+        test_current_broker_policy,
         test_native_path_pins_the_top_of_each_class,
         test_a_null_in_the_harness_column_is_the_harness_tier,
         test_each_provider_validates_a_reference_through_its_adapter,

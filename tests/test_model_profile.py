@@ -75,7 +75,7 @@ def test_set_writes_under_the_provider_and_nothing_else(f: Fixture) -> None:
     j = json.loads(f.run("list", "--json").stdout)
     assert (j["providers"]["anthropic"]["session"]["model"], j["providers"]["anthropic"]["session"]["capability"]) == \
         ("claude-fable-5-1", "code-plan"), "a class-named session is that class's model"
-    assert j["providers"]["openrouter"]["session"]["model"] == "anthropic/claude-sonnet-5", "one provider's session is not the other's"
+    assert j["providers"]["openrouter"]["session"]["model"] == "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim", "one provider's session is not the other's"
     assert j["providers"]["openrouter"]["code-low"]["model"] == "z-ai/glm-5.2@preset/glm2claude-shim"
     assert f.local.startswith(f.state), "the write is under the state dir"
     assert not os.path.exists(os.path.join(f.state, "routing")), "nothing shaped like the repo appears in state"
@@ -149,9 +149,9 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     p = f.run("seed", "--provider", "openrouter")
     assert p.returncode == 0, p.stderr
     got = f.read()["providers"]["openrouter"]
-    assert got["session"] == "anthropic/claude-sonnet-5" and "@preset" not in json.dumps(got), "the shim is derived, never seeded"
-    assert got["capabilities"] == {"code-low": "z-ai/glm-5.3-flash", "code-medium": "z-ai/glm-5.2", "code-high": "z-ai/glm-5.3",
-                                   "code-plan": "z-ai/glm-5.3", "code-review": "z-ai/glm-5.3"}, got
+    assert got["session"] == "deepseek/deepseek-v4-pro-0813" and "@preset" not in json.dumps(got), "the shim is derived, never seeded"
+    assert got["capabilities"] == {"code-low": "z-ai/glm-5.3-flash", "code-medium": "z-ai/glm-5.2", "code-high": "deepseek/deepseek-v4-pro-0813",
+                                   "code-plan": "deepseek/deepseek-v4-pro-0813", "code-review": "deepseek/deepseek-v4-pro-0813"}, got
     assert "anthropic" not in f.read()["providers"], "only the provider asked for"
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr

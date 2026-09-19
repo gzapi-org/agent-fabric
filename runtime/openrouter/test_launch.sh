@@ -86,11 +86,11 @@ mkfabric
 out="$(run --print)"; rc=$?
 [[ $rc -eq 0 ]] && ok "exits 0" || bad "rc=$rc" "$out"
 grep -q "resolved profile for backend-dev/$LOGIN (agent $LOGIN, role backend-dev, provider openrouter)" <<<"$out" && ok "the label is role/agent, agent = login" || bad "label wrong" "$out"
-grep -q "session : anthropic/claude-sonnet-5" <<<"$out" && ok "default session" || bad "session wrong" "$out"
+grep -q "session : deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "default session (the top tier, with its family shim)" || bad "session wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "code-low -> glm-5.3-flash + shim -> haiku alias" || bad "code-low wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "code-medium -> glm-5.2 + shim -> sonnet alias" || bad "code-medium wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "code-high -> glm-5.3 + shim -> opus alias" || bad "code-high wrong" "$out"
-grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=z-ai/glm-5.3@preset/glm2claude-shim$" <<<"$out" && ok "review -> glm-5.3 + shim -> fable alias, its own export" || bad "review wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "code-high -> deepseek v4 pro + its shim -> opus alias" || bad "code-high wrong" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" <<<"$out" && ok "code-plan -> deepseek v4 pro + its shim -> fable alias, its own export" || bad "review wrong" "$out"
 [[ "$(grep -c 'export ANTHROPIC_DEFAULT_' <<<"$out")" == 4 ]] && ok "four aliases, four exports: the review class never shares code-high's" || bad "export count" "$out"
 
 echo "launch: a non-GLM override receives no shim; a GLM override keeps it"
@@ -118,7 +118,7 @@ echo "launch: the review gate"
 mkfabric; printf '%s\n' '{"capabilities":{"code-review":"anthropic/claude-opus-5"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q "code-review : anthropic/claude-opus-5  shim -  => anthropic/claude-opus-5  (pinned in the agent file" <<<"$out" && ! grep -q "ANTHROPIC_DEFAULT_FABLE_MODEL=anthropic/claude-opus-5" <<<"$out" && ok "another review-grade model in the local override is allowed; it reaches the reviewer file, never the fable export (code-plan's)" || bad "review-grade override refused" "$out"
-grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the fable export is code-plan's" || bad "fable export not code-plan's" "$out"
+grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "the fable export is code-plan's" || bad "fable export not code-plan's" "$out"
 mkfabric; printf '%s\n' '{"capabilities":{"code-review":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 run_err --print; [[ $? -ne 0 ]] && ok "a review model outside review-grade.json in the local override is REFUSED" || bad "review gate bypassed by local override"
 mkfabric; printf '%s\n' '{"capabilities":{"code-high":"z-ai/glm-5.3-flash"}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
@@ -284,7 +284,7 @@ grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" &
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
 grep -q "^model: claude-opus-5\[1m\]$" "$HOME/.claude/agents/code-review.md" && ok "the exec installed the reviewer file for plain claude: claude-opus-5[1m]" || bad "reviewer file not installed for anthropic" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
 out="$(run --version 2>&1)"
-grep -q "^model: z-ai/glm-5.3@preset/glm2claude-shim$" "$HOME/.claude/agents/code-review.md" && ok "…and a broker launch rewrites it with the composite: one file, one launch at a time" || bad "reviewer file not installed for the broker" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
+grep -q "^model: deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" "$HOME/.claude/agents/code-review.md" && ok "…and a broker launch rewrites it with the composite: one file, one launch at a time" || bad "reviewer file not installed for the broker" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
 grep -q "^model: fable$" "$HOME/.claude/agents/code-plan.md" && ok "code-plan keeps its alias line: its pin is the export" || bad "code-plan file pinned" "$(head -5 "$HOME/.claude/agents/code-plan.md")"
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=$" <<<"$out" && ok "no base URL: Anthropic direct" || bad "base URL set" "$out"
@@ -307,10 +307,10 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 grep -q "code-high   : claude-opus-5\[1m\]  (exported for its tier; from local)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5\[1m\]" <<<"$out" && ok "a local pin of a coding class is exported for the tier it rides and says where it came from" || bad "local pin not exported" "$out"
 grep -q "export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5$" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5$" <<<"$out" && ok "the other tiers keep the column's pins" || bad "column pins lost under a local layer" "$out"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "the same file on the broker: its own session, and the native pins do not reach the broker's exports" || bad "anthropic layer leaked to the broker" "$out"
+[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "the same file on the broker: its own session, and the native pins do not reach the broker's exports" || bad "anthropic layer leaked to the broker" "$out"
 printf '%s\n' '{"session":"code-high"}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : z-ai/glm-5.3@preset/glm2claude-shim  (the code-high class)" <<<"$out" && ok "a flat class-named session is that class's composite on the broker" || bad "class session on the broker" "$out"
+[[ $rc -eq 0 ]] && grep -q "session : deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim  (the code-high class)" <<<"$out" && ok "a flat class-named session is that class's composite on the broker" || bad "class session on the broker" "$out"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q "session : claude-opus-5  (the code-high class)" <<<"$out" && ok "…and that class's native pin on plain claude" || bad "class session on vanilla" "$out"
 printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"code-review":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
@@ -340,12 +340,12 @@ echo "launch: the exec carries the pins to the child"
 mkfabric
 out="$(run --version 2>&1)"; rc=$?
 grep -q "ORI-EXECCED:" <<<"$out" && ok "execs via ori claude" || bad "no exec" "$out"
-grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "session model passed as --model" || bad "session missing" "$out"
+grep -q -- "--model deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "session model passed as --model" || bad "session missing" "$out"
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_HAIKU_MODEL=z-ai/glm-5.3-flash@preset/glm2claude-shim" <<<"$out" && ok "HAIKU pin (code-low composite) is in the child's environment" || bad "haiku pin not exported" "$out"
 grep -q "ORI-ENV:ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-shim" <<<"$out" && ok "SONNET pin (code-medium composite) is in the child's environment" || bad "sonnet pin not exported" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && ok "OPUS pin (code-high composite) is in the child's environment" || bad "opus pin not exported" "$out"
-grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=z-ai/glm-5.3@preset/glm2claude-shim$" <<<"$out" && ok "FABLE pin (review composite) is in the child's environment, separate from OPUS" || bad "fable pin not exported" "$out"
-grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=anthropic/claude-sonnet-5" <<<"$out" && ok "session model stamped in the child env" || bad "no session stamp" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "OPUS pin (code-high composite) is in the child's environment" || bad "opus pin not exported" "$out"
+grep -q "ORI-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" <<<"$out" && ok "FABLE pin (code-plan composite) is in the child's environment, separate from OPUS" || bad "fable pin not exported" "$out"
+grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "session model stamped in the child env" || bad "no session stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped as role/agent" || bad "no profile stamp" "$out"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_AGENT=$LOGIN" <<<"$out" && ok "agent stamped" || bad "no agent stamp" "$out"
 grep -q "ORI-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "the harness's tab-title writer is off in the child: the hook is the only writer" || bad "terminal-title switch not in the child's env" "$out"
@@ -358,7 +358,7 @@ out="$(run --print --model=vendor/override2 2>&1)"
 grep -q "overridden by --model on the command line: vendor/override2" <<<"$out" && ok "--print shows the override" || bad "--print hides the override" "$out"
 mkfabric
 out="$(run -p hi 2>&1)"
-grep -q "ORI-EXECCED:claude --model anthropic/claude-sonnet-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
+grep -q "ORI-EXECCED:claude --model deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
 
 echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project

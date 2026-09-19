@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'tokens', 'memory', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'tokens', 'memory', 'host', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -89,6 +89,66 @@ export function session(uid = process.getuid(), exec = execFileSync) {
   try { n = exec('pgrep', ['-u', String(uid), '-x', 'claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').filter(Boolean).length; }
   catch { n = 0; }   // pgrep exits 1 when nothing matches
   return { claude_processes: n, planning: holdStatus().held };
+}
+
+// The MACHINE this account shares — what develop-qzapp's crash of
+// 2026-09-19 was diagnosed from by hand, after the fact, with free, df,
+// xenstore-read and find (docs/live-checks/2026-09-19-develop-qzapp-crash.md;
+// the layers: docs/resources.md). Load and cpus; memory and swap from
+// /proc/meminfo; the Xen balloon where there is one (current and target
+// from sysfs, static-max — the ceiling this boot — from xenstore, null on
+// a host that is not a Xen guest); every mounted block device once, by
+// statfs; the leases held under /run/lock/agent-fabric, each probed with
+// a read-only flock (held or not is the kernel's answer, the record line
+// only says by whom); the largest processes by RSS, with the login they
+// run as. Numbers and names of programs and logins, never a command
+// line. Every daemon on one host answers the same numbers: fabric-ctl
+// collapses the rows by host.
+export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-fabric', exec = execFileSync, cpus = os.cpus().length, statfs = fs.statfsSync } = {}) {
+  const read = f => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  const run = (cmd, args) => { try { const r = exec(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }); return typeof r === 'string' ? r : r.stdout; } catch { return null; } };
+  const mb = kb => kb == null ? null : Math.round(kb / 1024);
+  const out = { status: 'ok', cpus, loadavg: null, mem_mb: null, balloon_mb: null, disk: [], leases: [], top_rss: [] };
+  const la = read(path.join(proc, 'loadavg'));
+  if (la) out.loadavg = la.trim().split(/\s+/).slice(0, 3).map(Number);
+  const mi = read(path.join(proc, 'meminfo'));
+  if (mi) {
+    const kb = {}; for (const m of mi.matchAll(/^(\w+):\s+(\d+) kB/gm)) kb[m[1]] = Number(m[2]);
+    out.mem_mb = { total: mb(kb.MemTotal), available: mb(kb.MemAvailable), swap_total: mb(kb.SwapTotal), swap_free: mb(kb.SwapFree) };
+  }
+  const xm = path.join(sys, 'devices', 'system', 'xen_memory', 'xen_memory0');
+  const cur = read(path.join(xm, 'info', 'current_kb')), tgt = read(path.join(xm, 'target_kb'));
+  if (cur != null || tgt != null) {
+    const smax = run('xenstore-read', ['memory/static-max']);
+    out.balloon_mb = { current: mb(Number(cur)), target: mb(Number(tgt)), static_max: smax ? mb(Number(smax.trim())) : null };
+  }
+  const mounts = read(path.join(proc, 'mounts'));
+  if (mounts) {
+    const seen = new Set();
+    for (const line of mounts.split('\n')) {
+      const [dev, mnt] = line.split(' ');
+      if (!dev?.startsWith('/dev/') || seen.has(dev)) continue;
+      seen.add(dev);
+      try { const st = statfs(mnt.replace(/\\040/g, ' ')); const size = st.blocks * st.bsize, avail = st.bavail * st.bsize;
+        out.disk.push({ mount: mnt, size_gb: Math.round(size / 2 ** 30), avail_gb: Math.round(avail / 2 ** 30), use_pct: size ? Math.round(100 * (size - avail) / size) : null }); }
+      catch { /* a mount that vanished between the read and the statfs: not a row */ }
+    }
+  }
+  let names = []; try { names = fs.readdirSync(leases).filter(n => !n.startsWith('.')); } catch { /* no lease directory: no leases */ }
+  for (const n of names) {
+    const f = path.join(leases, n);
+    try { if (!fs.statSync(f).isFile()) continue; } catch { continue; }
+    // bash opens read-only and locks the descriptor: the flock command
+    // itself would open with O_CREAT, which fs.protected_regular refuses
+    // on another login's file in the sticky directory.
+    let held; try { exec('bash', ['-c', 'exec 9<"$1"; flock -n 9', '_', f], { stdio: 'ignore', timeout: 5000 }); held = false; } catch (e) { held = e?.status === 1; }
+    if (!held) continue;
+    const [login, pid, since] = (read(f) ?? '').split('\n')[0].split(' ');
+    out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });
+  }
+  const ps = run('ps', ['-eo', 'user:32,pid,rss,comm', '--sort=-rss']);
+  if (ps) out.top_rss = ps.trim().split('\n').slice(1, 7).map(l => { const [user, pid, rss, ...comm] = l.trim().split(/\s+/); return { user, pid: Number(pid), rss_mb: mb(Number(rss)), comm: comm.join(' ') }; });
+  return out;
 }
 
 // Which SCRIPT the account writes in — the signature of the language it
@@ -473,6 +533,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'script') return guard(name, () => script(ctx.home));
     if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));
     if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
+    if (name === 'host') return guard(name, () => host(ctx.hostOpts));
     return Promise.resolve();
   }));
   return data;

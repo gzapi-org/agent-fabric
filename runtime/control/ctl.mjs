@@ -3,6 +3,7 @@
 // Front door: bin/fabric-ctl.
 //
 //   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]
+//   fabric-ctl <login|all> host                     the machine, one row per host: load, memory, balloon, disks, leases, largest processes
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
 //
 // A login becomes an address through the registry's placement
@@ -101,7 +102,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -148,6 +149,33 @@ export function table(op, rs) {
     }
     return lines.join('\n');
   }
+  if (op === 'host') {
+    // Every daemon on a host reads the same machine, so the table is BY
+    // HOST: the first answered row of each host speaks for it, the others
+    // only count. A host none of whose accounts answered is a row too.
+    const G = n => n == null ? '-' : `${n}`;
+    const byHost = new Map();
+    for (const r of rs) (byHost.get(r.host) ?? byHost.set(r.host, []).get(r.host)).push(r);
+    lines.push(`${'host'.padEnd(16)} ${'answered'.padEnd(9)} ${'load 1/5/15'.padEnd(17)} ${'cpus'.padStart(4)}  ${'mem avail/total MB'.padEnd(19)} ${'swap free'.padStart(9)}  ${'balloon cur/max MB'.padEnd(19)} disks`);
+    for (const [host, group] of [...byHost.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const ok = group.filter(r => r.status === 'ok' && r.machine?.status === 'ok');
+      const answered = `${group.filter(r => r.status === 'ok').length}/${group.length}`;
+      if (!ok.length) { lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${group.find(r => r.status === 'ok')?.machine?.status ?? 'no answer'}`); continue; }
+      const m = ok[0].machine;
+      const load = m.loadavg ? m.loadavg.map(x => x.toFixed(2)).join(' ') : '-';
+      const mem = m.mem_mb ? `${G(m.mem_mb.available)}/${G(m.mem_mb.total)}` : '-';
+      const swap = m.mem_mb ? G(m.mem_mb.swap_free) : '-';
+      const bal = m.balloon_mb ? `${G(m.balloon_mb.current)}/${G(m.balloon_mb.static_max)}` : 'none';
+      const disks = (m.disk ?? []).map(d => `${d.mount} ${d.avail_gb}G free (${d.use_pct}%)`).join(', ') || '-';
+      lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${load.padEnd(17)} ${G(m.cpus).padStart(4)}  ${mem.padEnd(19)} ${swap.padStart(9)}  ${bal.padEnd(19)} ${disks}`);
+      const leases = (m.leases ?? []).map(l => `${l.name}: ${l.holder ?? '?'}${l.pid ? ` pid ${l.pid}` : ''}${l.since ? ` since ${l.since.slice(11, 16)}Z` : ''}`).join('; ') || 'none';
+      const top = (m.top_rss ?? []).slice(0, 5).map(p => `${p.comm} ${p.user} ${p.rss_mb} MB`).join(', ') || '-';
+      lines.push(`${''.padEnd(16)} ${''.padEnd(9)} leases: ${leases}`);
+      lines.push(`${''.padEnd(16)} ${''.padEnd(9)} largest: ${top}`);
+      for (const r of group) if (r.status !== 'ok') lines.push(`${''.padEnd(16)} ${''.padEnd(9)} ${r.account}: ${r.status}`);
+    }
+    return lines.join('\n');
+  }
   if (op === 'tokens') {
     // Grouped by Claude account: a login's share is its direct-path
     // equivalents over the account's, from the logins that answered — the
@@ -184,7 +212,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
+  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|host|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;

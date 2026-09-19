@@ -57,7 +57,14 @@ token, which goes into one request header and nowhere else), `keys`
 (name, presence and twelve hex digits of the sha256 of each synced key —
 enough to tell two keys apart, never a value), `fabric` (head, branch,
 how far behind `origin/main`, dirty), `session` (Claude processes as the
-login; whether one is planning), `script` (the letters of the account's
+login; whether one is planning), `host` (the machine the account shares —
+load and cpus, memory and swap, the Xen balloon's current and static-max
+where there is one, every mounted block device by statfs, the leases held
+under `/run/lock/agent-fabric` each probed with a read-only flock, the
+largest processes by RSS with the login they run as; every daemon on a
+host answers the same numbers and `fabric-ctl` collapses the rows by
+host — the read that the 2026-09-19 crash was diagnosed without,
+`docs/resources.md`), `script` (the letters of the account's
 own notes — `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/notes/`,
 which the language-culture charter requires in the locale's language —
 and of its session records, visible text and stored thinking apart,

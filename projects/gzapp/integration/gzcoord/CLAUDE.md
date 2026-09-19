@@ -29,8 +29,10 @@ block and the person copies it into the receiving session's prompt
   not guessed past: the person resolves `TO-ROLE` by equality against
   the last `HELLO` they saw, and one addressing field per message is the
   whole routing rule.
-- **Do** activate what you own at session start. The relay dies with
-  its hosting session and the fabric-coordinator hosts it: the
+- **Do** activate what you own at session start. The relay is a
+  systemd user unit on the hosting account — the fabric-coordinator's —
+  up with that account's user manager; where no manager answers it is a
+  spawn of the hosting session: the
   `SessionStart` drain brings the relay up before draining, and only the
   hosting workspace (the one whose `projects/.gzcoord/` holds the relay
   venv) can — every other skips by design, one relay, one owner.

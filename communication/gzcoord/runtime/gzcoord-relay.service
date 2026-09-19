@@ -1,0 +1,34 @@
+# communication/gzcoord/runtime/gzcoord-relay.service — the GZCoord relay
+# (claude-bridge) as a systemd USER unit on the ONE account that hosts it:
+# the operator's, whose workspace runtime dir projects/.gzcoord/ holds the
+# relay's venv, token and database (BRIDGE-RELAY-SETUP.md §Hosting). Until
+# 2026-09-19 the relay was a process the hosting session spawned detached,
+# or a person started in a terminal: it died with the terminal, ignored
+# TERM, and nothing found it by name. Installed by
+# runtime/claude-code/bootstrap.sh only where the venv exists — a client
+# account has no venv and gets no unit; ConditionPathExists is the second
+# fence, so a copied unit on a client does nothing. Static: the workspace
+# is %h/projects, the only variable. Restart=on-failure and no start
+# limit: a crash comes back, a clean stop stays stopped. The log is the
+# same bridge.log the hand-started relay wrote.
+[Unit]
+Description=GZCoord relay (claude-bridge) on 127.0.0.1:8765
+Documentation=file:%h/projects/agent-fabric/projects/gzapp/integration/gzcoord/BRIDGE-RELAY-SETUP.md
+ConditionPathExists=%h/projects/.gzcoord/venv/bin/claude-bridge
+ConditionPathExists=%h/projects/.gzcoord/bridge-token
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/.gzcoord
+ExecStart=%h/projects/.gzcoord/venv/bin/claude-bridge --host 127.0.0.1 --port 8765 --db %h/projects/.gzcoord/claude-bridge.db --auth-token-file %h/projects/.gzcoord/bridge-token
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=10
+StandardOutput=append:%h/projects/.gzcoord/bridge.log
+StandardError=append:%h/projects/.gzcoord/bridge.log
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

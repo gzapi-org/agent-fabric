@@ -157,6 +157,29 @@ in which defects have actually shipped; still worth the first look:
 6. **Comments that state what the code does not do**, or assert facts
    the repository has no way to verify.
 
+## Comments are engineering memory
+
+The owner's policy for every repository here (`policies/code-as-memory.md`,
+2026-09-19): a comment preserves what the code cannot say — the why —
+for a session that has none of the conversation the code was written
+in. Ask, of every range:
+
+- Is there a comment that only narrates what the code visibly does?
+  (P3: it spends every later reader's context and goes stale.)
+- Is there a non-obvious decision — an ordering, a defensive check, a
+  workaround, an unusual choice — whose reason is nowhere: not in a
+  comment, a test, an assertion or an ADR? (P3; P2 where a refactoring
+  that removed it would remove required behaviour.)
+- Is an invariant left in prose that a type, an assertion or a test
+  could enforce?
+- Could a fresh session misunderstand this, or "improve" it wrongly?
+- Is every comment the range touches, or sits beside, still true?
+  (A misleading comment is a defect of the code, not of the prose.)
+- Does a decision that spans modules belong in an ADR rather than only
+  in a comment?
+
+Comment density measures nothing; report information value, both ways.
+
 ## A finding
 
 A finding on the change is a counterexample, with these fields:

@@ -84,6 +84,14 @@ directory, the repository, the branch or the session.
   role is a rebind there and a relaunch. `bin/fabric-role status` (or
   `bin/fabric-status`) says what you are. Holding a role never entitles
   you to change its charter or brief, or anything else here (above).
+- **Code is memory for the session that comes after yours**
+  (`policies/code-as-memory.md`, the owner, 2026-09-19). Self-documenting
+  code first; a comment says *why*, never what the code visibly does —
+  the invariant, the assumption, the rejected alternative, the oddity a
+  refactoring would otherwise "fix"; a stronger executable form (a type,
+  an assertion, a test) wins over a comment where one exists; a comment
+  whose assumption you changed is updated or removed in the same change.
+  The review class checks all of it.
 - **Work in the project's working copy**, under that project's
   `CLAUDE.md`. From `projects/`, `cd` into the working copy first; the
   session-start hook records which one you are in.

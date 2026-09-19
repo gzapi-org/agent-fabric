@@ -141,31 +141,39 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
   // Only what fabric-lease itself can create is a lease: its name grammar,
   // [A-Za-z0-9][A-Za-z0-9._-]{0,63}. The directory is world-writable, so any
   // login can drop any name there; a name outside the grammar is not a lease
-  // and never reaches the probe — the probe passes the path to bash as "$1",
-  // never interpolated, but a name it will not accept is safer still.
+  // and never reaches the probe — and the name reaches only fs.openSync,
+  // never a command line; the grammar is the first gate, not the only one.
   const LEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
   let names = []; try { names = fs.readdirSync(leases).filter(n => LEASE_NAME.test(n)); } catch { /* no lease directory: no leases */ }
   for (const n of names) {
     const f = path.join(leases, n);
-    try { if (!fs.statSync(f).isFile()) continue; } catch { continue; }
     // The file is opened READ-ONLY here and the descriptor handed to
     // flock(1) as fd 3 — no shell, no command text built from a name in a
     // world-writable directory. The flock command opening the path itself
     // would use O_CREAT, which fs.protected_regular refuses on another
-    // login's file in the sticky directory. A SHARED lock, not exclusive:
-    // an exclusive probe would hold a free lease for a moment, and sixteen
-    // daemons probing at once could refuse a real caller and each report
-    // the other's hold as a stale holder; a shared probe is refused only by
-    // a real holder's exclusive lock (exit 1). A file that cannot be opened
-    // (a hand-made 0600) is not a lease row.
-    let fd; try { fd = fs.openSync(f, 'r'); } catch { continue; }
-    let held;
-    try { exec('flock', ['-s', '-n', '3'], { stdio: ['ignore', 'ignore', 'ignore', fd], timeout: 5000 }); held = false; }
-    catch (e) { held = e?.status === 1; }
-    finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
-    if (!held) continue;
-    const [login, pid, since] = (read(f) ?? '').split('\n')[0].split(' ');
-    out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });
+    // login's file in the sticky directory. O_NONBLOCK and O_NOFOLLOW, then
+    // fstat on the descriptor rather than stat before the open: any login
+    // can rename a fifo or a symlink over its own grammar-named entry in
+    // between, and a blocking open of a reader-less fifo would hang this
+    // synchronous op — and the daemon with it — for good. A SHARED lock,
+    // not exclusive: an exclusive probe would hold a free lease for a
+    // moment, and sixteen daemons probing at once could refuse a real
+    // caller and each report the other's hold as a stale holder; a shared
+    // probe is refused only by a real holder's exclusive lock (exit 1). A
+    // file that cannot be opened (a hand-made 0600) is not a lease row.
+    let fd; try { fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW); } catch { continue; }
+    try {
+      if (!fs.fstatSync(fd).isFile()) continue;
+      let held = false;
+      try { exec('flock', ['-s', '-n', '3'], { stdio: ['ignore', 'ignore', 'ignore', fd], timeout: 5000 }); }
+      catch (e) { held = e?.status === 1; }
+      if (!held) continue;
+      // The record is the holder's own line — informational, and read
+      // bounded: the first 256 bytes, never a whole file a login has grown.
+      const buf = Buffer.alloc(256); const nread = fs.readSync(fd, buf, 0, 256, 0);
+      const [login, pid, since] = buf.toString('utf8', 0, nread).split('\n')[0].split(' ');
+      out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });
+    } finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
   }
   const ps = run('ps', ['-eo', 'user:32,pid,rss,comm', '--sort=-rss']);
   if (ps) out.top_rss = ps.trim().split('\n').slice(1, 7).map(l => { const [user, pid, rss, ...comm] = l.trim().split(/\s+/); return { user, pid: Number(pid), rss_mb: mb(Number(rss)), comm: comm.join(' ') }; });

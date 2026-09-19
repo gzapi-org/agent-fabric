@@ -44,8 +44,10 @@ served, a migration against its reader — the role that owns the concern
 integrates: contributors push branches and open no PR; the integrator
 merges them unrebased into one branch, opens the one PR naming whose
 range is which, and arms it. One blind review covers the range; a
-finding goes to the lane that owns the hunk. Independent work stays
-separate PRs (the CEO, 2026-09-16).
+finding goes to the lane that owns the hunk. Independent work of
+*different owners* stays separate PRs (the CEO, 2026-09-16); one
+session's own work does not split by topic — it accumulates on its one
+open branch (below).
 
 **A change has one owner; the roles it needs supply it.** The caller —
 the lane holding the consuming code, contract or screen — owns the
@@ -64,8 +66,13 @@ owner, 2026-09-18).
 **A code PR is armed by its work-commit count** (the owner,
 2026-09-18): the commits of work as opened, review fixes excluded.
 Eight to sixteen: arm once the review gate is met (a posted review of
-the head, no open P1/P2). Fewer: ask the owner. More than sixteen is
-split before the PR opens. Never without the gate.
+the head, no open P1/P2). Fewer is not a PR yet: keep committing to the
+same branch — your next piece of work goes there, whatever its topic —
+and open the PR when the band is reached; under eight it is opened only
+when the owner says so, and armed by the owner. Two one-commit PRs from
+one session in one day is the mistake this sentence exists to stop (the
+owner, 2026-09-19). More than sixteen is split before the PR opens.
+Never without the gate.
 
 **A review finding is judged before it is answered** — with the review
 class, so the assessment is not made by the session that wrote the code —

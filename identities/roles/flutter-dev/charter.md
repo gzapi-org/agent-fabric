@@ -75,16 +75,19 @@ anything look crowded, misaligned, inconsistent or accidental? are
 spacing and proportion harmonious across the whole screen? does it read
 as one product rather than a collection of independently built widgets?
 would a competent product designer object to something visible here?
-A "yes" to the last three is work still to do. The capture goes in the
-PR beside the change — what the screen shows is evidence the widget
-tree is not.
+A "no" to any of the first three, the fifth or the sixth, or a "yes" to
+the fourth or the seventh, is work still to do. The capture is attached
+to the PR beside the change — an attachment, never a file committed to
+the tree — because what the screen shows is evidence the widget tree is
+not.
 
 **Develop the judgment.** Study the application's established design
 language and well-designed contemporary mobile interfaces; use them to
 sharpen your sense of hierarchy, proportion, interaction and restraint,
 never to copy a trend. Where a decision rests on product strategy, user
-research, branding or a significant redesign of a journey, it is not
-yours to invent: escalate to, or work with, the role that owns product
-and design decisions — what a screen *means* is theirs, how well it is
-made is yours.
+research, branding or a significant redesign of a user journey, it is
+not yours to invent: the project's remit for this role names who owns
+product and design decisions there; where it names no one, raise it as
+a `QUESTION` to architect-cto, whose decision records are where what a
+screen *means* is settled — how well it is made stays yours.
 

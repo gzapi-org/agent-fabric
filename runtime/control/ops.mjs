@@ -148,15 +148,21 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
   for (const n of names) {
     const f = path.join(leases, n);
     try { if (!fs.statSync(f).isFile()) continue; } catch { continue; }
-    // bash opens read-only and takes a SHARED lock on the descriptor: the
-    // flock command itself would open with O_CREAT, which
-    // fs.protected_regular refuses on another login's file in the sticky
-    // directory; and an exclusive probe would hold a free lease for a
-    // moment — sixteen daemons probing at once could refuse a real caller
-    // and each report the other's hold as a stale holder. A shared probe
-    // is refused only by a real holder's exclusive lock. A file that
-    // cannot be opened (a hand-made 0600) exits 3 and is not a lease row.
-    let held; try { exec('bash', ['-c', 'exec 9<"$1" || exit 3; flock -s -n 9', '_', f], { stdio: 'ignore', timeout: 5000 }); held = false; } catch (e) { held = e?.status === 1; }
+    // The file is opened READ-ONLY here and the descriptor handed to
+    // flock(1) as fd 3 — no shell, no command text built from a name in a
+    // world-writable directory. The flock command opening the path itself
+    // would use O_CREAT, which fs.protected_regular refuses on another
+    // login's file in the sticky directory. A SHARED lock, not exclusive:
+    // an exclusive probe would hold a free lease for a moment, and sixteen
+    // daemons probing at once could refuse a real caller and each report
+    // the other's hold as a stale holder; a shared probe is refused only by
+    // a real holder's exclusive lock (exit 1). A file that cannot be opened
+    // (a hand-made 0600) is not a lease row.
+    let fd; try { fd = fs.openSync(f, 'r'); } catch { continue; }
+    let held;
+    try { exec('flock', ['-s', '-n', '3'], { stdio: ['ignore', 'ignore', 'ignore', fd], timeout: 5000 }); held = false; }
+    catch (e) { held = e?.status === 1; }
+    finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
     if (!held) continue;
     const [login, pid, since] = (read(f) ?? '').split('\n')[0].split(' ');
     out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });

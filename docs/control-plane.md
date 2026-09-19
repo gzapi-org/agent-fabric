@@ -60,7 +60,7 @@ how far behind `origin/main`, dirty), `session` (Claude processes as the
 login; whether one is planning), `host` (the machine the account shares —
 load and cpus, memory and swap, the Xen balloon's current and static-max
 where there is one, every mounted block device by statfs, the leases held
-under `/run/lock/agent-fabric` each probed with a read-only flock, the
+under `/run/lock/agent-fabric`, each probed with a shared flock on a descriptor the daemon opened read-only, the
 largest processes by RSS with the login they run as; every daemon on a
 host answers the same numbers and `fabric-ctl` collapses the rows by
 host — the read that the 2026-09-19 crash was diagnosed without,

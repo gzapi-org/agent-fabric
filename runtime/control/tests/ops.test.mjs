@@ -314,11 +314,11 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   fs.writeFileSync(path.join(leases, '.lock'), '');
   fs.writeFileSync(path.join(leases, 'not a lease; $(id)'), 'x 1 t n\n');   // outside fabric-lease's name grammar: never probed
   const calls = [];
-  const exec = (cmd, args) => {
-    calls.push([cmd, ...args]);
+  const exec = (cmd, args, opts = {}) => {
+    calls.push([cmd, ...args, opts.stdio?.[3] != null ? fs.readlinkSync(`/proc/self/fd/${opts.stdio[3]}`) : null]);
     if (cmd === 'xenstore-read') return '31916000\n';
     if (cmd === 'ps') return 'USER PID RSS COMMAND\nbackend-dev-02 667140 2191360 VBCSCompiler\np2p-network-dev-01 674834 159744 rustc\n';
-    if (cmd === 'bash') { if (args[3].endsWith('backend-test')) { const e = new Error('held'); e.status = 1; throw e; } return ''; }
+    if (cmd === 'flock') { if (fs.readlinkSync(`/proc/self/fd/${opts.stdio[3]}`).endsWith('backend-test')) { const e = new Error('held'); e.status = 1; throw e; } return ''; }
     throw new Error('unexpected ' + cmd);
   };
   const statfs = mnt => ({ bsize: 4096, blocks: mnt === '/rw' ? 77332480 : 10485760, bavail: mnt === '/rw' ? 22020096 : 5505024 });
@@ -330,11 +330,17 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   assert.deepEqual(h.disk.map(d => d.mount), ['/', '/rw'], 'one row per block device, tmpfs and none excluded');
   assert.deepEqual(h.disk[1], { mount: '/rw', size_gb: 295, avail_gb: 84, use_pct: 72 });
   assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }], 'only the held lease; the free one, the dotfile and the name outside the grammar are not rows');
-  assert.ok(!calls.some(c => c[0] === 'bash' && c[3]?.includes('not a lease')), 'a name outside the grammar never reaches the probe');
-  assert.ok(calls.some(c => c[0] === 'bash' && c[1] === '-c' && /exec 9<"\$1" \|\| exit 3; flock -s -n 9/.test(c[2])), 'the probe takes a SHARED lock on a read-only descriptor — never the flock command\'s O_CREAT open, never the exclusive lock a caller needs');
-  // a file the probe cannot open (exit 3) is not a lease row
-  const unreadable = host({ proc, sys, leases, exec: (cmd, args) => { if (cmd === 'bash') { const e = new Error('open'); e.status = 3; throw e; } return exec(cmd, args); }, cpus: 6, statfs });
-  assert.deepEqual(unreadable.leases, [], 'an unopenable file is not reported as held');
+  assert.ok(!calls.some(c => c[0] === 'flock' && String(c[4]).includes('not a lease')), 'a name outside the grammar never reaches the probe');
+  assert.ok(calls.some(c => c[0] === 'flock' && c[1] === '-s' && c[2] === '-n' && c[3] === '3' && String(c[4]).endsWith('/backend-test')), 'the probe hands flock an already-open read-only descriptor as fd 3 and asks for a SHARED lock — no shell, no O_CREAT, never the exclusive lock a caller needs');
+  // a file the probe cannot open is not a lease row, and flock is never asked about it
+  fs.chmodSync(path.join(leases, 'free-one'), 0o000);
+  if (process.getuid() !== 0) {
+    calls.length = 0;
+    const unreadable = host({ proc, sys, leases, exec, cpus: 6, statfs });
+    assert.ok(!calls.some(c => String(c[4]).endsWith('/free-one')), 'an unopenable file never reaches flock');
+    assert.deepEqual(unreadable.leases.map(l => l.name), ['backend-test']);
+  }
+  fs.chmodSync(path.join(leases, 'free-one'), 0o644);
   // half a balloon in sysfs: the missing half is null, never 0
   fs.rmSync(path.join(xm, 'info', 'current_kb'));
   const half = host({ proc, sys, leases, exec, cpus: 6, statfs });

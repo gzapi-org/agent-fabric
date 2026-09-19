@@ -138,7 +138,13 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
       catch { /* a mount that vanished between the read and the statfs: not a row */ }
     }
   }
-  let names = []; try { names = fs.readdirSync(leases).filter(n => !n.startsWith('.')); } catch { /* no lease directory: no leases */ }
+  // Only what fabric-lease itself can create is a lease: its name grammar,
+  // [A-Za-z0-9][A-Za-z0-9._-]{0,63}. The directory is world-writable, so any
+  // login can drop any name there; a name outside the grammar is not a lease
+  // and never reaches the probe — the probe passes the path to bash as "$1",
+  // never interpolated, but a name it will not accept is safer still.
+  const LEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+  let names = []; try { names = fs.readdirSync(leases).filter(n => LEASE_NAME.test(n)); } catch { /* no lease directory: no leases */ }
   for (const n of names) {
     const f = path.join(leases, n);
     try { if (!fs.statSync(f).isFile()) continue; } catch { continue; }

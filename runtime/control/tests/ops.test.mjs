@@ -312,6 +312,7 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   fs.writeFileSync(path.join(leases, 'backend-test'), 'db-admin 4242 2026-09-19T08:26:43Z backend-test\n');
   fs.writeFileSync(path.join(leases, 'free-one'), 'user 1 2026-09-19T00:00:00Z free-one\n');
   fs.writeFileSync(path.join(leases, '.lock'), '');
+  fs.writeFileSync(path.join(leases, 'not a lease; $(id)'), 'x 1 t n\n');   // outside fabric-lease's name grammar: never probed
   const calls = [];
   const exec = (cmd, args) => {
     calls.push([cmd, ...args]);
@@ -328,7 +329,8 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   assert.deepEqual(h.balloon_mb, { current: 31151, target: 31152, static_max: 31168 });
   assert.deepEqual(h.disk.map(d => d.mount), ['/', '/rw'], 'one row per block device, tmpfs and none excluded');
   assert.deepEqual(h.disk[1], { mount: '/rw', size_gb: 295, avail_gb: 84, use_pct: 72 });
-  assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }], 'only the held lease; the free one and the dotfile are not rows');
+  assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }], 'only the held lease; the free one, the dotfile and the name outside the grammar are not rows');
+  assert.ok(!calls.some(c => c[0] === 'bash' && c[3]?.includes('not a lease')), 'a name outside the grammar never reaches the probe');
   assert.ok(calls.some(c => c[0] === 'bash' && c[1] === '-c' && /exec 9<"\$1" \|\| exit 3; flock -s -n 9/.test(c[2])), 'the probe takes a SHARED lock on a read-only descriptor — never the flock command\'s O_CREAT open, never the exclusive lock a caller needs');
   // a file the probe cannot open (exit 3) is not a lease row
   const unreadable = host({ proc, sys, leases, exec: (cmd, args) => { if (cmd === 'bash') { const e = new Error('open'); e.status = 3; throw e; } return exec(cmd, args); }, cpus: 6, statfs });

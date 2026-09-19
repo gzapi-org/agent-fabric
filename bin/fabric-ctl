@@ -2,6 +2,8 @@
 # bin/fabric-ctl — ask the fleet's control agents, in real time.
 #
 #   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]
+#   fabric-ctl <login|all> tokens [--days N]     each login's spend from its own session records,
+#                                              grouped by Claude account with its share (docs/control-plane.md)
 #   fabric-ctl <login|all> memory --out <dir>     the drain: each account's bundles, <dir>/<login>/<wc>.tar
 #
 # One request on the control channel, the replies read back and printed

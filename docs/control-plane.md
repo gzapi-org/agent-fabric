@@ -107,7 +107,19 @@ harvester refuses the whole drain when a memory carries a credential by
 shape, so no secret reaches the channel; a memory directory with no
 working copy beside it, or with two that share its slug, is named and
 left where it is; the op passes `--all`, so the watermark governs only
-the sudo fallback; not part of `status`), `status` (all but `script` and `memory`). A section that
+the sudo fallback; not part of `status`), `tokens` (the login's own
+spend from its session and subagent records, per model over a window —
+7 days unless the request names one, capped at 90 — deduplicated by
+request; direct-path models and broker models summed apart, since a
+`z-ai/…` or `anthropic/…` id was billed to the login's OpenRouter key
+and never to the Claude account the windows meter; `equiv` is the sum in
+input-token equivalents at the API's own ratios, cache write 1.25×,
+cache read 0.1×, output 5×, a proxy for what the meter weighs and not
+its figure; the usage windows give one number per Claude account and
+this is the only place a login's part of it can be read; rides with
+`identity` so the coordinator can group by account; counts only, no
+text; not part of `status`), `status` (all but `script`, `tokens` and
+`memory`). A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
@@ -139,7 +151,11 @@ the coordinator.
 ## The coordinator's side
 
 `bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]`
-posts one request and reads the replies after its own id every half
+(and `tokens [--days N]`, whose table groups the logins by Claude
+account and prints each one's share of the account's visible direct-path
+spend, the broker spend beside it; what the account spends off this host
+— the web app, a phone — is not visible, so the shares are of what the
+fleet can see, 2026-09-19) posts one request and reads the replies after its own id every half
 second until every placed address has answered or the timeout is spent
 (20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:
 a run leaves its request and the replies on the channel, nothing

@@ -31,7 +31,7 @@ export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ??
 }
 
 export function parseArgs(argv) {
-  const out = { targets: [], op: 'status', json: false, timeout: null, out: null };
+  const out = { targets: [], op: 'status', json: false, timeout: null, out: null, days: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
@@ -39,12 +39,15 @@ export function parseArgs(argv) {
     else if (a.startsWith('--timeout=')) out.timeout = Number(a.slice(10));
     else if (a === '--out') out.out = argv[++i];
     else if (a.startsWith('--out=')) out.out = a.slice(6);
+    else if (a === '--days') out.days = Number(argv[++i]);
+    else if (a.startsWith('--days=')) out.days = Number(a.slice(7));
     else if (a === '-h' || a === '--help') out.help = true;
     else if (a.startsWith('--')) throw new Error(`unknown option ${a}`);
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : 20;
+  if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
   if (out.op === 'memory' && !out.out) throw new Error('memory takes --out <dir>: where the drain bundles are written');
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
   return out;
@@ -98,7 +101,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, memory: d.memory ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -145,6 +148,29 @@ export function table(op, rs) {
     }
     return lines.join('\n');
   }
+  if (op === 'tokens') {
+    // Grouped by Claude account: a login's share is its direct-path
+    // equivalents over the account's, from the logins that answered — the
+    // meter counts what this host cannot see, so the shares are of the
+    // visible spend. The broker column is the login's own key, no share.
+    const M = n => n >= 1e9 ? `${(n / 1e9).toFixed(2)}G` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n);
+    const ok = rs.filter(r => r.status === 'ok' && r.tokens?.status === 'ok');
+    const days = ok[0]?.tokens?.days ?? '-';
+    const byAccount = new Map();
+    for (const r of ok) { const k = r.email ?? '(no Claude account)'; (byAccount.get(k) ?? byAccount.set(k, []).get(k)).push(r); }
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'claude account'.padEnd(30)} ${'share'.padStart(6)}  ${'claude equiv'.padStart(12)} ${'requests'.padStart(8)} ${'cache read'.padStart(10)} ${'output'.padStart(8)}  ${'broker equiv'.padStart(12)} ${'requests'.padStart(8)}  top model (${days} days)`);
+    for (const [email, group] of [...byAccount.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const sum = group.reduce((n, r) => n + r.tokens.claude.equiv, 0);
+      for (const r of group.sort((a, b) => b.tokens.claude.equiv - a.tokens.claude.equiv)) {
+        const t = r.tokens; const top = Object.entries(t.models)[0];
+        const share = sum ? `${(100 * t.claude.equiv / sum).toFixed(0).padStart(5)}%` : '     -';
+        lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${email.padEnd(30)} ${share}  ${M(t.claude.equiv).padStart(12)} ${String(t.claude.requests).padStart(8)} ${M(t.claude.cache_read).padStart(10)} ${M(t.claude.output).padStart(8)}  ${M(t.broker.equiv).padStart(12)} ${String(t.broker.requests).padStart(8)}  ${top ? `${top[0]} ${M(top[1].equiv)}` : '-'}`.trimEnd());
+      }
+      if (group.length > 1) lines.push(`${''.padEnd(22)} ${''.padEnd(10)} ${`= ${email}`.padEnd(30)} ${' 100%'.padStart(6)}  ${M(sum).padStart(12)} ${String(group.reduce((n, r) => n + r.tokens.claude.requests, 0)).padStart(8)}`);
+    }
+    for (const r of rs) if (!(r.status === 'ok' && r.tokens?.status === 'ok')) lines.push(`${r.account.padEnd(22)} ${r.status !== 'ok' ? r.status : `ok         ${(r.email ?? '-').padEnd(30)} tokens ${r.tokens?.status ?? '-'}`}`);
+    return lines.join('\n');
+  }
   lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'claude account'.padEnd(30)} ${'5h'.padStart(4)}  ${'5h resets (UTC)'.padEnd(16)} ${'7d'.padStart(4)}  ${'7d resets (UTC)'.padEnd(16)} ${'role'.padEnd(18)} fabric`);
   for (const r of rs) {
     if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
@@ -158,7 +184,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
+  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;
@@ -181,7 +207,7 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const call = (p, init) => api(tok, p, { relayUrl: cfg.relay_url, ...init });
 
   const id = newId();
-  const request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)) };
+  const request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)), ...(args.days ? { days: args.days } : {}) };
   let sent;
   try { sent = await call('/api/send', { method: 'POST', body: JSON.stringify({ channel: cfg.channel, sender: me.address, content: JSON.stringify(request) }) }); }
   catch (e) { console.error(`fabric-ctl: relay ${e.status ? `refused (HTTP ${e.status})` : `unreachable at ${cfg.relay_url}`}`); return 3; }

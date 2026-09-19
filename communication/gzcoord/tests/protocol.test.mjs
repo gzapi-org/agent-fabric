@@ -23,7 +23,9 @@ test('every inline GZCOORD example in MESSAGE-FORMAT.md validates', () => {
   const blocks = [...doc.matchAll(/```text\n(\[GZCOORD\/1\] (?!TYPE\b)[^\n]*\n[\s\S]*?)```/g)].map(m => m[1]);
   assert.ok(blocks.length >= 2, `expected the document's inline examples, found ${blocks.length}`);
   for (const b of blocks) {
-    const text = b.replace(/^(MESSAGE-ID|IN-REPLY-TO): .*…\s*$/gm, (line, key) => `${key}: 01a09fc1-0000-7000-8000-000000000000`);
+    // [ \t]*, never \s*: with the m flag \s* eats the newline and the blank
+    // line that separates metadata from body, gluing NOTES: onto the block.
+    const text = b.replace(/^(MESSAGE-ID|IN-REPLY-TO): .*…[ \t]*$/gm, (line, key) => `${key}: 01a09fc1-0000-7000-8000-000000000000`);
     const r = validate(text, { taxonomy });
     assert.deepEqual(r.errors, [], `${b.split('\n')[0]} / ${b.match(/^SUBJECT: (.*)$/m)?.[1] ?? '(no subject)'}: ${r.errors}`);
   }

@@ -89,7 +89,10 @@ now="$(head -1 "$D/backend-test")"
 refused="$(lease backend-test -- echo second 2>&1)"
 [[ "$now" == "$(id -un) $HOLDER "* ]] && ok "the record names the new holder while its memory check is still running" || bad "record during the memory check" "prev=$prev now=$now holder=$HOLDER"
 grep -q "held by $(id -un) $HOLDER " <<<"$refused" && ok "…and a caller refused in that window is told the new holder" || bad "refused caller told the wrong holder" "$refused"
-printf 'MemTotal:       18152000 kB\nMemAvailable:   12000000 kB\n' > "$SANDBOX/meminfo.fifo"
+# Opening a fifo for writing blocks until a reader opens it: bounded, so a
+# regression that made the holder exit before its awk ever read the fifo
+# fails the suite instead of hanging it.
+timeout 5 sh -c 'printf "MemTotal:       18152000 kB\nMemAvailable:   12000000 kB\n" > "$1"' _ "$SANDBOX/meminfo.fifo" || bad "the holder never opened the fifo (exited before its memory check)"
 wait "$HOLDER"; rc=$?; HOLDER=""
 [[ $rc -eq 0 ]] && grep -q started "$SANDBOX/holder.out" && ok "…the holder then ran once the meminfo arrived" || bad "holder after fifo" "rc=$rc $(cat "$SANDBOX/holder.out")"
 

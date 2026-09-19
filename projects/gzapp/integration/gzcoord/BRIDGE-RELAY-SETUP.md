@@ -243,8 +243,8 @@ one more reason the runtime lives there now.
 
 Still open:
 
-- **The relay dies with its hosting session.** Closed 2026-09-19: it is a
-  systemd user unit on the hosting account (§Hosting), up with the
+- ~~The relay dies with its hosting session~~ — closed 2026-09-19: it is
+  a systemd user unit on the hosting account (§Hosting), up with the
   account's user manager at boot, restarted on failure.
 - ~~The token has to reach the other clones~~ — closed 2026-09-14: it
   reaches every account as `CLAUDE_BRIDGE_AUTH_TOKEN` in the environment,

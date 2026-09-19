@@ -224,7 +224,7 @@ fi
 #     agent's), so it is installed only where $PROJECTS is that path.
 if [[ -x "$PROJECTS/.gzcoord/venv/bin/claude-bridge" ]]; then
     RELAY_UNIT=gzcoord-relay
-    if [[ "$PROJECTS" != "$HOME/projects" ]]; then
+    if [[ "$PROJECTS" != "$(readlink -f "$HOME/projects" 2>/dev/null)" ]]; then
         echo "  !  $RELAY_UNIT: not installed — the unit expects the workspace at \$HOME/projects, this one is $PROJECTS"
     else
     before=$changed
@@ -238,10 +238,17 @@ if [[ -x "$PROJECTS/.gzcoord/venv/bin/claude-bridge" ]]; then
             # crash-loop every three seconds while is-active said "active". Enable
             # for the next boot, say who holds the port, and leave the start to a
             # person who has stopped it.
-            if [[ "$(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null)" != active ]] \
-               && curl -sf -m 1 http://127.0.0.1:8765/status >/dev/null 2>&1; then
+            relay_state="$(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null || true)"
+            if [[ "$relay_state" != active ]] && curl -sf -m 1 http://127.0.0.1:8765/status >/dev/null 2>&1; then
+                # ss is not in the host contract (iproute2 is absent on a minimal image): fall back to the process name.
+                holder="$(ss -Hltnp 'sport = :8765' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
+                [[ -n "$holder" ]] || holder="$(pgrep -u "$(id -u)" -x claude-bridge 2>/dev/null | head -1)"
                 systemctl --user enable "$RELAY_UNIT" >/dev/null 2>&1 || true
-                echo "  !  $RELAY_UNIT: enabled, NOT started — a relay outside the unit holds 127.0.0.1:8765 (pid $(ss -Hltnp 'sport = :8765' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)); stop it, then: systemctl --user start $RELAY_UNIT"
+                if [[ "$relay_state" == activating ]]; then
+                    echo "  !  $RELAY_UNIT: RESTARTING against a relay outside the unit that holds 127.0.0.1:8765 (pid ${holder:-unknown}); stop that relay and the unit takes the port (systemctl --user status $RELAY_UNIT)"
+                else
+                    echo "  !  $RELAY_UNIT: enabled, NOT started — a relay outside the unit holds 127.0.0.1:8765 (pid ${holder:-unknown}); stop it, then: systemctl --user start $RELAY_UNIT"
+                fi
             else
                 systemctl --user enable --now "$RELAY_UNIT" >/dev/null 2>&1 || true
                 (( changed > before )) && systemctl --user restart "$RELAY_UNIT" >/dev/null 2>&1 || true

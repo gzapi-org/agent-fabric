@@ -1440,8 +1440,10 @@ test('ensureRelay: a client hosts nothing; with the unit installed the relay is 
     // the passed environment: systemctl sees XDG_RUNTIME_DIR even when the shell had none
     fs.writeFileSync(path.join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "XDG=$XDG_RUNTIME_DIR" >> ${JSON.stringify(path.join(runtime, 'systemctl.log'))}\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f ${JSON.stringify(path.join(runtime, 'systemctl.log'))} ]]\n`, { mode: 0o755 });
-    delete process.env.XDG_RUNTIME_DIR; fs.mkdirSync(`/run/user/${process.getuid()}`, { recursive: true }); // exists on a real host
+    delete process.env.XDG_RUNTIME_DIR;   // the shell has none: the resolved /run/user/<uid> must reach systemctl anyway
     const s3 = ensureRelay(runtime, 'http://127.0.0.1:1');
-    if (s3.unit) assert.match(fs.readFileSync(path.join(runtime, 'systemctl.log'), 'utf8'), /^XDG=\/run\/user\/\d+$/m, 'systemctl received the resolved runtime dir');
+    if (s3.pid) { try { process.kill(s3.pid, 'SIGKILL'); } catch { /* gone */ } }
+    assert.equal(s3.unit, 'gzcoord-relay', `the unit path must be taken with no XDG_RUNTIME_DIR in the shell: ${JSON.stringify(s3)}`);
+    assert.match(fs.readFileSync(path.join(runtime, 'systemctl.log'), 'utf8'), /^XDG=\/run\/user\/\d+$/m, 'systemctl received the resolved runtime dir');
   } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 });

@@ -68,6 +68,11 @@ n1="$(wc -l < "$T/etc/passwd")"; sh "$RC" 2>/dev/null; n2="$(wc -l < "$T/etc/pas
 grep -qx 'otscache:x:990:user,db-admin' "$T/etc/group" && ok "…nor a membership twice" || bad "membership duplicated" "$(cat "$T/etc/group")"
 : > "$LOGINCTL_LOG"; rm -rf "$T/snap" "$T/run"; sh "$RC"; [[ $? -eq 0 && ! -s "$LOGINCTL_LOG" ]] && ok "no snapshot: nothing done, exit 0" || bad "no snapshot"
 [[ -d "$T/run/lock/agent-fabric" ]] && ok "…but the lease directory is made even then" || bad "lease dir needs a snapshot"
+# install absent: mkdir+chmod gives the same mode; both failing is said on stderr
+mkdir -p "$T/noinstall"; for t in mkdir chmod sh grep cut awk cp mv rm tr head paste cat printf; do ln -sf "$(command -v $t)" "$T/noinstall/$t"; done
+rm -rf "$T/run"; PATH="$T/noinstall" sh "$RC" 2>/dev/null; [[ "$(stat -c %a "$T/run/lock/agent-fabric" 2>/dev/null)" == 1777 ]] && ok "without install(1) the fallback still makes it 1777" || bad "fallback mode" "$(stat -c %a "$T/run/lock/agent-fabric" 2>&1)"
+err="$(AGENT_FABRIC_LEASES="$T/nowhere/deep/leases" PATH="$T/noinstall" sh -c 'chmod() { return 1; }; . "$0"' "$RC" 2>&1 >/dev/null || true)"
+[[ -z "$err" ]] || grep -q "not made 1777" <<<"$err" && ok "a fallback that cannot set the mode says so" || bad "quiet fallback" "$err"
 
 echo "writer: one line per login per file, replace-or-append, the boot script installed once"
 mkdir -p "$T/snap"; : > "$LOGINCTL_LOG"

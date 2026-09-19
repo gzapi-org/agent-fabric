@@ -20,7 +20,7 @@ out="$(lease 2>&1 >/dev/null)"; rc=$?; [[ $rc -eq 2 ]] && grep -q "^usage:" <<<"
 lease "bad name" -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a name with a space is refused" || bad "bad name accepted"
 lease x --wait abc -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "--wait must be a number" || bad "--wait abc"
 out="$(AGENT_FABRIC_LEASES="$SANDBOX/absent" bash "$ROOT/bin/fabric-lease" x -- true 2>&1)"; rc=$?
-[[ $rc -eq 2 ]] && grep -q "persist-accounts" <<<"$out" && ok "no lease directory: refused, the fix named" || bad "absent dir" "$out"
+[[ $rc -eq 2 ]] && grep -q "operator" <<<"$out" && ! grep -q "sudo" <<<"$out" && ok "no lease directory: refused; the operator's action named, nothing the agent cannot run" || bad "absent dir" "$out"
 
 echo "fabric-lease: a free lease runs the command and returns its status"
 out="$(lease backend-test -- sh -c 'echo ran; exit 3' 2>&1)"; rc=$?
@@ -62,6 +62,25 @@ out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/absent" lease backend-test --need-mem 1024
 printf 'MemTotal:       18152000 kB\n' > "$SANDBOX/meminfo-noavail"
 out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo-noavail" lease backend-test --need-mem 1024 -- echo ran 2>&1)"; rc=$?
 [[ $rc -eq 2 ]] && ! grep -q '^ran$' <<<"$out" && ok "no MemAvailable line: the same refusal" || bad "missing MemAvailable" "rc=$rc $out"
+
+echo "fabric-lease: a probe is not an acquisition"
+# --who holds a shared lock for its lifetime; a caller landing in that window
+# must still acquire. Run 40 probes in a burst and a caller in the middle.
+for _ in $(seq 40); do lease backend-test --who >/dev/null 2>&1 & done
+out="$(lease backend-test -- echo got-through 2>&1)"; rc=$?; wait
+[[ $rc -eq 0 && "$out" == "got-through" ]] && ok "a caller is not refused by a burst of --who probes" || bad "probe refused a caller" "rc=$rc $out"
+# two probes at once both say free (shared locks coexist)
+( lease backend-test --who & lease backend-test --who; wait ) 2>/dev/null | sort | uniq -c | grep -q "2 free: backend-test" && ok "two simultaneous probes both read free" || bad "probes saw each other as a holder"
+# the record is written before the memory check: a caller refused during a
+# --need-mem evaluation is told THIS holder, not the previous one
+printf 'MemTotal:       18152000 kB\nMemAvailable:    2048000 kB\n' > "$SANDBOX/meminfo"
+lease backend-test -- true >/dev/null 2>&1   # a previous holder's record
+prev="$(head -1 "$D/backend-test")"
+AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; sleep 2' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+now="$(head -1 "$D/backend-test")"
+[[ "$now" != "$prev" && "$now" == "$(id -un) $HOLDER "* ]] && ok "the record names the current holder's wrapper pid" || bad "record" "prev=$prev now=$now holder=$HOLDER"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null; HOLDER=""
 
 echo "fabric-lease: signals and names"
 AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "echo child-got-term; exit 0" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &

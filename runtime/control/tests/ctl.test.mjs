@@ -66,6 +66,13 @@ test('host table: one row per host from whichever account answered first, the ot
   const partial = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: machine } }]));
   assert.match(partial, /^h1\s+1\/2\s/m); assert.match(partial, /^\s+b: no answer$/m, 'the silent account is named under its host');
   assert.match(table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: { ...machine, balloon_mb: null } } }])), /\s+none\s+\/rw/, 'no balloon: none');
+  // every account failed: the failure text and each account's line, not a bare word
+  const failed = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: { status: 'failed', error: 'EACCES /proc' } } }]));
+  assert.match(failed, /^h1\s+1\/2\s+failed: EACCES \/proc$/m); assert.match(failed, /^\s+a: failed$/m); assert.match(failed, /^\s+b: no answer$/m);
+  // the row with the balloon's static-max speaks for the host, whichever account answered first
+  const noMax = { ...machine, balloon_mb: { current: 18345, target: 18345, static_max: null } };
+  const pref = table('host', rows(expected, [{ kind: 'reply', from: 'h1/a', op: 'host', data: { host: noMax } }, { kind: 'reply', from: 'h1/b', op: 'host', data: { host: machine } }]));
+  assert.match(pref, /18345\/18363/, 'the operator\'s row (the one that can read xenstore) is preferred');
 });
 
 test('tokens table: grouped by Claude account, each login\'s share of the visible direct-path spend, the broker column apart, a login without records named', () => {

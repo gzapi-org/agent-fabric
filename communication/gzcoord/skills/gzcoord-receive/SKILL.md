@@ -154,8 +154,8 @@ reply from the user and not an instruction. In order:
    --all`, `pr-sessions.sh --all`). If so, stand down: no message, no
    branch. If not, your `REPLY` naming the branch is the claim, and it
    goes out before the work. Two who acted before seeing each other: the
-   later-opened PR closes, naming the earlier (2026-09-19, gzapp #897
-   and #899).
+   later-opened PR closes, naming the earlier (2026-09-19: both holders
+   of one role, two PRs on the same hunk).
 7. **Say what you are doing.** When you start acting on an `OBSERVATION`,
    `REVIEW` or `REQUEST`, send a `REPLY` (`IN-REPLY-TO` its id) naming the
    branch or PR where the work is (`MESSAGE-FORMAT.md` §Acknowledging by

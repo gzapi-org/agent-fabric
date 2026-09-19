@@ -53,7 +53,18 @@ fabric-lease <name> --who
   not get its 18 before it needs them.
 - **Nothing stale.** The lock is the kernel's on an open descriptor: a
   killed holder releases it; the command runs with the descriptor
-  closed, so nothing it spawns and leaves behind holds it.
+  closed, so nothing it spawns and leaves behind holds it. The command
+  runs in its own process group and TERM, INT and HUP to the wrapper
+  reach that group, so a killed wrapper takes its suite down with it —
+  except by KILL, which cannot be forwarded: a harness that ends a
+  timed-out tool call with KILL to the wrapper alone frees the lease
+  under a running suite. Not observed; the shape to settle if it is.
+- **No privilege.** An agent has no sudo, and needs none here: the
+  directory is root's, made at boot by provisioning; taking a lease,
+  reading `--who`, and the control plane's `host` op are all
+  unprivileged reads and locks. The one privileged read the `host` op
+  attempts, xenstore's `static-max`, degrades to `null` for an account
+  and `fabric-ctl` prefers the operator's row.
 - **The directory survives the boot** on both platform kinds: the
   account boot script makes it on a Qubes AppVM (volatile `/run`, `/etc`
   and all), tmpfiles.d where `/etc` persists; `persist-accounts.sh`

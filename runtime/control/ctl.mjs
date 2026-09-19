@@ -160,8 +160,16 @@ export function table(op, rs) {
     for (const [host, group] of [...byHost.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const ok = group.filter(r => r.status === 'ok' && r.machine?.status === 'ok');
       const answered = `${group.filter(r => r.status === 'ok').length}/${group.length}`;
-      if (!ok.length) { lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${group.find(r => r.status === 'ok')?.machine?.status ?? 'no answer'}`); continue; }
-      const m = ok[0].machine;
+      if (!ok.length) {
+        // Every account failed or stayed silent: the failure text, then each account's own line.
+        const f = group.find(r => r.status === 'ok')?.machine;
+        lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${f ? `${f.status}${f.error ? `: ${f.error}` : ''}` : 'no answer'}`);
+        for (const r of group) lines.push(`${''.padEnd(16)} ${''.padEnd(9)} ${r.account}: ${r.status === 'ok' ? (r.machine?.status ?? '-') : r.status}`);
+        continue;
+      }
+      // The balloon's static-max is xenstore's, readable by the operator's
+      // login and not by an account's: the row that has it speaks for the host.
+      const m = (ok.find(r => r.machine.balloon_mb?.static_max != null) ?? ok[0]).machine;
       const load = m.loadavg ? m.loadavg.map(x => x.toFixed(2)).join(' ') : '-';
       const mem = m.mem_mb ? `${G(m.mem_mb.available)}/${G(m.mem_mb.total)}` : '-';
       const swap = m.mem_mb ? G(m.mem_mb.swap_free) : '-';

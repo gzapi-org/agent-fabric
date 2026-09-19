@@ -120,7 +120,11 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
   const cur = read(path.join(xm, 'info', 'current_kb')), tgt = read(path.join(xm, 'target_kb'));
   if (cur != null || tgt != null) {
     const smax = run('xenstore-read', ['memory/static-max']);
-    out.balloon_mb = { current: mb(Number(cur)), target: mb(Number(tgt)), static_max: smax ? mb(Number(smax.trim())) : null };
+    // static-max is xenstore's, and /dev/xen/xenbus is root:qubes on this
+    // deployment: an account's daemon reads null, the operator's the number;
+    // fabric-ctl prefers the row that has it. A half-present sysfs is null
+    // per field, never 0 (Number(null) is 0).
+    out.balloon_mb = { current: cur == null ? null : mb(Number(cur)), target: tgt == null ? null : mb(Number(tgt)), static_max: smax ? mb(Number(smax.trim())) : null };
   }
   const mounts = read(path.join(proc, 'mounts'));
   if (mounts) {
@@ -138,10 +142,15 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
   for (const n of names) {
     const f = path.join(leases, n);
     try { if (!fs.statSync(f).isFile()) continue; } catch { continue; }
-    // bash opens read-only and locks the descriptor: the flock command
-    // itself would open with O_CREAT, which fs.protected_regular refuses
-    // on another login's file in the sticky directory.
-    let held; try { exec('bash', ['-c', 'exec 9<"$1"; flock -n 9', '_', f], { stdio: 'ignore', timeout: 5000 }); held = false; } catch (e) { held = e?.status === 1; }
+    // bash opens read-only and takes a SHARED lock on the descriptor: the
+    // flock command itself would open with O_CREAT, which
+    // fs.protected_regular refuses on another login's file in the sticky
+    // directory; and an exclusive probe would hold a free lease for a
+    // moment — sixteen daemons probing at once could refuse a real caller
+    // and each report the other's hold as a stale holder. A shared probe
+    // is refused only by a real holder's exclusive lock. A file that
+    // cannot be opened (a hand-made 0600) exits 3 and is not a lease row.
+    let held; try { exec('bash', ['-c', 'exec 9<"$1" || exit 3; flock -s -n 9', '_', f], { stdio: 'ignore', timeout: 5000 }); held = false; } catch (e) { held = e?.status === 1; }
     if (!held) continue;
     const [login, pid, since] = (read(f) ?? '').split('\n')[0].split(' ');
     out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });

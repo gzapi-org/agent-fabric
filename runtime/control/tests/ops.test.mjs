@@ -329,7 +329,15 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   assert.deepEqual(h.disk.map(d => d.mount), ['/', '/rw'], 'one row per block device, tmpfs and none excluded');
   assert.deepEqual(h.disk[1], { mount: '/rw', size_gb: 295, avail_gb: 84, use_pct: 72 });
   assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }], 'only the held lease; the free one and the dotfile are not rows');
-  assert.ok(calls.some(c => c[0] === 'bash' && c[1] === '-c' && /exec 9<"\$1"; flock -n 9/.test(c[2])), 'the probe locks a read-only descriptor, never the flock command\'s O_CREAT open');
+  assert.ok(calls.some(c => c[0] === 'bash' && c[1] === '-c' && /exec 9<"\$1" \|\| exit 3; flock -s -n 9/.test(c[2])), 'the probe takes a SHARED lock on a read-only descriptor — never the flock command\'s O_CREAT open, never the exclusive lock a caller needs');
+  // a file the probe cannot open (exit 3) is not a lease row
+  const unreadable = host({ proc, sys, leases, exec: (cmd, args) => { if (cmd === 'bash') { const e = new Error('open'); e.status = 3; throw e; } return exec(cmd, args); }, cpus: 6, statfs });
+  assert.deepEqual(unreadable.leases, [], 'an unopenable file is not reported as held');
+  // half a balloon in sysfs: the missing half is null, never 0
+  fs.rmSync(path.join(xm, 'info', 'current_kb'));
+  const half = host({ proc, sys, leases, exec, cpus: 6, statfs });
+  assert.equal(half.balloon_mb.current, null); assert.equal(half.balloon_mb.target, 31152);
+  fs.writeFileSync(path.join(xm, 'info', 'current_kb'), '31899000\n');
   assert.deepEqual(h.top_rss[0], { user: 'backend-dev-02', pid: 667140, rss_mb: 2140, comm: 'VBCSCompiler' });
   assert.equal(JSON.stringify(h).includes('/home/'), false, 'no path of a home in the record');
   // not a Xen guest, no lease directory, no ps: null and empty, never a throw

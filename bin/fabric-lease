@@ -61,7 +61,10 @@ done
 [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "fabric-lease: a name is [A-Za-z0-9._-], 64 at most: '$NAME'" >&2; exit 2; }
 [[ "$WAIT" =~ ^[0-9]+$ && "$NEED" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --wait and --need-mem take whole numbers" >&2; exit 2; }
 (( WHO )) || [[ $# -ge 1 ]] || { echo "fabric-lease: a command after --" >&2; usage; }
-[[ -d "$LEASES" ]] || { echo "fabric-lease: no lease directory at $LEASES — this host has not run runtime/provisioning/persist-accounts.sh since its boot (bin/fabric-host <host> persist)" >&2; exit 2; }
+# An agent has no sudo: the directory is root's to make (the boot script,
+# tmpfiles.d, or the operator's persist run), so the message names whose
+# action it is rather than a command the caller cannot run.
+[[ -d "$LEASES" ]] || { echo "fabric-lease: no lease directory at $LEASES — it is made at boot by the fabric's provisioning; ask the host's operator (fabric-coordinator) to run bin/fabric-host <host> persist" >&2; exit 2; }
 L="$LEASES/$NAME"
 # 0666 so a later holder, another login, can record itself; a file that
 # exists with tighter modes (made by hand) still locks, and the record is
@@ -76,11 +79,21 @@ L="$LEASES/$NAME"
 exec 9<"$L" || { echo "fabric-lease: cannot open $L" >&2; exit 2; }
 holder() { local h; h="$(head -c 512 "$L" 2>/dev/null | head -1)"; [[ -n "$h" ]] && echo "$h" || echo "(holder unrecorded)"; }
 record() { [[ -w "$L" ]] && printf '%s %s %s %s\n' "$(id -un)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" | dd of="$L" conv=nocreat status=none 2>/dev/null; return 0; }
+# A probe is a SHARED lock, never the exclusive one: `flock -n` on a free
+# lease would take it for the probe's lifetime, and sixteen daemons
+# probing at once (fabric-ctl all host) or a --who could refuse a real
+# caller and report a stale record as the holder (the whole-range review
+# of b981d19, F1). Shared locks coexist, so two probes never see each
+# other; a holder's exclusive lock refuses a shared probe, which is the
+# answer "held".
 if (( WHO )); then
-    if flock -n 9; then echo "free: $NAME"; exit 0; fi
+    if flock -s -n 9; then echo "free: $NAME"; exit 0; fi
     echo "held: $(holder)"; exit 1
 fi
-if ! flock -n 9; then
+# The real caller waits a bounded second before refusing: long enough
+# to outlive any probe's momentary hold, far shorter than any real
+# holder's seconds-to-minutes, so "fail fast" holds to within a second.
+if ! flock -w 1 9; then
     h="$(holder)"
     if (( WAIT > 0 )); then
         echo "fabric-lease: $NAME is held by $h — waiting up to ${WAIT}s" >&2
@@ -89,6 +102,9 @@ if ! flock -n 9; then
         echo "fabric-lease: $NAME is held by $h — retry later, or --wait SECS" >&2; exit 75
     fi
 fi
+# Held. The record FIRST: a caller refused while this one is still
+# checking memory must read this holder, not the previous one (F3).
+record
 # Held. Memory, checked under the lease so two callers do not both pass.
 if (( NEED > 0 )); then
     avail_kb="$(awk '/^MemAvailable:/{print $2}' "$MEMINFO" 2>/dev/null)"
@@ -101,7 +117,6 @@ if (( NEED > 0 )); then
         exit 75
     fi
 fi
-record
 # The command runs in ITS OWN PROCESS GROUP (set -m around the fork),
 # with the lease's descriptor closed, and TERM, INT and HUP delivered
 # to the wrapper are forwarded to that whole group — a wrapper killed
@@ -120,15 +135,26 @@ record
 # the suite's teardown and the exit status is the command's. `command
 # --` so a name never resolves to a function of this script nor to an
 # option of `command` itself.
+# The traps are armed BEFORE the fork: a signal in the gap between the
+# fork and the trap would kill the wrapper with the default disposition,
+# release the lease, and leave the command running in its own group —
+# the outcome this design exists to prevent (F2). Before the child
+# exists a signal is only remembered, and forwarded once it does.
+child=""; pending=""; hit=0
+forward() { hit=1; if [[ -n "$child" ]]; then kill -"$1" -- "-$child" 2>/dev/null; else pending="$1"; fi; }
+trap 'forward TERM' TERM
+trap 'forward INT' INT
+trap 'forward HUP' HUP
 set -m
 command -- "$@" 9>&- &
 child=$!
 set +m
-forward() { kill -"$1" -- "-$child" 2>/dev/null; }
-trap 'forward TERM' TERM
-trap 'forward INT' INT
-trap 'forward HUP' HUP
-wait "$child"; rc=$?
-while kill -0 "$child" 2>/dev/null; do wait "$child"; rc=$?; done
+[[ -n "$pending" ]] && forward "$pending"
+# `wait` returns 128+signal the moment a trapped signal arrives; the
+# command is still running. Repeat until a wait completed with no signal
+# in between — a flag set by the trap, not `kill -0`, which can race the
+# shell's own reaping of the child and report it gone before its status
+# was collected.
+while :; do hit=0; wait "$child"; rc=$?; (( hit )) || break; done
 trap - TERM INT HUP
 exit "$rc"

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# bin/fabric-lease — run a command under a host-wide lease: one holder at
+# a time across every account on this host, by name.
+#
+#   fabric-lease <name> [--wait SECS] [--need-mem MB] -- <cmd> [args...]
+#   fabric-lease <name> --who              who holds it, if anyone; exit 0 free, 1 held
+#
+# The host is one machine the accounts share, and some of what they run
+# is a host resource, not an account's: a backend integration suite with
+# its own postgres, a device emulator, a build that takes every core.
+# Two of those at once is how develop-qzapp died on 2026-09-19 — two
+# accounts started the backend suite forty seconds apart on a VM
+# ballooned to 8.6 GiB, 166,000 postgres files in ninety seconds, and
+# the VM was gone (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
+# The fix is not a role that runs suites for everyone: it is mutual
+# exclusion where the suite is started (docs/host-leases.md).
+#
+# A lease is a flock(2) on ${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}/<name>,
+# a directory every account can create files in (1777, made at boot by
+# the account boot script on a Qubes AppVM and by tmpfiles.d elsewhere,
+# both installed by runtime/provisioning/persist-accounts.sh). The file is
+# created 0666 so the holder — whichever account it is — can write one
+# line into it: `<login> <pid> <since> <name>`, which is what a refused
+# caller is told. The kernel releases the lock when the holder exits,
+# however it exits: a killed suite leaves no stale lease.
+#
+# Fail fast by default: a session's tool call has a timeout of its own
+# and should decide, told who holds the lease, whether to wait, do
+# something else or ask; --wait SECS blocks that long first. --need-mem
+# refuses, lease released, when MemAvailable is under MB — the balloon
+# on a Qubes VM grows on demand with a lag, and a suite started at 8.6
+# GiB does not get its 18 before it needs them. The command runs with
+# the lease's descriptor closed, so nothing it spawns and leaves behind
+# keeps the lease. Exit status: the command's; 75 (EX_TEMPFAIL) when
+# the lease is held or memory is short; 2 on usage.
+set -uo pipefail
+LEASES="${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}"
+MEMINFO="${AGENT_FABRIC_MEMINFO:-/proc/meminfo}"
+usage() { sed -n '5,6p' "$0" | sed 's/^# //'; exit 2; }
+NAME=""; WAIT=0; NEED=0; WHO=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --wait) WAIT="${2:-}"; shift ;;
+        --wait=*) WAIT="${1#--wait=}" ;;
+        --need-mem) NEED="${2:-}"; shift ;;
+        --need-mem=*) NEED="${1#--need-mem=}" ;;
+        --who) WHO=1 ;;
+        --) shift; break ;;
+        -*) echo "fabric-lease: unknown option $1" >&2; usage ;;
+        *) [[ -z "$NAME" ]] && NAME="$1" || { echo "fabric-lease: one name, then --" >&2; usage; } ;;
+    esac
+    shift
+done
+[[ -n "$NAME" ]] || usage
+[[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "fabric-lease: a name is [A-Za-z0-9._-], 64 at most: '$NAME'" >&2; exit 2; }
+[[ "$WAIT" =~ ^[0-9]+$ && "$NEED" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --wait and --need-mem take whole numbers" >&2; exit 2; }
+(( WHO )) || [[ $# -ge 1 ]] || { echo "fabric-lease: a command after --" >&2; usage; }
+[[ -d "$LEASES" ]] || { echo "fabric-lease: no lease directory at $LEASES — this host has not run runtime/provisioning/persist-accounts.sh since its boot (bin/fabric-host <host> persist)" >&2; exit 2; }
+L="$LEASES/$NAME"
+# 0666 so a later holder, another login, can record itself; a file that
+# exists with tighter modes (made by hand) still locks, and the record is
+# best effort. The lock is taken on a READ-ONLY descriptor and the record
+# written by dd with conv=nocreat: in a sticky world-writable directory
+# fs.protected_regular (2 on Fedora) refuses an O_CREAT open of a file
+# another login owns, and every bash write redirection carries O_CREAT —
+# found live on develop-qzapp, 2026-09-19, the second account locked out
+# of the first one's lease file (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
+[[ -e "$L" ]] || ( umask 000; : >> "$L" ) 2>/dev/null
+exec 9<"$L" || { echo "fabric-lease: cannot open $L" >&2; exit 2; }
+holder() { local h; h="$(head -c 512 "$L" 2>/dev/null | head -1)"; [[ -n "$h" ]] && echo "$h" || echo "(holder unrecorded)"; }
+record() { [[ -w "$L" ]] && printf '%s %s %s %s\n' "$(id -un)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" | dd of="$L" conv=nocreat status=none 2>/dev/null; return 0; }
+if (( WHO )); then
+    if flock -n 9; then echo "free: $NAME"; exit 0; fi
+    echo "held: $(holder)"; exit 1
+fi
+if ! flock -n 9; then
+    h="$(holder)"
+    if (( WAIT > 0 )); then
+        echo "fabric-lease: $NAME is held by $h — waiting up to ${WAIT}s" >&2
+        flock -w "$WAIT" 9 || { echo "fabric-lease: $NAME still held by $(holder) after ${WAIT}s" >&2; exit 75; }
+    else
+        echo "fabric-lease: $NAME is held by $h — retry later, or --wait SECS" >&2; exit 75
+    fi
+fi
+# Held. Memory, checked under the lease so two callers do not both pass.
+if (( NEED > 0 )); then
+    avail_kb="$(awk '/^MemAvailable:/{print $2}' "$MEMINFO" 2>/dev/null)"
+    if [[ -n "$avail_kb" ]] && (( avail_kb / 1024 < NEED )); then
+        echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $(( $(awk '/^MemTotal:/{print $2}' "$MEMINFO") / 1024 )) MB) — the largest processes:" >&2
+        ps -eo user:20,pid,rss,comm --sort=-rss 2>/dev/null | head -6 | awk 'NR==1{print "   "$0; next}{printf "   %-20s %7s %6d MB %s\n", $1, $2, $3/1024, $4}' >&2
+        exit 75
+    fi
+fi
+record
+"$@" 9>&-

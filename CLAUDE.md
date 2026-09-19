@@ -47,6 +47,8 @@ agent-fabric/bin/fabric-ctl all status  # (coordinator) the fleet in real time: 
                                         # key fingerprints, fabric head, session (docs/control-plane.md)
 agent-fabric/bin/fabric-usage           # (coordinator) the usage windows through the host executor —
                                         # the sudo fallback when a host's control agents are down
+agent-fabric/bin/fabric-lease <name> -- <cmd>   # one holder per host resource across every account on
+                                        # this host (a backend suite with its postgres); docs/resources.md
 ```
 
 When asked who you are, what you are bound to, or which API or model

@@ -174,6 +174,7 @@ BACKEND=local
 seq_run() { rm -f "$CALLS"; local h=(); [[ "$BACKEND" == ssh ]] && h=(--host far-host)
   SUDO="$BIN/sudo" SSH="$BIN/ssh" AGENT_FABRIC_CLONE_URL="$BARE" HOME="$SANDBOX/home" \
   AGENT_FABRIC_ACCOUNTS_SNAPSHOT="$SANDBOX/persist/snap" AGENT_FABRIC_RC_LOCAL_D="$SANDBOX/persist/rcd" AGENT_FABRIC_ETC="$SANDBOX/persist/etc" AGENT_FABRIC_LOGINCTL="$BIN/loginctl" \
+  AGENT_FABRIC_LEASES="$SANDBOX/persist/leases" AGENT_FABRIC_TMPFILES_D="$SANDBOX/persist/tmpfiles.d" \
   bash "$FAB/runtime/provisioning/new-agent.sh" "$@" "${h[@]}" 2>&1; }
 cp "$SEQ/enroll.sh" "$FAB/runtime/provisioning/secrets/enroll.sh"
 reset_seq() { rm -rf "$HOMES" "$SEQ/passwd" "$SEQ/enrolled" "$FAULT"; mkdir -p "$HOMES"; }

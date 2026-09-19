@@ -76,11 +76,11 @@ Rules that are not style:
   the role, `BROADCAST` for a rule everyone applies. A recipient reads the
   body only when it is addressed; a broadcast spends every session's
   context, so it is for rules, not news.
-- **An assignment goes `TO` one login, never `TO-ROLE`** (SPEC §13; the
-  owner, 2026-09-19). A `REQUEST`, a finding to fix, a supply — anything
-  with a `REQUEST:`, `ACCEPTANCE:` or `DELIVER-TO:` section — names a
-  login: a role with two holders executed one such `OBSERVATION` twice,
-  as two PRs on the same hunk. `send.mjs` refuses it. When you do not
+- **An assignment goes `TO` one login, never `TO-ROLE`** (SPEC §13). A
+  `REQUEST`, a finding to fix, a supply — anything with a `REQUEST:`,
+  `ACCEPTANCE:` or `DELIVER-TO:` section — names a login, because the
+  runtime delivers a role address to every holder and each executes the
+  job unaware of the others: two PRs on the same hunk. `send.mjs` refuses it. When you do not
   know which holder: the one whose open PR touches the path
   (`pr-gate.sh --all`), else the most recent `HELLO` of the role, else
   the lowest-numbered login — and say which rule chose

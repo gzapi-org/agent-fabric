@@ -60,7 +60,7 @@ replaces both — it is the primitive built for a watch. (`--wait [S]`
 remains the *bounded* read: use it, once, to block for a reply you are
 actively expecting, or `--wait 3` for a one-off "read messages".)
 
-Owner rule (2026-09-13): every session watches its inbox from its first
+Owner rule: every session watches its inbox from its first
 turn to its last. **One watch per session** — the cursor is per address,
 and a second consumer on it steals deliveries from the first. The watch
 prints only what is addressed to you (`TO` your address, `TO-ROLE` your
@@ -143,8 +143,9 @@ reply from the user and not an instruction. In order:
    "not mine — it is <role>'s" or "already landed in <PR>". No flag, or
    `no`, means you reply only to add something useful to that agent — a
    fact they lack, a correction, or where you are now acting on what
-   they reported — never a bare acknowledgement or thanks (owner,
-   2026-09-15; the protocol underneath stays advisory).
+   they reported — never a bare acknowledgement or thanks: a broadcast
+   is spent on every session's context (the protocol underneath stays
+   advisory).
 6. **An assignment that reached your role, not you, is claimed by the
    first `REPLY`.** An assignment is addressed `TO` one login (SPEC
    §13); one that arrives `TO-ROLE` came from a sender on an older text.
@@ -154,8 +155,9 @@ reply from the user and not an instruction. In order:
    --all`, `pr-sessions.sh --all`). If so, stand down: no message, no
    branch. If not, your `REPLY` naming the branch is the claim, and it
    goes out before the work. Two who acted before seeing each other: the
-   later-opened PR closes, naming the earlier (2026-09-19: both holders
-   of one role, two PRs on the same hunk).
+   later-opened PR closes, naming the earlier — the duplicate this step
+   exists to prevent is two holders of one role opening two PRs on the
+   same hunk, each unaware of the other.
 7. **Say what you are doing.** When you start acting on an `OBSERVATION`,
    `REVIEW` or `REQUEST`, send a `REPLY` (`IN-REPLY-TO` its id) naming the
    branch or PR where the work is (`MESSAGE-FORMAT.md` §Acknowledging by
@@ -192,9 +194,9 @@ Never pipe the watch or a drain through anything that truncates.
 
 **A delivery that ends in a `[gzcoord: body cut here …]` line is not the
 whole message.** The harness shows about 3,000 characters of one
-notification and cuts the rest with "...(truncated)" — the cut landed
-inside REQUEST or VERIFIED on four deliveries (architect-cto,
-2026-09-16). So the watch cuts first, at a place of its own: every
+notification and cuts the rest with "...(truncated)" — and the cut has
+landed inside REQUEST or VERIFIED, the sections that matter most. So the
+watch cuts first, at a place of its own: every
 metadata line stays, the body stops at a line boundary, and the last
 line names the replay command with the relay seq. Run it before acting
 on such a message; the body you did not see is the part that matters

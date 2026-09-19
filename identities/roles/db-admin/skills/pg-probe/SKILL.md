@@ -172,9 +172,9 @@ Once the DDL is settled, the migration itself still owes:
   tables added since the baseline do this — `0024_stopping_mode_policy.sql`
   (table :44, trigger :76) and `0038_transit_search_profiles.sql`
   (:81, :278). A two-step "ship it commented out, activate later" pattern
-  did exist for `runtime_events` in June 2026, but its migration was folded
-  into `0001_baseline.sql` by the 2026-07-20 re-baseline and nothing has
-  used it since. Attach the guard with the table.
+  existed once, for one table, and its migration was folded into the
+  baseline at the next re-baseline; nothing has used it since. Attach the
+  guard with the table.
 - **`ON CONFLICT (<natural key>) DO NOTHING`** on any seed row. Not because
   the file gets re-run — `MigrationRunner` records applied filenames in
   `schema_migrations` and refuses to re-apply. Because of **re-baselining**:

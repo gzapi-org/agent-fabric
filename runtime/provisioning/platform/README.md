@@ -19,7 +19,7 @@ the worker names one:
 provisioning call, whatever the platform:
 `bash sudo ssh getent pgrep timeout flock stat sha256sum cmp useradd
 usermod shred install curl python3 node npm git gh jq gpg` (`usermod
---add-subuids` needs shadow-utils 4.9 or later: Fedora 34+, Debian 12+) (`cmp` is
+--add-subuids` needs shadow-utils 4.9 or later: Fedora 35+, Debian 12+) (`cmp` is
 what bootstrap's idempotence rests on; a Fedora container without
 diffutils rewrote every file on every run — the smoke job's first find). `pkg_for` maps each
 to its package; the CI smoke jobs install that list from the map on a

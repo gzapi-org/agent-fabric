@@ -71,16 +71,27 @@ out="$(lease backend-test -- echo got-through 2>&1)"; rc=$?; wait
 [[ $rc -eq 0 && "$out" == "got-through" ]] && ok "a caller is not refused by a burst of --who probes" || bad "probe refused a caller" "rc=$rc $out"
 # two probes at once both say free (shared locks coexist)
 ( lease backend-test --who & lease backend-test --who; wait ) 2>/dev/null | sort | uniq -c | grep -q "2 free: backend-test" && ok "two simultaneous probes both read free" || bad "probes saw each other as a holder"
-# the record is written before the memory check: a caller refused during a
-# --need-mem evaluation is told THIS holder, not the previous one
-printf 'MemTotal:       18152000 kB\nMemAvailable:    2048000 kB\n' > "$SANDBOX/meminfo"
+# a shared lock held by an observer never reads as "held": --who says free
+# while a flock -s is open on the file (the deterministic pin for the
+# shared-probe design; the burst above is the same fact, timing-dependent)
+( exec 8<"$D/backend-test"; flock -s 8; lease backend-test --who; echo "who-rc=$?" ) 2>/dev/null | grep -q "who-rc=0" && ok "--who reads free under another observer's shared lock" || bad "a shared lock read as held"
+# the record is written before the memory check: a caller refused WHILE a
+# --need-mem evaluation is running is told THIS holder. The check is made
+# observable by pointing MEMINFO at a fifo: awk blocks on it until the test
+# writes, and in that window the record must already be the new holder's.
 lease backend-test -- true >/dev/null 2>&1   # a previous holder's record
 prev="$(head -1 "$D/backend-test")"
-AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; sleep 2' > "$SANDBOX/holder.out" 2>&1 &
-HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+mkfifo "$SANDBOX/meminfo.fifo"
+AGENT_FABRIC_LEASES="$D" AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo.fifo" bash "$ROOT/bin/fabric-lease" backend-test --need-mem 1024 -- sh -c 'echo started' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!
+for _ in $(seq 50); do [[ "$(head -1 "$D/backend-test" 2>/dev/null)" != "$prev" ]] && break; sleep 0.1; done
 now="$(head -1 "$D/backend-test")"
-[[ "$now" != "$prev" && "$now" == "$(id -un) $HOLDER "* ]] && ok "the record names the current holder's wrapper pid" || bad "record" "prev=$prev now=$now holder=$HOLDER"
-kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null; HOLDER=""
+refused="$(lease backend-test -- echo second 2>&1)"
+[[ "$now" == "$(id -un) $HOLDER "* ]] && ok "the record names the new holder while its memory check is still running" || bad "record during the memory check" "prev=$prev now=$now holder=$HOLDER"
+grep -q "held by $(id -un) $HOLDER " <<<"$refused" && ok "…and a caller refused in that window is told the new holder" || bad "refused caller told the wrong holder" "$refused"
+printf 'MemTotal:       18152000 kB\nMemAvailable:   12000000 kB\n' > "$SANDBOX/meminfo.fifo"
+wait "$HOLDER"; rc=$?; HOLDER=""
+[[ $rc -eq 0 ]] && grep -q started "$SANDBOX/holder.out" && ok "…the holder then ran once the meminfo arrived" || bad "holder after fifo" "rc=$rc $(cat "$SANDBOX/holder.out")"
 
 echo "fabric-lease: signals and names"
 AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "echo child-got-term; exit 0" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &

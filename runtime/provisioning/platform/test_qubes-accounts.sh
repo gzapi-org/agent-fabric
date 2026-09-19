@@ -72,7 +72,7 @@ grep -qx 'otscache:x:990:user,db-admin' "$T/etc/group" && ok "…nor a membershi
 mkdir -p "$T/noinstall"; for t in mkdir chmod sh grep cut awk cp mv rm tr head paste cat printf; do ln -sf "$(command -v $t)" "$T/noinstall/$t"; done
 rm -rf "$T/run"; PATH="$T/noinstall" sh "$RC" 2>/dev/null; [[ "$(stat -c %a "$T/run/lock/agent-fabric" 2>/dev/null)" == 1777 ]] && ok "without install(1) the fallback still makes it 1777" || bad "fallback mode" "$(stat -c %a "$T/run/lock/agent-fabric" 2>&1)"
 err="$(AGENT_FABRIC_LEASES="$T/nowhere/deep/leases" PATH="$T/noinstall" sh -c 'chmod() { return 1; }; . "$0"' "$RC" 2>&1 >/dev/null || true)"
-[[ -z "$err" ]] || grep -q "not made 1777" <<<"$err" && ok "a fallback that cannot set the mode says so" || bad "quiet fallback" "$err"
+grep -q "not made 1777" <<<"$err" && ok "a fallback that cannot set the mode says so" || bad "quiet fallback" "$err"
 
 echo "writer: one line per login per file, replace-or-append, the boot script installed once"
 mkdir -p "$T/snap"; : > "$LOGINCTL_LOG"

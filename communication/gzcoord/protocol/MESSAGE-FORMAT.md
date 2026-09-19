@@ -193,7 +193,7 @@ the reader is right to refuse it.
 [GZCOORD/1] REQUEST
 FROM: develop-qzapp/backend-dev-01
 ROLE: backend-dev
-TO-ROLE: fabric-coordinator
+TO: develop-qzapp/user
 PROJECT: gzapp
 MESSAGE-ID: 01a09fc1-…
 SUBJECT: Revert the index refresh in 21a8714f: it dropped two entries

@@ -12,6 +12,23 @@ const gzmsg = (...args) =>
   spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
             { encoding: 'utf8' });
 
+// The format document's own inline examples are copied as much as the
+// files under examples/: every fenced block that opens with the protocol
+// header must validate under the deployment's catalogue, ids elided
+// ("01a0…") tolerated. The one under "Asking for an undo" was a REQUEST
+// addressed TO-ROLE — the shape §13 now refuses — for a day after the rule.
+test('every inline GZCOORD example in MESSAGE-FORMAT.md validates', () => {
+  const doc = fs.readFileSync(new URL('../protocol/MESSAGE-FORMAT.md', import.meta.url), 'utf8');
+  // The §Shape template ("[GZCOORD/1] TYPE", placeholder keys) is the grammar shown, not a message.
+  const blocks = [...doc.matchAll(/```text\n(\[GZCOORD\/1\] (?!TYPE\b)[^\n]*\n[\s\S]*?)```/g)].map(m => m[1]);
+  assert.ok(blocks.length >= 2, `expected the document's inline examples, found ${blocks.length}`);
+  for (const b of blocks) {
+    const text = b.replace(/^(MESSAGE-ID|IN-REPLY-TO): .*…\s*$/gm, (line, key) => `${key}: 01a09fc1-0000-7000-8000-000000000000`);
+    const r = validate(text, { taxonomy });
+    assert.deepEqual(r.errors, [], `${b.split('\n')[0]} / ${b.match(/^SUBJECT: (.*)$/m)?.[1] ?? '(no subject)'}: ${r.errors}`);
+  }
+});
+
 for (const name of ['hello','observation','observation-diagnosis','reply','review']) {
   test(`${name} example is valid`, () => {
     const text = fs.readFileSync(new URL(`../protocol/examples/${name}.txt`, import.meta.url), 'utf8');

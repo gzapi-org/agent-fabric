@@ -220,20 +220,37 @@ fi
 #     the relay's venv. Every other account is a client and gets nothing
 #     here (BRIDGE-RELAY-SETUP.md §Hosting). Same mechanics as the control
 #     agent above; the unit's own ConditionPathExists is the second fence.
+#     The unit hard-codes %h/projects/.gzcoord (static, like the control
+#     agent's), so it is installed only where $PROJECTS is that path.
 if [[ -x "$PROJECTS/.gzcoord/venv/bin/claude-bridge" ]]; then
     RELAY_UNIT=gzcoord-relay
+    if [[ "$PROJECTS" != "$HOME/projects" ]]; then
+        echo "  !  $RELAY_UNIT: not installed — the unit expects the workspace at \$HOME/projects, this one is $PROJECTS"
+    else
     before=$changed
     put "$HOME/.config/systemd/user/$RELAY_UNIT.service" "$FABRIC_ROOT/communication/gzcoord/runtime/$RELAY_UNIT.service"
     if (( ! DRY_RUN )); then
         export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
         if [[ -S "$XDG_RUNTIME_DIR/bus" ]] && command -v systemctl >/dev/null 2>&1 \
            && systemctl --user daemon-reload >/dev/null 2>&1; then
-            systemctl --user enable --now "$RELAY_UNIT" >/dev/null 2>&1 || true
-            (( changed > before )) && systemctl --user restart "$RELAY_UNIT" >/dev/null 2>&1 || true
-            echo "  *  $RELAY_UNIT (this workspace hosts the relay): $(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null || true)"
+            # A relay that is not the unit's — hand-started, or an older session's
+            # detached spawn — holds the port: starting the unit against it would
+            # crash-loop every three seconds while is-active said "active". Enable
+            # for the next boot, say who holds the port, and leave the start to a
+            # person who has stopped it.
+            if [[ "$(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null)" != active ]] \
+               && curl -sf -m 1 http://127.0.0.1:8765/status >/dev/null 2>&1; then
+                systemctl --user enable "$RELAY_UNIT" >/dev/null 2>&1 || true
+                echo "  !  $RELAY_UNIT: enabled, NOT started — a relay outside the unit holds 127.0.0.1:8765 (pid $(ss -Hltnp 'sport = :8765' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)); stop it, then: systemctl --user start $RELAY_UNIT"
+            else
+                systemctl --user enable --now "$RELAY_UNIT" >/dev/null 2>&1 || true
+                (( changed > before )) && systemctl --user restart "$RELAY_UNIT" >/dev/null 2>&1 || true
+                echo "  *  $RELAY_UNIT (this workspace hosts the relay): $(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null || true)"
+            fi
         else
             echo "  !  $RELAY_UNIT: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus"
         fi
+    fi
     fi
 fi
 

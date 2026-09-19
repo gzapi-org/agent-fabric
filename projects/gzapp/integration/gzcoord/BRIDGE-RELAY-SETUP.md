@@ -64,11 +64,12 @@ database is the only record of the channel's past, the token is a
 secret, and the venv is host state: none of it belongs in a repository,
 gitignored or not (until 2026-09-14 it sat in the hosting clone's
 `.gzcoord/`, and a directory rename stranded it once). The hosting duty
-is the **fabric-coordinator role's**: the relay dies with its hosting
-session, so that role's session start is the activation — the
-`SessionStart` drain (`scripts/inbox.mjs`, "Receiving", below) starts
-the relay before draining whenever this workspace hosts and the relay
-is not answering. A client workspace has no `.gzcoord/venv`, skips
+is the **fabric-coordinator role's**: that role's session start is the
+activation of whatever hosts the relay — the `SessionStart` drain
+(`scripts/inbox.mjs`, "Receiving", below) brings the relay up before
+draining whenever this workspace hosts and the relay is not answering:
+the user unit below where bootstrap installed it, else a detached
+spawn. A client workspace has no `.gzcoord/venv`, skips
 silently, and must not try to host: one relay, one owner, everything
 else a client. Starting it by hand stays the documented fallback:
 
@@ -93,7 +94,10 @@ name: `systemctl --user status gzcoord-relay`, `… restart gzcoord-relay`.
 The session-start activation (`ensureRelay`) starts that unit when it is
 installed and a user manager is up, and only otherwise falls back to the
 detached spawn above. The hand-started process this replaced ignored
-TERM, died with its terminal, and nothing could find it by name.
+TERM, died with its terminal, and nothing could find it by name. A
+relay started by hand or by an older session's spawn still holds the
+port: stop it before the unit takes over — bootstrap says so when it
+finds one and does not start the unit against it.
 
 `--host 127.0.0.1` is the default and stays: the relay is unreachable
 off this machine. Authentication stays on — a loopback bind is not a
@@ -223,9 +227,11 @@ the 2026-09-13 host reboot). Read with a throwaway consumer id only to
 ## What was once not yet true
 
 Both limits recorded at first bring-up are closed: real instances
-exchange traffic on the channel daily, and the relay's lifetime is the
-hosting session's, brought up by the fabric-coordinator's session start
-from the workspace runtime directory (`projects/.gzcoord/venv`). One
+exchange traffic on the channel daily, and the relay has an owner that
+outlives a session — a systemd user unit on the hosting account, brought
+up with the account's user manager and, failing that, by the
+fabric-coordinator's session start from the workspace runtime directory
+(`projects/.gzcoord/venv`). One
 thing learned while it still lived in a clone: **renaming the directory
 holding the venv strands it** — its scripts keep the old interpreter
 path — and nothing can start the relay again until the venv is rebuilt
@@ -237,10 +243,9 @@ one more reason the runtime lives there now.
 
 Still open:
 
-- **The relay dies with its hosting session.** Giving it an owner that
-  outlives a session — a user service, or a container — is the next
-  decision, and it belongs to the runtime surface rather than to the
-  protocol role.
+- **The relay dies with its hosting session.** Closed 2026-09-19: it is a
+  systemd user unit on the hosting account (§Hosting), up with the
+  account's user manager at boot, restarted on failure.
 - ~~The token has to reach the other clones~~ — closed 2026-09-14: it
   reaches every account as `CLAUDE_BRIDGE_AUTH_TOKEN` in the environment,
   from the account's own Doppler config (`bin/fabric-secrets sync`); the

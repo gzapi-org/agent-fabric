@@ -208,15 +208,17 @@ export function forMe(msg, me) {
   return false;
 }
 
-// The relay dies with its hosting session, and the hosting workspace —
-// the one whose runtime dir holds the relay's venv, token and database
-// (projects/.gzcoord/, outside every repository) — is the
-// fabric-coordinator's (a project integration rule, not a protocol
-// one). So the host's session start IS the activation: if the relay is
-// not answering, bring it up before draining, exactly as the runbook
-// says. Workspaces without the venv return false and skip silently:
-// they are clients, not hosts, and nothing in a client session may try
-// to host.
+// The hosting workspace — the one whose runtime dir holds the relay's
+// venv, token and database (projects/.gzcoord/, outside every
+// repository) — is the fabric-coordinator's (a project integration rule,
+// not a protocol one). The host's session start is the activation of
+// whatever hosts the relay: the systemd user unit where bootstrap
+// installed one (supervised, restarted on failure, outlives the
+// session), else a detached spawn that lives as long as the session. If
+// the relay is not answering, bring it up before draining, exactly as
+// the runbook says. Workspaces without the venv return false and skip
+// silently: they are clients, not hosts, and nothing in a client session
+// may try to host.
 export function ensureRelay(runtimeDir, relayUrl = RELAY) {
   const bin = path.join(runtimeDir, 'venv', 'bin', 'claude-bridge');
   if (!fs.existsSync(bin)) return { hosted: false, started: false };
@@ -231,15 +233,27 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
   // is the fallback for a host with no manager (a bare sudo -u, a test).
   const unit = process.env.GZCOORD_RELAY_UNIT ?? 'gzcoord-relay';
   const unitFile = path.join(process.env.HOME ?? os.homedir(), '.config', 'systemd', 'user', `${unit}.service`);
-  const bus = path.join(process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`, 'bus');
-  if (fs.existsSync(unitFile) && fs.existsSync(bus)) {
-    try { execFileSync('systemctl', ['--user', 'start', unit], { stdio: 'ignore', timeout: 15000 }); } catch { /* fall through to the probe: a failed start is said below */ }
-    for (let waited = 0; waited < 8000; waited += 500) {
-      try { execFileSync('curl', ['-sf', '-m', '1', `${relayUrl}/status`], { stdio: 'ignore' });
-        return { hosted: true, started: true, unit }; } catch { /* not up yet */ }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+  // The user manager's bus: XDG_RUNTIME_DIR where the shell has it, else
+  // the account's runtime dir — a `sudo -u` or the host executor gives
+  // the shell neither, while the lingering account's manager is up all
+  // the same. systemctl needs the dir in ITS environment, so it is
+  // passed explicitly; a bus that is not a socket is a leftover, not a
+  // manager.
+  const runtime = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
+  const bus = path.join(runtime, 'bus');
+  const busIsSocket = () => { try { return fs.statSync(bus).isSocket(); } catch { return false; } };
+  if (fs.existsSync(unitFile) && (busIsSocket() || process.env.GZCOORD_TEST_BUS_ANY === '1')) {
+    let asked = false;
+    try { execFileSync('systemctl', ['--user', 'start', unit], { stdio: 'ignore', timeout: 15000, env: { ...process.env, XDG_RUNTIME_DIR: runtime } }); asked = true; }
+    catch { /* systemctl itself failed: the unit was never asked, so the spawn below is the fallback */ }
+    if (asked) {
+      for (let waited = 0; waited < 8000; waited += 500) {
+        try { execFileSync('curl', ['-sf', '-m', '1', `${relayUrl}/status`], { stdio: 'ignore' });
+          return { hosted: true, started: true, unit }; } catch { /* not up yet */ }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+      }
+      return { hosted: true, started: false, note: `${unit} was started and did not answer within 8s; systemctl --user status ${unit}, ${path.join(runtimeDir, 'bridge.log')}` };
     }
-    return { hosted: true, started: false, note: `${unit} did not answer within 8s; systemctl --user status ${unit}, ${path.join(runtimeDir, 'bridge.log')}` };
   }
   const out = fs.openSync(path.join(runtimeDir, 'bridge.log'), 'a');
   const child = spawn(bin, [
@@ -594,7 +608,7 @@ export async function main(argv = process.argv.slice(2)) {
   // Activate what this session owns before anything else: the hosting
   // working copy starts its relay here, so a session restart is also the relay's.
   const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
-  if (up.started) console.error(`gzcoord inbox: relay started (pid ${up.pid})`);
+  if (up.started) console.error(up.unit ? `gzcoord inbox: relay started (unit ${up.unit})` : `gzcoord inbox: relay started (pid ${up.pid})`);
   else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
   let tok = token(root, cfg);
   if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file ?? '(no token_env_file configured)'}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }

@@ -142,7 +142,11 @@ publication-ready. Keep improving the eye: study strong work in
 branding, editorial, presentation, product, advertising, typography,
 photography and information design for *why* it works, take principles
 rather than executions, fold approved reusable improvements into the
-brand system. The question is not only "is the communication correct?"
-but "is the final, rendered result something the brand should be proud
-to publish?"
+brand system. What is not yours to decide is escalated, not invented: a
+fact about the product goes to the role that owns it (architect-cto,
+backend-dev — "Not yours", above); a design decision that would change
+a brand rule goes to the owner as a proposed decision record — you hold
+the gate, the owner decides. The question is not only "is the
+communication correct?" but "is the final, rendered result something
+the brand should be proud to publish?"
 

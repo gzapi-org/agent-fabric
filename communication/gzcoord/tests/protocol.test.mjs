@@ -1414,8 +1414,9 @@ test('ensureRelay: a client hosts nothing; with the unit installed the relay is 
   // fake systemctl records the call; fake curl answers the probe only after systemctl ran
   fs.writeFileSync(path.join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(path.join(runtime, 'systemctl.log'))}\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f ${JSON.stringify(path.join(runtime, 'systemctl.log'))} ]]\n`, { mode: 0o755 });
-  const saved = { HOME: process.env.HOME, PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
-  Object.assign(process.env, { HOME: home, PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: xdg });
+  const saved = { HOME: process.env.HOME, PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, GZCOORD_TEST_BUS_ANY: process.env.GZCOORD_TEST_BUS_ANY };
+  // the fixture's bus is a plain file, not a socket: the test switch admits it
+  Object.assign(process.env, { HOME: home, PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: xdg, GZCOORD_TEST_BUS_ANY: '1' });
   try {
     const r = ensureRelay(runtime, 'http://127.0.0.1:1');
     assert.deepEqual(r, { hosted: true, started: true, unit: 'gzcoord-relay' }, JSON.stringify(r));
@@ -1428,5 +1429,19 @@ test('ensureRelay: a client hosts nothing; with the unit installed the relay is 
     assert.equal(f.started, true); assert.ok(f.pid, 'the fallback spawned and reports a pid');
     assert.ok(fs.existsSync(path.join(runtime, 'spawned')));
     try { process.kill(f.pid, 'SIGKILL'); } catch { /* gone */ }
-  } finally { Object.assign(process.env, saved); }
+    // systemctl itself failing (no manager reachable): the spawn is the fallback, not an 8 s wait on nothing
+    fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'gzcoord-relay.service'), '[Service]\n');
+    fs.rmSync(path.join(runtime, 'spawned')); fs.rmSync(path.join(runtime, 'systemctl.log'), { force: true });
+    fs.writeFileSync(path.join(bin, 'systemctl'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+    const t0 = Date.now(); const s2 = ensureRelay(runtime, 'http://127.0.0.1:1');
+    assert.equal(s2.started, true); assert.ok(s2.pid && !s2.unit, 'a failed systemctl falls back to the spawn');
+    assert.ok(Date.now() - t0 < 6000, 'no eight-second wait on a unit that was never asked');
+    try { process.kill(s2.pid, 'SIGKILL'); } catch { /* gone */ }
+    // the passed environment: systemctl sees XDG_RUNTIME_DIR even when the shell had none
+    fs.writeFileSync(path.join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "XDG=$XDG_RUNTIME_DIR" >> ${JSON.stringify(path.join(runtime, 'systemctl.log'))}\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f ${JSON.stringify(path.join(runtime, 'systemctl.log'))} ]]\n`, { mode: 0o755 });
+    delete process.env.XDG_RUNTIME_DIR; fs.mkdirSync(`/run/user/${process.getuid()}`, { recursive: true }); // exists on a real host
+    const s3 = ensureRelay(runtime, 'http://127.0.0.1:1');
+    if (s3.unit) assert.match(fs.readFileSync(path.join(runtime, 'systemctl.log'), 'utf8'), /^XDG=\/run\/user\/\d+$/m, 'systemctl received the resolved runtime dir');
+  } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 });

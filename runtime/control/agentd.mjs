@@ -120,7 +120,8 @@ export function remember(seen, id) {
 // a drain is bigger. The coordinator reassembles by slug and part and
 // verifies the sha256 the first record names.
 export async function answer(request, ctx) {
-  const data = request.op === 'ping' ? {} : await collect(request.op, ctx);
+  const days = Number(request.days);
+  const data = request.op === 'ping' ? {} : await collect(request.op, Number.isFinite(days) && days > 0 ? { ...ctx, days: Math.min(days, 90) } : ctx);
   const head = () => ({ v: 1, kind: 'reply', id: newId(), in_reply_to: request.id, from: ctx.me.address, op: request.op, ts: new Date().toISOString(), ok: true });
   const meta = { agentd: { pid: process.pid, started: ctx.started, uptime_s: Math.round((Date.now() - Date.parse(ctx.started)) / 1000) } };
   if (request.op !== 'memory' || !data.memory?.bundles) return { ...head(), data: { ...data, ...meta } };

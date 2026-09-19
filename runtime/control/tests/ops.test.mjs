@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -241,6 +241,46 @@ test('session: counts the harness processes of the uid; none is zero, not a thro
   const s = session(4242, (cmd, args) => { assert.deepEqual(args, ['-u', '4242', '-x', 'claude']); return '111\n222\n'; });
   assert.equal(s.claude_processes, 2); assert.equal(typeof s.planning, 'boolean');
   assert.equal(session(4242, () => { throw Object.assign(new Error('no match'), { status: 1 }); }).claude_processes, 0);
+});
+
+test('tokens: per model from the login\'s own records — deduplicated by request, in the window by timestamp, direct and broker apart, subagents counted, synthetic dropped; nothing of the text leaves', async () => {
+  const h = home();
+  const now = Date.parse('2026-09-19T12:00:00Z');
+  const day = 86400000;
+  const proj = path.join(h, '.claude', 'projects', '-home-x-projects-gzapp');
+  const sub = path.join(proj, 's1', 'subagents');
+  fs.mkdirSync(sub, { recursive: true });
+  const rec = (ts, model, u, extra = {}) => JSON.stringify({ type: 'assistant', timestamp: new Date(ts).toISOString(), requestId: extra.req, message: { id: extra.id ?? 'm-' + Math.random(), model, usage: u, content: [{ type: 'text', text: 'SECRET-TEXT-NEVER-COUNTED' }] } }) + '\n';
+  const u1 = { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 20 };
+  fs.writeFileSync(path.join(proj, 's1.jsonl'),
+    rec(now - day, 'claude-opus-5', u1, { req: 'r1' }) +
+    rec(now - day, 'claude-opus-5', u1, { req: 'r1' }) +          // the same request, one record per content block
+    rec(now - 2 * day, 'z-ai/glm-5.3', { input_tokens: 500, output_tokens: 5 }, { req: 'r2' }) +
+    rec(now - 30 * day, 'claude-opus-5', u1, { req: 'r-old' }) +   // outside the window by its own timestamp
+    rec(now - day, '<synthetic>', { input_tokens: 0, output_tokens: 0 }, { req: 'r-syn' }) +
+    JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\nnot json\n');
+  fs.writeFileSync(path.join(sub, 'agent-a1.jsonl'), rec(now - day, 'claude-sonnet-5', { input_tokens: 1, cache_read_input_tokens: 50, output_tokens: 7 }, { id: 'msg-sub' }));
+  const stale = path.join(proj, 'old.jsonl');
+  fs.writeFileSync(stale, rec(now - day, 'claude-opus-5', u1, { req: 'r-stale' }));
+  fs.utimesSync(stale, new Date(now - 40 * day), new Date(now - 40 * day));   // a file older than the window is not read
+  const t = tokens(h, { now });
+  assert.equal(t.status, 'ok');
+  assert.equal(t.days, 7);
+  assert.deepEqual(t.requests, { session: 2, subagent: 1 });
+  assert.deepEqual(Object.keys(t.models), ['z-ai/glm-5.3', 'claude-opus-5', 'claude-sonnet-5'], 'ordered by equivalents (525, 335, 41), synthetic absent');
+  assert.deepEqual(t.models['claude-opus-5'], { requests: 1, input: 10, cache_write: 100, cache_read: 1000, output: 20, equiv: 335, path: 'claude' });
+  assert.equal(equivalent({ input: 10, cache_write: 100, cache_read: 1000, output: 20 }), 10 + 125 + 100 + 100);
+  assert.deepEqual(t.models['z-ai/glm-5.3'], { requests: 1, input: 500, cache_write: 0, cache_read: 0, output: 5, equiv: 525, path: 'broker' });
+  assert.deepEqual(t.claude, { requests: 2, input: 11, cache_write: 100, cache_read: 1050, output: 27, equiv: 335 + 41 });
+  assert.deepEqual(t.broker, { requests: 1, input: 500, cache_write: 0, cache_read: 0, output: 5, equiv: 525 });
+  assert.equal(t.ratios, TOKEN_RATIOS);
+  assert.equal(t.first, new Date(now - 2 * day).toISOString()); assert.equal(t.last, new Date(now - day).toISOString());
+  assert.ok(!JSON.stringify(t).includes('SECRET-TEXT'), 'counts only');
+  assert.equal(tokens(h, { now, days: 0.5 }).status, 'no-records', 'a narrower window with nothing in it says so');
+  assert.equal(tokens(fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-empty-'))).status, 'no-records');
+  const c = await collect('tokens', { home: h, who, days: 3 });
+  assert.deepEqual(Object.keys(c).sort(), ['identity', 'tokens'], 'tokens rides with identity, so the coordinator can group by Claude account');
+  assert.equal(c.tokens.days, 3);
 });
 
 test('collect: status is every section, a single op its own, and a failing section is inline', async () => {

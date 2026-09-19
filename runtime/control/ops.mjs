@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'memory', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'tokens', 'memory', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -259,6 +259,92 @@ export function script(home = os.homedir(), { hours = 24, limit = 5, now = Date.
   return { status: 'ok', hours, files: files.length, turns, thinking: shares(thinking), thinking_blocks: blocks, text: shares(text), notes: notesOut, workers: workerTranscripts(files, { hours, now, langid: p => langid(p, { home }) }) };
 }
 
+// THE TOKENS. The usage windows (`usage`) are the Claude account's, one
+// number for every login signed into it; which login consumed what is
+// nowhere but in each login's own session records, where every assistant
+// message carries the model and its usage (input, cache creation, cache
+// read, output). Summed here per model over a window, deduplicated by
+// request — the harness writes one record per content block, all with
+// the same usage — for the session transcripts and the subagent
+// transcripts beside them (a dispatched agent spends the same account).
+// A file older than the window holds nothing in it; a record is in the
+// window by its own timestamp. `equiv` is the sum in input-token
+// equivalents at the API's own ratios — cache write 1.25×, cache read
+// 0.1×, output 5× — a proxy for what the subscription meter weighs, not
+// its figure: the meter's weighting is unpublished, one model tier is
+// not priced here against another, and what the same account spends
+// outside this host (the web app, a phone) is invisible. Read back
+// 2026-09-19: this login's session, 155 requests, 22.5M cache reads,
+// 68k output. Counts only; nothing of the text leaves.
+export const TOKEN_RATIOS = { input: 1, cache_write: 1.25, cache_read: 0.1, output: 5 };
+export const TOKENS_DAYS = 7;
+export function equivalent(u, ratios = TOKEN_RATIOS) {
+  return Math.round(u.input * ratios.input + u.cache_write * ratios.cache_write + u.cache_read * ratios.cache_read + u.output * ratios.output);
+}
+export function tokens(home = os.homedir(), { days = TOKENS_DAYS, now = Date.now() } = {}) {
+  const root = path.join(home, '.claude', 'projects');
+  const since = now - days * 86400000;
+  const files = [];
+  try {
+    for (const d of fs.readdirSync(root)) {
+      const dir = path.join(root, d);
+      let names; try { names = fs.readdirSync(dir); } catch { continue; }
+      for (const n of names) {
+        if (n.endsWith('.jsonl')) { files.push({ f: path.join(dir, n), kind: 'session' }); continue; }
+        const sub = path.join(dir, n, 'subagents');
+        let subs; try { subs = fs.readdirSync(sub); } catch { continue; }
+        for (const a of subs) if (/^agent-.*\.jsonl$/.test(a)) files.push({ f: path.join(sub, a), kind: 'subagent' });
+      }
+    }
+  } catch { return { status: 'no-records', days }; }
+  const models = {}; const kinds = { session: 0, subagent: 0 }; const seen = new Set();
+  let read = 0, first = null, last = null;
+  for (const { f, kind } of files) {
+    let st; try { st = fs.statSync(f); } catch { continue; }
+    if (st.mtimeMs < since) continue;
+    let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    read += 1;
+    for (const line of body.split('\n')) {
+      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      if (d?.type !== 'assistant') continue;
+      const m = d.message; const u = m?.usage;
+      if (!u || typeof u !== 'object') continue;
+      const ts = Date.parse(d.timestamp);
+      if (!Number.isFinite(ts) || ts < since || ts > now) continue;
+      const key = d.requestId ?? m.id;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (typeof m.model !== 'string' || m.model.startsWith('<')) continue;   // <synthetic>: the harness's own, no usage
+      const model = m.model;
+      const t = (models[model] ??= { requests: 0, input: 0, cache_write: 0, cache_read: 0, output: 0 });
+      t.requests += 1;
+      t.input += Number(u.input_tokens) || 0;
+      t.cache_write += Number(u.cache_creation_input_tokens) || 0;
+      t.cache_read += Number(u.cache_read_input_tokens) || 0;
+      t.output += Number(u.output_tokens) || 0;
+      kinds[kind] += 1;
+      if (first === null || ts < first) first = ts;
+      if (last === null || ts > last) last = ts;
+    }
+  }
+  if (!read || !seen.size) return { status: 'no-records', days };
+  // Two paths, two bills: a model id with a vendor prefix (z-ai/glm-5.3,
+  // anthropic/claude-opus-5) was served by the broker on the account's
+  // OpenRouter key; a bare id (claude-opus-5) by Anthropic directly, on
+  // the Claude account's subscription — the one the usage windows meter.
+  const zero = () => ({ requests: 0, input: 0, cache_write: 0, cache_read: 0, output: 0 });
+  const paths = { claude: zero(), broker: zero() };
+  for (const [model, t] of Object.entries(models)) {
+    t.equiv = equivalent(t); t.path = model.includes('/') ? 'broker' : 'claude';
+    for (const k of Object.keys(paths[t.path])) paths[t.path][k] += t[k];
+  }
+  for (const t of Object.values(paths)) t.equiv = equivalent(t);
+  const sorted = Object.fromEntries(Object.entries(models).sort((a, b) => b[1].equiv - a[1].equiv));
+  return { status: 'ok', days, files: read, requests: kinds, first: first ? new Date(first).toISOString() : null, last: last ? new Date(last).toISOString() : null,
+           models: sorted, claude: paths.claude, broker: paths.broker, ratios: TOKEN_RATIOS };
+}
+
 // THE WORKERS. A subagent's transcript is stored beside its session's
 // (<session>/subagents/agent-*.jsonl) with a sidecar the harness writes,
 // agent-*.meta.json, whose agentType names the type dispatched: the
@@ -375,7 +461,7 @@ export async function memory(home = os.homedir(), { root = process.env.AGENT_FAB
 
 // Everything, for `status`; the sections a request names, otherwise.
 export async function collect(op, ctx = {}) {
-  const wants = op === 'status' ? ['identity', 'usage', 'keys', 'fabric', 'session'] : [op];
+  const wants = op === 'status' ? ['identity', 'usage', 'keys', 'fabric', 'session'] : op === 'tokens' ? ['identity', 'tokens'] : [op];
   const data = {};
   const guard = async (name, fn) => { try { data[name] = await fn(); } catch (e) { data[name] = { status: 'failed', error: String(e?.message ?? e).slice(0, 200) }; } };
   await Promise.all(wants.map(name => {
@@ -385,6 +471,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));
     if (name === 'session') return guard(name, () => session(ctx.uid, ctx.exec));
     if (name === 'script') return guard(name, () => script(ctx.home));
+    if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));
     if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
     return Promise.resolve();
   }));

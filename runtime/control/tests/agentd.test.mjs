@@ -129,6 +129,12 @@ test('answer: a memory reply is the report first, then one record per part in or
   assert.ok(!('_followups' in ping), 'only a memory reply has follow-ups');
   const empty = await answer({ id: 'q3', op: 'memory' }, { ...ctx, home: fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-nomem-')) });
   assert.deepEqual(empty.data.memory, { status: 'ok', bundles: [] }); assert.equal(empty.data.parts, 0); assert.deepEqual(empty._followups, []);
+  // A tokens request names its window; unset, absurd or huge, the op's default or the 90-day cap decides.
+  const tk = await answer({ id: 'q4', op: 'tokens', days: 3 }, ctx);
+  assert.equal(tk.data.tokens.days, 3); assert.ok('identity' in tk.data, 'tokens rides with identity');
+  assert.equal((await answer({ id: 'q5', op: 'tokens' }, ctx)).data.tokens.days, 7);
+  assert.equal((await answer({ id: 'q6', op: 'tokens', days: -2 }, ctx)).data.tokens.days, 7);
+  assert.equal((await answer({ id: 'q7', op: 'tokens', days: 9999 }, ctx)).data.tokens.days, 90);
 });
 
 // A python3 on the daemon's PATH that answers for the harvester alone — a

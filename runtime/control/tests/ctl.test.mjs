@@ -15,9 +15,13 @@ import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 const CTL = new URL('../ctl.mjs', import.meta.url).pathname;
 
 test('parseArgs: targets, op, flags, defaults', () => {
-  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null });
-  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null });
-  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d' });
+  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null });
+  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null, days: null });
+  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d', days: null });
+  assert.deepEqual(parseArgs(['all', 'tokens', '--days', '3']), { targets: ['all'], op: 'tokens', json: false, timeout: 60, out: null, days: 3 });
+  assert.equal(parseArgs(['all', 'tokens', '--days=14']).days, 14);
+  assert.throws(() => parseArgs(['all', 'tokens', '--days', '0']), /--days/);
+  assert.throws(() => parseArgs(['all', 'status', '--days', '3']), /--days/, 'a window belongs to tokens only');
   assert.equal(parseArgs(['all', 'memory', '--out=/tmp/d']).out, '/tmp/d');
   assert.throws(() => parseArgs(['all', 'memory']), /--out/, 'a drain needs somewhere to land');
   assert.equal(parseArgs(['a', 'b', 'usage', '--timeout', '3']).timeout, 3);
@@ -46,6 +50,23 @@ test('rows and table: an answered account and a silent one', () => {
   assert.match(withNotesLang, /1 file\(s\): 2 only \/ 0 mixed \/ 0 latin — lang ka 100% — georgian 100%/);
   const none = table('script', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'script', data: { script: { ...sc, workers: { status: 'none', other_subagents: 0 } } } }]));
   assert.match(none, /db-admin\s+ok\s+none.*unreadable\s+-\s*$/m);
+});
+
+test('tokens table: grouped by Claude account, each login\'s share of the visible direct-path spend, the broker column apart, a login without records named', () => {
+  const expected = [{ login: 'a', host: 'h', address: 'h/a' }, { login: 'b', host: 'h', address: 'h/b' }, { login: 'c', host: 'h', address: 'h/c' }, { login: 'd', host: 'h', address: 'h/d' }];
+  const tok = (claude, broker, top) => ({ status: 'ok', days: 7, files: 1, requests: { session: 1, subagent: 0 }, models: { [top]: { equiv: claude, requests: 1, input: 0, cache_write: 0, cache_read: 0, output: 0, path: 'claude' } },
+    claude: { requests: 3, input: 0, cache_write: 0, cache_read: 4000000, output: 5000, equiv: claude }, broker: { requests: 2, input: 0, cache_write: 0, cache_read: 0, output: 0, equiv: broker } });
+  const reply = (login, email, t) => ({ kind: 'reply', from: `h/${login}`, op: 'tokens', data: { identity: { claude_account: email ? { email } : null }, tokens: t } });
+  const rs = rows(expected, [reply('a', 'x@y.z', tok(3000000, 100000, 'claude-opus-5')), reply('b', 'x@y.z', tok(1000000, 0, 'claude-sonnet-5')), reply('c', 'q@y.z', tok(500, 0, 'claude-opus-5')), reply('d', 'x@y.z', { status: 'no-records', days: 7 })]);
+  const t = table('tokens', rs);
+  assert.match(t, /^account\s+status\s+claude account\s+share\s+claude equiv.*top model \(7 days\)/m);
+  assert.match(t, /^a\s+ok\s+x@y.z\s+75%\s+3.0M\s+3\s+4.0M\s+5k\s+100k\s+2\s+claude-opus-5 3.0M$/m);
+  assert.match(t, /^b\s+ok\s+x@y.z\s+25%\s+1.0M/m);
+  assert.match(t, /= x@y.z\s+100%\s+4.0M\s+6$/m, 'an account with two logins gets a sum line');
+  assert.match(t, /^c\s+ok\s+q@y.z\s+100%\s+500\b/m, 'the only login on its account holds all of it');
+  assert.ok(!/= q@y.z/.test(t), 'no sum line for one login');
+  assert.match(t, /^d\s+ok\s+x@y.z\s+tokens no-records$/m);
+  assert.ok(t.indexOf('q@y.z') < t.indexOf('x@y.z'), 'accounts in order');
 });
 
 // A tar as the harvester writes it: manifest.json first (ustar header, size in octal), then padding.

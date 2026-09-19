@@ -89,6 +89,18 @@ land now — a user-visible or CI-blocking defect, not impatience.
 class, so the assessment is not made by the session that wrote the code —
 and when it is real you fix the rule, not the instance.
 
+**A test run leaves behind nothing it did not find** (the owner,
+2026-09-19: two suites' postgres volumes wrote 166,000 files in ninety
+seconds before the host died; a build cache reached 72 GB, a quarter of
+the disk). Containers and volumes a run started are gone when it ends,
+however it ends; scratch goes under the session's scratchpad, never the
+tree; a build that changed the dependency graph (a bump, a feature-set
+switch) cleans its target — an incremental cache is disposable and is
+removed when it is large. A clean after *every* run is not the rule: a
+wire suite that rebuilds its workspace costs minutes, and the waste is
+the variant graphs, not the cache. Measure before you clean, and say
+what you removed and how much.
+
 **The control plane is read-only.** `agent-fabric/` and every project's
 `.agent-fabric/` are fabric-coordinator's to write; a charter, a brief, a
 slice or a routing entry you believe wrong is raised (a message, or a PR

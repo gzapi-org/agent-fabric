@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/test_pr-review-status.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/test_pr-review-status.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # Behavioural tests for pr-review-status.sh.
 #
@@ -214,11 +214,15 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
       # what the case asserts.
       body=""
       case "$kind" in
-        MARKED) body='<!-- gzapp-substitute-review v1 -->\nfindings…' ;;
+        MARKED) body='<!-- agent-fabric-substitute-review v1 -->\nfindings…' ;;
+        # A project's earlier marker, named by its forwarder through
+        # AGENT_FABRIC_LEGACY_REVIEW_MARKERS: counts. One nobody named: not.
+        LEGACY) body='<!-- legacy-project-substitute-review v1 -->\nfindings…' ;;
+        STRANGER) body='<!-- somebody-else-substitute-review v1 -->\nfindings…' ;;
         # The marker QUOTED mid-body, not leading it. A review discussing
         # the marker — reviewing this very mechanism does it — must not
         # be counted as a substitute review.
-        QUOTES) body='I think the marker <!-- gzapp-substitute-review v1 --> should move.' ;;
+        QUOTES) body='I think the marker <!-- agent-fabric-substitute-review v1 --> should move.' ;;
       esac
       printf '{"user":{"login":"%s"},"state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
         "$login" "$commit" "$at" "$body"
@@ -410,7 +414,7 @@ run() {
     local __o __e
     __o="$(mktemp)"; __e="$(mktemp)"
     PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
-        GZAPP_VERDICT_AUTHORS="${VERDICT_AUTHORS_OVERRIDE:-}" \
+        AGENT_FABRIC_VERDICT_AUTHORS="${VERDICT_AUTHORS_OVERRIDE:-}" \
         timeout 20 bash "$UNDER_TEST" 77 o/r "$@" >"$__o" 2>"$__e"
     RUN_RC=$?
     RUN_ERR="$(cat "$__e")"
@@ -472,6 +476,20 @@ run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,QUOTES"
 assert_rc       "a review that only QUOTES the marker is not coverage" 1
 assert_contains "  not counted as a substitute" "substitute reviews  : 0"
 assert_contains "  still counted as a self review" "self reviews        : 1"
+
+# A LEGACY marker — the one a project posted under before the tool became
+# the fabric's — counts only when that project's forwarder names it in
+# AGENT_FABRIC_LEGACY_REVIEW_MARKERS; a marker nobody named is not coverage.
+AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-substitute-review v1 -->' \
+run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,LEGACY"
+assert_rc       "a legacy marker the forwarder names IS coverage" 0
+assert_contains "  counted as a substitute" "substitute reviews  : 1"
+run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,LEGACY"
+assert_rc       "the same marker, not named by the environment: not coverage" 1
+assert_contains "  counted as a self review" "self reviews        : 1"
+AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-substitute-review v1 -->' \
+run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,STRANGER"
+assert_rc       "a marker nobody named is not coverage even with a legacy one set" 1
 
 # A marked review from ANOTHER account is a substitute, not an independent
 # reviewer. Gating the marker test on authorship let it through as genuine
@@ -722,7 +740,7 @@ echo "pr-review-status.sh — the allow-list is overridable"
 # editing the script.
 VERDICT_AUTHORS_OVERRIDE='["some-other-bot"]' \
     run_with_verdicts "OPEN:eeeeeeeeee:0" "" "some-other-bot,eeeeeeeeee"
-assert_rc "GZAPP_VERDICT_AUTHORS replaces the default list" 0
+assert_rc "AGENT_FABRIC_VERDICT_AUTHORS replaces the default list" 0
 # ...and the default is still what applies without it, so the previous
 # assertion is about the override rather than about a list that accepts
 # everybody.

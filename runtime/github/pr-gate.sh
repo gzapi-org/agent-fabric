@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/pr-gate.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/pr-gate.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # >>> help
 # My open pull requests: how many commits, and what stands between each
@@ -56,8 +56,8 @@
 #   2  gh, git or the repository could not be read
 #
 # Environment (the self-test):
-#   GZAPP_PR_REVIEW_STATUS   path of pr-review-status.sh (default beside this script)
-#   GZAPP_PR_SESSION         the <host>/<login> prefix (default: fabric-whoami)
+#   AGENT_FABRIC_PR_REVIEW_STATUS   path of pr-review-status.sh (default beside this script)
+#   AGENT_FABRIC_PR_SESSION         the <host>/<login> prefix (default: fabric-whoami)
 # <<< help
 
 set -uo pipefail
@@ -65,7 +65,7 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=commit-class.sh
 . "$here/commit-class.sh"
-REVIEW_STATUS="${GZAPP_PR_REVIEW_STATUS:-$here/pr-review-status.sh}"
+REVIEW_STATUS="${AGENT_FABRIC_PR_REVIEW_STATUS:-$here/pr-review-status.sh}"
 JSON=0; ALL=0; NUMS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -81,7 +81,7 @@ REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || R
 [[ -n "$REPO" ]] || { echo "pr-gate: cannot read the repository (gh repo view failed)" >&2; exit 2; }
 OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 
-session="${GZAPP_PR_SESSION:-}"
+session="${AGENT_FABRIC_PR_SESSION:-}"
 if [[ -z "$session" ]]; then
     fabric="${AGENT_FABRIC_ROOT:-$here/../..}"   # this script lives in the fabric now
     if [[ -x "$fabric/bin/fabric-whoami" ]]; then

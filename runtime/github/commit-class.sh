@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/commit-class.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim) — sourced, not run.
+# runtime/github/commit-class.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/) — sourced, not run.
 #
 # ONE classifier for "is this commit a review fix" — the count rule
 # (root CLAUDE.md §When to open a NEW PR: 8–16 WORK commits arm at the

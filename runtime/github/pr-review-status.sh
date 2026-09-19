@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/pr-review-status.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/pr-review-status.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # >>> help
 # Has anyone OTHER THAN THE AUTHOR actually reviewed the code that is at
@@ -199,7 +199,13 @@ note() { (( QUIET )) || echo "pr-review-status: $*" >&2; }
 # The marker tools/gh/post-substitute-review.sh writes as the first line
 # of every substitute review. Must stay byte-identical to the constant in
 # that script; both self-tests pin it, so a one-sided change is caught.
-SUBSTITUTE_REVIEW_MARKER='<!-- gzapp-substitute-review v1 -->'
+SUBSTITUTE_REVIEW_MARKER='<!-- agent-fabric-substitute-review v1 -->'
+# A project that posted substitute reviews under an earlier marker keeps
+# counting them: its integration forwarder (projects/<id>/integration/gh/)
+# exports AGENT_FABRIC_LEGACY_REVIEW_MARKERS, one marker per line. The
+# project's own name never appears here — the fabric's lint refuses it in
+# a generic file, and that rule is what keeps this tool every project's.
+LEGACY_MARKERS="${AGENT_FABRIC_LEGACY_REVIEW_MARKERS:-}"
 
 # Accounts whose verdict COMMENT counts as a review.
 #
@@ -214,9 +220,9 @@ SUBSTITUTE_REVIEW_MARKER='<!-- gzapp-substitute-review v1 -->'
 # `[bot]` suffix varies by API surface, and a normalisation that quietly
 # stopped matching would fail OPEN.
 #
-# Override with GZAPP_VERDICT_AUTHORS (a JSON array) if the reviewer
+# Override with AGENT_FABRIC_VERDICT_AUTHORS (a JSON array) if the reviewer
 # account ever changes.
-VERDICT_AUTHORS="${GZAPP_VERDICT_AUTHORS:-[\"chatgpt-codex-connector\",\"chatgpt-codex-connector[bot]\"]}"
+VERDICT_AUTHORS="${AGENT_FABRIC_VERDICT_AUTHORS:-[\"chatgpt-codex-connector\",\"chatgpt-codex-connector[bot]\"]}"
 
 probe_ok=0
 qualifying='[]'
@@ -305,10 +311,13 @@ probe() {
     # and subtracted that review from `self` at the same time. A false
     # "this was reviewed" is worse than the under-counting this whole
     # change exists to fix.
-    marked="$(jq --arg m "$SUBSTITUTE_REVIEW_MARKER" \
-        '[.[] | select((.body // "") | startswith($m))]' <<<"$reviews")"
-    unmarked="$(jq --arg m "$SUBSTITUTE_REVIEW_MARKER" \
-        '[.[] | select(((.body // "") | startswith($m)) | not)]' <<<"$reviews")"
+    # The current marker and every legacy one the forwarder names: a
+    # review starts with one of them or it is unmarked.
+    markers_json="$(printf '%s\n%s' "$SUBSTITUTE_REVIEW_MARKER" "$LEGACY_MARKERS" | jq -R . | jq -s '[.[] | select(length > 0)]')"
+    marked="$(jq --argjson ms "$markers_json" \
+        '[.[] | select((.body // "") as $b | ($ms | map(. as $m | $b | startswith($m)) | any))]' <<<"$reviews")"
+    unmarked="$(jq --argjson ms "$markers_json" \
+        '[.[] | select((.body // "") as $b | ($ms | map(. as $m | $b | startswith($m)) | any) | not)]' <<<"$reviews")"
 
     independent="$(jq --arg a "$author" '[.[] | select(.user.login != $a)]' <<<"$unmarked")"
 

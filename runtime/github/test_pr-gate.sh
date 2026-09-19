@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/test_pr-gate.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/test_pr-gate.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # Tests for pr-gate.sh with gh and pr-review-status.sh mocked on PATH and
 # a throwaway git repository for the commit classification: the work /
@@ -90,7 +90,7 @@ printf '[]' > "$STATE/closed.json"
 GREEN='[{"name":"ci / a","status":"COMPLETED","conclusion":"SUCCESS"}]'
 RED='[{"name":"ci / a","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"backend / shard","status":"COMPLETED","conclusion":"FAILURE"}]'
 PENDING='[{"name":"ci / a","status":"IN_PROGRESS","conclusion":null}]'
-run() { (cd "$SANDBOX/repo" && MOCK_STATE="$STATE" PATH="$SANDBOX/bin:$PATH" GZAPP_PR_REVIEW_STATUS="$SANDBOX/bin/pr-review-status.sh" GZAPP_PR_SESSION="develop-qzapp/me" bash "$UNDER_TEST" "$@" 2>&1); }
+run() { (cd "$SANDBOX/repo" && MOCK_STATE="$STATE" PATH="$SANDBOX/bin:$PATH" AGENT_FABRIC_PR_REVIEW_STATUS="$SANDBOX/bin/pr-review-status.sh" AGENT_FABRIC_PR_SESSION="develop-qzapp/me" bash "$UNDER_TEST" "$@" 2>&1); }
 
 ONE="$(jq -nc --arg h "$HEAD_SHA" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"},{number:43,title:"someone else",headRefName:"develop-qzapp/other/fix/x",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
 

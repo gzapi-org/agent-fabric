@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/test_post-substitute-review.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/test_post-substitute-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # Behavioural tests for post-substitute-review.sh.
 #
@@ -60,7 +60,7 @@ setup_sandbox() {
     mkdir -p "$SANDBOX/$CLONE_NAME" "$SANDBOX/bin" "$SANDBOX/state"
     git -C "$SANDBOX/$CLONE_NAME" init -q 2>/dev/null
     cat > "$SANDBOX/bin/gh" <<'MOCK'
-#!/bin/sh
+#!/usr/bin/env bash
 S="$GH_STATE"
 case "$1" in
   repo) echo "gzapi-org/gzapp"; exit 0 ;;
@@ -107,7 +107,7 @@ set_pr "$ME/feat/thing"
 invoke "A P1 in the ownership guard." 552
 assert_rc "exits 0" 0
 if posted; then pass "a review was posted"; else fail "nothing posted" "$(cat "$SANDBOX/state/calls")"; fi
-if [[ "$(body_of | head -1)" == '<!-- gzapp-substitute-review v1 -->' ]]; then
+if [[ "$(body_of | head -1)" == '<!-- agent-fabric-substitute-review v1 -->' ]]; then
     pass "the marker is line 1 of the body"
 else
     fail "marker missing or not first" "got: $(body_of | head -1)"
@@ -207,7 +207,7 @@ echo "post-substitute-review: --dry-run sends nothing"
 set_pr "$ME/feat/thing"
 invoke "findings" 552 --dry-run
 assert_rc       "exits 0" 0
-assert_contains "shows the marker"  "gzapp-substitute-review v1"
+assert_contains "shows the marker"  "agent-fabric-substitute-review v1"
 if ! posted; then pass "no request was sent"; else fail "dry run posted" "$(cat "$SANDBOX/state/calls")"; fi
 
 echo "post-substitute-review: invocation errors are refused, not guessed at"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/test_commit-class.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim) — the shared work/fix/merge classifier,
+# runtime/github/test_commit-class.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/) — the shared work/fix/merge classifier,
 # on the subjects the count rule was calibrated against.
 set -u
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"

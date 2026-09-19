@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runtime/github/post-substitute-review.sh (lifted from gzapp's tools/gh/, 2026-09-19 — general to every managed project; gzapp's copy is a shim)
+# runtime/github/post-substitute-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # >>> help
 # Post a SUBSTITUTE blind review to a PR, marked so tooling can count it.
@@ -68,7 +68,7 @@ die() { echo "post-substitute-review: $*" >&2; exit 2; }
 # pin it, so changing it here without changing the reader is caught.
 # Versioned because a later field addition must not silently reclassify
 # older reviews.
-SUBSTITUTE_REVIEW_MARKER='<!-- gzapp-substitute-review v1 -->'
+SUBSTITUTE_REVIEW_MARKER='<!-- agent-fabric-substitute-review v1 -->'
 
 PR=""
 MODEL=""

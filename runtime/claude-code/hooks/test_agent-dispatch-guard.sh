@@ -163,9 +163,9 @@ out="$(vanilla '{"subagent_type":"code-plan","model":"opus","isolation":"worktre
 out="$(vanilla '{"subagent_type":"blind-reviewer","model":"fable","description":"Review PR 626 diff"}')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "code-review" <<<"$out" && pass "the retired type name is denied and the message names code-review" || fail "blind-reviewer not redirected" "$out"
 # The broker path is the same route: the file carries the composite.
-reviewer_file "z-ai/glm-5.3@preset/glm2claude-shim"
+reviewer_file "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim"
 out="$(launched openrouter "$R")"
-[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == allow && "$(jq -r '.hookSpecificOutput.updatedInput | has("model")' <<<"$out")" == false ]] && grep -q "z-ai/glm-5.3@preset/glm2claude-shim" <<<"$out" && pass "on the broker path the review dispatch hands the model to the file too, the composite" || fail "broker review not on the file route" "$out"
+[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == allow && "$(jq -r '.hookSpecificOutput.updatedInput | has("model")' <<<"$out")" == false ]] && grep -q "deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && pass "on the broker path the review dispatch hands the model to the file too, the composite" || fail "broker review not on the file route" "$out"
 # A stale file: another launch of this account rewrote it.
 reviewer_file "claude-opus-5[1m]"
 out="$(launched openrouter "$R")"

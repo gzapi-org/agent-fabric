@@ -41,9 +41,9 @@
       "models": {
         "code-low": "z-ai/glm-5.3-flash",
         "code-medium": "z-ai/glm-5.2",
-        "code-high": "z-ai/glm-5.3",
-        "code-plan": "z-ai/glm-5.3",
-        "code-review": "z-ai/glm-5.3"
+        "code-high": "deepseek/deepseek-v4-pro-0813",
+        "code-plan": "deepseek/deepseek-v4-pro-0813",
+        "code-review": "deepseek/deepseek-v4-pro-0813"
       }
     }
   }

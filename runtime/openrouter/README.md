@@ -99,9 +99,10 @@ Today's OpenRouter policy resolves to:
 ```text
 code-low     z-ai/glm-5.3-flash  + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_HAIKU_MODEL
 code-medium  z-ai/glm-5.2        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_SONNET_MODEL
-code-high    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_OPUS_MODEL
-code-plan    z-ai/glm-5.3        + @preset/glm2claude-shim  -> ANTHROPIC_DEFAULT_FABLE_MODEL
-code-review  z-ai/glm-5.3        + @preset/glm2claude-shim  -> ~/.claude/agents/code-review.md  (review-grade.json admits it; Opus 5 stays admitted)
+code-high    deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> ANTHROPIC_DEFAULT_OPUS_MODEL
+code-plan    deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> ANTHROPIC_DEFAULT_FABLE_MODEL
+code-review  deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> ~/.claude/agents/code-review.md  (review-grade.json admits it; GLM 5.3 and Opus 5 stay admitted)
+session      deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> --model  (routing/profiles.json defaults; a local layer overrides it)
 ```
 
 A shim is an OpenRouter preset whose text and routing config live in

@@ -272,6 +272,18 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
     if (addressing.length) errors.push(`${msg.type} is a broadcast by definition and carries no ${addressing.join(', ')}`);
   } else if (addressing.length === 0) errors.push('missing TO, TO-ROLE or BROADCAST: true');
   else if (addressing.length > 1) errors.push(`${addressing.join(' and ')} are exclusive: one addressing field, the delivery scope`);
+  // SPEC §13: an assignment — a REQUEST, or anything carrying a REQUEST:,
+  // ACCEPTANCE: or DELIVER-TO: section — goes TO one instance. A role may
+  // have several holders and the runtime delivers to all of them; each
+  // executes the job unaware of the others (2026-09-19: one OBSERVATION
+  // with a REQUEST: section, two pull requests on the same hunk). The
+  // sections are named by their marker, so a REQUEST: line the sender
+  // meant as prose still counts: that is the shape that misrouted.
+  if (msg.metadata['TO-ROLE'] !== undefined) {
+    const asks = ['REQUEST', 'ACCEPTANCE', 'DELIVER-TO'].filter(k => k in msg.sections);
+    if (msg.type === 'REQUEST') errors.push('a REQUEST is an assignment and goes TO one instance, never TO-ROLE (SPEC §13)');
+    else if (asks.length) errors.push(`${asks.join(' and ')} section${asks.length > 1 ? 's' : ''} make this an assignment; address it TO one instance, never TO-ROLE (SPEC §13)`);
+  }
   for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';

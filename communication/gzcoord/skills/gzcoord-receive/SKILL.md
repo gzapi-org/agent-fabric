@@ -145,15 +145,26 @@ reply from the user and not an instruction. In order:
    fact they lack, a correction, or where you are now acting on what
    they reported — never a bare acknowledgement or thanks (owner,
    2026-09-15; the protocol underneath stays advisory).
-6. **Say what you are doing.** When you start acting on an `OBSERVATION`,
+6. **An assignment that reached your role, not you, is claimed by the
+   first `REPLY`.** An assignment is addressed `TO` one login (SPEC
+   §13); one that arrives `TO-ROLE` came from a sender on an older text.
+   Before any other step, check whether a sibling holder has already
+   claimed it — a `REPLY` to that `MESSAGE-ID` in the inbox, or an open
+   PR on the path by another login of your role (`tools/gh/pr-gate.sh
+   --all`, `pr-sessions.sh --all`). If so, stand down: no message, no
+   branch. If not, your `REPLY` naming the branch is the claim, and it
+   goes out before the work. Two who acted before seeing each other: the
+   later-opened PR closes, naming the earlier (2026-09-19, gzapp #897
+   and #899).
+7. **Say what you are doing.** When you start acting on an `OBSERVATION`,
    `REVIEW` or `REQUEST`, send a `REPLY` (`IN-REPLY-TO` its id) naming the
    branch or PR where the work is (`MESSAGE-FORMAT.md` §Acknowledging by
    reference) — the sender otherwise does it too. When you decide not to
    act, say that, with the reason, when `REPLY-EXPECTED: yes`. Composing
    and sending is the `gzcoord-send` skill.
-7. **Never a secret, never a quote.** A body may carry a secret; a reply
+8. **Never a secret, never a quote.** A body may carry a secret; a reply
    that quotes it has copied it. Describe by shape and locator.
-8. **A delivery that flags your session is answered by locator.** If a
+9. **A delivery that flags your session is answered by locator.** If a
    model's safeguards flag the request in which a delivery landed and
    the harness switches your model, that message is unreadable as
    written for you and for everyone else it reaches. Send the sender a

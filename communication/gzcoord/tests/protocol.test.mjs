@@ -398,6 +398,27 @@ test('normalize CLI prints the normalised message for validate to read', () => {
   } finally { fs.unlinkSync(file); }
 });
 
+// SPEC §13: an assignment goes TO one instance. Both holders of a role
+// executed one OBSERVATION with a REQUEST: section (2026-09-19, two PRs on
+// the same hunk); a REQUEST type or a REQUEST:/ACCEPTANCE:/DELIVER-TO:
+// section addressed TO-ROLE is refused, and the same body TO an instance
+// or an INFO/DECISION/QUESTION TO-ROLE without those sections passes.
+test('an assignment TO-ROLE is refused; the same TO an instance, and a non-assignment TO-ROLE, pass', () => {
+  const head = t => `[GZCOORD/1] ${t}\nFROM: develop-gzapp/gzapp\nROLE: Application Architect\nPROJECT: gzapp\nMESSAGE-ID: test-0001\n`;
+  let r = validate(`${head('REQUEST')}TO-ROLE: Web Engineer\n\nREQUEST:\nmove the line\n`);
+  assert.ok(r.errors.some(e => e.includes('a REQUEST is an assignment')), r.errors);
+  assert.deepEqual(validate(`${head('REQUEST')}TO: develop-gzapp/web\n\nREQUEST:\nmove the line\n`).errors, []);
+  for (const section of ['REQUEST', 'ACCEPTANCE', 'DELIVER-TO']) {
+    r = validate(`${head('OBSERVATION')}TO-ROLE: Web Engineer\n\nOBSERVATION:\nseen\n\n${section}:\nfix it\n`);
+    assert.ok(r.errors.some(e => e.includes(`${section} section`) && e.includes('never TO-ROLE')), `${section}: ${r.errors}`);
+    assert.deepEqual(validate(`${head('OBSERVATION')}TO: develop-gzapp/web\n\nOBSERVATION:\nseen\n\n${section}:\nfix it\n`).errors, [], section);
+  }
+  r = validate(`${head('OBSERVATION')}TO-ROLE: Web Engineer\n\nOBSERVATION:\nseen\n\nREQUEST:\nfix it\n\nACCEPTANCE:\nit is fixed\n`);
+  assert.ok(r.errors.some(e => e.includes('REQUEST and ACCEPTANCE sections')), r.errors);
+  for (const [type, body] of [['INFO', 'INFO:\nfyi\n'], ['DECISION', 'DECISION:\nso decided\n'], ['QUESTION', 'QUESTION:\nwhich?\n'], ['OBSERVATION', 'OBSERVATION:\nseen, no ask\n']])
+    assert.deepEqual(validate(`${head(type)}TO-ROLE: Web Engineer\n\n${body}`).errors, [], type);
+});
+
 // SPEC §7.1: one addressing field, the delivery scope. Live traffic
 // carried TO beside a TO-ROLE that matched no recorded role, and nothing
 // noticed, because the address had already routed the message; a

@@ -363,6 +363,26 @@ If more than one matching peer exists, the runtime SHOULD either:
 
 It MUST NOT invent a permanent ownership rule.
 
+**An assignment is addressed to one instance, never to a role.** An
+assignment is a message that asks its recipient to do a piece of work —
+a `REQUEST` (§8), or any message carrying a `REQUEST:`, `ACCEPTANCE:`
+or `DELIVER-TO:` section: a finding to fix, a supply, a decision to
+record. A role may have any number of holders, and a runtime that
+delivers to all of them (option 1 above) hands the same job to each;
+none can see that another has taken it until both have. Observed
+2026-09-19: an `OBSERVATION` with a `REQUEST:` section addressed
+`TO-ROLE: backend-dev` was executed by both holders, as two pull
+requests rewriting the same section of the same file. So a sender MUST
+address an assignment with `TO`; `TO-ROLE` remains for what is not an
+assignment — an `INFO` or a `DECISION` every holder applies, a
+`QUESTION` to whoever holds the role. A validator MUST reject a
+`REQUEST` addressed `TO-ROLE`, and MUST reject any message addressed
+`TO-ROLE` that carries a `REQUEST:`, `ACCEPTANCE:` or `DELIVER-TO:`
+section (§18). How a sender chooses the instance when it does not know
+the holders is a deployment matter (`MESSAGE-FORMAT.md` §Direct versus
+role addressing); how a holder behaves when an assignment reaches a
+role anyway is a receiver convention there too.
+
 `TO`, `TO-ROLE` and `BROADCAST` are exclusive (§7.1). A sender that knows the concrete recipient uses `TO`; the role that recipient holds is in the peer directory, not in the message.
 
 ## 14. Transport boundary
@@ -463,6 +483,7 @@ A GZCOORD/1 parser:
 - MUST reject a metadata key that appears more than once in the metadata block (§6);
 - MUST reject a `BROADCAST` value other than `true` (§7.1);
 - MUST reject a message carrying more than one of `TO`, `TO-ROLE` and `BROADCAST`, and a `HELLO` or `GOODBYE` carrying any (§7.1);
+- MUST reject a `REQUEST` addressed `TO-ROLE`, and any message addressed `TO-ROLE` that carries a `REQUEST:`, `ACCEPTANCE:` or `DELIVER-TO:` section — an assignment goes to one instance (§13);
 - MUST reject a message with no `MESSAGE-ID` (§7.1), transport-generated diagnostics excepted;
 
 A sender: MUST validate every message before sending (§1), and MUST NOT send one that fails.

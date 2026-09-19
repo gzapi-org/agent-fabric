@@ -83,6 +83,18 @@ umask 077 && openssl rand -hex 32 > .gzcoord/bridge-token   # never printed, nev
   --auth-token-file .gzcoord/bridge-token
 ```
 
+**Since 2026-09-19 the relay is a systemd user unit on the hosting
+account**, `gzcoord-relay.service` (`communication/gzcoord/runtime/`),
+installed by `bootstrap.sh` only where `.gzcoord/venv` exists and
+gated a second time by the unit's own `ConditionPathExists`. It comes
+up with the account's user manager at boot (the account lingers),
+restarts on failure, logs to the same `bridge.log`, and is found by
+name: `systemctl --user status gzcoord-relay`, `… restart gzcoord-relay`.
+The session-start activation (`ensureRelay`) starts that unit when it is
+installed and a user manager is up, and only otherwise falls back to the
+detached spawn above. The hand-started process this replaced ignored
+TERM, died with its terminal, and nothing could find it by name.
+
 `--host 127.0.0.1` is the default and stays: the relay is unreachable
 off this machine. Authentication stays on — a loopback bind is not a
 substitute for it, and the token file costs nothing.

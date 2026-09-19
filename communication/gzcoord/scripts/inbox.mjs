@@ -225,6 +225,22 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
   const tokenFile = path.join(runtimeDir, 'bridge-token');
   const db = path.join(runtimeDir, 'claude-bridge.db');
   if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${tokenFile}; cannot start` };
+  // Where bootstrap installed the relay's user unit and a user manager is
+  // up, start THAT: a unit is supervised, restarted on failure, found by
+  // name, and outlives the session; a detached spawn is none of those and
+  // is the fallback for a host with no manager (a bare sudo -u, a test).
+  const unit = process.env.GZCOORD_RELAY_UNIT ?? 'gzcoord-relay';
+  const unitFile = path.join(process.env.HOME ?? os.homedir(), '.config', 'systemd', 'user', `${unit}.service`);
+  const bus = path.join(process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`, 'bus');
+  if (fs.existsSync(unitFile) && fs.existsSync(bus)) {
+    try { execFileSync('systemctl', ['--user', 'start', unit], { stdio: 'ignore', timeout: 15000 }); } catch { /* fall through to the probe: a failed start is said below */ }
+    for (let waited = 0; waited < 8000; waited += 500) {
+      try { execFileSync('curl', ['-sf', '-m', '1', `${relayUrl}/status`], { stdio: 'ignore' });
+        return { hosted: true, started: true, unit }; } catch { /* not up yet */ }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    }
+    return { hosted: true, started: false, note: `${unit} did not answer within 8s; systemctl --user status ${unit}, ${path.join(runtimeDir, 'bridge.log')}` };
+  }
   const out = fs.openSync(path.join(runtimeDir, 'bridge.log'), 'a');
   const child = spawn(bin, [
     '--host', '127.0.0.1', '--port', '8765',

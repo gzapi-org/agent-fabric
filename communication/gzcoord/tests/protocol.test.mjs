@@ -727,7 +727,7 @@ test('CLI: an unknown flag is refused before any side effect', () => {
 // inbox.mjs applies SPEC §7.1 addressing and the §17 reading rule at
 // delivery: the body of a message not addressed to this session is never
 // printed. forMe() is that decision, kept pure so it can be pinned.
-import { forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, splitMessage, NOTIFICATION_CAP, REPLAY_CMD, assertNotControlChannel } from '../scripts/inbox.mjs';
+import { ensureRelay, forMe, identity, waitLoop, checkKeywords, keywordHit, inboxRoot, relayRuntimeDir, WORKSPACE, integrationConfig, holdDir, holdStatus, pidStart, pidAlive, render, splitMessage, NOTIFICATION_CAP, REPLAY_CMD, assertNotControlChannel } from '../scripts/inbox.mjs';
 test('inbox forMe: exactly the messages SPEC §7.1 addresses to this session', () => {
   const me = { address: 'develop-qzapp/db-admin', instance: 'db-admin', slug: 'db-admin' };
   const mk = (type, extra) => parse(`[GZCOORD/1] ${type}\nFROM: develop-qzapp/x\nROLE: architect-cto\nPROJECT: gzapp\nMESSAGE-ID: x-0001\n${extra}`);
@@ -1394,4 +1394,39 @@ test('a :control channel is refused by the drain, the watch and send, before any
   assert.equal(s.status, 2, `send: exit ${s.status}\n${s.stderr}`);
   assert.match(s.stderr, /is a control channel[\s\S]*not sent/);
   assert.deepEqual(hits.filter(u => u.startsWith('/api/')), [], `a request reached the relay: ${hits}`);
+});
+
+// The hosting account's relay is a user unit once bootstrap installed it:
+// ensureRelay starts the unit by name and never spawns beside it; a
+// workspace without the venv is a client and hosts nothing; without a
+// unit file (or a user manager) the detached spawn stays the fallback.
+test('ensureRelay: a client hosts nothing; with the unit installed the relay is started by name, not spawned', () => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'gzc-'));
+  assert.deepEqual(ensureRelay(runtime, 'http://127.0.0.1:1'), { hosted: false, started: false }, 'no venv: a client');
+  fs.mkdirSync(path.join(runtime, 'venv', 'bin'), { recursive: true });
+  // a "claude-bridge" that would betray itself if spawned
+  fs.writeFileSync(path.join(runtime, 'venv', 'bin', 'claude-bridge'), '#!/usr/bin/env bash\necho SPAWNED >> "$(dirname "$0")/../../spawned"\nsleep 30\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(runtime, 'bridge-token'), 'tok\n');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-')); const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bin-'));
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'xdg-')); fs.writeFileSync(path.join(xdg, 'bus'), '');
+  fs.mkdirSync(path.join(home, '.config', 'systemd', 'user'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'gzcoord-relay.service'), '[Service]\n');
+  // fake systemctl records the call; fake curl answers the probe only after systemctl ran
+  fs.writeFileSync(path.join(bin, 'systemctl'), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(path.join(runtime, 'systemctl.log'))}\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f ${JSON.stringify(path.join(runtime, 'systemctl.log'))} ]]\n`, { mode: 0o755 });
+  const saved = { HOME: process.env.HOME, PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
+  Object.assign(process.env, { HOME: home, PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: xdg });
+  try {
+    const r = ensureRelay(runtime, 'http://127.0.0.1:1');
+    assert.deepEqual(r, { hosted: true, started: true, unit: 'gzcoord-relay' }, JSON.stringify(r));
+    assert.equal(fs.readFileSync(path.join(runtime, 'systemctl.log'), 'utf8').trim(), '--user start gzcoord-relay');
+    assert.ok(!fs.existsSync(path.join(runtime, 'spawned')), 'the venv binary was not spawned beside the unit');
+    // no unit file: the fallback spawns (and the fake binary says so)
+    fs.rmSync(path.join(home, '.config', 'systemd', 'user', 'gzcoord-relay.service')); fs.rmSync(path.join(runtime, 'systemctl.log'));
+    fs.writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f ${JSON.stringify(path.join(runtime, 'spawned'))} ]]\n`, { mode: 0o755 });
+    const f = ensureRelay(runtime, 'http://127.0.0.1:1');
+    assert.equal(f.started, true); assert.ok(f.pid, 'the fallback spawned and reports a pid');
+    assert.ok(fs.existsSync(path.join(runtime, 'spawned')));
+    try { process.kill(f.pid, 'SIGKILL'); } catch { /* gone */ }
+  } finally { Object.assign(process.env, saved); }
 });

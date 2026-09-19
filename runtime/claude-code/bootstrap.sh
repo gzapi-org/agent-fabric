@@ -26,6 +26,9 @@
 #   ~/.config/systemd/user/agent-fabric-agentd.service
 #                                      the control agent (runtime/control/), enabled and started
 #                                      in this account's user manager when one is running
+#   ~/.config/systemd/user/gzcoord-relay.service
+#                                      ONLY on the account whose workspace hosts the relay
+#                                      ($PROJECTS/.gzcoord/venv exists): the relay as a unit
 #   ~/.cache/agent-fabric/langid/venv/  the language detector (pycld2) for the control agent's
 #                                      script op (runtime/langid/), best effort
 #
@@ -209,6 +212,28 @@ if (( ! DRY_RUN )); then
         echo "  *  $UNIT_NAME: $(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true) (systemctl --user status $UNIT_NAME)"
     else
         echo "  !  $UNIT_NAME: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus (loginctl enable-linger $(id -un), or the next login starts it)"
+    fi
+fi
+
+# 6b. The GZCoord relay as a user unit — ONLY on the account that hosts
+#     it: the one whose workspace runtime dir ($PROJECTS/.gzcoord/) holds
+#     the relay's venv. Every other account is a client and gets nothing
+#     here (BRIDGE-RELAY-SETUP.md §Hosting). Same mechanics as the control
+#     agent above; the unit's own ConditionPathExists is the second fence.
+if [[ -x "$PROJECTS/.gzcoord/venv/bin/claude-bridge" ]]; then
+    RELAY_UNIT=gzcoord-relay
+    before=$changed
+    put "$HOME/.config/systemd/user/$RELAY_UNIT.service" "$FABRIC_ROOT/communication/gzcoord/runtime/$RELAY_UNIT.service"
+    if (( ! DRY_RUN )); then
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        if [[ -S "$XDG_RUNTIME_DIR/bus" ]] && command -v systemctl >/dev/null 2>&1 \
+           && systemctl --user daemon-reload >/dev/null 2>&1; then
+            systemctl --user enable --now "$RELAY_UNIT" >/dev/null 2>&1 || true
+            (( changed > before )) && systemctl --user restart "$RELAY_UNIT" >/dev/null 2>&1 || true
+            echo "  *  $RELAY_UNIT (this workspace hosts the relay): $(systemctl --user is-active "$RELAY_UNIT" 2>/dev/null || true)"
+        else
+            echo "  !  $RELAY_UNIT: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus"
+        fi
     fi
 fi
 

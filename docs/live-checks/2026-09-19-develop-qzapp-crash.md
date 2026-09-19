@@ -63,7 +63,7 @@ the fabric from its own checkout, and the coordinator's home is 0700):
   while still owned by `user`.
 
 The first attempt failed with `Permission denied` opening the file:
-`fs.protected_regular` (1 here, Fedora's default; 2 elsewhere) refuses an `O_CREAT` open of another login's
+`fs.protected_regular` (1 here — systemd's default, `/usr/lib/sysctl.d/50-default.conf`; some distributions set 2; the mechanism needs only ≥ 1) refuses an `O_CREAT` open of another login's
 file in a sticky world-writable directory, and bash's `<>` and `>`
 always carry `O_CREAT`. The tool now locks a read-only descriptor and
 writes the record with `dd conv=nocreat`. The suite cannot reproduce

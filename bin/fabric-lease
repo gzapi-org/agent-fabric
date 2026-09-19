@@ -67,7 +67,8 @@ L="$LEASES/$NAME"
 # exists with tighter modes (made by hand) still locks, and the record is
 # best effort. The lock is taken on a READ-ONLY descriptor and the record
 # written by dd with conv=nocreat: in a sticky world-writable directory
-# fs.protected_regular (1 on Fedora's default, 2 elsewhere) refuses an O_CREAT open of a file
+# fs.protected_regular (systemd's default is 1 — /usr/lib/sysctl.d/50-default.conf;
+# some distributions set 2; the mechanism needs only >= 1) refuses an O_CREAT open of a file
 # another login owns, and every bash write redirection carries O_CREAT —
 # found live on develop-qzapp, 2026-09-19, the second account locked out
 # of the first one's lease file (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
@@ -94,20 +95,40 @@ if (( NEED > 0 )); then
     # A floor that cannot be evaluated is refused, never skipped.
     [[ "$avail_kb" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --need-mem asked, and MemAvailable cannot be read from $MEMINFO" >&2; exit 2; }
     if (( avail_kb / 1024 < NEED )); then
-        echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $(( $(awk '/^MemTotal:/{print $2}' "$MEMINFO") / 1024 )) MB) — the largest processes:" >&2
+        total_kb="$(awk '/^MemTotal:/{print $2}' "$MEMINFO" 2>/dev/null)"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
+        echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $((total_kb / 1024)) MB) — the largest processes:" >&2
         ps -eo user:20,pid,rss,comm --sort=-rss 2>/dev/null | head -6 | awk 'NR==1{print "   "$0; next}{printf "   %-20s %7s %6d MB %s\n", $1, $2, $3/1024, $4}' >&2
         exit 75
     fi
 fi
 record
-# The command in the background with the lease's descriptor closed, and
-# TERM/INT forwarded to it: a wrapper killed alone would release the
-# lease while the suite — and its postgres — were still running. Its
-# exit status is ours; `command` so a name never resolves to a function
-# of this script.
-command "$@" 9>&- &
+# The command runs in ITS OWN PROCESS GROUP (set -m around the fork),
+# with the lease's descriptor closed, and TERM, INT and HUP delivered
+# to the wrapper are forwarded to that whole group — a wrapper killed
+# alone would otherwise release the lease while the suite, and its
+# postgres, were still running (the re-review of 1fbed3d reproduced
+# exactly that with the first shape of this: a trap that forwarded to
+# the direct child only, then `wait` returning at once with 143). Job
+# control is what gives the child default signal dispositions and the
+# wrapper's stdin: a plain `&` in a script hands it /dev/null and INT
+# and QUIT ignored, which every descendant inherits. The cost: the
+# child is not the terminal's foreground group, so a command that READS
+# THE TTY is stopped with SIGTTIN — not a case for a suite started from
+# a tool call, and the reason interactive use is not what this is for.
+# `wait` returns early (128+signal) when a trapped signal arrives, so it
+# is repeated until the child is really gone: the lease is held through
+# the suite's teardown and the exit status is the command's. `command
+# --` so a name never resolves to a function of this script nor to an
+# option of `command` itself.
+set -m
+command -- "$@" 9>&- &
 child=$!
-trap 'kill -TERM "$child" 2>/dev/null' TERM INT
+set +m
+forward() { kill -"$1" -- "-$child" 2>/dev/null; }
+trap 'forward TERM' TERM
+trap 'forward INT' INT
+trap 'forward HUP' HUP
 wait "$child"; rc=$?
-trap - TERM INT
+while kill -0 "$child" 2>/dev/null; do wait "$child"; rc=$?; done
+trap - TERM INT HUP
 exit "$rc"

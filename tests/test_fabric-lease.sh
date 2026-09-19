@@ -67,9 +67,27 @@ echo "fabric-lease: signals and names"
 AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "echo child-got-term; exit 0" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &
 HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
 kill -TERM "$HOLDER"; wait "$HOLDER" 2>/dev/null; HOLDER=""
-sleep 0.5; grep -q child-got-term "$SANDBOX/holder.out" && ok "TERM to the wrapper reaches the command" || bad "TERM not forwarded" "$(cat "$SANDBOX/holder.out")"
+for _ in $(seq 30); do grep -q child-got-term "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+grep -q child-got-term "$SANDBOX/holder.out" && ok "TERM to the wrapper reaches the command" || bad "TERM not forwarded" "$(cat "$SANDBOX/holder.out")"
 lease backend-test --who >/dev/null; [[ $? -eq 0 ]] && ok "…and the lease is free afterwards" || bad "lease held after TERM"
 out="$(lease backend-test -- record 2>&1)"; rc=$?; [[ $rc -eq 127 ]] && ok "a function of the script is not a command (exit 127)" || bad "function ran as command" "rc=$rc $out"
+out="$(lease backend-test -- -v ls 2>&1)"; rc=$?; [[ $rc -eq 127 ]] && ok "a first word of -v is not an option of command (exit 127)" || bad "-v taken as command's option" "rc=$rc $out"
+out="$(echo hello-from-stdin | lease backend-test -- cat)"; [[ "$out" == "hello-from-stdin" ]] && ok "the command inherits the wrapper's stdin" || bad "stdin lost" "$out"
+out="$(lease backend-test -- grep SigIgn /proc/self/status)"; [[ "$out" =~ SigIgn:[[:space:]]+0+$ ]] && ok "the command runs with no signal ignored (INT and QUIT reach it)" || bad "signals ignored in the command" "$out"
+# The teardown: a child whose TERM handler takes time and exits 7. The
+# lease must stay held while it runs, and the wrapper must return 7.
+AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "sleep 1.5; echo child-done; exit 7" TERM; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+kill -TERM "$HOLDER"; sleep 0.6
+lease backend-test --who >/dev/null 2>&1; [[ $? -eq 1 ]] && ok "TERM: the lease stays held while the command tears down" || bad "lease released before the command exited"
+wait "$HOLDER"; rc=$?; HOLDER=""
+[[ $rc -eq 7 ]] && grep -q child-done "$SANDBOX/holder.out" && ok "…the wrapper's status is the command's (7), after its teardown" || bad "wrapper status after TERM" "rc=$rc $(cat "$SANDBOX/holder.out")"
+lease backend-test --who >/dev/null; [[ $? -eq 0 ]] && ok "…and the lease is free once it is gone" || bad "lease held after teardown"
+# HUP is forwarded like TERM.
+AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" backend-test -- sh -c 'echo started; trap "echo child-got-hup; exit 0" HUP; while :; do sleep 0.2; done' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+kill -HUP "$HOLDER"; wait "$HOLDER" 2>/dev/null; HOLDER=""
+grep -q child-got-hup "$SANDBOX/holder.out" && ok "HUP to the wrapper reaches the command" || bad "HUP not forwarded" "$(cat "$SANDBOX/holder.out")"
 
 echo
 if (( FAIL )); then echo "fabric-lease: $FAIL failure(s), $PASS passed"; exit 1; fi

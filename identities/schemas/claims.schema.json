@@ -121,6 +121,11 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9-]*$"
             }
+          },
+          "observed_at": {
+            "description": "When the fact was written, YYYY-MM-DD — the memory's own modified stamp, else the file's mtime. Rendered at the foot of the section so two divergent sections on one topic read in time order.",
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
           }
         },
         "allOf": [

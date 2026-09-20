@@ -62,6 +62,7 @@ import atexit
 import importlib.util
 import json
 import os
+import glob
 import hashlib
 import re
 import sys
@@ -383,14 +384,31 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     return meta, sections
 
 
+OBSERVED_RE = re.compile(r"\*Observed (\d{4}-\d{2}-\d{2})(?: \(([a-z0-9-]+)\))?\*")
+
+
+def claim_heading(claim: dict[str, Any]) -> str:
+    """The section heading a claim renders under — one rule, used by the
+    writer, the budget and the collision pre-pass alike."""
+    return (claim.get("title") or claim["topic"].replace("-", " ").capitalize()).strip()
+
+
 def claim_block(claim: dict[str, Any]) -> str:
-    title = claim.get("title") or claim["topic"].replace("-", " ").capitalize()
+    title = claim_heading(claim)
     body = claim["body"].strip()
     cites = claim.get("citations") or {}
     flat = [c for values in cites.values() for c in values]
     tail = ""
     if flat:
         tail = "\n\n*References: " + ", ".join(sorted(set(flat))) + "*"
+    # WHEN the fact was written, and by which role. Two sections on one
+    # topic that disagree — a workflow that changed — read in time order
+    # only if each carries its date; the slice's distilled_at is the last
+    # drain's, not the fact's. The role, never the login: a slice travels
+    # into every repository.
+    if claim.get("observed_at"):
+        who = f" ({claim['_role']})" if claim.get("_role") else ""
+        tail += f"\n\n*Observed {claim['observed_at']}{who}*"
     scope = ""
     if claim.get("knowledge_scope") == "domain-only":
         scope = "\n\n> Learned outside this system; it describes the field, not our implementation.\n"
@@ -471,6 +489,9 @@ def main() -> int:
                          "for agent-fabric itself)")
     ap.add_argument("--stamp", required=True, help="distillation date (YYYY-MM-DD)")
     ap.add_argument("--budget", type=int, default=DEFAULT_SLICE_BUDGET_TOKENS)
+    ap.add_argument("--collision-decisions", default=None, metavar="FILE",
+                    help="the owner's decision per collision the previous run refused on: "
+                         "{\"<role>/<class>:<topic>#<heading>\": \"supersede\"|\"keep-both\"|\"drop\"}")
     args = ap.parse_args()
     if args.bundle:
         if args.claims or args.drain:
@@ -528,6 +549,8 @@ def main() -> int:
             payload = json.load(fh)
         role = payload["role"]
         all_claims[role] = payload.get("claims", [])
+        for claim in all_claims[role]:
+            claim["_role"] = role   # for the section's dated tail; never written to disk
         telemetry[role] = payload.get("telemetry", {})
 
         # DOMAIN-ONLY EVIDENCE MAY SUPPORT ONLY A DOMAIN CLAIM.
@@ -618,6 +641,109 @@ def main() -> int:
     oversized: list[str] = []
     migrated: list[str] = []
 
+    # A CLAIM THAT DISAGREES WITH THE CORPUS STOPS THE DRAIN (the owner,
+    # 2026-09-20). A new claim under a heading the slice already has, with
+    # different text, is a potential supersession — a workflow that
+    # changed, or a memory that is wrong — and the assembler cannot tell
+    # which: it used to write both as "X" and "X (2)" and report a
+    # collision nobody read. Now nothing is written and the run exits 1
+    # naming each pair, both texts, both dates; the owner decides, and
+    # the re-run carries the decisions: supersede (the new text replaces
+    # the section and retires its siblings — merge_target, the author's
+    # instrument, applied by the coordinator on the owner's word),
+    # keep-both (the old shape), or drop (the new claim is wrong). Two
+    # claims of one drain under one heading collide the same way. Every
+    # applied decision is recorded in the drain report.
+    decisions: dict[str, str] = {}
+    if args.collision_decisions:
+        with open(args.collision_decisions, encoding="utf-8") as fh:
+            decisions = json.load(fh)
+        bad = {k: v for k, v in decisions.items() if v not in ("supersede", "keep-both", "drop")}
+        if bad:
+            sys.exit(f"assemble: --collision-decisions: a decision is supersede, keep-both or drop; got {bad}")
+
+    def existing_sections(paths: list[str]) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for path in paths:
+            _meta, sections = read_existing_slice(path)
+            found.update(sections)
+        return found
+
+    def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
+        """Every file the topic's sections may sit in: the flat class file,
+        the topic file, and its budget parts."""
+        if role is None:
+            base = layout.shared_home(klass, project)
+            stem = os.path.join(base, f"{klass}-{topic}")
+            flat: list[str] = []
+        else:
+            base = layout.class_home(klass, role, project)
+            stem = os.path.join(base, CLASS_FILES[klass], topic)
+            flat = [os.path.join(base, f"{CLASS_FILES[klass]}.md")]
+        parts = [f"{stem}.md"] + sorted(glob.glob(f"{stem}-[0-9]*.md"))
+        return [p for p in flat + parts if os.path.exists(p)]
+
+    def observed_of(text: str) -> str:
+        m = OBSERVED_RE.search(text)
+        return m.group(1) if m else "undated"
+
+    def excerpt(text: str) -> str:
+        line = " ".join(OBSERVED_RE.sub("", text).split())
+        return line if len(line) <= 160 else line[:157] + "..."
+
+    refused_collisions: list[str] = []
+    applied_decisions: list[dict[str, str]] = []
+    groups_to_check: list[tuple[str | None, str, tuple[str, str], list[dict[str, Any]]]] = []
+    for role, topics in per_role.items():
+        for key, group in topics.items():
+            groups_to_check.append((role, role, key, group))
+    for key, group in shared.items():
+        groups_to_check.append((None, "shared", key, group))
+    for role, label, (klass, topic), group in groups_to_check:
+        present = existing_sections(slice_candidates(role, klass, topic))
+        seen_incoming: dict[str, dict[str, Any]] = {}
+        for claim in list(group):
+            heading = claim_heading(claim)
+            rendered = claim_block(claim).split("\n", 1)[1].strip()
+            target = (claim.get("merge_target") or "").strip()
+            if target and target in present:
+                continue   # the author's own supersession: authorised
+            rival = present.get(heading)
+            if rival is None and heading in seen_incoming and \
+               claim_block(seen_incoming[heading]).split("\n", 1)[1].strip() != rendered:
+                rival = claim_block(seen_incoming[heading]).split("\n", 1)[1].strip()
+            seen_incoming.setdefault(heading, claim)
+            if rival is None or rival == rendered:
+                continue
+            key_id = f"{label}/{klass}:{topic}#{heading}"
+            decision = decisions.get(key_id)
+            agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
+            if decision == "supersede":
+                claim["merge_target"] = heading
+            elif decision == "drop":
+                group.remove(claim)
+            elif decision == "keep-both":
+                pass
+            else:
+                refused_collisions.append(
+                    f"{key_id}\n"
+                    f"    in the corpus (observed {observed_of(rival)}): {excerpt(rival)}\n"
+                    f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}): {excerpt(rendered)}"
+                )
+                continue
+            applied_decisions.append({"key": key_id, "decision": decision, "agent": agent,
+                                      "observed_at": claim.get("observed_at") or ""})
+    if refused_collisions:
+        print("SUPERSEDING? — a claim disagrees with a section already in the corpus; the owner decides "
+              "which is true. This run wrote NOTHING and exits 1.", file=sys.stderr)
+        for note in refused_collisions:
+            print(f"  {note}", file=sys.stderr)
+        print("\nRe-run with --collision-decisions FILE, one entry per line above:\n"
+              "  {\"<role>/<class>:<topic>#<heading>\": \"supersede\" | \"keep-both\" | \"drop\"}\n"
+              "  supersede: the incoming text replaces the section and retires its siblings;\n"
+              "  keep-both: both stand, side by side, dated;  drop: the incoming claim is wrong.", file=sys.stderr)
+        return 1
+
     def crossref_slice_ids(role: str) -> set[str]:
         """Every `class:topic` id the role's committed crossref names."""
         path = os.path.join(layout.project_dir(project, role), "crossref.json")
@@ -688,8 +814,7 @@ def main() -> int:
         blocks: dict[str, str] = dict(previous_sections)
         order: list[str] = list(previous_sections)
         for claim in claims:
-            heading = (claim.get("title")
-                       or claim["topic"].replace("-", " ").capitalize()).strip()
+            heading = claim_heading(claim)
             target = (claim.get("merge_target") or "").strip()
             authorised = bool(target and target in blocks)
             if authorised:
@@ -801,11 +926,7 @@ def main() -> int:
         alone is not identity: two claims with the same body under
         different titles are two sections, and both are carried.
         """
-        incoming = {
-            ((c.get("title") or c["topic"].replace("-", " ").capitalize()).strip(),
-             claim_block(c).split("\n", 1)[1].strip())
-            for c in claims
-        }
+        incoming = {(claim_heading(c), claim_block(c).split("\n", 1)[1].strip()) for c in claims}
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
@@ -1190,6 +1311,7 @@ def main() -> int:
         "clipped_descriptions": clipped_descriptions,
         "migrated": migrated,
         "title_collisions": collisions,
+        "collision_decisions": applied_decisions,
         "harvest": harvest_meta,
         "watermarks": watermarks,
     }

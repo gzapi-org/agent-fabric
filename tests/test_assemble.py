@@ -685,22 +685,93 @@ def test_merge_target_strengthens_instead_of_appending(tmp: str) -> None:
     assert "First statement" not in text, "the strengthened claim replaces the old text"
 
 
-def test_duplicate_title_keeps_both_claims(tmp: str) -> None:
-    """Replacement is opt-in through merge_target. Overwriting on a bare title
-    match made it implicit and silent — a drain deleting a finding nobody asked
-    it to touch."""
+def decisions_file(tmp: str, decisions: dict[str, str]) -> str:
+    path = os.path.join(tmp, "decisions.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(decisions, fh)
+    return path
+
+
+def keep_both(tmp: str, *keys: str) -> tuple[str, str]:
+    """The owner's decision the collision fixtures need: both stand."""
+    return ("--collision-decisions", decisions_file(tmp, {k: "keep-both" for k in keys}))
+
+
+def test_a_collision_stops_the_drain_until_the_owner_decides(tmp: str) -> None:
+    """Two claims under one heading with different text is a potential
+    supersession — a workflow that changed, or a memory that is wrong —
+    and the assembler cannot tell which (the owner, 2026-09-20). It writes
+    nothing, exits 1 and names the pair with both texts and dates; the
+    re-run carries the owner's decision. keep-both is the old shape:
+    both stand, dated, and the collision is reported."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "one", "title": "Same title",
-         "body": "The first claim.", "evidence": ["h1"]},
+         "body": "The first claim.", "evidence": ["h1"], "observed_at": "2026-08-30"},
         {"class": "domain", "topic": "one", "title": "Same title",
-         "body": "A genuinely different second claim.", "evidence": ["h2"]},
+         "body": "A genuinely different second claim.", "evidence": ["h2"], "observed_at": "2026-09-18"},
     ])})
     proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, proc.stderr
+    assert "SUPERSEDING?" in proc.stderr and "alpha/domain:one#Same title" in proc.stderr, proc.stderr
+    assert "observed 2026-08-30" in proc.stderr and "observed 2026-09-18" in proc.stderr, proc.stderr
+    assert "The first claim." in proc.stderr and "A genuinely different second claim." in proc.stderr, proc.stderr
+    assert not os.path.exists(dom(out, "alpha", "domain.md")), "a refused drain must write nothing"
+    assert not os.path.exists(report_path(out)), "a refused drain leaves no report"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:one#Same title": "keep-both"}))
     assert proc.returncode == 0, proc.stderr
     text = read(dom(out, "alpha", "domain.md"))
     assert "The first claim." in text, "the earlier claim was silently discarded"
     assert "A genuinely different second claim." in text
+    assert "*Observed 2026-08-30 (alpha)*" in text and "*Observed 2026-09-18 (alpha)*" in text, text
     assert "TITLE COLLISIONS" in proc.stderr, "the collision must be reported, not hidden"
+    report = json.loads(read(report_path(out)))
+    assert report["collision_decisions"] == [{"key": "alpha/domain:one#Same title", "decision": "keep-both",
+                                              "agent": "unresolved", "observed_at": "2026-09-18"}], report["collision_decisions"]
+
+
+def test_the_owner_supersedes_or_drops_a_colliding_claim(tmp: str) -> None:
+    """Against a section already in the corpus: supersede makes the incoming
+    text replace it (merge_target applied on the owner's word, siblings
+    retired); drop leaves the corpus as it was. An invalid decision word is
+    refused before anything runs."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "deploy", "title": "How we deploy",
+         "body": "By hand, from the operator's laptop.", "evidence": ["h1"], "observed_at": "2026-08-30"},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    incoming = claims("alpha", [
+        {"class": "workflow", "topic": "deploy", "title": "How we deploy",
+         "body": "Through the pipeline, never by hand.", "evidence": ["h2"], "observed_at": "2026-09-18"},
+    ])
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(incoming, fh)
+    path = proj(out, "alpha", "workflow.md")
+    before = read(path)
+
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "in the corpus (observed 2026-08-30)" in proc.stderr, proc.stderr
+    assert read(path) == before, "a refused drain must not touch the slice"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "bogus"}))
+    assert proc.returncode != 0 and "supersede, keep-both or drop" in proc.stderr, proc.stderr
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    assert "Through the pipeline" not in read(path) and "By hand" in read(path), read(path)
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = read(path)
+    assert "Through the pipeline, never by hand." in after and "By hand, from the operator" not in after, after
+    assert after.count("## How we deploy") == 1 and "(2)" not in after, after
+    assert "*Observed 2026-09-18 (alpha)*" in after, after
+    report = json.loads(read(report_path(out)))
+    assert report["collision_decisions"][0]["decision"] == "supersede"
 
 
 def test_carried_sections_keep_their_citation_edges(tmp: str) -> None:
@@ -753,11 +824,12 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     first = read(report_path(out))
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     second = read(report_path(out))
-    assert first == second, "the drain report must be identical for identical input"
+    strip = lambda t: {k: v for k, v in json.loads(t).items() if k != "collision_decisions"}  # noqa: E731
+    assert strip(first) == strip(second), "the drain report must be identical for identical input"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
 
@@ -773,7 +845,7 @@ def test_collision_survives_a_drain_with_an_empty_delta(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     assert json.loads(read(report_path(out)))["title_collisions"]
 
     # A later drain that admits nothing for this slice — and touches a
@@ -807,7 +879,7 @@ def test_merge_target_clears_the_collision_it_resolves(tmp: str) -> None:
          "body": "A DIFFERENT second finding.", "evidence": ["h2"]},
     ])}
     drain, claims_dir, out = build(tmp, first)
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Shared title"))
     path = dom(out, "alpha", "domain.md")
     text = read(path)
     assert "Shared title (2)" in text, "precondition: the collision happened"
@@ -885,7 +957,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     assert "collisions:" in read(dom(out, "alpha", "domain.md")), \
         "the collision should have been recorded in the slice"
     lint_inputs(out)
@@ -895,7 +967,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
         json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
     with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
-    run_assemble(drain, claims_dir, out)          # re-index with the charter present
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))          # re-index with the charter present
     proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 0, \
         f"lint rejected what the assembler wrote:\n{proc.stderr}"
@@ -914,12 +986,12 @@ def test_quoted_titles_survive_repeated_drains(tmp: str) -> None:
          "body": "Second — a different claim under the same title.",
          "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, 'alpha/domain:one#The "quoted" finding'))
     first = read(dom(out, "alpha", "domain.md"))
     assert first.count("collisions:") == 1
     entries_first = first.count(quoted.replace('"', '\\"'))
 
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, 'alpha/domain:one#The "quoted" finding'))
     second = read(dom(out, "alpha", "domain.md"))
     assert second == first, "a repeated drain must not rewrite the slice"
     assert second.count(quoted.replace('"', '\\"')) == entries_first, \
@@ -1285,7 +1357,8 @@ def main() -> int:
         test_a_hash_shaped_like_a_number_survives_the_frontmatter,
         test_carried_full_scope_survives_a_domain_only_drain,
         test_merge_target_strengthens_instead_of_appending,
-        test_duplicate_title_keeps_both_claims,
+        test_a_collision_stops_the_drain_until_the_owner_decides,
+        test_the_owner_supersedes_or_drops_a_colliding_claim,
         test_collision_is_reported_on_every_run,
         test_collision_survives_a_drain_with_an_empty_delta,
         test_authored_headings_are_not_mistaken_for_collisions,

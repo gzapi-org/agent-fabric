@@ -58,9 +58,15 @@ commit_class() {
     local parents="$1" subject="$2" answers="${3:-}"
     if [[ "$parents" == *" "* ]]; then echo merge; return 0; fi
     if [[ -n "${answers//[[:space:]]/}" ]]; then echo fix; return 0; fi
-    # A subject that OPENS with the review word is an answer to one —
-    # "review PE-6: …", "re-review F1: …" — whatever follows.
-    if grep -qiE "^(re-)?review([^A-Za-z]|$)" <<<"$subject"; then echo fix; return 0; fi
+    # A subject that OPENS with the review word AS THE SCOPE is an
+    # answer to one — "review: …", "review PE-6: …", "re-review F1: …".
+    # The word followed by another word before the colon is a component
+    # whose name contains it — "review class: …", "review tooling: …",
+    # "review brief: …" — and says nothing about answering a review; the
+    # wider opener read two work commits on agent-fabric #25 as fixes
+    # and reported a five-commit PR as two of work. Such a subject falls
+    # through to the general rule, which still needs an answer word.
+    if grep -qiE "^(re-)?review(:| [A-Z]{1,2}-?[0-9]+)" <<<"$subject"; then echo fix; return 0; fi
     if grep -qiE "(^|[^A-Za-z])(re-review|review'?s?|findings?|nits?)([^A-Za-z]|$)" <<<"$subject" \
        && { grep -qiE '(^|[^A-Za-z])(fix(es|ed)?|address(es|ed|ing)?|answer(s|ed)?|round|re-review|nits?|findings?)([^A-Za-z0-9]|$)|#[0-9]+' <<<"$subject" \
             || grep -qE '(^|[^A-Za-z0-9])[A-Z]{1,2}-?[0-9]+(-[0-9]+)?([^A-Za-z0-9]|$)' <<<"$subject"; }; then

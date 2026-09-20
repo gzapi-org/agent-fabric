@@ -86,6 +86,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 from typing import Any
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -240,7 +241,19 @@ def parse_memory(path: str) -> dict[str, Any] | None:
         "path": path,
         "mtime": int(os.path.getmtime(path)),
         "mtime_ms": int(os.path.getmtime(path) * 1000),
+        # When the fact was written, as the memory itself says (the
+        # harness stamps `modified` in its metadata); the file's mtime is
+        # the fallback. A section rendered from this claim carries the
+        # date, so two divergent sections on one topic read in time order.
+        "observed_at": observed_date(meta.get("metadata.modified") or meta.get("modified"), path),
     }
+
+
+def observed_date(stamp: str | None, path: str) -> str:
+    """YYYY-MM-DD from an ISO stamp, else from the file's mtime (UTC)."""
+    if stamp and re.match(r"^\d{4}-\d{2}-\d{2}", stamp.strip()):
+        return stamp.strip()[:10]
+    return time.strftime("%Y-%m-%d", time.gmtime(os.path.getmtime(path)))
 
 
 def content_hash(name: str, body: str) -> str:
@@ -396,6 +409,7 @@ def main() -> int:
             "class": klass,
             "knowledge_scope": "full",
             "body": text,
+            "observed_at": parsed["observed_at"],
             # Two or more owners is the assembler's route to a shared slice
             # (memory/README.md, "Four scopes"); a memory names its co-owners
             # and the drain carries them, so a fact every role needs is not

@@ -62,6 +62,7 @@ import atexit
 import importlib.util
 import json
 import os
+import glob
 import hashlib
 import re
 import sys
@@ -69,7 +70,7 @@ import shutil
 import tarfile
 import tempfile
 from collections import defaultdict
-from typing import Any
+from typing import Callable, Any
 
 _spec = importlib.util.spec_from_file_location(
     "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
@@ -337,6 +338,62 @@ def decode_scalar(text: str) -> str:
     return text
 
 
+def retire_in_siblings(directory: str, filename: str, target: str,
+                       clip: Callable[[str, str], str] = lambda d, _where: d) -> list[tuple[str, str]]:
+    """Remove the section `target` (and its "(n)" siblings) from every
+    OTHER budget part of the same topic in `directory`. `filename` is the
+    part being written: `<topic>.md`, `<topic>-<n>.md`,
+    `<class>-<topic>(-n).md` for a shared slice, or the flat `<class>.md`.
+    Returns what was touched: (path, "rewritten" | "removed").
+
+    The frontmatter is kept VERBATIM and edited textually — the
+    `collisions:` list loses the target, the `description:` follows the
+    first remaining heading — never parsed and re-rendered: the parser
+    reads every scalar as a string, and a round trip wrote `tier: "2"`,
+    which the schema refuses (review, 2026-09-20). A part left with no
+    section is removed; the index sweep then stops pointing at an empty
+    file whose cue named the section that moved."""
+    stem = re.sub(r"(-\d+)?\.md$", "", filename)
+    touched: list[tuple[str, str]] = []
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        if name == filename or not name.endswith(".md"):
+            continue
+        if re.sub(r"(-\d+)?\.md$", "", name) != stem:
+            continue
+        path = os.path.join(directory, name)
+        _meta, sections = read_existing_slice(path)
+        victims = [h for h in sections if h == target or re.fullmatch(re.escape(target) + r" \(\d+\)", h)]
+        if not victims:
+            continue
+        for h in victims:
+            del sections[h]
+        if not sections:
+            os.remove(path)
+            touched.append((path, "removed"))
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+        front = m.group(1) if m else ""
+        # collisions: drop the target's entry; drop the key when empty.
+        def prune(block: str) -> str:
+            lines = [ln for ln in block.split("\n")]
+            kept = [ln for ln in lines[1:] if decode_scalar(ln.strip()[2:]) != target]
+            return "\n".join([lines[0]] + kept) if kept else ""
+        # (?m) alone: with (?s) the item pattern ran to the end of the
+        # frontmatter, the list never read as empty, and a bare
+        # `collisions:` key was left behind.
+        front = re.sub(r"(?m)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
+        first = next(iter(sections))
+        # The cue is clipped as every description the assembler writes is.
+        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first, path)), front, count=1)
+        body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
+        touched.append((path, "rewritten"))
+    return touched
+
+
 def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     """Return (frontmatter, {heading: section-text}) for a slice already on disk.
 
@@ -383,14 +440,41 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     return meta, sections
 
 
+OBSERVED_RE = re.compile(r"\s*\*Observed (\d{4}-\d{2}-\d{2})(?: \(([a-z0-9-]+)\))?\*\s*$")
+
+
+def undated(text: str) -> str:
+    """A section's text with its dated tail removed — the identity a
+    section is compared by. The date is when the memory was written, not
+    what it says: the same claim re-emitted with a moved mtime, or
+    arriving with a date where the corpus has none, is the same claim,
+    and a comparison that included the tail refused it as a collision
+    with two identical excerpts (review of 2026-09-20, F1)."""
+    return OBSERVED_RE.sub("", text).strip()
+
+
+def claim_heading(claim: dict[str, Any]) -> str:
+    """The section heading a claim renders under — one rule, used by the
+    writer, the budget and the collision pre-pass alike."""
+    return (claim.get("title") or claim["topic"].replace("-", " ").capitalize()).strip()
+
+
 def claim_block(claim: dict[str, Any]) -> str:
-    title = claim.get("title") or claim["topic"].replace("-", " ").capitalize()
+    title = claim_heading(claim)
     body = claim["body"].strip()
     cites = claim.get("citations") or {}
     flat = [c for values in cites.values() for c in values]
     tail = ""
     if flat:
         tail = "\n\n*References: " + ", ".join(sorted(set(flat))) + "*"
+    # WHEN the fact was written, and by which role. Two sections on one
+    # topic that disagree — a workflow that changed — read in time order
+    # only if each carries its date; the slice's distilled_at is the last
+    # drain's, not the fact's. The role, never the login: a slice travels
+    # into every repository.
+    if claim.get("observed_at"):
+        who = f" ({claim['_role']})" if claim.get("_role") else ""
+        tail += f"\n\n*Observed {claim['observed_at']}{who}*"
     scope = ""
     if claim.get("knowledge_scope") == "domain-only":
         scope = "\n\n> Learned outside this system; it describes the field, not our implementation.\n"
@@ -471,6 +555,9 @@ def main() -> int:
                          "for agent-fabric itself)")
     ap.add_argument("--stamp", required=True, help="distillation date (YYYY-MM-DD)")
     ap.add_argument("--budget", type=int, default=DEFAULT_SLICE_BUDGET_TOKENS)
+    ap.add_argument("--collision-decisions", default=None, metavar="FILE",
+                    help="the owner's decision per collision the previous run refused on: "
+                         "{\"<role>/<class>:<topic>#<heading>\": \"supersede\"|\"keep-both\"|\"drop\"}")
     args = ap.parse_args()
     if args.bundle:
         if args.claims or args.drain:
@@ -528,6 +615,8 @@ def main() -> int:
             payload = json.load(fh)
         role = payload["role"]
         all_claims[role] = payload.get("claims", [])
+        for claim in all_claims[role]:
+            claim["_role"] = role   # for the section's dated tail; never written to disk
         telemetry[role] = payload.get("telemetry", {})
 
         # DOMAIN-ONLY EVIDENCE MAY SUPPORT ONLY A DOMAIN CLAIM.
@@ -630,8 +719,142 @@ def main() -> int:
             for entry in (kinds or {}).values():
                 ids.update(x for x in (entry.get("slices") or []) if isinstance(x, str))
         return ids
+
+    # A CLAIM THAT DISAGREES WITH THE CORPUS STOPS THE DRAIN (the owner,
+    # 2026-09-20). A new claim under a heading the slice already has, with
+    # different text, is a potential supersession — a workflow that
+    # changed, or a memory that is wrong — and the assembler cannot tell
+    # which: it used to write both as "X" and "X (2)" and report a
+    # collision nobody read. Now nothing is written and the run exits 1
+    # naming each pair, both texts, both dates; the owner decides, and
+    # the re-run carries the decisions: supersede (the new text replaces
+    # the section and retires its siblings — merge_target, the author's
+    # instrument, applied by the coordinator on the owner's word),
+    # keep-both (the old shape), or drop (the new claim is wrong). Two
+    # claims of one drain under one heading collide the same way. Every
+    # applied decision is recorded in the drain report.
+    decisions: dict[str, str] = {}
+    if args.collision_decisions:
+        with open(args.collision_decisions, encoding="utf-8") as fh:
+            decisions = json.load(fh)
+        bad = {k: v for k, v in decisions.items() if v not in ("supersede", "keep-both", "drop")}
+        if bad:
+            sys.exit(f"assemble: --collision-decisions: a decision is supersede, keep-both or drop; got {bad}")
+
+    def existing_sections(paths: list[str]) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for path in paths:
+            _meta, sections = read_existing_slice(path)
+            found.update(sections)
+        return found
+
+    def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
+        """Every file the topic's sections may sit in — the pre-pass reads
+        exactly what the write phase will write into. The topic file and
+        its budget parts (`<topic>-<n>.md`, digits only — a sibling topic
+        named `<topic>-2026-09-17` is another topic); and the flat class
+        file when the write phase writes into it (no `<class>/` directory
+        yet and this drain brings one topic of the class) or migrates it
+        to this topic's file (the crossref names this topic alone). Read
+        as this topic's regardless, another topic's section under a
+        coinciding heading was refused as a collision the write phase
+        never has; excluded whenever the crossref named two topics, a
+        real collision inside a two-topic flat file went unstopped."""
+        if role is None:
+            base = layout.shared_home(klass, project)
+            stem = os.path.join(base, f"{klass}-{topic}")
+            flat: list[str] = []
+        else:
+            base = layout.class_home(klass, role, project)
+            stem = os.path.join(base, CLASS_FILES[klass], topic)
+            flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
+            prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
+            topics_here = sum(1 for (k, _t) in per_role.get(role, {}) if k == klass)
+            writes_flat = not os.path.isdir(os.path.join(base, CLASS_FILES[klass])) and topics_here == 1
+            flat = [flat_file] if os.path.exists(flat_file) and (writes_flat or prior == {topic}) else []
+        parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if re.fullmatch(r".*-\d+\.md", p))
+        return [p for p in flat + parts if os.path.exists(p)]
+
+    def observed_of(text: str) -> str:
+        m = OBSERVED_RE.search(text)
+        return m.group(1) if m else "undated"
+
+    def excerpt(text: str) -> str:
+        line = " ".join(OBSERVED_RE.sub("", text).split())
+        return line if len(line) <= 160 else line[:157] + "..."
+
+    refused_collisions: list[str] = []
+    applied_decisions: list[dict[str, str]] = []
+    groups_to_check: list[tuple[str | None, str, tuple[str, str], list[dict[str, Any]]]] = []
+    for role, topics in per_role.items():
+        for key, group in topics.items():
+            groups_to_check.append((role, role, key, group))
+    for key, group in shared.items():
+        groups_to_check.append((None, "shared", key, group))
+    for role, label, (klass, topic), group in groups_to_check:
+        present = existing_sections(slice_candidates(role, klass, topic))
+        seen_incoming: dict[str, dict[str, Any]] = {}
+        for claim in list(group):
+            heading = claim_heading(claim)
+            rendered = undated(claim_block(claim).split("\n", 1)[1])
+            target = (claim.get("merge_target") or "").strip()
+            if target and target in present:
+                continue   # the author's own supersession: authorised
+            # Present already — under its heading or as a kept-both
+            # sibling "X (n)" — is the same claim again, whatever its date.
+            siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
+            if any(undated(present[k]) == rendered for k in siblings if k in present):
+                continue
+            rival = present.get(heading)
+            rival_date = observed_of(rival) if rival is not None else None
+            if rival is None and heading in seen_incoming and \
+               undated(claim_block(seen_incoming[heading]).split("\n", 1)[1]) != rendered:
+                # Two claims of this drain under one heading: the earlier one
+                # is the rival, with its own date.
+                rival = undated(claim_block(seen_incoming[heading]).split("\n", 1)[1])
+                rival_date = seen_incoming[heading].get("observed_at") or "undated"
+            seen_incoming.setdefault(heading, claim)
+            if rival is None:
+                continue
+            key_id = f"{label}/{klass}:{topic}#{heading}"
+            # A key per incoming claim as well as per heading: with three
+            # claims under one heading the owner may supersede with one
+            # and drop another, which one key for the pair cannot say.
+            # The claim's key is its first evidence hash; the heading key
+            # is the default for every pair under it.
+            claim_key = f"{key_id}@{(claim.get('evidence') or ['?'])[0][:12]}"
+            decision = decisions.get(claim_key) or decisions.get(key_id)
+            agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
+            if decision == "supersede":
+                claim["merge_target"] = heading
+            elif decision == "drop":
+                group.remove(claim)
+            elif decision == "keep-both":
+                pass
+            else:
+                refused_collisions.append(
+                    f"{claim_key}   (or {key_id} for every pair under the heading)\n"
+                    f"    {'in this drain ' if heading not in present else 'in the corpus '}(observed {rival_date}): {excerpt(rival)}\n"
+                    f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}): {excerpt(rendered)}"
+                )
+                continue
+            applied_decisions.append({"key": claim_key if claim_key in decisions else key_id, "decision": decision,
+                                      "agent": agent, "observed_at": claim.get("observed_at") or ""})
+    if refused_collisions:
+        print("SUPERSEDING? — a claim disagrees with a section already in the corpus; the owner decides "
+              "which is true. This run wrote NOTHING and exits 1.", file=sys.stderr)
+        for note in refused_collisions:
+            print(f"  {note}", file=sys.stderr)
+        print("\nRe-run with --collision-decisions FILE, one entry per line above (the claim's own key,\n"
+              "or the heading's key for every pair under it):\n"
+              "  {\"<role>/<class>:<topic>#<heading>[@<evidence>]\": \"supersede\" | \"keep-both\" | \"drop\"}\n"
+              "  supersede: the incoming text replaces the section and retires its siblings;\n"
+              "  keep-both: both stand, side by side, dated;  drop: the incoming claim is wrong.", file=sys.stderr)
+        return 1
+
     collisions: list[str] = []
     written: list[str] = []
+    retired_in: list[str] = []   # sibling parts a supersede touched: path, section, rewritten|removed
     index_entries: dict[str, list[dict[str, str]]] = defaultdict(list)
 
     DESCRIPTION_MAX = 240  # identities/schemas/role-template.schema.json
@@ -688,10 +911,38 @@ def main() -> int:
         blocks: dict[str, str] = dict(previous_sections)
         order: list[str] = list(previous_sections)
         for claim in claims:
-            heading = (claim.get("title")
-                       or claim["topic"].replace("-", " ").capitalize()).strip()
+            heading = claim_heading(claim)
             target = (claim.get("merge_target") or "").strip()
             authorised = bool(target and target in blocks)
+            if target and not authorised:
+                # THE SECTION LIVES IN ANOTHER PART of this topic (a slice
+                # split by budget): the owner's supersede retires it there
+                # and the superseding text lands here. Authorising only a
+                # target in the part being written exited 0 with both texts
+                # standing in two files (connected reviewer, 2026-09-20).
+                # Every sibling touched is written and reported.
+                touched = retire_in_siblings(directory, filename, target, clip=clip_description)
+                if touched:
+                    authorised = True
+                    resolved.append(target)
+                    for tpath, what in touched:
+                        retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
+                        # `written` counts files on disk once: a rewritten
+                        # sibling joins it, a removed one leaves it.
+                        if what == "rewritten" and tpath not in written:
+                            written.append(tpath)
+                        if what == "removed" and tpath in written:
+                            written.remove(tpath)
+                        # A sibling this run already indexed keeps a stale
+                        # line otherwise — a link to a removed file, or the
+                        # old cue: drop it, and the on-disk sweep re-lists a
+                        # rewritten part by its frontmatter.
+                        rel = layout.link_rel(tpath, project)
+                        if role == "shared":
+                            for owner in list(shared_index):
+                                shared_index[owner] = [e for e in shared_index[owner] if e["path"] != rel]
+                        else:
+                            index_entries[role] = [e for e in index_entries[role] if e["path"] != rel]
             if authorised:
                 # Replacement is opt-in, and this is the opt-in.
                 heading = target
@@ -716,20 +967,28 @@ def main() -> int:
                 resolved.append(target)
             base_heading = heading
             rendered = claim_block(claim).split("\n", 1)[1].strip()
-            if not authorised and heading in blocks and blocks[heading] != rendered:
+            if not authorised and heading in blocks and undated(blocks[heading]) != undated(rendered):
                 # A heading that already holds DIFFERENT text is a second
                 # claim, not this one again. Overwriting on a bare title match
                 # made replacement implicit and silent — a drain deleting a
                 # finding nobody asked it to touch. Keep both and report it.
                 # (Identical text is simply the same claim re-rendered, which
-                # must stay a no-op or re-assembly would duplicate everything.)
+                # must stay a no-op or re-assembly would duplicate everything;
+                # identical text under a new or moved date is the same claim
+                # and takes the date.)
                 suffix = 2
-                while f"{heading} ({suffix})" in blocks and blocks[f"{heading} ({suffix})"] != rendered:
+                while f"{heading} ({suffix})" in blocks and undated(blocks[f"{heading} ({suffix})"]) != undated(rendered):
                     suffix += 1
                 collided.append(base_heading)
                 heading = f"{heading} ({suffix})"
             if heading not in blocks:
                 order.append(heading)
+            # Equal text arriving WITHOUT a date (a bundle from before sections
+            # were dated) keeps the date the corpus already recorded; a
+            # recorded value is never dropped silently.
+            if heading in blocks and not OBSERVED_RE.search(rendered) and OBSERVED_RE.search(blocks[heading]) \
+               and undated(blocks[heading]) == undated(rendered):
+                rendered = blocks[heading]
             blocks[heading] = rendered
 
         # SCOPE UNIONS WITH WHAT IS CARRIED, and `full` wins.
@@ -781,20 +1040,32 @@ def main() -> int:
         text = render_frontmatter(meta) + "\n\n" + body
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.rstrip() + "\n")
-        written.append(path)
+        if path not in written:   # a retire may have rewritten this part earlier in the run
+            written.append(path)
         problems.extend(hygiene_check(body, layout.root_rel(path)))
 
-    def carried_chars(*candidates: str) -> int:
-        """How much text merge mode will carry into the FIRST part.
+    def carried_chars(claims: list[dict[str, Any]], *candidates: str) -> int:
+        """How much text merge mode will carry into the FIRST part, BEYOND
+        what this drain's claims already are.
 
         Sized from whichever candidate path actually exists: the layout of a
         slice depends on whether it ever split, so the same topic can live at
         `<class>.md` or `<class>/<topic>.md` and only the tree knows which.
+
+        A section that IS one of this drain's claims re-rendered — same
+        heading, same text, the rule write_slice applies — costs nothing:
+        write_slice writes it once. Counting it here as well counted every
+        re-assembled claim twice, so a slice past half its budget split on
+        the second run of the same drain, and the second part received the
+        same claims as new sections — the `-2` copies of 2026-09-17. Text
+        alone is not identity: two claims with the same body under
+        different titles are two sections, and both are carried.
         """
+        incoming = {(claim_heading(c), undated(claim_block(c).split("\n", 1)[1])) for c in claims}
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
-                return sum(len(h) + len(t) + 8 for h, t in sections.items())
+                return sum(len(h) + len(t) + 8 for h, t in sections.items() if (h, undated(t)) not in incoming)
         return 0
 
     def split_by_budget(
@@ -847,9 +1118,11 @@ def main() -> int:
     # knowledge under the project's shared/.
     shared_index: dict[str, list[dict[str, str]]] = defaultdict(list)
     for (klass, topic), claims in sorted(shared.items()):
+        if not claims:
+            continue   # every claim dropped by the owner: the slice stays as it was
         owners = sorted(shared_owners[(klass, topic)])
         shared_dir = layout.shared_home(klass, project)
-        prior = carried_chars(os.path.join(shared_dir, f"{klass}-{topic}.md"))
+        prior = carried_chars(claims, os.path.join(shared_dir, f"{klass}-{topic}.md"))
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
             filename = f"{klass}-{topic}{suffix}.md"
@@ -910,9 +1183,12 @@ def main() -> int:
                 os.replace(flat, os.path.join(base, CLASS_FILES[klass], name))
                 migrated.append(f"{role}/{klass}: {CLASS_FILES[klass]}.md -> {CLASS_FILES[klass]}/{name}")
             for topic, claims in topics:
+                if not claims:
+                    continue   # every claim dropped by the owner: the slice stays as it was
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(
+                    claims,
                     os.path.join(base, f"{CLASS_FILES[klass]}.md"),
                     os.path.join(base, CLASS_FILES[klass], f"{topic}.md"),
                 )
@@ -955,6 +1231,34 @@ def main() -> int:
                 {"path": entry["path"], "description": entry["description"] + " (shared)",
                  "class": entry["class"]}
             )
+        # ...and every shared slice ON DISK this role owns and this run did
+        # not write — the same sweep the role's own directories get. A
+        # shared slice untouched by a drain (nothing new for it, or its only
+        # incoming claim dropped by the owner) vanished from its owners'
+        # indexes, and the index is the only thing a session reads.
+        listed_shared = {e["path"] for e in index_entries[role]}
+        for klass in CLASS_FILES:
+            try:
+                shared_dir = layout.shared_home(klass, project)
+            except ValueError:
+                continue
+            if not os.path.isdir(shared_dir):
+                continue
+            for name in sorted(os.listdir(shared_dir)):
+                if not name.startswith(f"{klass}-") or not name.endswith(".md"):
+                    continue
+                path = os.path.join(shared_dir, name)
+                meta, _sections = read_existing_slice(path)
+                owners = meta.get("shared_with") or []
+                if role not in owners:
+                    continue
+                rel = layout.link_rel(path, project)
+                if rel in listed_shared:
+                    continue
+                index_entries[role].append(
+                    {"path": rel, "description": described(path, name) + " (shared)", "class": klass}
+                )
+                listed_shared.add(rel)
 
         # Authored files (charter, recall) are not distilled from claims, but
         # they are part of the role and the index must account for them — an
@@ -1170,10 +1474,12 @@ def main() -> int:
         "hygiene_problems": problems,
         "rejected_hygiene": rejected_hygiene,
         "redactions": redactions,
+        "retired_in_siblings": retired_in,
         "oversized_claims": oversized,
         "clipped_descriptions": clipped_descriptions,
         "migrated": migrated,
         "title_collisions": collisions,
+        "collision_decisions": applied_decisions,
         "harvest": harvest_meta,
         "watermarks": watermarks,
     }
@@ -1198,6 +1504,10 @@ def main() -> int:
     if rejected_hygiene:
         print("\nREJECTED (hygiene — fix the memory, the corpus did not receive it; this run exits 1):", file=sys.stderr)
         for note in rejected_hygiene:
+            print(f"  {note}", file=sys.stderr)
+    if retired_in:
+        print("\nRETIRED in another part of the topic (a supersede reached the section where it lived):", file=sys.stderr)
+        for note in retired_in:
             print(f"  {note}", file=sys.stderr)
     if oversized:
         print("\nOVER BUDGET (written whole; lint will fail until the memory is split):", file=sys.stderr)

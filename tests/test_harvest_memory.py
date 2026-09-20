@@ -73,6 +73,22 @@ def test_a_memory_in_another_language_drains_through_its_rendering(tmp: str) -> 
     assert obs["rendered"]["language"] == "ka" and "language" not in obs["plain"], obs
 
 
+def test_a_claim_carries_the_date_the_memory_was_written(tmp: str) -> None:
+    """The memory's own `modified` stamp, else the file's mtime: the section
+    rendered from it carries the date, so two divergent sections on one
+    topic read in time order."""
+    mem, out = os.path.join(tmp, "m0"), os.path.join(tmp, "o0")
+    os.makedirs(mem)
+    with open(os.path.join(mem, "stamped.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: stamped\ndescription: d\nmetadata:\n  type: project\n  roles_class: workflow\n"
+                 "  modified: 2026-09-12T08:15:00.000Z\n---\n\nthe fact\n")
+    write_memory(mem, "unstamped", "project", roles_class="workflow")
+    os.utime(os.path.join(mem, "unstamped.md"), (1789113600, 1789113600))   # 2026-09-11 08:00 UTC
+    assert run(mem, out).returncode == 0
+    got = {c["topic"]: c["observed_at"] for c in claims_of(out)}
+    assert got == {"stamped": "2026-09-12", "unstamped": "2026-09-11"}, got
+
+
 def test_role_knowledge_is_opt_in(tmp: str) -> None:
     """A memory reaches the shared corpus only if it says so. Nothing is
     inferred from `type`: memory has four types, .roles/ has nine classes,
@@ -516,6 +532,7 @@ def main() -> int:
     cases = [
         test_the_watermark_round_trips_through_the_committed_report,
         test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file,
+        test_a_claim_carries_the_date_the_memory_was_written,
         test_role_knowledge_is_opt_in,
         test_a_memory_in_another_language_drains_through_its_rendering,
         test_the_class_is_taken_verbatim_not_mapped,

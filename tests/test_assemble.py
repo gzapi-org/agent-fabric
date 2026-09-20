@@ -350,20 +350,30 @@ def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:
 
 
 def test_output_is_byte_stable(tmp: str) -> None:
+    """The same drain assembled twice is the same tree — every file, and no
+    new one. The bodies are sized so the slice sits past HALF its budget:
+    with tiny bodies this case passed while a re-run of a real drain split
+    the slice into `-2` (2026-09-17), because the carried sections and the
+    same claims re-rendered were both counted toward the budget."""
+    body = ("A durable fact about the field, stated once. " * 60).strip()
     payload = {"alpha": claims("alpha", [
-        {"class": "domain", "topic": "one", "title": "T", "body": "b", "evidence": ["h1"]},
-        {"class": "solution", "topic": "two", "title": "U", "body": "b", "evidence": ["h2"]},
+        {"class": "domain", "topic": "one", "title": f"Fact {i}", "body": body, "evidence": ["h1"]}
+        for i in range(2)
+    ] + [
+        {"class": "solution", "topic": "two", "title": "U", "body": body, "evidence": ["h2"]},
     ])}
     drain, claims_dir, out = build(tmp, payload)
     run_assemble(drain, claims_dir, out)
-    first = {}
-    for dirpath, _dirs, files in os.walk(out):
-        for name in files:
-            p = os.path.join(dirpath, name)
-            first[p] = read(p)
-    run_assemble(drain, claims_dir, out)
+    def snapshot() -> dict[str, str]:
+        return {os.path.join(d, n): read(os.path.join(d, n)) for d, _ds, fs in os.walk(out) for n in fs}
+    first = snapshot()
+    assert not [p for p in first if p.endswith("-2.md")], "the fixture must fit one part on the first run"
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    second = snapshot()
+    assert set(second) == set(first), f"files appeared or vanished: {sorted(set(second) ^ set(first))}"
     for path, before in first.items():
-        assert read(path) == before, f"{path} differs between identical runs"
+        assert second[path] == before, f"{path} differs between identical runs"
 
 
 def test_slice_splits_when_it_exceeds_budget(tmp: str) -> None:
@@ -675,22 +685,94 @@ def test_merge_target_strengthens_instead_of_appending(tmp: str) -> None:
     assert "First statement" not in text, "the strengthened claim replaces the old text"
 
 
-def test_duplicate_title_keeps_both_claims(tmp: str) -> None:
-    """Replacement is opt-in through merge_target. Overwriting on a bare title
-    match made it implicit and silent — a drain deleting a finding nobody asked
-    it to touch."""
+def decisions_file(tmp: str, decisions: dict[str, str]) -> str:
+    path = os.path.join(tmp, "decisions.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(decisions, fh)
+    return path
+
+
+def keep_both(tmp: str, *keys: str) -> tuple[str, str]:
+    """The owner's decision the collision fixtures need: both stand."""
+    return ("--collision-decisions", decisions_file(tmp, {k: "keep-both" for k in keys}))
+
+
+def test_a_collision_stops_the_drain_until_the_owner_decides(tmp: str) -> None:
+    """Two claims under one heading with different text is a potential
+    supersession — a workflow that changed, or a memory that is wrong —
+    and the assembler cannot tell which (the owner, 2026-09-20). It writes
+    nothing, exits 1 and names the pair with both texts and dates; the
+    re-run carries the owner's decision. keep-both is the old shape:
+    both stand, dated, and the collision is reported."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "one", "title": "Same title",
-         "body": "The first claim.", "evidence": ["h1"]},
+         "body": "The first claim.", "evidence": ["h1"], "observed_at": "2026-08-30"},
         {"class": "domain", "topic": "one", "title": "Same title",
-         "body": "A genuinely different second claim.", "evidence": ["h2"]},
+         "body": "A genuinely different second claim.", "evidence": ["h2"], "observed_at": "2026-09-18"},
     ])})
     proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, proc.stderr
+    assert "SUPERSEDING?" in proc.stderr and "alpha/domain:one#Same title" in proc.stderr, proc.stderr
+    assert "observed 2026-08-30" in proc.stderr and "observed 2026-09-18" in proc.stderr, proc.stderr
+    assert "The first claim." in proc.stderr and "A genuinely different second claim." in proc.stderr, proc.stderr
+    assert not os.path.exists(dom(out, "alpha", "domain.md")), "a refused drain must write nothing"
+    assert not os.path.exists(report_path(out)), "a refused drain leaves no report"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:one#Same title": "keep-both"}))
     assert proc.returncode == 0, proc.stderr
     text = read(dom(out, "alpha", "domain.md"))
     assert "The first claim." in text, "the earlier claim was silently discarded"
     assert "A genuinely different second claim." in text
+    assert "*Observed 2026-08-30 (alpha)*" in text and "*Observed 2026-09-18 (alpha)*" in text, text
     assert "TITLE COLLISIONS" in proc.stderr, "the collision must be reported, not hidden"
+    report = json.loads(read(report_path(out)))
+    assert report["collision_decisions"] == [{"key": "alpha/domain:one#Same title", "decision": "keep-both",
+                                              "agent": "unresolved", "observed_at": "2026-09-18"}], report["collision_decisions"]
+
+
+def test_the_owner_supersedes_or_drops_a_colliding_claim(tmp: str) -> None:
+    """Against a section already in the corpus: supersede makes the incoming
+    text replace it (merge_target applied on the owner's word, siblings
+    retired); drop leaves the corpus as it was. An invalid decision word is
+    refused before anything runs."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "workflow", "topic": "deploy", "title": "How we deploy",
+         "body": "By hand, from the operator's laptop.", "evidence": ["h1"], "observed_at": "2026-08-30"},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    incoming = claims("alpha", [
+        {"class": "workflow", "topic": "deploy", "title": "How we deploy",
+         "body": "Through the pipeline, never by hand.", "evidence": ["h2"], "observed_at": "2026-09-18"},
+    ])
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(incoming, fh)
+    path = proj(out, "alpha", "workflow.md")
+    before = read(path)
+
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "in the corpus (observed 2026-08-30)" in proc.stderr, proc.stderr
+    assert read(path) == before, "a refused drain must not touch the slice"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "bogus"}))
+    assert proc.returncode != 0 and "supersede, keep-both or drop" in proc.stderr, proc.stderr
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    assert read(path) == before, "drop must leave the slice byte-identical — description and stamp included"
+    assert "How we deploy" in read(proj(out, "alpha", "INDEX.md")), "the index keeps the slice's cue"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = read(path)
+    assert "Through the pipeline, never by hand." in after and "By hand, from the operator" not in after, after
+    assert after.count("## How we deploy") == 1 and "(2)" not in after, after
+    assert "*Observed 2026-09-18 (alpha)*" in after, after
+    report = json.loads(read(report_path(out)))
+    assert report["collision_decisions"][0]["decision"] == "supersede"
 
 
 def test_carried_sections_keep_their_citation_edges(tmp: str) -> None:
@@ -743,11 +825,17 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     first = read(report_path(out))
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     second = read(report_path(out))
-    assert first == second, "the drain report must be identical for identical input"
+    # `collision_decisions` records what THIS run applied: the first run
+    # applied keep-both, the second found the pair already present and
+    # asked nothing — so that key alone may differ between the two.
+    strip = lambda t: {k: v for k, v in json.loads(t).items() if k != "collision_decisions"}  # noqa: E731
+    assert strip(first) == strip(second), "the drain report must be identical for identical input"
+    assert json.loads(first)["collision_decisions"] and not json.loads(second)["collision_decisions"], \
+        "the decision is applied once and not asked for again"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
 
@@ -763,7 +851,7 @@ def test_collision_survives_a_drain_with_an_empty_delta(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     assert json.loads(read(report_path(out)))["title_collisions"]
 
     # A later drain that admits nothing for this slice — and touches a
@@ -797,7 +885,7 @@ def test_merge_target_clears_the_collision_it_resolves(tmp: str) -> None:
          "body": "A DIFFERENT second finding.", "evidence": ["h2"]},
     ])}
     drain, claims_dir, out = build(tmp, first)
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Shared title"))
     path = dom(out, "alpha", "domain.md")
     text = read(path)
     assert "Shared title (2)" in text, "precondition: the collision happened"
@@ -875,7 +963,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
         {"class": "domain", "topic": "one", "title": "Same title",
          "body": "Second.", "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     assert "collisions:" in read(dom(out, "alpha", "domain.md")), \
         "the collision should have been recorded in the slice"
     lint_inputs(out)
@@ -885,7 +973,7 @@ def test_a_collision_slice_passes_lint(tmp: str) -> None:
         json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
     with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
-    run_assemble(drain, claims_dir, out)          # re-index with the charter present
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))          # re-index with the charter present
     proc = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
     assert proc.returncode == 0, \
         f"lint rejected what the assembler wrote:\n{proc.stderr}"
@@ -904,12 +992,12 @@ def test_quoted_titles_survive_repeated_drains(tmp: str) -> None:
          "body": "Second — a different claim under the same title.",
          "evidence": ["h2"]},
     ])})
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, 'alpha/domain:one#The "quoted" finding'))
     first = read(dom(out, "alpha", "domain.md"))
     assert first.count("collisions:") == 1
     entries_first = first.count(quoted.replace('"', '\\"'))
 
-    run_assemble(drain, claims_dir, out)
+    run_assemble(drain, claims_dir, out, *keep_both(tmp, 'alpha/domain:one#The "quoted" finding'))
     second = read(dom(out, "alpha", "domain.md"))
     assert second == first, "a repeated drain must not rewrite the slice"
     assert second.count(quoted.replace('"', '\\"')) == entries_first, \
@@ -969,6 +1057,377 @@ def test_hygiene_violation_is_redacted_in_place(tmp: str) -> None:
     report = json.loads(read(report_path(out)))
     assert any("Springfield" in r and "[redacted]" in r for r in report["redactions"]), report["redactions"]
     assert report["rejected_hygiene"] == [] and "rejected_hygiene" not in report["telemetry"]["alpha"]
+
+
+def test_carried_text_is_redacted_the_same_way_a_claim_is(tmp: str) -> None:
+    """A slice written before a pattern existed carries the banned term into
+    the next drain; it is substituted there exactly as a new claim's text
+    is, and named. Once the two paths disagreed — a claim refused, the same
+    word in carried text written with a warning — and lint failed the
+    assembled tree (2026-09-16)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "carry", "title": "Older", "body": "Written before the rule.", "evidence": ["h1"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    path = dom(out, "alpha", "domain.md")
+    text = read(path).replace("Written before the rule.", "Written before the rule, in Springfield.")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    # A later drain touches the same slice with a clean claim.
+    _drain, claims_dir2, _out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "carry", "title": "Newer", "body": "A clean addition.", "evidence": ["h2"]},
+    ])})
+    proc = run_assemble(drain, claims_dir2, out)
+    assert proc.returncode == 0, proc.stderr
+    after = read(path)
+    assert "Springfield" not in after and "in [redacted]." in after, after
+    assert "A clean addition." in after, after
+    assert "REDACTED (hygiene" in proc.stderr and "city name" in proc.stderr, proc.stderr
+    assert "HYGIENE PROBLEMS" not in proc.stderr, proc.stderr
+
+
+def test_the_same_claim_again_is_never_a_collision_whatever_its_date(tmp: str) -> None:
+    """An undated corpus (every slice written before sections carried a
+    date) re-drained with --all, or a memory whose mtime moved without a
+    text change: the same claim again, not a disagreement. The section
+    takes the date; nothing is refused (review of 2026-09-20, F1)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    path = dom(out, "alpha", "domain.md")
+    assert "*Observed" not in read(path), "precondition: an undated section"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"], "observed_at": "2026-09-18"},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    text = read(path)
+    assert text.count("## T") == 1 and "*Observed 2026-09-18 (alpha)*" in text, text
+    # ...and a moved date on the same text is a date refresh, not a rival.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"], "observed_at": "2026-09-19"},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(path).count("## T") == 1 and "*Observed 2026-09-19 (alpha)*" in read(path)
+    # ...and the same text arriving WITHOUT a date keeps the recorded one.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(path).count("## T") == 1 and "*Observed 2026-09-19 (alpha)*" in read(path), read(path)
+
+
+def test_keep_both_is_remembered_on_the_next_drain(tmp: str) -> None:
+    """Once the owner kept both, the same pair re-emitted (--all, a
+    watermark at zero) is present as "X" and "X (2)" and is not asked
+    about again: the same drain twice is the same tree (F3)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "S", "body": "First.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "one", "title": "S", "body": "Second.", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#S")).returncode == 0
+    before = read(dom(out, "alpha", "domain.md"))
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(dom(out, "alpha", "domain.md")) == before
+
+
+def test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival(tmp: str) -> None:
+    """A flat <class>.md holds topic X; a drain brings topic Y whose heading
+    equals one of X's with other text. The write phase migrates the flat
+    file and writes Y to its own file — no collision exists — so the
+    pre-pass must not read X's sections as Y's (F4)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "x", "title": "Shared heading", "body": "About x.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert os.path.exists(dom(out, "alpha", "domain.md")), "precondition: the flat file"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "x", "title": "Shared heading", "body": "About x.", "evidence": ["h1"]},
+            {"class": "domain", "topic": "y", "title": "Shared heading", "body": "About y.", "evidence": ["h2"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "About y." in read(dom(out, "alpha", "domain", "y.md"))
+    assert "About x." in read(dom(out, "alpha", "domain", "x.md"))
+
+
+def test_a_collision_inside_a_two_topic_flat_file_is_still_stopped(tmp: str) -> None:
+    """Drain one brings topic x alone (a flat class file), drain two topic y
+    alone (merged into the same flat file), drain three x with changed text
+    under its heading. The pre-pass reads the flat file exactly when the
+    write phase writes into it, so this genuine collision is refused —
+    excluded whenever the crossref named two topics, it slipped through as
+    an "X (2)" (re-review of 2026-09-20, N1)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "x", "title": "Hx", "body": "About x.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "y", "title": "Hy", "body": "About y.", "evidence": ["h2"]}]), fh)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    flat = dom(out, "alpha", "domain.md")
+    assert os.path.exists(flat) and "## Hx" in read(flat) and "## Hy" in read(flat), "precondition: one flat file, two topics"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "x", "title": "Hx", "body": "About x, changed.", "evidence": ["h3"]}]), fh)
+    before = read(flat)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/domain:x#Hx" in proc.stderr, proc.stderr
+    assert read(flat) == before
+
+
+def test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index(tmp: str) -> None:
+    """A shared slice's only incoming claim dropped by the owner: the slice
+    stays, and so does its line in every owner's index — a shared slice on
+    disk is swept into its owners' indexes as the role's own are (N2)."""
+    shared_claim = {"class": "domain", "topic": "one", "title": "H", "body": "First.", "evidence": ["h1"], "shared_with": ["beta"]}
+    drain, claims_dir, out = build(tmp, {
+        "alpha": claims("alpha", [shared_claim]),
+        "beta": claims("beta", [{"class": "workflow", "topic": "own", "title": "Own", "body": "b", "evidence": ["h2"]}]),
+    })
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    for role in ("alpha", "beta"):
+        assert "shared/domain-one.md" in read(proj(out, role, "INDEX.md")), role
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{**shared_claim, "body": "Second, different.", "evidence": ["h3"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "shared/domain:one#H" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions", decisions_file(tmp, {"shared/domain:one#H": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    assert "First." in read(shared_path(out, "domain-one.md")) and "Second" not in read(shared_path(out, "domain-one.md"))
+    for role in ("alpha", "beta"):
+        assert "shared/domain-one.md" in read(proj(out, role, "INDEX.md")), f"{role} lost the shared slice from its index"
+    assert set(json.loads(read(report_path(out)))["roles"]) >= {"alpha", "beta"}
+
+
+def test_supersede_retires_the_section_in_the_part_that_holds_it(tmp: str) -> None:
+    """A topic split by budget: the rival heading sits in part two, the
+    superseding claim is grouped into part one. The owner's supersede must
+    retire the section where it lives and land the new text once — not
+    exit 0 with both standing in two files (connected reviewer, 2026-09-20)."""
+    big = "y " * 900
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    parts = sorted(n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow"))
+    assert len(parts) >= 2, parts
+    where = {n: "## Second" in read(dom(out, "alpha", "domain", n)) for n in parts}
+    assert any(where.values()), where
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Second", "body": "Second, revised.", "evidence": ["h3"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 1 and "alpha/domain:grow#Second" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Second": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    texts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## Second") for t in texts.values()) == 1, texts
+    assert any("Second, revised." in t for t in texts.values()) and not any(big.strip() in t and "## Second" in t and "Second, revised." not in t for t in texts.values())
+    assert not any("collisions:" in t for t in texts.values()), "the retired section's collision record goes with it"
+    # The part that held only the retired section is gone — not left as an
+    # empty file the index still points at under the moved section's cue.
+    assert not any("grow-2" in n for n in texts), texts.keys()
+    assert "grow-2" not in read(proj(out, "alpha", "INDEX.md"))
+    assert "RETIRED in another part" in proc.stderr and "grow-2.md: 'Second' removed" in proc.stderr, proc.stderr
+    assert json.loads(read(report_path(out)))["retired_in_siblings"], "the report names the sibling touched"
+    # A part rewritten with a section left keeps a schema-valid frontmatter
+    # (a round trip once wrote tier: "2") and a cue naming what remains.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "grow", "title": "Third", "body": "z " * 400, "evidence": ["h4"]},
+            {"class": "domain", "topic": "grow", "title": "Fourth", "body": "z " * 400, "evidence": ["h5"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    holder = next(n for n, t in parts.items() if "## Third" in t)
+    assert "## Fourth" in parts[holder] and holder != "grow.md", "precondition: Third and Fourth share a later part"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Third", "body": "Third, revised.", "evidence": ["h6"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## Third") for t in after.values()) == 1 and any("Third, revised." in t for t in after.values()), after
+    assert holder in after and "## Third" not in after[holder] and "## Fourth" in after[holder], after
+    assert "tier: 2" in after[holder] and 'tier: "2"' not in after[holder], after[holder]
+    assert "description: Fourth" in after[holder], after[holder]
+    assert "grow-2.md: 'Third' rewritten" in proc.stderr, proc.stderr
+    lint_inputs(out)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+    assert run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"})).returncode == 0
+    lint = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+    assert lint.returncode == 0, f"lint rejected the tree a supersede across parts left:\n{lint.stderr}"
+
+
+def _lintable(out: str) -> None:
+    lint_inputs(out)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+
+
+def _lint(out: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+
+
+def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains(tmp: str) -> None:
+    """The other ordering: the target lives in part ONE, which is full of
+    carried text, so the superseding claim is grouped into part two — and
+    part one was written and indexed before the retire touched it. Its
+    index line must follow: gone when the part is removed, re-described
+    when a section remains; lint accepts the tree; a part counts once in
+    files_written (re-review of 2026-09-20, finding 1)."""
+    big = "y " * 900
+    # Removed shape: part one holds First alone.
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    assert "## First" in read(dom(out, "alpha", "domain", "grow.md")), "precondition: First in part one"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "First", "body": "w " * 200, "evidence": ["h3"]}]), fh)
+    _lintable(out)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## First") for t in parts.values()) == 1 and any("w w w" in t for t in parts.values()), parts
+    index = read(proj(out, "alpha", "INDEX.md"))
+    listed = [ln for ln in index.splitlines() if "grow" in ln]
+    assert all(any(n in ln for n in parts) for ln in listed), f"the index lists a part that is not on disk: {listed}"
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+    report = json.loads(read(report_path(out)))
+    # On disk: grow-2.md and INDEX.md; grow.md was written, then removed by
+    # the retire, and leaves the count with it.
+    assert report["files_written"] == 2, report["files_written"]
+
+    # Rewritten shape: part one keeps Second after First is retired from it.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "keep", "title": "Alpha one", "body": "z " * 400, "evidence": ["h4"]},
+            {"class": "domain", "topic": "keep", "title": "Beta two", "body": "z " * 400, "evidence": ["h5"]},
+            {"class": "domain", "topic": "keep", "title": "Gamma three", "body": big, "evidence": ["h6"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    first_part = read(dom(out, "alpha", "domain", "keep.md"))
+    assert "## Alpha one" in first_part and "## Beta two" in first_part, "precondition: two sections share part one"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "keep", "title": "Alpha one", "body": big, "evidence": ["h7"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    first_part = read(dom(out, "alpha", "domain", "keep.md"))
+    assert "## Alpha one" not in first_part and "## Beta two" in first_part and "description: Beta two" in first_part, first_part
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert "keep.md" in index and "Beta two" in index and "keep (domain)" not in index, index
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+    assert json.loads(read(report_path(out)))["files_written"] == 3, "keep.md, keep-2.md, INDEX.md — the rewritten part once"
+
+    # The opposite ordering: the superseding claim lands in part one while
+    # part two, which holds the target, also receives a new claim — the
+    # part is rewritten by the retire and then written by the loop; once.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "twice", "title": "One", "body": big, "evidence": ["h8"]},
+            {"class": "domain", "topic": "twice", "title": "Two", "body": "z " * 300, "evidence": ["h9"]},
+            {"class": "domain", "topic": "twice", "title": "Three", "body": "z " * 300, "evidence": ["h10"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    assert "## Two" in read(dom(out, "alpha", "domain", "twice-2.md")), "precondition: Two in part two"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "twice", "title": "Two", "body": "Two, revised.", "evidence": ["h11"]},
+            {"class": "domain", "topic": "twice", "title": "Four", "body": big, "evidence": ["h12"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    n_parts = len([n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("twice")])
+    assert json.loads(read(report_path(out)))["files_written"] == n_parts + 1, (n_parts, proc.stderr)
+    assert _lint(out).returncode == 0
+
+
+def test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue(tmp: str) -> None:
+    """The rewritten part's frontmatter is edited as text: a `collisions:`
+    list whose only entry was the retired title disappears whole (with
+    (?s) the item pattern ran to the frontmatter's end and left a bare
+    key), and the refreshed description is clipped as every description
+    the assembler writes is (findings 2 and 3)."""
+    long_title = "A heading long enough to overrun the schema's description limit " * 5
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": "y " * 900, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Third", "body": "z " * 300, "evidence": ["h2"]},
+        {"class": "domain", "topic": "grow", "title": long_title.strip(), "body": "z " * 300, "evidence": ["h3"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    sibling = dom(out, "alpha", "domain", "grow-2.md")
+    text = read(sibling)
+    assert "## Third" in text and "## A heading long" in text, "precondition: Third and the long heading share part two"
+    # Seed a collision record naming Third where the assembler writes it —
+    # BEFORE origin: and derived_from:, so a pattern that runs to the end
+    # of the frontmatter would swallow those keys' lines too.
+    assert "\norigin:\n" in text, text
+    text = text.replace("\norigin:\n", '\ncollisions:\n  - "Third"\norigin:\n', 1)
+    with open(sibling, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Third", "body": "Third, revised.", "evidence": ["h4"]}]), fh)
+    _lintable(out)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = read(sibling)
+    front = after.split("\n---\n")[0]
+    assert "collisions" not in front, front
+    desc = next(ln for ln in front.splitlines() if ln.startswith("description: "))
+    assert len(desc) - len("description: ") <= 242 and desc.rstrip('"').endswith("…"), desc
+    assert "grow-2.md: description clipped" in proc.stderr and "grow.md: description clipped" not in proc.stderr.replace("grow-2.md", ""), proc.stderr
+    assert "origin:" in front and "derived_from:" in front, front
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+
+
+def test_each_colliding_claim_has_its_own_decision_key(tmp: str) -> None:
+    """Two incoming claims under one heading against a corpus section: the
+    owner supersedes with one and drops the other. A key per claim (its
+    first evidence hash) makes that sayable; the heading's key stays the
+    default for every pair under it."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "H", "body": "Original.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "H", "body": "Newest, the truth.", "evidence": ["h2"]},
+            {"class": "domain", "topic": "one", "title": "H", "body": "Intermediate, wrong.", "evidence": ["h3"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/domain:one#H@h2" in proc.stderr and "alpha/domain:one#H@h3" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:one#H@h2": "supersede", "alpha/domain:one#H@h3": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    text = read(dom(out, "alpha", "domain.md"))
+    assert "Newest, the truth." in text and "Intermediate" not in text and "Original." not in text and text.count("## H") == 1, text
+    keys = sorted(d["key"] for d in json.loads(read(report_path(out)))["collision_decisions"])
+    assert keys == ["alpha/domain:one#H@h2", "alpha/domain:one#H@h3"], keys
 
 
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
@@ -1247,7 +1706,8 @@ def main() -> int:
         test_a_hash_shaped_like_a_number_survives_the_frontmatter,
         test_carried_full_scope_survives_a_domain_only_drain,
         test_merge_target_strengthens_instead_of_appending,
-        test_duplicate_title_keeps_both_claims,
+        test_a_collision_stops_the_drain_until_the_owner_decides,
+        test_the_owner_supersedes_or_drops_a_colliding_claim,
         test_collision_is_reported_on_every_run,
         test_collision_survives_a_drain_with_an_empty_delta,
         test_authored_headings_are_not_mistaken_for_collisions,
@@ -1260,6 +1720,16 @@ def main() -> int:
         test_domain_only_evidence_may_only_support_a_domain_claim,
         test_domain_only_evidence_is_accepted_on_a_domain_claim,
         test_hygiene_violation_is_redacted_in_place,
+        test_carried_text_is_redacted_the_same_way_a_claim_is,
+        test_the_same_claim_again_is_never_a_collision_whatever_its_date,
+        test_keep_both_is_remembered_on_the_next_drain,
+        test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival,
+        test_a_collision_inside_a_two_topic_flat_file_is_still_stopped,
+        test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index,
+        test_supersede_retires_the_section_in_the_part_that_holds_it,
+        test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains,
+        test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue,
+        test_each_colliding_claim_has_its_own_decision_key,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

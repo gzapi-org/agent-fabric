@@ -250,6 +250,31 @@ regenerate from scratch — that discards accumulated curation. Same claims
 in, byte-identical tree out, which is what makes a drain reviewable as a
 content diff.
 
+**A claim that disagrees with the corpus stops the drain** (the owner,
+2026-09-20). A new claim under a heading the slice already carries, with
+different text — a workflow that changed, or a memory that is wrong —
+is a potential supersession, and the assembler cannot tell which. It
+used to write both as "X" and "X (2)" and report a collision nobody
+read. Now `assemble.py` finds every such pair in a pre-pass, writes
+nothing, and exits 1 naming each: the section in the corpus with its
+date, the incoming one with its agent and date, both texts. The
+coordinator brings the pairs to the owner, and the re-run carries the
+owner's word in `--collision-decisions FILE`, one entry per pair —
+`supersede` (the incoming text replaces the section and retires its
+siblings: `merge_target`, the author's instrument, applied on the
+owner's decision), `keep-both` (both stand, side by side, dated), or
+`drop` (the incoming claim is wrong). Every applied decision is
+recorded in the drain report under `collision_decisions`. Two claims of
+one drain under one heading collide the same way. An author who knows
+the older text is superseded says so in the memory itself
+(`merge_target`), and no question is asked.
+
+**Every section is dated.** A claim carries `observed_at` — the
+memory's own `modified` stamp, else the file's mtime — and the section
+rendered from it ends with *Observed YYYY-MM-DD (role)*, so where the
+owner keeps both, a reader sees which describes the later state. The
+role, never the login: a slice travels into every repository.
+
 ## Tools
 
 ```text

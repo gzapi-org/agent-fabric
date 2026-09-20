@@ -74,7 +74,18 @@ the CEO for that role; counts and shares only, never text, and not part
 of `status` since it reads megabytes. The reasoning itself is not on
 disk — most thinking blocks are stored with no text and the rest as
 short summaries — which is why the notes are the signature and the
-transcript's text share the second number. `workers`, in the same
+transcript's text share the second number. `recall` (is the corpus
+read? — the account's session records and their subagent records over
+the last 24 h, every tool call that touches the corpus counted by kind:
+an `INDEX.md` under a project's `.agent-fabric/memory/<role>/` or the
+fabric's `memory/domains/`, a slice there or under `memory/shared/`, a
+Grep/Glob/Bash naming one of those directories, an authored charter,
+brief or recall; the sessions that opened neither an index nor a slice;
+the slices read most — paths only, never a line of text. The drain was
+instrumented end to end and the read-back never was: a slice with a
+poor cue could be written and never opened and nobody would know (the
+owner, 2026-09-20). The first live read, on the coordinator's own
+account: 20 sessions, 2,446 turns, 0 index reads, 0 slice reads.) `workers`, in the same
 reply: the locale worker's transcripts — the subagent records stored
 beside each session, `<session>/subagents/agent-*.jsonl`, of which the
 worker's are the ones whose sidecar `agent-*.meta.json` says
@@ -157,7 +168,7 @@ the coordinator.
 
 ## The coordinator's side
 
-`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]`
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]`
 (and `tokens [--days N]`, whose table groups the logins by Claude
 account and prints each one's share of the account's visible direct-path
 spend, the broker spend beside it; what the account spends off this host

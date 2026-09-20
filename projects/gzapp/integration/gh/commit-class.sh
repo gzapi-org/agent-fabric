@@ -14,4 +14,9 @@ export AGENT_FABRIC_LEGACY_REVIEW_MARKERS="${AGENT_FABRIC_LEGACY_REVIEW_MARKERS:
 [[ -n "${GZAPP_PR_REVIEW_STATUS:-}" ]] && export AGENT_FABRIC_PR_REVIEW_STATUS="${AGENT_FABRIC_PR_REVIEW_STATUS:-$GZAPP_PR_REVIEW_STATUS}"
 [[ -n "${GZAPP_PR_SESSION:-}" ]]       && export AGENT_FABRIC_PR_SESSION="${AGENT_FABRIC_PR_SESSION:-$GZAPP_PR_SESSION}"
 [[ -n "${GZAPP_VERDICT_AUTHORS:-}" ]]  && export AGENT_FABRIC_VERDICT_AUTHORS="${AGENT_FABRIC_VERDICT_AUTHORS:-$GZAPP_VERDICT_AUTHORS}"
-exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)/runtime/github/commit-class.sh" "$@"
+# SOURCED, not executed: the fabric's file defines commit_class and
+# revert_targets for the script that sources it. An exec here (the
+# shape the other forwarders take) defined the functions in a child
+# shell and exited — the caller got nothing (review, 2026-09-20).
+# shellcheck source=../../../../runtime/github/commit-class.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)/runtime/github/commit-class.sh"

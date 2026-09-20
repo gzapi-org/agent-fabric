@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/fabric-ctl — ask the fleet's control agents, in real time.
 #
-#   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|host|ping] [--json] [--timeout S]
+#   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]
 #   fabric-ctl <login|all> host                   the machine, one row per host: load, memory and the Xen
 #                                                 balloon, disks, the leases held, the largest processes
 #   fabric-ctl <login|all> tokens [--days N]     each login's spend from its own session records,

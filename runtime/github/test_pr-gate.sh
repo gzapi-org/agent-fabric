@@ -3,7 +3,8 @@
 #
 # Tests for pr-gate.sh with gh and pr-review-status.sh mocked on PATH and
 # a throwaway git repository for the commit classification: the work /
-# fix / merge split, each verdict (ask the owner, arm, split, blocked by
+# fix / merge split, a revert netted with its in-range partner (once —
+# a revert-then-reapply leaves the original), each verdict (ask the owner, arm, split, blocked by
 # red checks, pending checks, no review, threads, a conflict; armed;
 # queued), the session filter, --all, numbers, --json, and the empty
 # states.
@@ -182,6 +183,50 @@ out="$(run --json)"; grep -q "git fetch origin failed" <<<"$out" && pass "the fa
 [[ "$(grep -v '^pr-gate:' <<<"$out" | jq -r '.[0].commits_known')" == "false" ]] && pass "commits_known false when origin cannot be fetched" || fail "a stale base was counted" "$out"
 git -C "$SANDBOX/repo" remote set-url origin "$orig_url"
 out="$(run --json)"; [[ "$(jq -r '.[0].commits_known' <<<"$out")" == "true" ]] && pass "…and counted again once the remote is back" || fail "count did not recover" "$out"
+
+echo "pr-gate: a revert and the commit it reverts net to zero work (gzapp #912: '9 work — arm' where the count was 7)"
+# On the same branch: a work commit, then git's own revert of it (the
+# body carries "This reverts commit <sha>."), then a revert of a commit
+# that is already on main (not in the range: it changes the tree, so it
+# is work), then a "Revert …" subject with no trailer line (prose: work).
+prs "$(jq -nc --arg h "$(git -C "$SANDBOX/repo" rev-parse HEAD)" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+graphql MERGEABLE 0 no "" "$GREEN"; review yes
+before_work="$(run --json | jq -r '.[0].work_commits')"; before_fix="$(run --json | jq -r '.[0].fix_commits')"
+(
+  cd "$SANDBOX/repo" || exit 1
+  c "feat: the used-by guard"; guard="$(git rev-parse HEAD)"
+  git revert --no-edit "$guard" >/dev/null
+  base_sha="$(git rev-parse origin/main)"
+  git revert --no-edit "$base_sha" >/dev/null 2>&1 || { git revert --abort 2>/dev/null; printf 'revert-main\n' >> f.txt; git add -A; git commit -q -m "Revert \"base\"" -m "This reverts commit $base_sha."; }
+  c "Revert the thing by hand"
+  git push -q origin develop-qzapp/me/feat/thing
+)
+HEAD2="$(git -C "$SANDBOX/repo" rev-parse HEAD)"
+prs "$(jq -nc --arg h "$HEAD2" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+graphql MERGEABLE 0 no "" "$GREEN"; review yes
+out="$(run --json)"; rc=$?
+[[ $rc -eq 0 ]] && [[ "$(jq -r '.[0] | "\(.work_commits) \(.fix_commits) \(.netted_commits)"' <<<"$out")" == "$((before_work + 2)) $before_fix 2" ]] \
+  && pass "four commits added: the in-range pair is netted (2); the revert of a main commit and the trailer-less 'Revert' are work (+2); fixes unchanged" \
+  || fail "revert netting wrong (rc=$rc; before: $before_work work, $before_fix fix)" "$out"
+out="$(run)"
+grep -q "work, $before_fix fix, 1 merge, 2 netted by a revert)" <<<"$out" && pass "the row says so" || fail "row text" "$out"
+grep -q 'netted by a revert: "feat: the used-by guard"; "Revert "feat: the used-by guard""\|netted by a revert: "Revert "feat: the used-by guard""; "feat: the used-by guard"' <<<"$out" && pass "…and names the netted pair, as it names the fixes" || fail "netted subjects missing" "$out"
+
+echo "pr-gate: a revert of a revert leaves the original as work — a commit nets once"
+# feat B; revert B; reapply B (git's revert of the revert). The tree after
+# the chain is the tree after B: 1 work, 2 netted — not 0 work, 3 netted.
+(
+  cd "$SANDBOX/repo" || exit 1
+  c "feat: B, the thing reapplied"; b="$(git rev-parse HEAD)"
+  git revert --no-edit "$b" >/dev/null; r1="$(git rev-parse HEAD)"
+  git revert --no-edit "$r1" >/dev/null
+  git push -q origin develop-qzapp/me/feat/thing
+)
+prs "$(jq -nc --arg h "$(git -C "$SANDBOX/repo" rev-parse HEAD)" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+out="$(run --json)"; rc=$?
+[[ $rc -eq 0 ]] && [[ "$(jq -r '.[0] | "\(.work_commits) \(.netted_commits)"' <<<"$out")" == "$((before_work + 3)) 4" ]] \
+  && pass "the chain adds one work (B stands) and two netted; the earlier pair still netted" \
+  || fail "chain over- or under-netted (rc=$rc; before: $before_work work)" "$out"
 
 echo
 if [[ $failures -eq 0 ]]; then echo "test_pr-gate: OK — all assertions passed."; else echo "test_pr-gate: FAILED — $failures assertion(s)."; exit 1; fi

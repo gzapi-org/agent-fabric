@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'tokens', 'memory', 'host', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -295,6 +295,79 @@ export function languages(paragraphs, { home, root, exec = execFileSync } = {}) 
   const shares = total ? sorted(Object.fromEntries(Object.entries(weight).map(([k, v]) => [k, Math.round(1000 * v / total) / 10]))) : {};
   return { status: 'ok', paragraphs: judged.length, unreliable, shares, dominant: sorted(dominant) };
 }
+// RECALL — is the corpus read? A drain is instrumented end to end; the
+// read-back never was: a slice read is a plain Read in the session's
+// record and nothing counted them, so a slice with a poor cue could be
+// written and never opened and nobody would know (the owner, 2026-09-20).
+// This walks the account's session records in the window — every
+// session and its subagents, not the newest five — and counts the tool
+// calls that touch the corpus: an index (`INDEX.md` under a project's
+// .agent-fabric/memory/<role>/ or the fabric's memory/domains/<x>/), a
+// slice (any other .md there, or under memory/shared/), the authored
+// identity (identities/roles/<role>/charter|brief|recall.md), and a
+// search (Grep/Glob whose path is one of those directories, or a Bash
+// command naming one). Counts and paths only — never a line of what was
+// read. `sessions_without_recall` is the number that matters: a session
+// that opened neither an index nor a slice worked without the corpus.
+const CORPUS_RE = /(?:\/\.agent-fabric\/memory\/|\/memory\/(?:domains|shared)\/)/;
+const IDENTITY_RE = /\/identities\/roles\/[a-z0-9-]+\/(?:charter|brief|recall)\.md$/;
+export function recallKind(tool, input) {
+  const p = typeof input?.file_path === 'string' ? input.file_path : typeof input?.path === 'string' ? input.path : '';
+  if (tool === 'Read') {
+    if (IDENTITY_RE.test(p)) return { kind: 'identity', path: p };
+    if (!CORPUS_RE.test(p)) return null;
+    return { kind: /\/INDEX\.md$/.test(p) ? 'index' : 'slice', path: p };
+  }
+  if (tool === 'Grep' || tool === 'Glob') return CORPUS_RE.test(p) || CORPUS_RE.test(String(input?.pattern ?? '')) ? { kind: 'search', path: p || String(input?.pattern ?? '') } : null;
+  if (tool === 'Bash') {
+    const m = String(input?.command ?? '').match(/(\S*(?:\/\.agent-fabric\/memory\/|\/memory\/(?:domains|shared)\/)\S*)/);
+    return m ? { kind: 'search', path: m[1].replace(/["'`;|)]+$/, '') } : null;
+  }
+  return null;
+}
+export function recall(home = os.homedir(), { hours = 24, now = Date.now() } = {}) {
+  const root = path.join(home, '.claude', 'projects');
+  const files = [];
+  try {
+    for (const d of fs.readdirSync(root)) {
+      const dir = path.join(root, d);
+      let names; try { names = fs.readdirSync(dir); } catch { continue; }
+      for (const n of names) {
+        if (n.endsWith('.jsonl')) files.push(path.join(dir, n));
+        const subs = path.join(dir, n, 'subagents');
+        let inner; try { inner = fs.readdirSync(subs); } catch { continue; }
+        for (const a of inner) if (/^agent-.*\.jsonl$/.test(a)) files.push(path.join(subs, a));
+      }
+    }
+  } catch { return { status: 'no-records', hours }; }
+  const recent = files.filter(f => { try { return now - fs.statSync(f).mtimeMs <= hours * 3600000; } catch { return false; } });
+  if (!recent.length) return { status: 'no-records', hours };
+  const counts = { index: 0, slice: 0, search: 0, identity: 0 };
+  const slices = {}; let sessions = 0, turns = 0, without = 0;
+  for (const f of recent) {
+    let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    let mine = 0, own = 0;
+    for (const line of body.split('\n')) {
+      if (!line.includes('"tool_use"')) { if (line.includes('"assistant"')) own += 1; continue; }
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      if (d?.type !== 'assistant') continue;
+      own += 1;
+      for (const b of d.message?.content ?? []) {
+        if (b?.type !== 'tool_use') continue;
+        const r = recallKind(b.name, b.input);
+        if (!r) continue;
+        counts[r.kind] += 1;
+        if (r.kind === 'index' || r.kind === 'slice') { mine += 1; slices[r.path] = (slices[r.path] ?? 0) + 1; }
+      }
+    }
+    if (!own) continue;   // a record with no assistant turn is not a session
+    sessions += 1; turns += own;
+    if (!mine) without += 1;
+  }
+  const top = Object.entries(slices).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([p, n]) => ({ path: p.replace(home, '~'), reads: n }));
+  return { status: 'ok', hours, sessions, turns, ...counts, sessions_without_recall: without, top };
+}
+
 export function notesDir(home = os.homedir(), env = process.env, login = (() => { try { return os.userInfo().username; } catch { return 'unknown'; } })()) {
   return path.join(env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'agent-fabric', 'agents', login, 'notes');
 }
@@ -560,6 +633,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));
     if (name === 'session') return guard(name, () => session(ctx.uid, ctx.exec));
     if (name === 'script') return guard(name, () => script(ctx.home));
+    if (name === 'recall') return guard(name, () => recall(ctx.home));
     if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));
     if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
     if (name === 'host') return guard(name, () => host(ctx.hostOpts));

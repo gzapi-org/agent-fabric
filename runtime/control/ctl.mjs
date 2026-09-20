@@ -2,7 +2,7 @@
 // post one request on the control channel, read the replies, print them.
 // Front door: bin/fabric-ctl.
 //
-//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]
+//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]
 //   fabric-ctl <login|all> host                     the machine, one row per host: load, memory, balloon, disks, leases, largest processes
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
 //
@@ -102,7 +102,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -146,6 +146,20 @@ export function table(op, rs) {
       const th = s => !s.thinking_blocks ? '-' : `${bins(s.thinking_blocks)} / ${s.thinking_blocks.empty} unreadable`;
       if (!s) { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${notes(r.script?.notes).padEnd(70)} ${(r.script?.status ?? '-')}`); continue; }
       lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${notes(s.notes).padEnd(70)} ${String(s.turns).padStart(5)}  ${fmt(s.text).padEnd(44)} ${th(s).padEnd(40)} ${workers(s.workers)}`);
+    }
+    return lines.join('\n');
+  }
+  if (op === 'recall') {
+    // Is the corpus read? One row per account: sessions in the window,
+    // how many opened neither an index nor a slice, the reads by kind,
+    // and the slice read most. Paths only, never text.
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'sessions'.padStart(8)} ${'no recall'.padStart(9)} ${'turns'.padStart(6)}  ${'index'.padStart(5)} ${'slice'.padStart(5)} ${'search'.padStart(6)} ${'identity'.padStart(8)}  most read`);
+    for (const r of rs) {
+      if (r.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      const c = r.recall;
+      if (!c || c.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${(c?.status ?? '-')}`); continue; }
+      const most = c.top?.[0] ? `${c.top[0].path} (${c.top[0].reads})` : '-';
+      lines.push(`${r.account.padEnd(22)} ${'ok'.padEnd(10)} ${String(c.sessions).padStart(8)} ${String(c.sessions_without_recall).padStart(9)} ${String(c.turns).padStart(6)}  ${String(c.index).padStart(5)} ${String(c.slice).padStart(5)} ${String(c.search).padStart(6)} ${String(c.identity).padStart(8)}  ${most}`);
     }
     return lines.join('\n');
   }
@@ -220,7 +234,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|host|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
+  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;

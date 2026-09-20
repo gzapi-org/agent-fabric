@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
-import { identity, usage, keys, fabric, session, host, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -362,4 +362,51 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   const bare = host({ proc, sys: path.join(root, 'nosys'), leases: path.join(root, 'noleases'), exec: () => { throw new Error('no such command'); }, cpus: 2, statfs });
   assert.equal(bare.balloon_mb, null); assert.deepEqual(bare.leases, []); assert.deepEqual(bare.top_rss, []);
   assert.ok(OPS.includes('host'));
+});
+
+test('recall: the corpus reads in the account\'s session records — index, slice, search, identity — and the sessions that read none; paths only', () => {
+  const h = scratch('recall-home-');
+  const dir = path.join(h, '.claude', 'projects', '-home-x-projects-demo'); fs.mkdirSync(dir, { recursive: true });
+  const use = (name, input) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+  const say = text => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+  const wc = `${h}/projects/demo`, fab = `${h}/projects/agent-fabric`;
+  // Session one: reads its index, two slices (one twice), greps the domain
+  // directory, cats a slice from bash, reads its charter — and a file that
+  // is none of these.
+  fs.writeFileSync(path.join(dir, 'one.jsonl'), [
+    say('hello'),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/INDEX.md` }),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/solution/auth.md` }),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/solution/auth.md` }),
+    use('Read', { file_path: `${fab}/memory/domains/backend-dev/domain/idempotency.md` }),
+    use('Grep', { pattern: 'outbox', path: `${fab}/memory/domains/backend-dev` }),
+    use('Bash', { command: `sed -n 1,40p ${wc}/.agent-fabric/memory/backend-dev/workflow.md` }),
+    use('Read', { file_path: `${fab}/identities/roles/backend-dev/charter.md` }),
+    use('Read', { file_path: `${wc}/src/main.rs` }),
+    'not json',
+  ].join('\n') + '\n');
+  // Session two: worked without the corpus. A subagent record beside it
+  // read a slice; it counts as its own session.
+  fs.writeFileSync(path.join(dir, 'two.jsonl'), [say('x'), use('Read', { file_path: `${wc}/README.md` })].join('\n') + '\n');
+  const subs = path.join(dir, 'two', 'subagents'); fs.mkdirSync(subs, { recursive: true });
+  fs.writeFileSync(path.join(subs, 'agent-1.jsonl'), use('Read', { file_path: `${fab}/memory/shared/domain-x.md` }) + '\n');
+  // A record older than the window is not read.
+  const old = path.join(dir, 'old.jsonl'); fs.writeFileSync(old, use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/INDEX.md` }) + '\n');
+  const past = new Date(Date.now() - 48 * 3600000); fs.utimesSync(old, past, past);
+
+  const r = recall(h);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.sessions, 3, 'two sessions and one subagent record');
+  assert.equal(r.turns, 9 + 2 + 1);
+  assert.deepEqual({ index: r.index, slice: r.slice, search: r.search, identity: r.identity }, { index: 1, slice: 4, search: 2, identity: 1 });
+  assert.equal(r.sessions_without_recall, 1, 'session two opened neither an index nor a slice');
+  assert.equal(r.top[0].reads, 2); assert.match(r.top[0].path, /^~\/projects\/demo\/.agent-fabric\/memory\/backend-dev\/solution\/auth\.md$/, 'the home is folded to ~');
+  assert.ok(!JSON.stringify(r).includes('outbox') || r.search, 'a grep pattern is never reported as text beyond the path');
+  assert.equal(recall(scratch('recall-empty-')).status, 'no-records');
+  // The classifier alone.
+  assert.equal(recallKind('Read', { file_path: '/x/memory/domains/a/INDEX.md' }).kind, 'index');
+  assert.equal(recallKind('Read', { file_path: '/x/memory/shared/domain-y.md' }).kind, 'slice');
+  assert.equal(recallKind('Read', { file_path: '/x/memory/README.md' }), null, 'the corpus README is not a slice');
+  assert.equal(recallKind('Edit', { file_path: '/x/memory/domains/a/b.md' }), null, 'a write is not a recall');
+  assert.equal(recallKind('Bash', { command: 'ls' }), null);
 });

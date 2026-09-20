@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# runtime/github/test_post-substitute-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
+# runtime/github/test_post-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
-# Behavioural tests for post-substitute-review.sh.
+# Behavioural tests for post-review.sh.
 #
-# What this exists to hold still: the MARKER. A substitute blind review
+# What this exists to hold still: the MARKER. The review class's review
 # is authored by the same GitHub account as every other session's work,
 # so nothing but an exact marker distinguishes it from a thread reply —
 # and pr-review-status.sh greps for that exact string. A marker that
@@ -19,7 +19,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-UNDER_TEST="$SCRIPT_DIR/post-substitute-review.sh"
+UNDER_TEST="$SCRIPT_DIR/post-review.sh"
 READER="$SCRIPT_DIR/pr-review-status.sh"
 
 [[ -f "$UNDER_TEST" ]] || { echo "test: not found: $UNDER_TEST" >&2; exit 1; }
@@ -100,14 +100,14 @@ body_of() { jq -r '.body' "$SANDBOX/state/payload.json" 2>/dev/null; }
 
 setup_sandbox
 
-echo "post-substitute-review: the marker is the first line of what is SENT"
+echo "post-review: the marker is the first line of what is SENT"
 # Asserted against the request payload, not the script's own output: the
 # reader greps the stored body, so that is the only thing that matters.
 set_pr "$ME/feat/thing"
 invoke "A P1 in the ownership guard." 552
 assert_rc "exits 0" 0
 if posted; then pass "a review was posted"; else fail "nothing posted" "$(cat "$SANDBOX/state/calls")"; fi
-if [[ "$(body_of | head -1)" == '<!-- agent-fabric-substitute-review v1 -->' ]]; then
+if [[ "$(body_of | head -1)" == '<!-- agent-fabric-review v1 -->' ]]; then
     pass "the marker is line 1 of the body"
 else
     fail "marker missing or not first" "got: $(body_of | head -1)"
@@ -130,7 +130,7 @@ else
     fail "the body was expanded or mangled" "sent: $(body_of)"
 fi
 
-echo "post-substitute-review: it is posted as a REVIEW, at the head commit"
+echo "post-review: it is posted as a REVIEW, at the head commit"
 if [[ "$(jq -r '.event' "$SANDBOX/state/payload.json")" == "COMMENT" ]]; then
     pass "event=COMMENT (a review object, not an issue comment)"
 else fail "wrong event" "$(cat "$SANDBOX/state/payload.json")"; fi
@@ -141,14 +141,19 @@ if grep -q 'POST repos/gzapi-org/gzapp/pulls/552/reviews' "$SANDBOX/state/calls"
     pass "posted to the reviews endpoint"
 else fail "wrong endpoint" "$(cat "$SANDBOX/state/calls")"; fi
 
-echo "post-substitute-review: it never claims to be a real review"
-assert_contains "output says it is reported separately" "reported separately from a real review"
+echo "post-review: it says what it is — the review class's blind review, nothing less"
+assert_contains "output says the reader counts it as THE review" "counts it as the review of this head"
 # The needle must not span the body's line wrap.
-if [[ "$(body_of)" == *"not an equivalent"* ]]; then
-    pass "the body itself says it is not equivalent"
-else fail "the disclaimer is missing from the body" "$(body_of)"; fi
+if [[ "$(body_of)" == *"**Blind review**"* ]]; then
+    pass "the body names the method"
+else fail "the body does not say what it is" "$(body_of)"; fi
+for word in substitute fallback "not a real review" "not an equivalent"; do
+    if [[ "$(body_of)" == *"$word"* ]]; then
+        fail "the body still calls the review '$word'" "$(body_of)"
+    else pass "the body never says '$word'"; fi
+done
 
-echo "post-substitute-review: --model is recorded when given, absent when not"
+echo "post-review: --model is recorded when given, absent when not"
 set_pr "$ME/feat/thing"; invoke "findings" 552 --model opus
 [[ "$(body_of)" == *"<!-- model: opus -->"* ]] && pass "records the model" \
     || fail "model not recorded" "$(body_of)"
@@ -156,19 +161,19 @@ set_pr "$ME/feat/thing"; invoke "findings" 552
 [[ "$(body_of)" != *"<!-- model:"* ]] && pass "no model line when unset" \
     || fail "invented a model line" "$(body_of)"
 
-echo "post-substitute-review: an older branch named for this clone is still this session's"
+echo "post-review: an older branch named for this clone is still this session's"
 set_pr "$ME_LEGACY/feat/thing"; invoke "findings" 552
 assert_rc "exits 0" 0
 posted && pass "posted on the legacy-prefixed branch" || fail "did not post on the legacy prefix"
 
-echo "post-substitute-review: another session's PR is refused"
+echo "post-review: another session's PR is refused"
 set_pr "$OTHER/fix/theirs"
 invoke "I should not be able to post this." 552
 assert_rc       "exits 2" 2
 assert_contains "names the owning session" "$OTHER"
 if ! posted; then pass "nothing was sent"; else fail "posted to another session's PR" "$(cat "$SANDBOX/state/calls")"; fi
 
-echo "post-substitute-review: a branch naming no session is allowed, with a warning"
+echo "post-review: a branch naming no session is allowed, with a warning"
 for b in "agent/global-event-identity" "dependabot/pub/apps/x/y" "add-claude-github-actions-178"; do
     set_pr "$b"
     invoke "findings" 552
@@ -177,7 +182,7 @@ for b in "agent/global-event-identity" "dependabot/pub/apps/x/y" "add-claude-git
 done
 assert_contains "says the branch names no session" "names no session"
 
-echo "post-substitute-review: an unusual <type> is still another session's"
+echo "post-review: an unusual <type> is still another session's"
 # The same P1 that the sibling script had: a shape test on <type> would
 # make a real session's branch writable. This predicate must agree.
 for t in "Fix" "chore(gh)" "WIP" "2fix"; do
@@ -187,7 +192,7 @@ for t in "Fix" "chore(gh)" "WIP" "2fix"; do
     else fail "POSTED to another session's '$t/' branch" "rc=$RUN_RC"; fi
 done
 
-echo "post-substitute-review: unreadable PR metadata REFUSES, it does not post"
+echo "post-review: unreadable PR metadata REFUSES, it does not post"
 # `jq -r .headRefName` on an empty or field-less payload yields "" or the
 # literal "null" — either splits into fewer than four segments, so the
 # guard read "names no session" and took the POSTING path. The header
@@ -203,14 +208,14 @@ for payload in '{}' ''; do
     fi
 done
 
-echo "post-substitute-review: --dry-run sends nothing"
+echo "post-review: --dry-run sends nothing"
 set_pr "$ME/feat/thing"
 invoke "findings" 552 --dry-run
 assert_rc       "exits 0" 0
-assert_contains "shows the marker"  "agent-fabric-substitute-review v1"
+assert_contains "shows the marker"  "agent-fabric-review v1"
 if ! posted; then pass "no request was sent"; else fail "dry run posted" "$(cat "$SANDBOX/state/calls")"; fi
 
-echo "post-substitute-review: invocation errors are refused, not guessed at"
+echo "post-review: invocation errors are refused, not guessed at"
 set_pr "$ME/feat/thing"
 invoke "" 552;            assert_rc "an empty body is refused" 2
 invoke "x" ;              assert_rc "a missing PR number is refused" 2
@@ -218,7 +223,7 @@ invoke "x" notanumber;    assert_rc "a non-numeric PR is refused" 2
 invoke "x" 552 --model;   assert_rc "--model without a value is refused" 2
 invoke "x" 552 --bogus;   assert_rc "an unknown option is refused" 2
 
-echo "post-substitute-review: a rejected post is reported, never assumed"
+echo "post-review: a rejected post is reported, never assumed"
 set_pr "$ME/feat/thing"; touch "$SANDBOX/state/api_fail"
 invoke "findings" 552
 assert_rc       "exits 2" 2
@@ -231,15 +236,15 @@ assert_rc       "an empty URL is treated as NOT posted" 2
 assert_contains "  and says so"                         "NOT posted"
 rm -f "$SANDBOX/state/api_empty"
 
-echo "post-substitute-review: the marker matches the READER's, byte for byte"
+echo "post-review: the marker matches the READER's, byte for byte"
 # THE CROSS-FILE CONTRACT. Two constants in two scripts; a one-sided
 # edit turns real coverage back into "0 reviews" with nothing failing.
-emit="$(grep -m1 "^SUBSTITUTE_REVIEW_MARKER=" "$UNDER_TEST" | cut -d= -f2-)"
-read_="$(grep -m1 "^SUBSTITUTE_REVIEW_MARKER=" "$READER"    | cut -d= -f2-)"
+emit="$(grep -m1 "^REVIEW_MARKER=" "$UNDER_TEST" | cut -d= -f2-)"
+read_="$(grep -m1 "^REVIEW_MARKER=" "$READER"    | cut -d= -f2-)"
 if [[ -n "$emit" && "$emit" == "$read_" ]]; then
     pass "emitter and pr-review-status.sh agree on the marker"
 else
-    fail "MARKER DRIFT — a substitute review would stop counting" \
+    fail "MARKER DRIFT — the review would stop counting" \
          "emitter: $emit
 reader : $read_"
 fi
@@ -251,8 +256,8 @@ if [[ -s "$GUARD_MARKER" ]]; then
 fi
 rm -f "$GUARD_MARKER"
 if [[ "$failures" -eq 0 ]]; then
-    echo "test_post-substitute-review: OK — all assertions passed."
+    echo "test_post-review: OK — all assertions passed."
     exit 0
 fi
-echo "test_post-substitute-review: FAILED — $failures assertion(s) failed." >&2
+echo "test_post-review: FAILED — $failures assertion(s) failed." >&2
 exit 1

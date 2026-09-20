@@ -524,7 +524,7 @@ write_pr_list "$(jq -n --arg me "$ME" \
 ]')"
 write_graphql "$(jq -n '{data: {repository: {
   p40: {number: 40, author: {login: "app/dependabot"}, reviewThreads: {nodes: []}},
-  p41: {number: 41, author: {login: "app/dependabot"}, reviewThreads: {nodes: [{isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}]}},
+  p41: {number: 41, author: {login: "app/dependabot"}, reviewThreads: {nodes: [{isResolved: false, comments: {nodes: [{author: {login: "reviewer[bot]"}}]}}]}},
   p42: {number: 42, author: {login: "andreabenetton"}, reviewThreads: {nodes: []}},
   p43: {number: 43, author: {login: "app/renovate"}, reviewThreads: {nodes: []}}
 }}}')"
@@ -748,8 +748,8 @@ write_pr_list "$(jq -n --arg me "$ME" \
 write_graphql "$(jq -n '{data: {repository: {
   p70: {number: 70, author: {login: "andreabenetton"},
         reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
-          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}},
-          {isResolved: false, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+          {isResolved: false, comments: {nodes: [{author: {login: "reviewer[bot]"}}]}},
+          {isResolved: false, comments: {nodes: [{author: {login: "reviewer[bot]"}}]}}
         ]}}
 }}}')"
 run /unattributed /unresolved
@@ -776,7 +776,7 @@ write_pr_list "$(jq -n --arg me "$ME" --arg t1 "$(ago '1 hour')" '[
 write_graphql "$(jq -n '{data: {repository: {
   p72: {number: 72, author: {login: "andreabenetton"},
         reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
-          {isResolved: true, comments: {nodes: [{author: {login: "chatgpt-codex-connector"}}]}}
+          {isResolved: true, comments: {nodes: [{author: {login: "reviewer[bot]"}}]}}
         ]}}
 }}}')"
 run /unattributed /unresolved

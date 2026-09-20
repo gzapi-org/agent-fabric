@@ -33,7 +33,7 @@
 #   checks green when every reported check passed; red names the failed
 #          ones; pending counts the ones still running; none-yet when no
 #          check has reported (seconds after a push)
-#   review whether a review (real or substitute) covers the CURRENT head
+#   review whether a review — an independent one, or the review class's blind review — covers the CURRENT head
 #          (pr-review-status.sh's reading)
 #   verdict one of:
 #     MERGEABLE — arm (8-16 work commits, gate met: post the basis, arm)
@@ -160,7 +160,7 @@ while IFS=$'\t' read -r num title head base hbranch draft; do
     rs="$("$REVIEW_STATUS" "$num" 2>/dev/null)"; rsrc=$?
     if [[ $rsrc -eq 2 ]]; then review="?"; else
         head_reviewed="$(sed -n 's/^  head reviewed? *: *\([a-z]*\).*/\1/p' <<<"$rs" | head -1)"
-        any="$(sed -n 's/^  \(independent reviews\|substitute reviews\|verdict comments\) *: *\([0-9]*\).*/\2/p' <<<"$rs" | awk '{s+=$1} END{print s+0}')"
+        any="$(sed -n 's/^  \(independent reviews\|blind reviews\|verdict comments\) *: *\([0-9]*\).*/\2/p' <<<"$rs" | awk '{s+=$1} END{print s+0}')"
         if [[ "$head_reviewed" == "yes" ]]; then review="head reviewed"; elif [[ "$any" -gt 0 ]]; then review="NOT on head"; else review="none"; fi
     fi
     # ── the verdict ──

@@ -291,14 +291,16 @@ def main() -> int:
              test_the_yaml_subset_and_the_cli, test_the_parser_refuses_what_it_cannot_keep,
              test_the_readme_example_renders_as_documented]
     failures = 0
-    tmp = tempfile.mkdtemp()
-    for case in cases:
-        try:
-            case(tmp) if case.__code__.co_argcount else case()
-            print(f"  ok   {case.__name__}")
-        except AssertionError as exc:
-            failures += 1
-            print(f"  FAIL {case.__name__}: {exc}")
+    # Removed when the run ends, however it ends: tests/run.sh names every
+    # entry a run leaves under the temporary directory as a failure.
+    with tempfile.TemporaryDirectory() as tmp:
+        for case in cases:
+            try:
+                case(tmp) if case.__code__.co_argcount else case()
+                print(f"  ok   {case.__name__}")
+            except AssertionError as exc:
+                failures += 1
+                print(f"  FAIL {case.__name__}: {exc}")
     print(f"\n{len(cases) - failures}/{len(cases)} passed")
     return 1 if failures else 0
 

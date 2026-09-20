@@ -8,7 +8,7 @@
 #   tests/run.sh static     # only the static checks (bash -n, shellcheck, ruff)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 what="${1:-all}"
 fail=0
 run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }

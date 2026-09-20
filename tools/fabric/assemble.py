@@ -338,6 +338,37 @@ def decode_scalar(text: str) -> str:
     return text
 
 
+def retire_in_siblings(directory: str, filename: str, target: str) -> bool:
+    """Remove the section `target` (and its "(n)" siblings) from every
+    OTHER budget part of the same topic in `directory`, rewriting each
+    file touched; True if it was found anywhere. `filename` is the part
+    being written: `<topic>.md`, `<topic>-<n>.md`, `<class>-<topic>(-n).md`
+    for a shared slice, or the flat `<class>.md`."""
+    stem = re.sub(r"(-\d+)?\.md$", "", filename)
+    found = False
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        if name == filename or not name.endswith(".md"):
+            continue
+        if re.sub(r"(-\d+)?\.md$", "", name) != stem:
+            continue
+        path = os.path.join(directory, name)
+        meta, sections = read_existing_slice(path)
+        victims = [h for h in sections if h == target or re.fullmatch(re.escape(target) + r" \(\d+\)", h)]
+        if not victims:
+            continue
+        for h in victims:
+            del sections[h]
+        found = True
+        if "collisions" in meta:
+            meta["collisions"] = [c for c in meta["collisions"] if c != target] or None
+            if meta["collisions"] is None:
+                del meta["collisions"]
+        body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + ("\n" if sections else "")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write((render_frontmatter(meta) + "\n\n" + body).rstrip() + "\n")
+    return found
+
+
 def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     """Return (frontmatter, {heading: section-text}) for a slice already on disk.
 
@@ -761,7 +792,13 @@ def main() -> int:
             if rival is None:
                 continue
             key_id = f"{label}/{klass}:{topic}#{heading}"
-            decision = decisions.get(key_id)
+            # A key per incoming claim as well as per heading: with three
+            # claims under one heading the owner may supersede with one
+            # and drop another, which one key for the pair cannot say.
+            # The claim's key is its first evidence hash; the heading key
+            # is the default for every pair under it.
+            claim_key = f"{key_id}@{(claim.get('evidence') or ['?'])[0][:12]}"
+            decision = decisions.get(claim_key) or decisions.get(key_id)
             agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
             if decision == "supersede":
                 claim["merge_target"] = heading
@@ -771,20 +808,21 @@ def main() -> int:
                 pass
             else:
                 refused_collisions.append(
-                    f"{key_id}\n"
+                    f"{claim_key}   (or {key_id} for every pair under the heading)\n"
                     f"    {'in this drain ' if heading not in present else 'in the corpus '}(observed {rival_date}): {excerpt(rival)}\n"
                     f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}): {excerpt(rendered)}"
                 )
                 continue
-            applied_decisions.append({"key": key_id, "decision": decision, "agent": agent,
-                                      "observed_at": claim.get("observed_at") or ""})
+            applied_decisions.append({"key": claim_key if claim_key in decisions else key_id, "decision": decision,
+                                      "agent": agent, "observed_at": claim.get("observed_at") or ""})
     if refused_collisions:
         print("SUPERSEDING? — a claim disagrees with a section already in the corpus; the owner decides "
               "which is true. This run wrote NOTHING and exits 1.", file=sys.stderr)
         for note in refused_collisions:
             print(f"  {note}", file=sys.stderr)
-        print("\nRe-run with --collision-decisions FILE, one entry per line above:\n"
-              "  {\"<role>/<class>:<topic>#<heading>\": \"supersede\" | \"keep-both\" | \"drop\"}\n"
+        print("\nRe-run with --collision-decisions FILE, one entry per line above (the claim's own key,\n"
+              "or the heading's key for every pair under it):\n"
+              "  {\"<role>/<class>:<topic>#<heading>[@<evidence>]\": \"supersede\" | \"keep-both\" | \"drop\"}\n"
               "  supersede: the incoming text replaces the section and retires its siblings;\n"
               "  keep-both: both stand, side by side, dated;  drop: the incoming claim is wrong.", file=sys.stderr)
         return 1
@@ -850,6 +888,14 @@ def main() -> int:
             heading = claim_heading(claim)
             target = (claim.get("merge_target") or "").strip()
             authorised = bool(target and target in blocks)
+            if target and not authorised and retire_in_siblings(directory, filename, target):
+                # THE SECTION LIVES IN ANOTHER PART of this topic (a slice
+                # split by budget): the owner's supersede retires it there
+                # and the superseding text lands here. Authorising only a
+                # target in the part being written exited 0 with both texts
+                # standing in two files (connected reviewer, 2026-09-20).
+                authorised = True
+                resolved.append(target)
             if authorised:
                 # Replacement is opt-in, and this is the opt-in.
                 heading = target

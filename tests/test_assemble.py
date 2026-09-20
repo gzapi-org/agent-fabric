@@ -1206,6 +1206,59 @@ def test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index(tmp: str) -> Non
     assert set(json.loads(read(report_path(out)))["roles"]) >= {"alpha", "beta"}
 
 
+def test_supersede_retires_the_section_in_the_part_that_holds_it(tmp: str) -> None:
+    """A topic split by budget: the rival heading sits in part two, the
+    superseding claim is grouped into part one. The owner's supersede must
+    retire the section where it lives and land the new text once — not
+    exit 0 with both standing in two files (connected reviewer, 2026-09-20)."""
+    big = "y " * 900
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    parts = sorted(n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow"))
+    assert len(parts) >= 2, parts
+    where = {n: "## Second" in read(dom(out, "alpha", "domain", n)) for n in parts}
+    assert any(where.values()), where
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Second", "body": "Second, revised.", "evidence": ["h3"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 1 and "alpha/domain:grow#Second" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Second": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    texts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## Second") for t in texts.values()) == 1, texts
+    assert any("Second, revised." in t for t in texts.values()) and not any(big.strip() in t and "## Second" in t and "Second, revised." not in t for t in texts.values())
+    assert not any("collisions:" in t for t in texts.values()), "the retired section's collision record goes with it"
+
+
+def test_each_colliding_claim_has_its_own_decision_key(tmp: str) -> None:
+    """Two incoming claims under one heading against a corpus section: the
+    owner supersedes with one and drops the other. A key per claim (its
+    first evidence hash) makes that sayable; the heading's key stays the
+    default for every pair under it."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "H", "body": "Original.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "H", "body": "Newest, the truth.", "evidence": ["h2"]},
+            {"class": "domain", "topic": "one", "title": "H", "body": "Intermediate, wrong.", "evidence": ["h3"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/domain:one#H@h2" in proc.stderr and "alpha/domain:one#H@h3" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:one#H@h2": "supersede", "alpha/domain:one#H@h3": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    text = read(dom(out, "alpha", "domain.md"))
+    assert "Newest, the truth." in text and "Intermediate" not in text and "Original." not in text and text.count("## H") == 1, text
+    keys = sorted(d["key"] for d in json.loads(read(report_path(out)))["collision_decisions"])
+    assert keys == ["alpha/domain:one#H@h2", "alpha/domain:one#H@h3"], keys
+
+
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
     """Non-English prose fails the same hygiene check a city name does: the
     claim is rejected and named, never written for lint to find later."""
@@ -1502,6 +1555,8 @@ def main() -> int:
         test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival,
         test_a_collision_inside_a_two_topic_flat_file_is_still_stopped,
         test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index,
+        test_supersede_retires_the_section_in_the_part_that_holds_it,
+        test_each_colliding_claim_has_its_own_decision_key,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

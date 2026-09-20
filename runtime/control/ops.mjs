@@ -309,8 +309,11 @@ export function languages(paragraphs, { home, root, exec = execFileSync } = {}) 
 // command naming one). Counts and paths only — never a line of what was
 // read. `sessions_without_recall` is the number that matters: a session
 // that opened neither an index nor a slice worked without the corpus.
-const CORPUS_RE = /(?:\/\.agent-fabric\/memory\/|\/memory\/(?:domains|shared)\/)/;
-const IDENTITY_RE = /\/identities\/roles\/[a-z0-9-]+\/(?:charter|brief|recall)\.md$/;
+// Anchored at a path boundary, not at a slash: a session that reads
+// `.agent-fabric/memory/<role>/INDEX.md` relative to its working copy —
+// the shape every instruction file shows — is reading the corpus.
+const CORPUS_RE = /(?:^|\/)(?:\.agent-fabric\/memory\/|memory\/(?:domains|shared)\/)/;
+const IDENTITY_RE = /(?:^|\/)identities\/roles\/[a-z0-9-]+\/(?:charter|brief|recall)\.md$/;
 export function recallKind(tool, input) {
   const p = typeof input?.file_path === 'string' ? input.file_path : typeof input?.path === 'string' ? input.path : '';
   if (tool === 'Read') {
@@ -320,7 +323,7 @@ export function recallKind(tool, input) {
   }
   if (tool === 'Grep' || tool === 'Glob') return CORPUS_RE.test(p) || CORPUS_RE.test(String(input?.pattern ?? '')) ? { kind: 'search', path: p || String(input?.pattern ?? '') } : null;
   if (tool === 'Bash') {
-    const m = String(input?.command ?? '').match(/(\S*(?:\/\.agent-fabric\/memory\/|\/memory\/(?:domains|shared)\/)\S*)/);
+    const m = String(input?.command ?? '').match(/(?:^|[\s'"=])((?:\S*\/)?(?:\.agent-fabric\/memory\/|memory\/(?:domains|shared)\/)\S*)/);
     return m ? { kind: 'search', path: m[1].replace(/["'`;|)]+$/, '') } : null;
   }
   return null;
@@ -344,13 +347,20 @@ export function recall(home = os.homedir(), { hours = 24, now = Date.now() } = {
   if (!recent.length) return { status: 'no-records', hours };
   const counts = { index: 0, slice: 0, search: 0, identity: 0 };
   const slices = {}; let sessions = 0, turns = 0, without = 0;
+  const since = now - hours * 3600000;
   for (const f of recent) {
     let body; try { body = fs.readFileSync(f, 'utf8'); } catch { continue; }
     let mine = 0, own = 0;
+    // The window applies to each RECORD: a long or resumed session's file
+    // is touched today and holds weeks of turns; counting them all
+    // inflated reads and turns and let an old index read stand for
+    // recent work. A record without a parseable timestamp is inside the
+    // window (the file is).
     for (const line of body.split('\n')) {
-      if (!line.includes('"tool_use"')) { if (line.includes('"assistant"')) own += 1; continue; }
+      if (!line.includes('"assistant"')) continue;
       let d; try { d = JSON.parse(line); } catch { continue; }
       if (d?.type !== 'assistant') continue;
+      const ts = Date.parse(d.timestamp); if (Number.isFinite(ts) && ts < since) continue;
       own += 1;
       for (const b of d.message?.content ?? []) {
         if (b?.type !== 'tool_use') continue;

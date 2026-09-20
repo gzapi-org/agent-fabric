@@ -367,8 +367,9 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
 test('recall: the corpus reads in the account\'s session records — index, slice, search, identity — and the sessions that read none; paths only', () => {
   const h = scratch('recall-home-');
   const dir = path.join(h, '.claude', 'projects', '-home-x-projects-demo'); fs.mkdirSync(dir, { recursive: true });
-  const use = (name, input) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
-  const say = text => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+  const fresh = new Date().toISOString(), stale = new Date(Date.now() - 72 * 3600000).toISOString();
+  const use = (name, input, timestamp = fresh) => JSON.stringify({ type: 'assistant', timestamp, message: { content: [{ type: 'tool_use', name, input }] } });
+  const say = (text, timestamp = fresh) => JSON.stringify({ type: 'assistant', timestamp, message: { content: [{ type: 'text', text }] } });
   const wc = `${h}/projects/demo`, fab = `${h}/projects/agent-fabric`;
   // Session one: reads its index, two slices (one twice), greps the domain
   // directory, cats a slice from bash, reads its charter — and a file that
@@ -386,6 +387,13 @@ test('recall: the corpus reads in the account\'s session records — index, slic
     use('Bash', { command: `sed -n 1,40p ${wc}/.agent-fabric/memory/backend-dev/workflow.md` }),
     use('Read', { file_path: `${fab}/identities/roles/backend-dev/charter.md` }),
     use('Read', { file_path: `${wc}/src/main.rs` }),
+    // Repository-relative paths — the shape every instruction file shows.
+    use('Read', { file_path: '.agent-fabric/memory/backend-dev/INDEX.md' }),
+    use('Read', { file_path: 'memory/domains/backend-dev/domain/idempotency.md' }),
+    // A long session's file is touched today and holds older turns: the
+    // window applies to the record, so these two count for nothing.
+    say('weeks ago', stale),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/solution/auth.md` }, stale),
     'not json',
   ].join('\n') + '\n');
   // Session two: worked without the corpus. A subagent record beside it
@@ -400,11 +408,16 @@ test('recall: the corpus reads in the account\'s session records — index, slic
   const r = recall(h);
   assert.equal(r.status, 'ok');
   assert.equal(r.sessions, 3, 'two sessions and one subagent record');
-  assert.equal(r.turns, 12 + 2 + 1);
-  assert.deepEqual({ index: r.index, slice: r.slice, search: r.search, identity: r.identity }, { index: 1, slice: 4, search: 3, identity: 1 },
-    'the crossref and the drain report are not slices; a grep naming a corpus directory only in its pattern is a search');
+  assert.equal(r.turns, 14 + 2 + 1, 'the two stale records are outside the window');
+  assert.deepEqual({ index: r.index, slice: r.slice, search: r.search, identity: r.identity }, { index: 2, slice: 5, search: 3, identity: 1 },
+    'relative paths count; the crossref and the drain report are not slices; a grep naming a corpus directory only in its pattern is a search; the stale read does not count');
   assert.equal(r.sessions_without_recall, 1, 'session two opened neither an index nor a slice');
-  assert.equal(r.top[0].reads, 2); assert.match(r.top[0].path, /^~\/projects\/demo\/.agent-fabric\/memory\/backend-dev\/solution\/auth\.md$/, 'the home is folded to ~');
+  assert.equal(r.top[0].reads, 2, 'the stale third read of auth.md is not counted'); assert.match(r.top[0].path, /^~\/projects\/demo\/.agent-fabric\/memory\/backend-dev\/solution\/auth\.md$/, 'the home is folded to ~');
+  // A file touched today whose every record is old is not a session in the window.
+  const olddir = path.join(h, '.claude', 'projects', '-home-x-projects-old'); fs.mkdirSync(olddir, { recursive: true });
+  fs.writeFileSync(path.join(olddir, 'resumed.jsonl'), [say('x', stale), use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/INDEX.md` }, stale)].join('\n') + '\n');
+  const r2 = recall(h);
+  assert.equal(r2.sessions, 3, 'a file with no record in the window is not a session'); assert.equal(r2.index, 2);
   assert.ok(!JSON.stringify(r).includes('outbox'), 'a grep pattern is never reported: paths of reads and counts only');
   assert.ok(!JSON.stringify(r).includes('crossref') && !JSON.stringify(r).includes('drain-report'), 'non-slice reads under the corpus are not in top');
   assert.equal(recall(scratch('recall-empty-')).status, 'no-records');
@@ -416,4 +429,7 @@ test('recall: the corpus reads in the account\'s session records — index, slic
   assert.equal(recallKind('Read', { file_path: '/x/.agent-fabric/memory/last-drain-report.json' }), null, 'nor a drain report');
   assert.equal(recallKind('Edit', { file_path: '/x/memory/domains/a/b.md' }), null, 'a write is not a recall');
   assert.equal(recallKind('Bash', { command: 'ls' }), null);
+  assert.equal(recallKind('Read', { file_path: '.agent-fabric/memory/db-admin/INDEX.md' }).kind, 'index', 'a repository-relative index');
+  assert.equal(recallKind('Bash', { command: 'sed -n 1,20p memory/domains/db-admin/domain/x.md' }).kind, 'search', 'a relative path in a command');
+  assert.equal(recallKind('Read', { file_path: '/x/some-memory/domains/a/b.md' }), null, 'a directory merely ending in memory is not the corpus');
 });

@@ -1114,6 +1114,12 @@ def test_the_same_claim_again_is_never_a_collision_whatever_its_date(tmp: str) -
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
     assert read(path).count("## T") == 1 and "*Observed 2026-09-19 (alpha)*" in read(path)
+    # ...and the same text arriving WITHOUT a date keeps the recorded one.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(path).count("## T") == 1 and "*Observed 2026-09-19 (alpha)*" in read(path), read(path)
 
 
 def test_keep_both_is_remembered_on_the_next_drain(tmp: str) -> None:
@@ -1150,6 +1156,54 @@ def test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival(tmp: str
     assert proc.returncode == 0, proc.stderr
     assert "About y." in read(dom(out, "alpha", "domain", "y.md"))
     assert "About x." in read(dom(out, "alpha", "domain", "x.md"))
+
+
+def test_a_collision_inside_a_two_topic_flat_file_is_still_stopped(tmp: str) -> None:
+    """Drain one brings topic x alone (a flat class file), drain two topic y
+    alone (merged into the same flat file), drain three x with changed text
+    under its heading. The pre-pass reads the flat file exactly when the
+    write phase writes into it, so this genuine collision is refused —
+    excluded whenever the crossref named two topics, it slipped through as
+    an "X (2)" (re-review of 2026-09-20, N1)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "x", "title": "Hx", "body": "About x.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "y", "title": "Hy", "body": "About y.", "evidence": ["h2"]}]), fh)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    flat = dom(out, "alpha", "domain.md")
+    assert os.path.exists(flat) and "## Hx" in read(flat) and "## Hy" in read(flat), "precondition: one flat file, two topics"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "x", "title": "Hx", "body": "About x, changed.", "evidence": ["h3"]}]), fh)
+    before = read(flat)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/domain:x#Hx" in proc.stderr, proc.stderr
+    assert read(flat) == before
+
+
+def test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index(tmp: str) -> None:
+    """A shared slice's only incoming claim dropped by the owner: the slice
+    stays, and so does its line in every owner's index — a shared slice on
+    disk is swept into its owners' indexes as the role's own are (N2)."""
+    shared_claim = {"class": "domain", "topic": "one", "title": "H", "body": "First.", "evidence": ["h1"], "shared_with": ["beta"]}
+    drain, claims_dir, out = build(tmp, {
+        "alpha": claims("alpha", [shared_claim]),
+        "beta": claims("beta", [{"class": "workflow", "topic": "own", "title": "Own", "body": "b", "evidence": ["h2"]}]),
+    })
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    for role in ("alpha", "beta"):
+        assert "shared/domain-one.md" in read(proj(out, role, "INDEX.md")), role
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{**shared_claim, "body": "Second, different.", "evidence": ["h3"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "shared/domain:one#H" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions", decisions_file(tmp, {"shared/domain:one#H": "drop"}))
+    assert proc.returncode == 0, proc.stderr
+    assert "First." in read(shared_path(out, "domain-one.md")) and "Second" not in read(shared_path(out, "domain-one.md"))
+    for role in ("alpha", "beta"):
+        assert "shared/domain-one.md" in read(proj(out, role, "INDEX.md")), f"{role} lost the shared slice from its index"
+    assert set(json.loads(read(report_path(out)))["roles"]) >= {"alpha", "beta"}
 
 
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
@@ -1446,6 +1500,8 @@ def main() -> int:
         test_the_same_claim_again_is_never_a_collision_whatever_its_date,
         test_keep_both_is_remembered_on_the_next_drain,
         test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival,
+        test_a_collision_inside_a_two_topic_flat_file_is_still_stopped,
+        test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

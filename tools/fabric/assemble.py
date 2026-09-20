@@ -384,7 +384,7 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     return meta, sections
 
 
-OBSERVED_RE = re.compile(r"\*Observed (\d{4}-\d{2}-\d{2})(?: \(([a-z0-9-]+)\))?\*")
+OBSERVED_RE = re.compile(r"\s*\*Observed (\d{4}-\d{2}-\d{2})(?: \(([a-z0-9-]+)\))?\*\s*$")
 
 
 def undated(text: str) -> str:
@@ -693,13 +693,17 @@ def main() -> int:
         return found
 
     def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
-        """Every file the topic's sections may sit in: the topic file and
+        """Every file the topic's sections may sit in — the pre-pass reads
+        exactly what the write phase will write into. The topic file and
         its budget parts (`<topic>-<n>.md`, digits only — a sibling topic
-        named `<topic>-2026-09-17` is another topic), and the flat class
-        file only when the committed crossref says it holds this topic
-        alone: read as this topic's regardless, another topic's section
-        under a coinciding heading was refused as a collision that the
-        write phase, which migrates the flat file first, never has."""
+        named `<topic>-2026-09-17` is another topic); and the flat class
+        file when the write phase writes into it (no `<class>/` directory
+        yet and this drain brings one topic of the class) or migrates it
+        to this topic's file (the crossref names this topic alone). Read
+        as this topic's regardless, another topic's section under a
+        coinciding heading was refused as a collision the write phase
+        never has; excluded whenever the crossref named two topics, a
+        real collision inside a two-topic flat file went unstopped."""
         if role is None:
             base = layout.shared_home(klass, project)
             stem = os.path.join(base, f"{klass}-{topic}")
@@ -709,7 +713,9 @@ def main() -> int:
             stem = os.path.join(base, CLASS_FILES[klass], topic)
             flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
             prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
-            flat = [flat_file] if os.path.exists(flat_file) and (not prior or prior == {topic}) else []
+            topics_here = sum(1 for (k, _t) in per_role.get(role, {}) if k == klass)
+            writes_flat = not os.path.isdir(os.path.join(base, CLASS_FILES[klass])) and topics_here == 1
+            flat = [flat_file] if os.path.exists(flat_file) and (writes_flat or prior == {topic}) else []
         parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if re.fullmatch(r".*-\d+\.md", p))
         return [p for p in flat + parts if os.path.exists(p)]
 
@@ -884,6 +890,12 @@ def main() -> int:
                 heading = f"{heading} ({suffix})"
             if heading not in blocks:
                 order.append(heading)
+            # Equal text arriving WITHOUT a date (a bundle from before sections
+            # were dated) keeps the date the corpus already recorded; a
+            # recorded value is never dropped silently.
+            if heading in blocks and not OBSERVED_RE.search(rendered) and OBSERVED_RE.search(blocks[heading]) \
+               and undated(blocks[heading]) == undated(rendered):
+                rendered = blocks[heading]
             blocks[heading] = rendered
 
         # SCOPE UNIONS WITH WHAT IS CARRIED, and `full` wins.
@@ -1125,6 +1137,34 @@ def main() -> int:
                 {"path": entry["path"], "description": entry["description"] + " (shared)",
                  "class": entry["class"]}
             )
+        # ...and every shared slice ON DISK this role owns and this run did
+        # not write — the same sweep the role's own directories get. A
+        # shared slice untouched by a drain (nothing new for it, or its only
+        # incoming claim dropped by the owner) vanished from its owners'
+        # indexes, and the index is the only thing a session reads.
+        listed_shared = {e["path"] for e in index_entries[role]}
+        for klass in CLASS_FILES:
+            try:
+                shared_dir = layout.shared_home(klass, project)
+            except ValueError:
+                continue
+            if not os.path.isdir(shared_dir):
+                continue
+            for name in sorted(os.listdir(shared_dir)):
+                if not name.startswith(f"{klass}-") or not name.endswith(".md"):
+                    continue
+                path = os.path.join(shared_dir, name)
+                meta, _sections = read_existing_slice(path)
+                owners = meta.get("shared_with") or []
+                if role not in owners:
+                    continue
+                rel = layout.link_rel(path, project)
+                if rel in listed_shared:
+                    continue
+                index_entries[role].append(
+                    {"path": rel, "description": described(path, name) + " (shared)", "class": klass}
+                )
+                listed_shared.add(rel)
 
         # Authored files (charter, recall) are not distilled from claims, but
         # they are part of the role and the index must account for them — an

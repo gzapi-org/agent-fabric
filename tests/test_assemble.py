@@ -350,20 +350,30 @@ def test_a_fully_attributed_drain_says_nothing_about_bindings(tmp: str) -> None:
 
 
 def test_output_is_byte_stable(tmp: str) -> None:
+    """The same drain assembled twice is the same tree — every file, and no
+    new one. The bodies are sized so the slice sits past HALF its budget:
+    with tiny bodies this case passed while a re-run of a real drain split
+    the slice into `-2` (2026-09-17), because the carried sections and the
+    same claims re-rendered were both counted toward the budget."""
+    body = ("A durable fact about the field, stated once. " * 60).strip()
     payload = {"alpha": claims("alpha", [
-        {"class": "domain", "topic": "one", "title": "T", "body": "b", "evidence": ["h1"]},
-        {"class": "solution", "topic": "two", "title": "U", "body": "b", "evidence": ["h2"]},
+        {"class": "domain", "topic": "one", "title": f"Fact {i}", "body": body, "evidence": ["h1"]}
+        for i in range(2)
+    ] + [
+        {"class": "solution", "topic": "two", "title": "U", "body": body, "evidence": ["h2"]},
     ])}
     drain, claims_dir, out = build(tmp, payload)
     run_assemble(drain, claims_dir, out)
-    first = {}
-    for dirpath, _dirs, files in os.walk(out):
-        for name in files:
-            p = os.path.join(dirpath, name)
-            first[p] = read(p)
-    run_assemble(drain, claims_dir, out)
+    def snapshot() -> dict[str, str]:
+        return {os.path.join(d, n): read(os.path.join(d, n)) for d, _ds, fs in os.walk(out) for n in fs}
+    first = snapshot()
+    assert not [p for p in first if p.endswith("-2.md")], "the fixture must fit one part on the first run"
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    second = snapshot()
+    assert set(second) == set(first), f"files appeared or vanished: {sorted(set(second) ^ set(first))}"
     for path, before in first.items():
-        assert read(path) == before, f"{path} differs between identical runs"
+        assert second[path] == before, f"{path} differs between identical runs"
 
 
 def test_slice_splits_when_it_exceeds_budget(tmp: str) -> None:
@@ -971,6 +981,34 @@ def test_hygiene_violation_is_redacted_in_place(tmp: str) -> None:
     assert report["rejected_hygiene"] == [] and "rejected_hygiene" not in report["telemetry"]["alpha"]
 
 
+def test_carried_text_is_redacted_the_same_way_a_claim_is(tmp: str) -> None:
+    """A slice written before a pattern existed carries the banned term into
+    the next drain; it is substituted there exactly as a new claim's text
+    is, and named. Once the two paths disagreed — a claim refused, the same
+    word in carried text written with a warning — and lint failed the
+    assembled tree (2026-09-16)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "carry", "title": "Older", "body": "Written before the rule.", "evidence": ["h1"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    path = dom(out, "alpha", "domain.md")
+    text = read(path).replace("Written before the rule.", "Written before the rule, in Springfield.")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    # A later drain touches the same slice with a clean claim.
+    _drain, claims_dir2, _out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "carry", "title": "Newer", "body": "A clean addition.", "evidence": ["h2"]},
+    ])})
+    proc = run_assemble(drain, claims_dir2, out)
+    assert proc.returncode == 0, proc.stderr
+    after = read(path)
+    assert "Springfield" not in after and "in [redacted]." in after, after
+    assert "A clean addition." in after, after
+    assert "REDACTED (hygiene" in proc.stderr and "city name" in proc.stderr, proc.stderr
+    assert "HYGIENE PROBLEMS" not in proc.stderr, proc.stderr
+
+
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
     """Non-English prose fails the same hygiene check a city name does: the
     claim is rejected and named, never written for lint to find later."""
@@ -1260,6 +1298,7 @@ def main() -> int:
         test_domain_only_evidence_may_only_support_a_domain_claim,
         test_domain_only_evidence_is_accepted_on_a_domain_claim,
         test_hygiene_violation_is_redacted_in_place,
+        test_carried_text_is_redacted_the_same_way_a_claim_is,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

@@ -784,17 +784,32 @@ def main() -> int:
         written.append(path)
         problems.extend(hygiene_check(body, layout.root_rel(path)))
 
-    def carried_chars(*candidates: str) -> int:
-        """How much text merge mode will carry into the FIRST part.
+    def carried_chars(claims: list[dict[str, Any]], *candidates: str) -> int:
+        """How much text merge mode will carry into the FIRST part, BEYOND
+        what this drain's claims already are.
 
         Sized from whichever candidate path actually exists: the layout of a
         slice depends on whether it ever split, so the same topic can live at
         `<class>.md` or `<class>/<topic>.md` and only the tree knows which.
+
+        A section that IS one of this drain's claims re-rendered — same
+        heading, same text, the rule write_slice applies — costs nothing:
+        write_slice writes it once. Counting it here as well counted every
+        re-assembled claim twice, so a slice past half its budget split on
+        the second run of the same drain, and the second part received the
+        same claims as new sections — the `-2` copies of 2026-09-17. Text
+        alone is not identity: two claims with the same body under
+        different titles are two sections, and both are carried.
         """
+        incoming = {
+            ((c.get("title") or c["topic"].replace("-", " ").capitalize()).strip(),
+             claim_block(c).split("\n", 1)[1].strip())
+            for c in claims
+        }
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
-                return sum(len(h) + len(t) + 8 for h, t in sections.items())
+                return sum(len(h) + len(t) + 8 for h, t in sections.items() if (h, t) not in incoming)
         return 0
 
     def split_by_budget(
@@ -849,7 +864,7 @@ def main() -> int:
     for (klass, topic), claims in sorted(shared.items()):
         owners = sorted(shared_owners[(klass, topic)])
         shared_dir = layout.shared_home(klass, project)
-        prior = carried_chars(os.path.join(shared_dir, f"{klass}-{topic}.md"))
+        prior = carried_chars(claims, os.path.join(shared_dir, f"{klass}-{topic}.md"))
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
             filename = f"{klass}-{topic}{suffix}.md"
@@ -913,6 +928,7 @@ def main() -> int:
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(
+                    claims,
                     os.path.join(base, f"{CLASS_FILES[klass]}.md"),
                     os.path.join(base, CLASS_FILES[klass], f"{topic}.md"),
                 )

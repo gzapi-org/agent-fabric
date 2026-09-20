@@ -35,7 +35,7 @@ here so nothing is lost:
 - The embedded-repository gitlink: observed 2026-08-07.
 - Parallel worktree creation: verified 2026-08-07, eight simultaneous
   adds.
-- The substitute reviewer's trigger named gzapp's
+- The review class's trigger named gzapp's
   `tools/gh/pr-review-status.sh`; the tool is the fabric's since
   2026-09-19 (`runtime/github/`), reached through the project's
   forwarder.

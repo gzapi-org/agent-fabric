@@ -70,7 +70,8 @@ export async function main(argv = process.argv.slice(2)) {
   // to stderr. The line-width check is off: the bridge carries a line as
   // written, and a warning nobody can act on (a path, an id) is noise.
   const result = validate(text, { taxonomy, maxColumns: 0 });
-  for (const w of result.warnings ?? []) console.error(`send: warning: ${w}`);
+  // An id complaint is repeated below as the refusal; once is enough.
+  for (const w of result.warnings ?? []) if (!/^(MESSAGE-ID|IN-REPLY-TO) is /.test(w)) console.error(`send: warning: ${w}`);
   if (!result.ok) { for (const e of result.errors ?? []) console.error(`send: ${e}`); console.error('send: not sent — the message does not validate'); return 2; }
   const msg = parse(text);
   const from = msg.metadata?.FROM;

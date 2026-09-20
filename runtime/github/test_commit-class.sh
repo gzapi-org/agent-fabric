@@ -59,5 +59,13 @@ expect work "aaa" "fix(scope): the nap is clamped to what is left"
 expect work "aaa" "admin driver review: approving a driver reads the roster"
 expect work "aaa" "the review decision's reason is persisted"
 expect work "aaa" "wait-merged: only PRIVATE repositories' minutes count"
+echo "commit-class: revert_targets reads git's own line, nothing else"
+got="$(printf 'Revert \"feat: x\"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.\nAlso: This reverts commit abcdef1.\n' | revert_targets | tr '\n' ' ')"
+[[ "$got" == "0123456789abcdef0123456789abcdef01234567 abcdef1 " ]] && pass "two targets, in order" || fail "revert_targets: $got"
+got="$(printf 'Revert the thing by hand\n\nno trailer here\n' | revert_targets)"
+[[ -z "$got" ]] && pass "a prose revert names no target" || fail "prose read as a target: $got"
+expect work "aaa" "Revert the thing by hand"
+expect work "aaa" 'Revert "feat: the used-by guard"'
+
 echo
 if [[ $failures -eq 0 ]]; then echo "test_commit-class: OK — all assertions passed."; else echo "test_commit-class: FAILED — $failures assertion(s)." >&2; exit 1; fi

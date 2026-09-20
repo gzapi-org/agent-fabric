@@ -83,3 +83,17 @@ commit_class() {
     fi
     echo work
 }
+
+# A REVERT AND WHAT IT REVERTS NET TO ZERO WORK when both are in the range
+# (devex-tooling and architect-cto, 2026-09-20: a PR carried a revert of
+# two of its own commits; the classifier counted the revert as work and
+# the reverted commits as work, and the gate said "9 work — arm" where
+# the honest count was 7, under the band). The machine-readable fact is
+# git's own line in the revert's body, "This reverts commit <sha>."; a
+# "Revert …" subject without it is prose and stays whatever its words
+# say. A revert whose partner is NOT in the range — reverting something
+# already on main — is work as before: it changes the tree. The caller
+# has the range; this prints the shas a body names, one per line.
+revert_targets() {
+    grep -oE 'This reverts commit [0-9a-f]{7,40}' | awk '{print $4}'
+}

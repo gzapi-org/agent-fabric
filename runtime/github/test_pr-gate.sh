@@ -183,5 +183,32 @@ out="$(run --json)"; grep -q "git fetch origin failed" <<<"$out" && pass "the fa
 git -C "$SANDBOX/repo" remote set-url origin "$orig_url"
 out="$(run --json)"; [[ "$(jq -r '.[0].commits_known' <<<"$out")" == "true" ]] && pass "…and counted again once the remote is back" || fail "count did not recover" "$out"
 
+echo "pr-gate: a revert and the commit it reverts net to zero work (gzapp #912: '9 work — arm' where the count was 7)"
+# On the same branch: a work commit, then git's own revert of it (the
+# body carries "This reverts commit <sha>."), then a revert of a commit
+# that is already on main (not in the range: it changes the tree, so it
+# is work), then a "Revert …" subject with no trailer line (prose: work).
+prs "$(jq -nc --arg h "$(git -C "$SANDBOX/repo" rev-parse HEAD)" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+graphql MERGEABLE 0 no "" "$GREEN"; review yes
+before_work="$(run --json | jq -r '.[0].work_commits')"; before_fix="$(run --json | jq -r '.[0].fix_commits')"
+(
+  cd "$SANDBOX/repo" || exit 1
+  c "feat: the used-by guard"; guard="$(git rev-parse HEAD)"
+  git revert --no-edit "$guard" >/dev/null
+  base_sha="$(git rev-parse origin/main)"
+  git revert --no-edit "$base_sha" >/dev/null 2>&1 || { git revert --abort 2>/dev/null; printf 'revert-main\n' >> f.txt; git add -A; git commit -q -m "Revert \"base\"" -m "This reverts commit $base_sha."; }
+  c "Revert the thing by hand"
+  git push -q origin develop-qzapp/me/feat/thing
+)
+HEAD2="$(git -C "$SANDBOX/repo" rev-parse HEAD)"
+prs "$(jq -nc --arg h "$HEAD2" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+graphql MERGEABLE 0 no "" "$GREEN"; review yes
+out="$(run --json)"; rc=$?
+[[ $rc -eq 0 ]] && [[ "$(jq -r '.[0] | "\(.work_commits) \(.fix_commits) \(.netted_commits)"' <<<"$out")" == "$((before_work + 2)) $before_fix 2" ]] \
+  && pass "four commits added: the in-range pair is netted (2); the revert of a main commit and the trailer-less 'Revert' are work (+2); fixes unchanged" \
+  || fail "revert netting wrong (rc=$rc; before: $before_work work, $before_fix fix)" "$out"
+out="$(run)"
+grep -q "work, $before_fix fix, 1 merge, 2 netted by a revert)" <<<"$out" && pass "the row says so" || fail "row text" "$out"
+
 echo
 if [[ $failures -eq 0 ]]; then echo "test_pr-gate: OK — all assertions passed."; else echo "test_pr-gate: FAILED — $failures assertion(s)."; exit 1; fi

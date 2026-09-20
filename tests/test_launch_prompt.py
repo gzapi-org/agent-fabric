@@ -276,6 +276,33 @@ def case_locale_render_has_a_wider_ceiling() -> None:
         assert "ქართული ხაზი" in _build_direct(f, "language-culture-ge", "language-culture")
 
 
+def case_every_catalogue_role_renders_under_the_ceiling() -> None:
+    """The launcher refuses a prompt over MAX_CHARS at launch — and until
+    2026-09-20 nothing before the launch checked the RENDERED total: the
+    lint budgets the charter and the brief each, the suite rendered
+    fixtures, and a brand-comms charter that passed both broke that
+    account's launch. Every role in the REAL catalogue renders here, for
+    a plain (non-locale) agent, under the ceiling; a failure names the
+    role and the size, the way the launcher does."""
+    roles = [r["id"] for r in json.load(open(os.path.join(ROOT, "identities", "roles", "catalog.json")))["roles"]]
+    assert roles, "the catalogue names roles"
+    code = ("import importlib.util, sys, json; "
+            "spec = importlib.util.spec_from_file_location('lp', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+            "out = {}\n"
+            "for role in sys.argv[2:]:\n"
+            "    try:\n"
+            "        t, _ = m.build_launch('test-agent', 'test-host', role); out[role] = len(t)\n"
+            "    except SystemExit as exc:\n"
+            "        out[role] = str(exc)\n"
+            "sys.stdout.write(json.dumps({'max': m.MAX_CHARS, 'sizes': out}))")
+    r = subprocess.run([sys.executable, "-c", code, os.path.join(ROOT, "tools", "fabric", "launch_prompt.py"), *roles],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    over = [f"{role}: {size}" for role, size in got["sizes"].items() if not isinstance(size, int) or size > got["max"]]
+    assert not over, f"rendered prompt over MAX_CHARS={got['max']} — shorten the charter or brief, or move the ceiling with its reason: " + "; ".join(over)
+
+
 def main() -> int:
     cases = [
         case_locale_charter_is_rendered_for_the_login_suffix,
@@ -292,7 +319,7 @@ def main() -> int:
         case_byte_stable_across_builds_and_cwds,
         case_nothing_about_who_can_be_passed_in,
         case_oversized_prompt_is_refused,
-    ]
+        case_every_catalogue_role_renders_under_the_ceiling]
     failures = 0
     for case in cases:
         try:

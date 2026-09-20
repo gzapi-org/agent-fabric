@@ -61,7 +61,7 @@ FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 # ~5 000 tokens: fabric-coordinator's 7 KB charter (13 KB rendered with no
 # brief) plus a full brief fits; anything larger is a lint problem upstream,
 # not something to ship with every request of a session.
-MAX_CHARS = 23_000   # 20_000 until 2026-09-18 (the owner's two rules), 21_500 until 2026-09-19 (one open PR per agent, its exceptions); layout.PROMPT_TEMPLATE_BUDGET_TOKENS moves with it
+MAX_CHARS = 28_000   # 20_000 until 2026-09-18 (the owner's two rules); 21_500 and 23_000 on 2026-09-19 (one open PR per agent, the clean-test rule); 28_000 on 2026-09-20: the owner's brand-comms sections rendered 24.5k over the fabric's longest brief, and language-culture's English render 26.5k — a green PR broke a launch because nothing but the launcher checked the rendered total; tests/test_launch_prompt.py now renders every role against this number
 
 # The header, the missing-brief line, the team and memory sections are
 # templates under identities/prompt/ (lint budgets them together): the

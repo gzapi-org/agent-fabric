@@ -246,6 +246,11 @@ def parse_memory(path: str) -> dict[str, Any] | None:
         # the fallback. A section rendered from this claim carries the
         # date, so two divergent sections on one topic read in time order.
         "observed_at": observed_date(meta.get("metadata.modified") or meta.get("modified"), path),
+        # The author's own supersession: `merge_target: "<heading>"` in the
+        # metadata block names the section this memory replaces, and the
+        # assembler asks the owner nothing. The README promised the field
+        # and the harvest dropped it (language-culture, 2026-09-20).
+        "merge_target": (meta.get("metadata.merge_target") or meta.get("merge_target") or "").strip(),
     }
 
 
@@ -410,6 +415,7 @@ def main() -> int:
             "knowledge_scope": "full",
             "body": text,
             "observed_at": parsed["observed_at"],
+            **({"merge_target": parsed["merge_target"]} if parsed["merge_target"] else {}),
             # Two or more owners is the assembler's route to a shared slice
             # (memory/README.md, "Four scopes"); a memory names its co-owners
             # and the drain carries them, so a fact every role needs is not

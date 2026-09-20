@@ -632,6 +632,14 @@ test('a missing MESSAGE-ID is an error; a key that misspells one is named', () =
   // A real id silences everything.
   const good = validate(`${head}MESSAGE-ID: db-admin-0007\n`);
   assert.deepEqual(good.warnings, []);
+
+  // The converse, seen live (seq 3445): the id field holds the shell
+  // variable's NAME. Valid — §7.2 keeps the id opaque — but said.
+  const unexpanded = validate(`${head}MESSAGE-ID: $ID\n`);
+  assert.equal(unexpanded.ok, true, 'the grammar admits any identifier');
+  assert.ok(unexpanded.warnings.some(w => w === 'MESSAGE-ID is the literal $ID — the shell variable was not expanded; mint the id with gzmsg.mjs new-id and write its value'), unexpanded.warnings);
+  const odd = validate(`${head}MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\nIN-REPLY-TO: yesterday's message\n`);
+  assert.ok(odd.warnings.some(w => w.startsWith("IN-REPLY-TO is yesterday's message, not an identifier this deployment mints")), odd.warnings);
 });
 
 test('unknown fields that are real extensions stay silent — §6 preserves them', () => {
@@ -983,6 +991,18 @@ test('send refuses a message that does not validate, and posts nothing', async (
   await withRelay(async (relay, posts) => {
     const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\n', ''));
     assert.equal(r.code, 2); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+  });
+});
+
+test('send refuses an id the deployment did not mint — the literal $ID reached the channel once', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001', 'MESSAGE-ID: $ID'));
+    assert.equal(r.code, 2); assert.match(r.err, /MESSAGE-ID is the literal \$ID — the shell variable was not expanded/); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+    const reply = await sendWith(relay, valid.replace('SUBJECT: fixture', 'IN-REPLY-TO: ${PREV}\nSUBJECT: fixture'));
+    assert.equal(reply.code, 2); assert.match(reply.err, /IN-REPLY-TO is the literal \$\{PREV\}/); assert.equal(posts.length, 0);
+    // The retired counter shape is still an id: older traffic is answered by it.
+    const old = await sendWith(relay, valid.replace('SUBJECT: fixture', 'IN-REPLY-TO: db-admin-0007\nSUBJECT: fixture'));
+    assert.equal(old.code, 0, old.err); assert.equal(posts.length, 1);
   });
 });
 

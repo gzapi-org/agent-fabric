@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
@@ -79,6 +79,16 @@ export async function main(argv = process.argv.slice(2)) {
     return 2;
   }
   const id = msg.metadata?.['MESSAGE-ID'] ?? '(none)';
+  // The deployment mints UUIDv7 ids (gzmsg.mjs new-id) and every join —
+  // IN-REPLY-TO, a REPLY claiming an assignment, a finding traced by id —
+  // resolves on them. The validator can only warn (the grammar keeps the
+  // id opaque); the sender is where the deployment's convention is a
+  // rule, because a malformed id degrades quietly: the message reads
+  // fine and the thread cannot be reconstructed later.
+  for (const key of ['MESSAGE-ID', 'IN-REPLY-TO']) {
+    const c = msg.metadata?.[key] ? idComplaint(key, msg.metadata[key]) : null;
+    if (c) { console.error(`send: ${c}; not sent`); return 2; }
+  }
   // This session's model fell back after a safeguard flagged a request
   // (runtime/claude-code/hooks/model-fallback-note.sh leaves the marker):
   // the flagged text is contagious, so the reminder is repeated here, at

@@ -17,9 +17,10 @@
 #   ~/.claude/hooks/review-bash-guard.sh
 #                                      the review class's Bash fence; the code-review agent file
 #                                      looks here when the launch project has no .claude/ copy
-#   ~/.claude/settings.json            attribution: commit "", pr "", sessionUrl false — the harness's
-#                                      Co-Authored-By/Generated-with reminder off at its source
-#                                      (runtime/claude-code/attribution-off.py); every other key kept
+#   ~/.claude/settings.json            the fabric's user-scope keys (runtime/claude-code/user-settings.py):
+#                                      attribution commit "", pr "", sessionUrl false — the harness's
+#                                      Co-Authored-By/Generated-with reminder off at its source —
+#                                      showThinkingSummaries and verbose on; every other key kept
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
 #   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md
 #                                      the dispatch policy as a loadable skill, from policies/
@@ -138,16 +139,19 @@ fi
 # projects/ (no .claude/ of its own) found no guard and lost Bash entirely
 # (docs/live-checks/2026-09-13-openrouter-routing.md).
 put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/hooks/review-bash-guard.sh"
-# The harness's attribution reminder — a system reminder asking for a
-# Co-Authored-By trailer and a "Generated with" footer, sent on the first
-# turn and after every model switch, outside any launch prompt — is
-# switched off where it is built, the login's user settings: an empty
-# attribution text hides it, and the harness then says the opposite
-# (docs/live-checks/2026-09-18-attribution-reminder-off.md). The guard
-# (policies/ban_generated_by_attribution.sh) stays as the fence.
-if (( DRY_RUN )); then python3 "$FABRIC_ROOT/runtime/claude-code/attribution-off.py" "$CLAUDE_HOME/settings.json" --dry-run
+# The login's user settings carry what the fabric wants in every session
+# of the account whatever directory it launches from: the harness's
+# attribution reminder — a system reminder asking for a Co-Authored-By
+# trailer and a "Generated with" footer, sent on the first turn and after
+# every model switch, outside any launch prompt — switched off where it
+# is built (an empty attribution text hides it, and the harness then says
+# the opposite; docs/live-checks/2026-09-18-attribution-reminder-off.md;
+# the guard policies/ban_generated_by_attribution.sh stays as the fence),
+# and the thinking summaries and verbose tool output the operator reads a
+# session by. The writer's docstring has each key's reason.
+if (( DRY_RUN )); then python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json" --dry-run
 else
-    out="$(python3 "$FABRIC_ROOT/runtime/claude-code/attribution-off.py" "$CLAUDE_HOME/settings.json")"; echo "$out"
+    out="$(python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json")"; echo "$out"
     [[ "$out" == "  +  "* ]] && changed=$((changed+1)) || same=$((same+1))
 fi
 # The dispatch policy is a skill the project CLAUDE.md files tell a session

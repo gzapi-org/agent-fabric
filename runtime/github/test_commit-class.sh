@@ -34,6 +34,10 @@ echo "commit-class: the review word as a COMPONENT's name is not an opener (agen
 expect work "aaa" "review class: described as the review everywhere, not a stand-in"
 expect work "aaa" "review brief: the lens vocabulary lists every lens"
 expect fix  "aaa" "review tooling: the review round's fixes — configuration refused loudly"
+# Not a label: the file says so for v2, and the opener must not admit it
+# case-insensitively where the label rule is case-sensitive on purpose.
+expect work "aaa" "review v2: the brief"
+expect work "aaa" "review pe-6 is not a label"
 # ("re-review — wording only" is NOT an opener-only case: re-review sits in the
 # answer-word list too, so the fallback rule reads it as a fix as well.)
 expect work "aaa" "reviewing the roster is the admin's act"

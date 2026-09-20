@@ -1215,10 +1215,9 @@ test('holdStatus: held iff some marker names a live harness of this login', () =
   // ownership: the directory and each file must be this login's
   assert.equal(holdStatus(dir, { uid: uid + 1 }).held, false);
   assert.match(holdStatus(dir, { uid: uid + 1 }).reason, /not this login's/);
-  const link = path.join(os.tmpdir(), `hold-link-${process.pid}`);
+  const link = path.join(scratch('hold-link-'), 'link');
   fs.symlinkSync(dir, link);
   assert.match(holdStatus(link).reason, /not a directory/, 'a symlinked directory is refused');
-  fs.unlinkSync(link);
   // the path is under the login's home, overridable for tests
   assert.equal(holdDir('/h'), '/h/.cache/agent-fabric/hold');
   process.env.AGENT_FABRIC_HOLD_DIR = dir;

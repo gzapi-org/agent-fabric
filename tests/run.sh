@@ -18,9 +18,12 @@ run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 # every entry the run added is a failure named by path: seventy such
 # directories per run had accumulated to 120 MB before anyone looked
 # (tests/scratch.mjs). A suite that needs scratch removes it on exit,
-# however it exits.
-SCRATCH_DIR="${TMPDIR:-/tmp}"
-scratch_before="$(ls -A "$SCRATCH_DIR" 2>/dev/null | sort)"
+# however it exits. tests/leak-check.sh is the check; test_leak-check.sh
+# is where a planted entry proves it fires.
+# shellcheck source=leak-check.sh
+. "$ROOT/tests/leak-check.sh"
+SCRATCH_DIR="$(leak_dir)"
+scratch_before="$(leak_snapshot "$SCRATCH_DIR")"
 
 if [[ "$what" == all || "$what" == static ]]; then
     run "static (bash -n, shellcheck, ruff)" bash tests/static.sh
@@ -46,6 +49,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
     run "fabric-lease (one holder per host resource)" bash tests/test_fabric-lease.sh
+    run "leak check (what a run left behind)" bash tests/test_leak-check.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh
     run "new-agent (the sequence, its refusals, a failure at each step)" bash runtime/provisioning/test_new-agent.sh
     run "account persistence (the Qubes boot script, the snapshot writer)" bash runtime/provisioning/platform/test_qubes-accounts.sh
@@ -73,11 +77,6 @@ if [[ "$what" == all || "$what" == bash ]]; then
 fi
 
 echo
-left="$(comm -13 <(printf '%s\n' "$scratch_before") <(ls -A "$SCRATCH_DIR" 2>/dev/null | sort) | grep -v '^$' || true)"
-if [[ -n "$left" ]]; then
-    echo "== scratch left behind under $SCRATCH_DIR (a suite did not clean up):"
-    printf '   %s\n' $left
-    fail=$((fail+1))
-fi
+leak_report "$SCRATCH_DIR" "$scratch_before" || fail=$((fail+1))
 if (( fail )); then echo "tests/run.sh: $fail suite(s) FAILED"; exit 1; fi
 echo "tests/run.sh: all suites passed"

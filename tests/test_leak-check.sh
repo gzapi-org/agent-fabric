@@ -35,7 +35,31 @@ echo "the directory"
 echo "run.sh uses it, on a directory of its own"
 grep -q 'leak-check.sh' "$HERE/run.sh" && grep -q 'leak_report' "$HERE/run.sh" && ok "run.sh sources the check and reports with it" || bad "run.sh wiring"
 grep -q 'export TMPDIR="\$SCRATCH_DIR"' "$HERE/run.sh" && ok "the run exports its own TMPDIR, so a concurrent writer is never a leak" || bad "TMPDIR export"
-grep -qE "trap 'rm -rf \"\\\$SCRATCH_DIR\"' EXIT INT TERM HUP" "$HERE/run.sh" && ok "and removes it however the run ends" || bad "trap"
+
+echo "a run killed by a signal ENDS, and its directory goes with it"
+# Behaviour, not text: a trap that removed the directory and let the
+# script carry on passed a grep for its own line while every remaining
+# suite ran against a deleted TMPDIR. Here run.sh's static group is
+# started in its own process group with a shellcheck that blocks, the
+# group gets TERM, and the run must be gone within seconds with no
+# agent-fabric-tests.* left under the directory it was made in.
+FAKEBIN="$SANDBOX/bin"; mkdir -p "$FAKEBIN"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$FAKEBIN/shellcheck"; chmod +x "$FAKEBIN/shellcheck"
+RUNTMP="$SANDBOX/runtmp"; mkdir -p "$RUNTMP"
+before="$(ls -A "$RUNTMP")"
+TMPDIR="$RUNTMP" PATH="$FAKEBIN:$PATH" setsid bash "$HERE/run.sh" static > "$SANDBOX/run.out" 2>&1 &
+RUNPID=$!
+made_dir() { compgen -G "$RUNTMP/agent-fabric-tests.*" >/dev/null; }
+for _ in $(seq 100); do made_dir && break; sleep 0.1; done
+made_dir && ok "the run made its directory under TMPDIR" || bad "run directory" "$(ls -A "$RUNTMP")"
+kill -TERM -- "-$RUNPID" 2>/dev/null || kill -TERM "$RUNPID"
+ended=0
+for _ in $(seq 50); do kill -0 "$RUNPID" 2>/dev/null || { ended=1; break; }; sleep 0.1; done
+(( ended )) && ok "TERM ends the run within five seconds" || { bad "the run outlived TERM" "$(cat "$SANDBOX/run.out")"; kill -KILL -- "-$RUNPID" 2>/dev/null; }
+wait "$RUNPID" 2>/dev/null; rc=$?
+[[ $rc -eq 143 ]] && ok "and it exits 143, the conventional status" || bad "exit status $rc" "$(cat "$SANDBOX/run.out")"
+[[ "$(ls -A "$RUNTMP")" == "$before" ]] && ok "and its directory is gone" || bad "directory left" "$(ls -A "$RUNTMP")"
+grep -q "suite(s) FAILED" "$SANDBOX/run.out" && bad "the interrupted run was reported as suite failures" "$(cat "$SANDBOX/run.out")" || ok "the interrupted run reports no suite failures"
 
 echo; echo "leak-check: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

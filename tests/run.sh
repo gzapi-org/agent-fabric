@@ -28,7 +28,14 @@ run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 . "$ROOT/tests/leak-check.sh"
 SCRATCH_DIR="$(mktemp -d "$(leak_dir)/agent-fabric-tests.XXXXXX")" || exit 1
 export TMPDIR="$SCRATCH_DIR"
-trap 'rm -rf "$SCRATCH_DIR"' EXIT INT TERM HUP
+# EXIT removes; a signal EXITS. Naming INT/TERM/HUP on the removal trap
+# itself made bash run the removal and then CONTINUE the script — every
+# remaining suite ran against a deleted TMPDIR and was reported failed,
+# and a harness that follows TERM with KILL got no cleanup at all. Bash
+# runs the EXIT trap when it dies of an untrapped signal, so the three
+# traps below only make the status conventional (128+signal).
+trap 'rm -rf "$SCRATCH_DIR"' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 scratch_before="$(leak_snapshot "$SCRATCH_DIR")"
 
 if [[ "$what" == all || "$what" == static ]]; then

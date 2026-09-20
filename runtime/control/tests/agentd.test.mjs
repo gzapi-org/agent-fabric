@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer } from '../agentd.mjs';
+import { memorySlug } from '../ops.mjs';
 
 const AGENTD = new URL('../agentd.mjs', import.meta.url).pathname;
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
@@ -111,7 +112,10 @@ test('answer: a memory reply is the report first, then one record per part in or
   const exec = async () => ({ stdout: tar, stderr: JSON.stringify({ claims: 1, counts: { in_scope: 1, total: 1 }, needs_rendering: [], skipped_no_roles_class: [] }) });
   const h = scratch('agentd-mem-');
   const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
-  const mem = path.join(h, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  // The slug is the op's own rule (every non-alphanumeric to '-'), not a
+  // '/'-only substitution: the run's TMPDIR carries a '.', and the two
+  // rules differed exactly there.
+  const mem = path.join(h, '.claude', 'projects', memorySlug(wc), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
   const ctx = { me: { address: 'h/db-admin' }, started: new Date().toISOString(), home: h, exec };
   const r = await answer({ id: 'q1', op: 'memory' }, ctx);
   assert.equal(r.op, 'memory'); assert.equal(r.in_reply_to, 'q1'); assert.equal(r.data.parts, 1);
@@ -230,7 +234,7 @@ test('agentd --once: a memory request is answered with the report and then the b
   const bin = fakeHarvester(payload);
   const home = scratchHome();
   const wc = path.join(home, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
-  const mem = path.join(home, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  const mem = path.join(home, '.claude', 'projects', memorySlug(wc), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
   const r = relay([['develop-qzapp/user', request({ op: 'ping', id: 'primer' })]]);
   await r.listen();
   try {

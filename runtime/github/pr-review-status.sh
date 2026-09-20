@@ -215,7 +215,9 @@ jq -e 'type == "array" and all(.[]; type == "string")' <<<"$VERDICT_AUTHORS" >/d
     || die "AGENT_FABRIC_VERDICT_AUTHORS must be a JSON array of logins, got '$VERDICT_AUTHORS'."
 for _re_name in REVIEWER_REFUSAL_RE REVIEW_REQUEST_RE; do
     [[ -z "${!_re_name}" ]] && continue
-    jq -n --arg re "${!_re_name}" '"" | test($re)' >/dev/null 2>&1 \
+    # Compiled with the same "i" flag the consumers use, so what passes
+    # here is exactly what runs below.
+    jq -n --arg re "${!_re_name}" '"" | test($re; "i")' >/dev/null 2>&1 \
         || die "AGENT_FABRIC_$_re_name is not a regex jq accepts: '${!_re_name}'."
 done
 

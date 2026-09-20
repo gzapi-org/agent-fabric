@@ -149,7 +149,9 @@ put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/
 # the guard policies/ban_generated_by_attribution.sh stays as the fence),
 # and the thinking summaries and verbose tool output the operator reads a
 # session by. The writer's docstring has each key's reason.
-if (( DRY_RUN )); then python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json" --dry-run
+# The dry run reports the refusal the same way and goes on, so both
+# paths reach the same summary line.
+if (( DRY_RUN )); then python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json" --dry-run || failed=$((failed+1))
 else
     if out="$(python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json")"; then
         echo "$out"

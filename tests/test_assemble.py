@@ -1309,14 +1309,14 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
     assert sum(t.count("## First") for t in parts.values()) == 1 and any("w w w" in t for t in parts.values()), parts
     index = read(proj(out, "alpha", "INDEX.md"))
-    for n in os.listdir(dom(out, "alpha", "domain")):
-        pass
     listed = [ln for ln in index.splitlines() if "grow" in ln]
     assert all(any(n in ln for n in parts) for ln in listed), f"the index lists a part that is not on disk: {listed}"
     lint = _lint(out)
     assert lint.returncode == 0, lint.stderr
     report = json.loads(read(report_path(out)))
-    assert report["files_written"] == len(set(report.get("written", []) or [])) or "written" not in report, report
+    # On disk: grow-2.md and INDEX.md; grow.md was written, then removed by
+    # the retire, and leaves the count with it.
+    assert report["files_written"] == 2, report["files_written"]
 
     # Rewritten shape: part one keeps Second after First is retired from it.
     with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
@@ -1339,6 +1339,30 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     assert "keep.md" in index and "Beta two" in index and "keep (domain)" not in index, index
     lint = _lint(out)
     assert lint.returncode == 0, lint.stderr
+    assert json.loads(read(report_path(out)))["files_written"] == 3, "keep.md, keep-2.md, INDEX.md — the rewritten part once"
+
+    # The opposite ordering: the superseding claim lands in part one while
+    # part two, which holds the target, also receives a new claim — the
+    # part is rewritten by the retire and then written by the loop; once.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "twice", "title": "One", "body": big, "evidence": ["h8"]},
+            {"class": "domain", "topic": "twice", "title": "Two", "body": "z " * 300, "evidence": ["h9"]},
+            {"class": "domain", "topic": "twice", "title": "Three", "body": "z " * 300, "evidence": ["h10"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    assert "## Two" in read(dom(out, "alpha", "domain", "twice-2.md")), "precondition: Two in part two"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "twice", "title": "Two", "body": "Two, revised.", "evidence": ["h11"]},
+            {"class": "domain", "topic": "twice", "title": "Four", "body": big, "evidence": ["h12"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    n_parts = len([n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("twice")])
+    assert json.loads(read(report_path(out)))["files_written"] == n_parts + 1, (n_parts, proc.stderr)
+    assert _lint(out).returncode == 0
 
 
 def test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue(tmp: str) -> None:
@@ -1375,6 +1399,7 @@ def test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue(tmp: str
     assert "collisions" not in front, front
     desc = next(ln for ln in front.splitlines() if ln.startswith("description: "))
     assert len(desc) - len("description: ") <= 242 and desc.rstrip('"').endswith("…"), desc
+    assert "grow-2.md: description clipped" in proc.stderr and "grow.md: description clipped" not in proc.stderr.replace("grow-2.md", ""), proc.stderr
     assert "origin:" in front and "derived_from:" in front, front
     lint = _lint(out)
     assert lint.returncode == 0, lint.stderr

@@ -339,7 +339,7 @@ def decode_scalar(text: str) -> str:
 
 
 def retire_in_siblings(directory: str, filename: str, target: str,
-                       clip: Callable[[str], str] = lambda d: d) -> list[tuple[str, str]]:
+                       clip: Callable[[str, str], str] = lambda d, _where: d) -> list[tuple[str, str]]:
     """Remove the section `target` (and its "(n)" siblings) from every
     OTHER budget part of the same topic in `directory`. `filename` is the
     part being written: `<topic>.md`, `<topic>-<n>.md`,
@@ -386,7 +386,7 @@ def retire_in_siblings(directory: str, filename: str, target: str,
         front = re.sub(r"(?m)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
         first = next(iter(sections))
         # The cue is clipped as every description the assembler writes is.
-        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first)), front, count=1)
+        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first, path)), front, count=1)
         body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
@@ -921,15 +921,18 @@ def main() -> int:
                 # target in the part being written exited 0 with both texts
                 # standing in two files (connected reviewer, 2026-09-20).
                 # Every sibling touched is written and reported.
-                touched = retire_in_siblings(directory, filename, target,
-                                             clip=lambda d: clip_description(d, os.path.join(directory, filename)))
+                touched = retire_in_siblings(directory, filename, target, clip=clip_description)
                 if touched:
                     authorised = True
                     resolved.append(target)
                     for tpath, what in touched:
                         retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
+                        # `written` counts files on disk once: a rewritten
+                        # sibling joins it, a removed one leaves it.
                         if what == "rewritten" and tpath not in written:
                             written.append(tpath)
+                        if what == "removed" and tpath in written:
+                            written.remove(tpath)
                         # A sibling this run already indexed keeps a stale
                         # line otherwise — a link to a removed file, or the
                         # old cue: drop it, and the on-disk sweep re-lists a
@@ -1037,7 +1040,8 @@ def main() -> int:
         text = render_frontmatter(meta) + "\n\n" + body
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.rstrip() + "\n")
-        written.append(path)
+        if path not in written:   # a retire may have rewritten this part earlier in the run
+            written.append(path)
         problems.extend(hygiene_check(body, layout.root_rel(path)))
 
     def carried_chars(claims: list[dict[str, Any]], *candidates: str) -> int:

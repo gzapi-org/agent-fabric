@@ -23,6 +23,10 @@
 #          GitHub user); "(me)" marks this session's. With --all, the
 #          repository's open PRs by owner: whose gate each one is at.
 #   commits all commits over the base, then the split: WORK ones are neither merges nor review fixes
+#          nor netted — a revert and the commit it reverts, both in the
+#          range, count in no column (git's "This reverts commit <sha>"
+#          line is the fact; each commit nets once, so a revert-then-
+#          reapply leaves the original as work) —
 #          (a fix is a commit carrying an "Answers: <labels>" trailer —
 #          the primary signal — or, without one, whose subject opens
 #          with "review" or names a review AND says it answers one —
@@ -123,12 +127,12 @@ rows="[]"
 while IFS=$'\t' read -r num title head base hbranch draft; do
     [[ -n "$num" ]] || continue
     # ── commits over the base: work / review-fix / merge ──
-    # The classifier is commit-class.sh (shared with pr-compliance.sh,
-    # so the band measured after the fact is the band applied before).
+    # The classifier is commit-class.sh, the one place the rule lives, so
+    # a measurement of the band after the fact reads the same split.
     # The subjects counted as fix are printed, so the split can be
     # checked; the count rule is applied on it and a misread moves the
     # band.
-    work=0; fix=0; merges=0; netted=0; commits_known=1; fix_subjects="[]"
+    work=0; fix=0; merges=0; netted=0; commits_known=1; fix_subjects="[]"; netted_subjects="[]"
     if (( fetched )) && git cat-file -e "$head^{commit}" 2>/dev/null && git rev-parse --verify -q "origin/$base^{commit}" >/dev/null 2>&1; then
         # Two passes over the range: classify each commit, then net out
         # every revert whose partner is in the range (commit-class.sh,
@@ -140,16 +144,27 @@ while IFS=$'\t' read -r num title head base hbranch draft; do
             [[ -n "$sha" ]] || continue
             shas+=("$sha"); cls["$sha"]="$(commit_class "$parents" "$subject" "$answers")"; subj["$sha"]="$subject"
         done < <(git log --format='%H%x09%P%x09%s%x09%(trailers:key=Answers,valueonly,unfold,separator=%x20)' "origin/$base..$head" 2>/dev/null)
+        # A COMMIT NETS ONCE. git log lists newest first, so a chain
+        # "feat A; revert A; reapply A" is walked reapply → revert: the
+        # reapply nets the revert, and the revert — already netted — no
+        # longer nets A, which stays work: the tree after the chain is the
+        # tree after A. Netting every pair a commit belongs to counted the
+        # whole chain as nothing (review, 2026-09-20, F1).
         for sha in "${shas[@]}"; do
+            [[ -z "${skip[$sha]:-}" ]] || continue
             while read -r target; do
                 [[ -n "$target" ]] || continue
                 for other in "${shas[@]}"; do
-                    if [[ "$other" == "$target"* ]]; then skip["$sha"]=1; skip["$other"]=1; fi
+                    if [[ "$other" == "$target"* && "$other" != "$sha" && -z "${skip[$other]:-}" && -z "${skip[$sha]:-}" ]]; then
+                        skip["$sha"]=1; skip["$other"]=1
+                    fi
                 done
             done < <(git log -1 --format=%b "$sha" 2>/dev/null | revert_targets)
         done
         for sha in "${shas[@]}"; do
-            if [[ -n "${skip[$sha]:-}" ]]; then netted=$((netted + 1)); continue; fi
+            # F2: what was netted is printed like the fix subjects, so the
+            # column whose misread moves the band can be checked by eye.
+            if [[ -n "${skip[$sha]:-}" ]]; then netted=$((netted + 1)); netted_subjects="$(jq --arg s "${subj[$sha]}" '. + [$s]' <<<"$netted_subjects")"; continue; fi
             case "${cls[$sha]}" in
                 merge) merges=$((merges + 1)) ;;
                 fix)   fix=$((fix + 1)); fix_subjects="$(jq --arg s "${subj[$sha]}" '. + [$s]' <<<"$fix_subjects")" ;;
@@ -216,10 +231,10 @@ while IFS=$'\t' read -r num title head base hbranch draft; do
     # session to name and is shown as its first segment.
     owner="$(awk -F/ 'NF >= 3 {print $1"/"$2; next} {print $1}' <<<"$hbranch")"
     [[ "$owner" == "$session" ]] && mine="yes" || mine="no"
-    rows="$(jq --argjson n "$num" --arg aw "$awaiting" --arg t "$title" --arg b "$hbranch" --arg o "$owner" --arg mine "$mine" --arg h "${head:0:8}" --argjson w "$( (( commits_known )) && echo "$work" || echo null)" --argjson f "$( (( commits_known )) && echo "$fix" || echo null)" --argjson fs "$fix_subjects" --argjson m "$( (( commits_known )) && echo "$merges" || echo null)" --argjson nt "$( (( commits_known )) && echo "$netted" || echo null)" --argjson known "$( (( commits_known )) && echo true || echo false)" --arg c "$checks" --arg r "$review" --arg u "$unresolved" --arg a "$armed" --arg q "${queue:-}" --arg ms "$mstate" --arg d "$draft" --arg v "$verdict" \
-        '. + [{number:$n, title:$t, branch:$b, owner:$o, mine:($mine == "yes"), head:$h, work_commits:$w, fix_commits:$f, fix_subjects:$fs, merge_commits:$m, netted_commits:$nt, commits_known:$known, awaiting_supply:($aw | if . == "" then [] else split(", ") end), checks:$c, review:$r, unresolved_threads:$u, armed:$a, queue_position:$q, merge_state:$ms, draft:($d == "true"), verdict:$v}]' <<<"$rows")"
+    rows="$(jq --argjson n "$num" --arg aw "$awaiting" --arg t "$title" --arg b "$hbranch" --arg o "$owner" --arg mine "$mine" --arg h "${head:0:8}" --argjson w "$( (( commits_known )) && echo "$work" || echo null)" --argjson f "$( (( commits_known )) && echo "$fix" || echo null)" --argjson fs "$fix_subjects" --argjson m "$( (( commits_known )) && echo "$merges" || echo null)" --argjson nt "$( (( commits_known )) && echo "$netted" || echo null)" --argjson ns "$netted_subjects" --argjson known "$( (( commits_known )) && echo true || echo false)" --arg c "$checks" --arg r "$review" --arg u "$unresolved" --arg a "$armed" --arg q "${queue:-}" --arg ms "$mstate" --arg d "$draft" --arg v "$verdict" \
+        '. + [{number:$n, title:$t, branch:$b, owner:$o, mine:($mine == "yes"), head:$h, work_commits:$w, fix_commits:$f, fix_subjects:$fs, merge_commits:$m, netted_commits:$nt, netted_subjects:$ns, commits_known:$known, awaiting_supply:($aw | if . == "" then [] else split(", ") end), checks:$c, review:$r, unresolved_threads:$u, armed:$a, queue_position:$q, merge_state:$ms, draft:($d == "true"), verdict:$v}]' <<<"$rows")"
 done < <(jq -r '.[] | [.number, .title, .headRefOid, .baseRefName, .headRefName, (.isDraft // false)] | @tsv' <<<"$list")
 
 if [[ $JSON -eq 1 ]]; then jq . <<<"$rows"; exit 0; fi
-jq -r '.[] | "#\(.number)  \(.owner)\(if .mine then " (me)" else "" end)  commits=\(if .commits_known then "\(.work_commits + .fix_commits + .merge_commits + .netted_commits) (\(.work_commits) work, \(.fix_commits) fix, \(.merge_commits) merge\(if .netted_commits > 0 then ", \(.netted_commits) netted by a revert" else "" end))" else "unknown (fetch)" end)  checks=\(.checks)  review=\(.review)  threads=\(.unresolved_threads)  armed=\(.armed)\(if .queue_position != "" then "  queue=\(.queue_position)" else "" end)\n      \(.title[0:88])\(if (.fix_subjects | length) > 0 then "\n      counted as fix: " + (.fix_subjects | map("\"" + .[0:60] + "\"") | join("; ")) else "" end)\n      \(.verdict)"' <<<"$rows"
+jq -r '.[] | "#\(.number)  \(.owner)\(if .mine then " (me)" else "" end)  commits=\(if .commits_known then "\(.work_commits + .fix_commits + .merge_commits + .netted_commits) (\(.work_commits) work, \(.fix_commits) fix, \(.merge_commits) merge\(if .netted_commits > 0 then ", \(.netted_commits) netted by a revert" else "" end))" else "unknown (fetch)" end)  checks=\(.checks)  review=\(.review)  threads=\(.unresolved_threads)  armed=\(.armed)\(if .queue_position != "" then "  queue=\(.queue_position)" else "" end)\n      \(.title[0:88])\(if (.fix_subjects | length) > 0 then "\n      counted as fix: " + (.fix_subjects | map("\"" + .[0:60] + "\"") | join("; ")) else "" end)\(if (.netted_subjects | length) > 0 then "\n      netted by a revert: " + (.netted_subjects | map("\"" + .[0:60] + "\"") | join("; ")) else "" end)\n      \(.verdict)"' <<<"$rows"
 exit 0

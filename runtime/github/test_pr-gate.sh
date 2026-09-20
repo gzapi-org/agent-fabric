@@ -3,7 +3,8 @@
 #
 # Tests for pr-gate.sh with gh and pr-review-status.sh mocked on PATH and
 # a throwaway git repository for the commit classification: the work /
-# fix / merge split, each verdict (ask the owner, arm, split, blocked by
+# fix / merge split, a revert netted with its in-range partner (once —
+# a revert-then-reapply leaves the original), each verdict (ask the owner, arm, split, blocked by
 # red checks, pending checks, no review, threads, a conflict; armed;
 # queued), the session filter, --all, numbers, --json, and the empty
 # states.
@@ -209,6 +210,23 @@ out="$(run --json)"; rc=$?
   || fail "revert netting wrong (rc=$rc; before: $before_work work, $before_fix fix)" "$out"
 out="$(run)"
 grep -q "work, $before_fix fix, 1 merge, 2 netted by a revert)" <<<"$out" && pass "the row says so" || fail "row text" "$out"
+grep -q 'netted by a revert: "feat: the used-by guard"; "Revert "feat: the used-by guard""\|netted by a revert: "Revert "feat: the used-by guard""; "feat: the used-by guard"' <<<"$out" && pass "…and names the netted pair, as it names the fixes" || fail "netted subjects missing" "$out"
+
+echo "pr-gate: a revert of a revert leaves the original as work — a commit nets once"
+# feat B; revert B; reapply B (git's revert of the revert). The tree after
+# the chain is the tree after B: 1 work, 2 netted — not 0 work, 3 netted.
+(
+  cd "$SANDBOX/repo" || exit 1
+  c "feat: B, the thing reapplied"; b="$(git rev-parse HEAD)"
+  git revert --no-edit "$b" >/dev/null; r1="$(git rev-parse HEAD)"
+  git revert --no-edit "$r1" >/dev/null
+  git push -q origin develop-qzapp/me/feat/thing
+)
+prs "$(jq -nc --arg h "$(git -C "$SANDBOX/repo" rev-parse HEAD)" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+out="$(run --json)"; rc=$?
+[[ $rc -eq 0 ]] && [[ "$(jq -r '.[0] | "\(.work_commits) \(.netted_commits)"' <<<"$out")" == "$((before_work + 3)) 4" ]] \
+  && pass "the chain adds one work (B stands) and two netted; the earlier pair still netted" \
+  || fail "chain over- or under-netted (rc=$rc; before: $before_work work)" "$out"
 
 echo
 if [[ $failures -eq 0 ]]; then echo "test_pr-gate: OK — all assertions passed."; else echo "test_pr-gate: FAILED — $failures assertion(s)."; exit 1; fi

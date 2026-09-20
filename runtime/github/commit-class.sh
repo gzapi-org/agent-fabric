@@ -5,9 +5,9 @@
 # (root CLAUDE.md §When to open a NEW PR: 8–16 WORK commits arm at the
 # review gate, under 8 ask the owner or state a class, over 16 is
 # advice for the next batch; review fixes never count) is applied by
-# pr-gate.sh on open PRs and measured by
-# pr-compliance.sh on merged ones, and two copies of the regex would
-# drift the band between them.
+# pr-gate.sh on open PRs and by whatever measures merged ones after
+# the fact, and two copies of the regex would drift the band between
+# them.
 #
 # A review FIX is a subject that names a REVIEW (review, re-review,
 # finding(s), nit(s), as words) AND says it answers one (a finding label
@@ -92,8 +92,8 @@ commit_class() {
 # git's own line in the revert's body, "This reverts commit <sha>."; a
 # "Revert …" subject without it is prose and stays whatever its words
 # say. A revert whose partner is NOT in the range — reverting something
-# already on main — is work as before: it changes the tree. The caller
-# has the range; this prints the shas a body names, one per line.
+# already on main — keeps its class as before: it changes the tree. The
+# caller has the range; this prints the shas a body names, one per line.
 revert_targets() {
     grep -oE 'This reverts commit [0-9a-f]{7,40}' | awk '{print $4}'
 }

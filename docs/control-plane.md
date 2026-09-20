@@ -168,7 +168,7 @@ the coordinator.
 
 ## The coordinator's side
 
-`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|ping] [--json] [--timeout S]`
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]`
 (and `tokens [--days N]`, whose table groups the logins by Claude
 account and prints each one's share of the account's visible direct-path
 spend, the broker spend beside it; what the account spends off this host

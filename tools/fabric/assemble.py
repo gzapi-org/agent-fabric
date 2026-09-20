@@ -387,6 +387,16 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
 OBSERVED_RE = re.compile(r"\*Observed (\d{4}-\d{2}-\d{2})(?: \(([a-z0-9-]+)\))?\*")
 
 
+def undated(text: str) -> str:
+    """A section's text with its dated tail removed — the identity a
+    section is compared by. The date is when the memory was written, not
+    what it says: the same claim re-emitted with a moved mtime, or
+    arriving with a date where the corpus has none, is the same claim,
+    and a comparison that included the tail refused it as a collision
+    with two identical excerpts (review of 2026-09-20, F1)."""
+    return OBSERVED_RE.sub("", text).strip()
+
+
 def claim_heading(claim: dict[str, Any]) -> str:
     """The section heading a claim renders under — one rule, used by the
     writer, the budget and the collision pre-pass alike."""
@@ -641,6 +651,19 @@ def main() -> int:
     oversized: list[str] = []
     migrated: list[str] = []
 
+    def crossref_slice_ids(role: str) -> set[str]:
+        """Every `class:topic` id the role's committed crossref names."""
+        path = os.path.join(layout.project_dir(project, role), "crossref.json")
+        try:
+            doc = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        ids: set[str] = set()
+        for kinds in (doc.get("index") or {}).values():
+            for entry in (kinds or {}).values():
+                ids.update(x for x in (entry.get("slices") or []) if isinstance(x, str))
+        return ids
+
     # A CLAIM THAT DISAGREES WITH THE CORPUS STOPS THE DRAIN (the owner,
     # 2026-09-20). A new claim under a heading the slice already has, with
     # different text, is a potential supersession — a workflow that
@@ -670,8 +693,13 @@ def main() -> int:
         return found
 
     def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
-        """Every file the topic's sections may sit in: the flat class file,
-        the topic file, and its budget parts."""
+        """Every file the topic's sections may sit in: the topic file and
+        its budget parts (`<topic>-<n>.md`, digits only — a sibling topic
+        named `<topic>-2026-09-17` is another topic), and the flat class
+        file only when the committed crossref says it holds this topic
+        alone: read as this topic's regardless, another topic's section
+        under a coinciding heading was refused as a collision that the
+        write phase, which migrates the flat file first, never has."""
         if role is None:
             base = layout.shared_home(klass, project)
             stem = os.path.join(base, f"{klass}-{topic}")
@@ -679,8 +707,10 @@ def main() -> int:
         else:
             base = layout.class_home(klass, role, project)
             stem = os.path.join(base, CLASS_FILES[klass], topic)
-            flat = [os.path.join(base, f"{CLASS_FILES[klass]}.md")]
-        parts = [f"{stem}.md"] + sorted(glob.glob(f"{stem}-[0-9]*.md"))
+            flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
+            prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
+            flat = [flat_file] if os.path.exists(flat_file) and (not prior or prior == {topic}) else []
+        parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if re.fullmatch(r".*-\d+\.md", p))
         return [p for p in flat + parts if os.path.exists(p)]
 
     def observed_of(text: str) -> str:
@@ -704,16 +734,25 @@ def main() -> int:
         seen_incoming: dict[str, dict[str, Any]] = {}
         for claim in list(group):
             heading = claim_heading(claim)
-            rendered = claim_block(claim).split("\n", 1)[1].strip()
+            rendered = undated(claim_block(claim).split("\n", 1)[1])
             target = (claim.get("merge_target") or "").strip()
             if target and target in present:
                 continue   # the author's own supersession: authorised
+            # Present already — under its heading or as a kept-both
+            # sibling "X (n)" — is the same claim again, whatever its date.
+            siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
+            if any(undated(present[k]) == rendered for k in siblings if k in present):
+                continue
             rival = present.get(heading)
+            rival_date = observed_of(rival) if rival is not None else None
             if rival is None and heading in seen_incoming and \
-               claim_block(seen_incoming[heading]).split("\n", 1)[1].strip() != rendered:
-                rival = claim_block(seen_incoming[heading]).split("\n", 1)[1].strip()
+               undated(claim_block(seen_incoming[heading]).split("\n", 1)[1]) != rendered:
+                # Two claims of this drain under one heading: the earlier one
+                # is the rival, with its own date.
+                rival = undated(claim_block(seen_incoming[heading]).split("\n", 1)[1])
+                rival_date = seen_incoming[heading].get("observed_at") or "undated"
             seen_incoming.setdefault(heading, claim)
-            if rival is None or rival == rendered:
+            if rival is None:
                 continue
             key_id = f"{label}/{klass}:{topic}#{heading}"
             decision = decisions.get(key_id)
@@ -727,7 +766,7 @@ def main() -> int:
             else:
                 refused_collisions.append(
                     f"{key_id}\n"
-                    f"    in the corpus (observed {observed_of(rival)}): {excerpt(rival)}\n"
+                    f"    {'in this drain ' if heading not in present else 'in the corpus '}(observed {rival_date}): {excerpt(rival)}\n"
                     f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}): {excerpt(rendered)}"
                 )
                 continue
@@ -744,18 +783,6 @@ def main() -> int:
               "  keep-both: both stand, side by side, dated;  drop: the incoming claim is wrong.", file=sys.stderr)
         return 1
 
-    def crossref_slice_ids(role: str) -> set[str]:
-        """Every `class:topic` id the role's committed crossref names."""
-        path = os.path.join(layout.project_dir(project, role), "crossref.json")
-        try:
-            doc = json.load(open(path, encoding="utf-8"))
-        except (OSError, ValueError):
-            return set()
-        ids: set[str] = set()
-        for kinds in (doc.get("index") or {}).values():
-            for entry in (kinds or {}).values():
-                ids.update(x for x in (entry.get("slices") or []) if isinstance(x, str))
-        return ids
     collisions: list[str] = []
     written: list[str] = []
     index_entries: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -841,15 +868,17 @@ def main() -> int:
                 resolved.append(target)
             base_heading = heading
             rendered = claim_block(claim).split("\n", 1)[1].strip()
-            if not authorised and heading in blocks and blocks[heading] != rendered:
+            if not authorised and heading in blocks and undated(blocks[heading]) != undated(rendered):
                 # A heading that already holds DIFFERENT text is a second
                 # claim, not this one again. Overwriting on a bare title match
                 # made replacement implicit and silent — a drain deleting a
                 # finding nobody asked it to touch. Keep both and report it.
                 # (Identical text is simply the same claim re-rendered, which
-                # must stay a no-op or re-assembly would duplicate everything.)
+                # must stay a no-op or re-assembly would duplicate everything;
+                # identical text under a new or moved date is the same claim
+                # and takes the date.)
                 suffix = 2
-                while f"{heading} ({suffix})" in blocks and blocks[f"{heading} ({suffix})"] != rendered:
+                while f"{heading} ({suffix})" in blocks and undated(blocks[f"{heading} ({suffix})"]) != undated(rendered):
                     suffix += 1
                 collided.append(base_heading)
                 heading = f"{heading} ({suffix})"
@@ -926,11 +955,11 @@ def main() -> int:
         alone is not identity: two claims with the same body under
         different titles are two sections, and both are carried.
         """
-        incoming = {(claim_heading(c), claim_block(c).split("\n", 1)[1].strip()) for c in claims}
+        incoming = {(claim_heading(c), undated(claim_block(c).split("\n", 1)[1])) for c in claims}
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
-                return sum(len(h) + len(t) + 8 for h, t in sections.items() if (h, t) not in incoming)
+                return sum(len(h) + len(t) + 8 for h, t in sections.items() if (h, undated(t)) not in incoming)
         return 0
 
     def split_by_budget(
@@ -983,6 +1012,8 @@ def main() -> int:
     # knowledge under the project's shared/.
     shared_index: dict[str, list[dict[str, str]]] = defaultdict(list)
     for (klass, topic), claims in sorted(shared.items()):
+        if not claims:
+            continue   # every claim dropped by the owner: the slice stays as it was
         owners = sorted(shared_owners[(klass, topic)])
         shared_dir = layout.shared_home(klass, project)
         prior = carried_chars(claims, os.path.join(shared_dir, f"{klass}-{topic}.md"))
@@ -1046,6 +1077,8 @@ def main() -> int:
                 os.replace(flat, os.path.join(base, CLASS_FILES[klass], name))
                 migrated.append(f"{role}/{klass}: {CLASS_FILES[klass]}.md -> {CLASS_FILES[klass]}/{name}")
             for topic, claims in topics:
+                if not claims:
+                    continue   # every claim dropped by the owner: the slice stays as it was
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(

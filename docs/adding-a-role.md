@@ -37,10 +37,12 @@ the guard covers one shape of the mistake and not the next.
    `INDEX.md` in the project. Commit the project side first (its index
    links the domain slices by path that resolves through
    `../agent-fabric/`, so its CI needs the fabric commit — push the
-   fabric commit before the project PR's checks run). Never run the
-   assembler twice over the same drain: it duplicates every slice as
-   `<name>-2`; restore and re-run, or edit the index by hand for a
-   hand-authored addition.
+   fabric commit before the project PR's checks run). The assembler is
+   idempotent since 2026-09-20: the same drain twice is the same tree,
+   so re-running to pick up a brief added after the first run is safe.
+   A claim that disagrees with a section already in the corpus stops
+   the run until the owner decides (`--collision-decisions`,
+   `memory/README.md` §The drain cycle).
 4. **The account.** `runtime/provisioning/new-agent.sh <login> <role>
    --project <id>`; what it leaves for a person (the signing key, the
    credentials file, the first interactive launch) it prints at the end.

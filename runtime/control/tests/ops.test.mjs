@@ -380,6 +380,9 @@ test('recall: the corpus reads in the account\'s session records — index, slic
     use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/solution/auth.md` }),
     use('Read', { file_path: `${fab}/memory/domains/backend-dev/domain/idempotency.md` }),
     use('Grep', { pattern: 'outbox', path: `${fab}/memory/domains/backend-dev` }),
+    use('Grep', { pattern: `outbox-pattern-only ${wc}/.agent-fabric/memory/backend-dev` }),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/backend-dev/crossref.json` }),
+    use('Read', { file_path: `${wc}/.agent-fabric/memory/last-drain-report.json` }),
     use('Bash', { command: `sed -n 1,40p ${wc}/.agent-fabric/memory/backend-dev/workflow.md` }),
     use('Read', { file_path: `${fab}/identities/roles/backend-dev/charter.md` }),
     use('Read', { file_path: `${wc}/src/main.rs` }),
@@ -397,16 +400,20 @@ test('recall: the corpus reads in the account\'s session records — index, slic
   const r = recall(h);
   assert.equal(r.status, 'ok');
   assert.equal(r.sessions, 3, 'two sessions and one subagent record');
-  assert.equal(r.turns, 9 + 2 + 1);
-  assert.deepEqual({ index: r.index, slice: r.slice, search: r.search, identity: r.identity }, { index: 1, slice: 4, search: 2, identity: 1 });
+  assert.equal(r.turns, 12 + 2 + 1);
+  assert.deepEqual({ index: r.index, slice: r.slice, search: r.search, identity: r.identity }, { index: 1, slice: 4, search: 3, identity: 1 },
+    'the crossref and the drain report are not slices; a grep naming a corpus directory only in its pattern is a search');
   assert.equal(r.sessions_without_recall, 1, 'session two opened neither an index nor a slice');
   assert.equal(r.top[0].reads, 2); assert.match(r.top[0].path, /^~\/projects\/demo\/.agent-fabric\/memory\/backend-dev\/solution\/auth\.md$/, 'the home is folded to ~');
-  assert.ok(!JSON.stringify(r).includes('outbox') || r.search, 'a grep pattern is never reported as text beyond the path');
+  assert.ok(!JSON.stringify(r).includes('outbox'), 'a grep pattern is never reported: paths of reads and counts only');
+  assert.ok(!JSON.stringify(r).includes('crossref') && !JSON.stringify(r).includes('drain-report'), 'non-slice reads under the corpus are not in top');
   assert.equal(recall(scratch('recall-empty-')).status, 'no-records');
   // The classifier alone.
   assert.equal(recallKind('Read', { file_path: '/x/memory/domains/a/INDEX.md' }).kind, 'index');
   assert.equal(recallKind('Read', { file_path: '/x/memory/shared/domain-y.md' }).kind, 'slice');
   assert.equal(recallKind('Read', { file_path: '/x/memory/README.md' }), null, 'the corpus README is not a slice');
+  assert.equal(recallKind('Read', { file_path: '/x/memory/shared/README.md' }), null, 'nor the shared README');
+  assert.equal(recallKind('Read', { file_path: '/x/.agent-fabric/memory/last-drain-report.json' }), null, 'nor a drain report');
   assert.equal(recallKind('Edit', { file_path: '/x/memory/domains/a/b.md' }), null, 'a write is not a recall');
   assert.equal(recallKind('Bash', { command: 'ls' }), null);
 });

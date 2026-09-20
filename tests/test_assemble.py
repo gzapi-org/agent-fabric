@@ -761,7 +761,8 @@ def test_the_owner_supersedes_or_drops_a_colliding_claim(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
                         decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "drop"}))
     assert proc.returncode == 0, proc.stderr
-    assert "Through the pipeline" not in read(path) and "By hand" in read(path), read(path)
+    assert read(path) == before, "drop must leave the slice byte-identical — description and stamp included"
+    assert "How we deploy" in read(proj(out, "alpha", "INDEX.md")), "the index keeps the slice's cue"
 
     proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
                         decisions_file(tmp, {"alpha/workflow:deploy#How we deploy": "supersede"}))
@@ -828,8 +829,13 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
     first = read(report_path(out))
     run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     second = read(report_path(out))
+    # `collision_decisions` records what THIS run applied: the first run
+    # applied keep-both, the second found the pair already present and
+    # asked nothing — so that key alone may differ between the two.
     strip = lambda t: {k: v for k, v in json.loads(t).items() if k != "collision_decisions"}  # noqa: E731
     assert strip(first) == strip(second), "the drain report must be identical for identical input"
+    assert json.loads(first)["collision_decisions"] and not json.loads(second)["collision_decisions"], \
+        "the decision is applied once and not asked for again"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
 
@@ -1079,6 +1085,71 @@ def test_carried_text_is_redacted_the_same_way_a_claim_is(tmp: str) -> None:
     assert "A clean addition." in after, after
     assert "REDACTED (hygiene" in proc.stderr and "city name" in proc.stderr, proc.stderr
     assert "HYGIENE PROBLEMS" not in proc.stderr, proc.stderr
+
+
+def test_the_same_claim_again_is_never_a_collision_whatever_its_date(tmp: str) -> None:
+    """An undated corpus (every slice written before sections carried a
+    date) re-drained with --all, or a memory whose mtime moved without a
+    text change: the same claim again, not a disagreement. The section
+    takes the date; nothing is refused (review of 2026-09-20, F1)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    path = dom(out, "alpha", "domain.md")
+    assert "*Observed" not in read(path), "precondition: an undated section"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"], "observed_at": "2026-09-18"},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    text = read(path)
+    assert text.count("## T") == 1 and "*Observed 2026-09-18 (alpha)*" in text, text
+    # ...and a moved date on the same text is a date refresh, not a rival.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "one", "title": "T", "body": "Same body.", "evidence": ["h1"], "observed_at": "2026-09-19"},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(path).count("## T") == 1 and "*Observed 2026-09-19 (alpha)*" in read(path)
+
+
+def test_keep_both_is_remembered_on_the_next_drain(tmp: str) -> None:
+    """Once the owner kept both, the same pair re-emitted (--all, a
+    watermark at zero) is present as "X" and "X (2)" and is not asked
+    about again: the same drain twice is the same tree (F3)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "S", "body": "First.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "one", "title": "S", "body": "Second.", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#S")).returncode == 0
+    before = read(dom(out, "alpha", "domain.md"))
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert read(dom(out, "alpha", "domain.md")) == before
+
+
+def test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival(tmp: str) -> None:
+    """A flat <class>.md holds topic X; a drain brings topic Y whose heading
+    equals one of X's with other text. The write phase migrates the flat
+    file and writes Y to its own file — no collision exists — so the
+    pre-pass must not read X's sections as Y's (F4)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "x", "title": "Shared heading", "body": "About x.", "evidence": ["h1"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert os.path.exists(dom(out, "alpha", "domain.md")), "precondition: the flat file"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "x", "title": "Shared heading", "body": "About x.", "evidence": ["h1"]},
+            {"class": "domain", "topic": "y", "title": "Shared heading", "body": "About y.", "evidence": ["h2"]},
+        ]), fh)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "About y." in read(dom(out, "alpha", "domain", "y.md"))
+    assert "About x." in read(dom(out, "alpha", "domain", "x.md"))
 
 
 def test_non_english_slice_is_rejected_by_the_assembler(tmp: str) -> None:
@@ -1372,6 +1443,9 @@ def main() -> int:
         test_domain_only_evidence_is_accepted_on_a_domain_claim,
         test_hygiene_violation_is_redacted_in_place,
         test_carried_text_is_redacted_the_same_way_a_claim_is,
+        test_the_same_claim_again_is_never_a_collision_whatever_its_date,
+        test_keep_both_is_remembered_on_the_next_drain,
+        test_another_topic_in_the_flat_class_file_is_not_this_topic_s_rival,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,
         test_scratchpad_references_are_normalized,

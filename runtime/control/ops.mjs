@@ -315,7 +315,7 @@ export function recallKind(tool, input) {
   const p = typeof input?.file_path === 'string' ? input.file_path : typeof input?.path === 'string' ? input.path : '';
   if (tool === 'Read') {
     if (IDENTITY_RE.test(p)) return { kind: 'identity', path: p };
-    if (!CORPUS_RE.test(p)) return null;
+    if (!CORPUS_RE.test(p) || !/\.md$/.test(p) || /\/README\.md$/.test(p)) return null;   // crossref.json, a drain report, a README: not a slice
     return { kind: /\/INDEX\.md$/.test(p) ? 'index' : 'slice', path: p };
   }
   if (tool === 'Grep' || tool === 'Glob') return CORPUS_RE.test(p) || CORPUS_RE.test(String(input?.pattern ?? '')) ? { kind: 'search', path: p || String(input?.pattern ?? '') } : null;

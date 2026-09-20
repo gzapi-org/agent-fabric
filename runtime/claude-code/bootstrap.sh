@@ -55,7 +55,7 @@ while [[ $# -gt 0 ]]; do
 done
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-changed=0; same=0
+changed=0; same=0; failed=0
 put() {  # put <dest> <content-file>
     local dest="$1" src="$2"
     if [[ -f "$dest" ]] && cmp -s "$src" "$dest"; then
@@ -151,8 +151,14 @@ put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/
 # session by. The writer's docstring has each key's reason.
 if (( DRY_RUN )); then python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json" --dry-run
 else
-    out="$(python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json")"; echo "$out"
-    [[ "$out" == "  +  "* ]] && changed=$((changed+1)) || same=$((same+1))
+    if out="$(python3 "$FABRIC_ROOT/runtime/claude-code/user-settings.py" "$CLAUDE_HOME/settings.json")"; then
+        echo "$out"
+        [[ "$out" == "  +  "* ]] && changed=$((changed+1)) || same=$((same+1))
+    else
+        # The writer said why on stderr; an unreadable settings file is
+        # the account's to fix, and the run must not report it settled.
+        failed=$((failed+1))
+    fi
 fi
 # The dispatch policy is a skill the project CLAUDE.md files tell a session
 # to load (`subagent-dispatch`); user-scope, so no project needs a copy.
@@ -272,5 +278,6 @@ fi
 if (( DRY_RUN )); then bash "$FABRIC_ROOT/runtime/langid/install.sh" --dry-run || true
 else bash "$FABRIC_ROOT/runtime/langid/install.sh" || echo "  !  langid: not installed (above); fabric-ctl <login> script reports language unavailable until it is"; fi
 
-echo "bootstrap: $changed written, $same already current."
+if (( failed )); then echo "bootstrap: $changed written, $same already current, $failed NOT written (above)."
+else echo "bootstrap: $changed written, $same already current."; fi
 echo "Launch from $PROJECTS: cd \"$PROJECTS\" && claude   — the session starts as $(python3 "$FABRIC_ROOT/runtime/identity.py")."

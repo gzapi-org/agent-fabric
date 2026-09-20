@@ -184,6 +184,8 @@ REVIEW_MARKER='<!-- agent-fabric-review v1 -->'
 # (projects/<id>/integration/gh/) may add its own through
 # AGENT_FABRIC_LEGACY_REVIEW_MARKERS, one per line. The project's name
 # never appears here — the fabric's lint refuses it in a generic file.
+# The built-in one goes when no open PR anywhere carries a review posted
+# before 2026-09-20 (docs/2026-09-20-the-review-class-is-the-review.md).
 LEGACY_MARKERS="$(printf '%s\n%s' '<!-- agent-fabric-substitute-review v1 -->' "${AGENT_FABRIC_LEGACY_REVIEW_MARKERS:-}")"
 
 # AN AUTOMATED REVIEWER, if a project runs one — none by default.
@@ -200,6 +202,22 @@ VERDICT_AUTHORS="${AGENT_FABRIC_VERDICT_AUTHORS:-[]}"
 # yet" — which is why it needs no allow-list.
 REVIEWER_REFUSAL_RE="${AGENT_FABRIC_REVIEWER_REFUSAL_RE:-}"
 REVIEW_REQUEST_RE="${AGENT_FABRIC_REVIEW_REQUEST_RE:-}"
+
+# A CONFIGURED value that cannot be applied fails HERE, not silently
+# below. Every jq call over these runs with stderr discarded and a
+# fall-back to "none", so a list that is not JSON, or a pattern jq's
+# regex engine rejects, would read as no verdicts, no decline, no ask —
+# and the no-ask reading turns a pending request into a confident
+# "NO REVIEW COMING" (exit 5), the wrong answer this script exists to
+# avoid. Exit 2 is the invocation-problem code; a bad configuration is
+# one.
+jq -e 'type == "array" and all(.[]; type == "string")' <<<"$VERDICT_AUTHORS" >/dev/null 2>&1 \
+    || die "AGENT_FABRIC_VERDICT_AUTHORS must be a JSON array of logins, got '$VERDICT_AUTHORS'."
+for _re_name in REVIEWER_REFUSAL_RE REVIEW_REQUEST_RE; do
+    [[ -z "${!_re_name}" ]] && continue
+    jq -n --arg re "${!_re_name}" '"" | test($re)' >/dev/null 2>&1 \
+        || die "AGENT_FABRIC_$_re_name is not a regex jq accepts: '${!_re_name}'."
+done
 
 probe_ok=0
 qualifying='[]'
@@ -351,7 +369,9 @@ probe() {
     if [[ -n "$refusal_at" ]]; then
         refusal_reason="$(jq -r --argjson allowed "$VERDICT_AUTHORS" --arg at "$refusal_at" '
             [ .[] | select(.user.login as $l | $allowed | index($l)) | select(.created_at == $at)
-              | (.body // "") ] | first // "" | split("\n")[0] | .[0:160]' <<<"$comments" 2>/dev/null)" || refusal_reason=""
+              | (.body // "") ] | first // ""
+            | gsub("\r"; "") | split("\n") | map(select(length > 0)) | first // "" | .[0:160]' \
+            <<<"$comments" 2>/dev/null)" || refusal_reason=""
     fi
 
     # A PENDING REQUEST, read from the same comment stream when a project
@@ -691,10 +711,10 @@ probe() {
     return 0
 }
 
-# Nothing is coming. Requires ALL of: a previous independent review (so
-# this is not a fresh PR, where review fires on open), a head that has
-# moved past it, and no pending request. Any one of those missing and
-# waiting is still the right move.
+# Nothing is coming. Requires ALL of: a previous counted review (so this
+# is not a fresh PR the owning session has yet to review), a head that
+# has moved past it, and no pending request. Any one of those missing
+# and waiting is still the right move.
 no_review_coming() {
     # A prior VERDICT comment is equally evidence that this PR is one the
     # reviewer answers, so it satisfies the "not a fresh PR" term just as
@@ -831,14 +851,14 @@ while :; do
             note "the reviewer declined this PR — no review will arrive without a change"
             render
             printf 'PR #%s NO REVIEW COMING — the reviewer declined%s (exit 5)\n' "$PR" \
-                "$( [[ -z "$refusal_reason" ]] || printf ': %s' "${refusal_reason%% —*}" )"
+                "$( [[ -z "$refusal_reason" ]] || printf ': %s' "$refusal_reason" )"
             exit 5
         fi
 
         if [[ "$state" == "OPEN" ]] && no_review_coming; then
             note "head has advanced past the newest review and none is requested"
             render
-            printf 'PR #%s NO REVIEW COMING — request one; waiting cannot help (exit 5)\n' "$PR"
+            printf 'PR #%s NO REVIEW COMING — the head moved past every review; dispatch a re-review (exit 5)\n' "$PR"
             exit 5
         fi
     else

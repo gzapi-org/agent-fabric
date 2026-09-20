@@ -352,6 +352,9 @@ if [[ "$1" == "api" && "$*" == *"/comments"* ]]; then
       elif [[ "$sha" == "REFUSED" ]]; then
         printf '{"user":{"login":"%s"},"created_at":"%s","body":"Usage limit reached for reviews; none will run."}' \
           "$login" "$at"
+      elif [[ "$sha" == "REFUSED_DASH" ]]; then
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"\\r\\nCannot review this PR — usage limit reached for reviews.\\r\\nTry later."}' \
+          "$login" "$at"
       elif [[ "$sha" == "NOENV" ]]; then
         printf '{"user":{"login":"%s"},"created_at":"%s","body":"No environment for this repo; none will run."}' \
           "$login" "$at"
@@ -1185,7 +1188,32 @@ run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00
     "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc       "still exits 5" 5
 assert_contains "names the DECLINE, not the stale review" "the reviewer declined"
-assert_lacks    "  and does not send the caller to request one" "request one; waiting cannot help"
+assert_lacks    "  and does not send the caller to re-review" "dispatch a re-review (exit 5)"
+
+echo "pr-review-status.sh — a configuration that cannot be applied is refused, never read as 'none'"
+# jq rejects the pattern; with stderr discarded and a fall-back to "no
+# ask", the pending request below vanished and the stale review became a
+# confident exit 5. A bad configuration is an invocation problem: exit 2.
+REQUEST_RE_OVERRIDE='@reviewer review(' \
+    run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z" \
+    "someone,REQUEST,2026-08-20T10:00:00Z"
+assert_rc       "an invalid ask regex exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_REVIEW_REQUEST_RE"
+REFUSAL_RE_OVERRIDE='[unclosed' run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED"
+assert_rc       "an invalid refusal regex exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_REVIEWER_REFUSAL_RE"
+VERDICT_AUTHORS_OVERRIDE='reviewer[bot]' run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],ffffffffff"
+assert_rc       "a verdict-author list that is not a JSON array exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_VERDICT_AUTHORS"
+
+echo "pr-review-status.sh — the decline reason is the reviewer's first line, whole"
+# A web-UI comment arrives with CRLF and may open with a blank line; a
+# reason with an em dash in it was cut at the dash by a consumer written
+# for the old fixed-format strings, and read as a refusal of the diff.
+run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED_DASH"
+assert_rc       "still a decline" 5
+assert_contains "  the reason is the first non-empty line, CR stripped" "decline reason      : Cannot review this PR — usage limit reached for reviews."
+assert_contains "  and the verdict line carries it whole" "the reviewer declined: Cannot review this PR — usage limit reached for reviews. (exit 5)"
 
 echo "pr-review-status.sh — a MERGED pr is not ended by a refusal"
 # Same exception the exit-5 path already carries: a post-merge sweep

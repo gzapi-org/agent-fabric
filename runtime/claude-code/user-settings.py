@@ -41,13 +41,21 @@ ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 TOP_LEVEL = {"showThinkingSummaries": True, "verbose": True}
 
 
+class Unreadable(Exception):
+    """The file exists and is not a JSON object: refused, never overwritten."""
+
+
 def load(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except FileNotFoundError:
         return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as exc:
+        raise Unreadable(f"{path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise Unreadable(f"{path}: not a JSON object")
+    return data
 
 
 def save(path: str, data: dict) -> None:
@@ -74,7 +82,14 @@ def main(argv: list[str]) -> int:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     path = args[0]
-    doc = load(path)
+    try:
+        doc = load(path)
+    except Unreadable as exc:
+        # One line in the installer's shape, so bootstrap can count the
+        # account as NOT settled instead of reading an empty stdout as
+        # "unchanged" — a traceback did exactly that.
+        print(f"  !  {exc} — fabric user settings NOT written", file=sys.stderr)
+        return 1
     if settled(doc):
         print(f"  =  {path} fabric user settings")
         return 0

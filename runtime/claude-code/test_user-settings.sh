@@ -32,12 +32,15 @@ out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "assert 'includeCoAuthoredB
 printf '{"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "verbose": false}\n' > "$S"
 out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "" >/dev/null && ok "attribution already off, the display keys still written (verbose false overridden)" || bad "display keys" "$out $(cat "$S")"
 printf 'not json\n' > "$S"; out="$(run "$S" 2>&1)"; rc=$?
-[[ $rc -ne 0 ]] && ok "an unreadable file is refused, not overwritten (exit $rc)" || bad "unreadable file" "$out"
+[[ $rc -eq 1 && "$out" == "  !  "*"NOT written"* && "$(cat "$S")" == "not json" ]] && ok "an unreadable file is refused with one line, not a traceback, and not overwritten" || bad "unreadable file" "$out"
+printf '[1]\n' > "$S"; out="$(run "$S" 2>&1)"; rc=$?
+[[ $rc -eq 1 && "$(cat "$S")" == "[1]" ]] && ok "a JSON file that is not an object is refused too" || bad "non-object" "$out"
 out="$(run 2>&1)"; [[ $? -eq 2 ]] && ok "no path: usage, exit 2" || bad "usage" "$out"
 
 echo "bootstrap runs it"
 grep -q 'user-settings.py" "\$CLAUDE_HOME/settings.json"' "$HERE/bootstrap.sh" && ok "bootstrap.sh calls it on the login's user settings" || bad "bootstrap wiring"
 grep -q 'attribution-off' "$HERE/bootstrap.sh" && bad "bootstrap.sh still names the retired writer" || ok "the retired name is gone from bootstrap.sh"
+grep -q 'failed=\$((failed+1))' "$HERE/bootstrap.sh" && ok "a refused write is counted, not read as already current" || bad "bootstrap accounting"
 
 echo; echo "user-settings: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

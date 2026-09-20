@@ -46,8 +46,8 @@ it — in one pull request — and announce it over the relay.
   pull request; jobs failing in seconds with no steps are the platform;
   a dequeued or moved-base pull request reads as stalled; the health
   script reads the billing month.
-- A substitute blind review counts only as a review object with a
-  marker, or nothing can count it.
+- The review class's blind review counts only as a review object with
+  a marker, or nothing can count it.
 - An image bump needs its runbook, the graph rebuilt on a build-only
   service, both service tags moving together, and the rollback re-read
   against what the application now requires.

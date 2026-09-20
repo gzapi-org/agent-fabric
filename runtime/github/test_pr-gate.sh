@@ -68,7 +68,7 @@ cat > "$SANDBOX/bin/pr-review-status.sh" <<'RS'
 S="$MOCK_STATE"
 echo "PR #$1  state=OPEN"
 echo "  independent reviews : $(cat "$S/reviews" 2>/dev/null || echo 0)"
-echo "  substitute reviews  : 0"
+echo "  blind reviews       : 0"
 echo "  verdict comments    : $(cat "$S/verdicts" 2>/dev/null || echo 0)"
 echo "  head reviewed?      : $(cat "$S/head_reviewed" 2>/dev/null || echo no)"
 echo "  unresolved threads  : 0"

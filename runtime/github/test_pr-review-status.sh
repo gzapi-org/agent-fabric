@@ -124,14 +124,14 @@ case "$1 ${2:-}" in
     echo $((n+1)) > "$S/n"
     IFS=: read -r st head req <<<"$line"
     [[ "$st" == "FAIL" ]] && exit 1
-    # reviewRequests carry a login, so --automated-only can narrow them
-    # the same way it narrows review objects. A bare count still works:
-    # `<state>:<head>:<n>` fills n slots with the bot, `:<n>@login`
+    # reviewRequests carry a login, because a decline answers only the
+    # reviewer who made it. A bare count still works: `<state>:<head>:<n>`
+    # fills n slots with the fixture's configured reviewer, `:<n>@login`
     # fills them with that account instead, and `:<n>@a+b` lists a and b
     # — one request each, n ignored — for the cases where WHO is still
     # pending is the whole question.
     who="${req##*@}"; n="${req%%@*}"
-    [[ "$who" == "$req" ]] && who="chatgpt-codex-connector[bot]"
+    [[ "$who" == "$req" ]] && who="reviewer[bot]"
     if [[ "$who" == *+* ]]; then
       printf '{"state":"%s","mergeStateStatus":"CLEAN","headRefOid":"%s","headRefName":%s,"author":{"login":"me"},"isDraft":false,"reviewRequests":%s}\n' \
         "$st" "$head" \
@@ -164,14 +164,14 @@ print(json.dumps([{'__typename':'User','login':sys.argv[1]}]*int(sys.argv[2])))"
       # serves; the caller's jq is the caller's business.
       #
       # state/formaldate holds "<date>" or "<date>,<login>" per line
-      # (login defaults to the recognised reviewer).
+      # (login defaults to the fixture's configured reviewer).
       raw="$(cat "$S/formaldate" 2>/dev/null || true)"
       printf '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":['
       first=1
       while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         d="${line%%,*}"; who="${line#*,}"
-        [[ "$who" == "$line" ]] && who="chatgpt-codex-connector[bot]"
+        [[ "$who" == "$line" ]] && who="reviewer[bot]"
         (( first )) || printf ','
         first=0
         printf '{"createdAt":"%s","requestedReviewer":{"login":"%s"}}' "$d" "$who"
@@ -207,22 +207,25 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
       [[ -z "$login" ]] && continue
       (( first )) || printf ','
       first=0
-      # A 4th CSV field of MARKED gives the review the substitute
+      # A 4th CSV field of MARKED gives the review the review class's
       # marker as its body. A SENTINEL rather than a literal body,
       # because the body is the thing under test and embedding it in a
       # comma-separated fixture would let a stray comma silently change
       # what the case asserts.
       body=""
       case "$kind" in
-        MARKED) body='<!-- agent-fabric-substitute-review v1 -->\nfindings…' ;;
+        MARKED) body='<!-- agent-fabric-review v1 -->\nfindings…' ;;
+        # The fabric's own earlier marker, from when the review class was
+        # called a substitute: built in, counts with nothing configured.
+        BUILTIN) body='<!-- agent-fabric-substitute-review v1 -->\nfindings…' ;;
         # A project's earlier marker, named by its forwarder through
         # AGENT_FABRIC_LEGACY_REVIEW_MARKERS: counts. One nobody named: not.
-        LEGACY) body='<!-- legacy-project-substitute-review v1 -->\nfindings…' ;;
-        STRANGER) body='<!-- somebody-else-substitute-review v1 -->\nfindings…' ;;
+        LEGACY) body='<!-- legacy-project-review v1 -->\nfindings…' ;;
+        STRANGER) body='<!-- somebody-else-review v1 -->\nfindings…' ;;
         # The marker QUOTED mid-body, not leading it. A review discussing
         # the marker — reviewing this very mechanism does it — must not
-        # be counted as a substitute review.
-        QUOTES) body='I think the marker <!-- agent-fabric-substitute-review v1 --> should move.' ;;
+        # be counted as a blind review.
+        QUOTES) body='I think the marker <!-- agent-fabric-review v1 --> should move.' ;;
       esac
       printf '{"user":{"login":"%s"},"state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
         "$login" "$commit" "$at" "$body"
@@ -325,9 +328,12 @@ fi
 
 # gh api [--paginate] repos/o/r/issues/N/comments
 #
-# The verdict comments a CLEAN review leaves instead of a review object.
-# state/verdicts holds <login>,<sha> per line; empty by default, so every
-# case written before verdict comments existed keeps its exact meaning.
+# The verdict comments a project's CONFIGURED automated reviewer leaves
+# instead of a review object when it finds nothing. state/verdicts holds
+# <login>,<sha> per line; empty by default, so every case written before
+# verdict comments existed keeps its exact meaning. The wording is the
+# fixture's, matched by the regexes run() configures below — nothing in
+# the script under test knows these phrases.
 if [[ "$1" == "api" && "$*" == *"/comments"* ]]; then
   [[ -f "$S/verdicts_fail" ]] && exit 1
   {
@@ -341,16 +347,19 @@ if [[ "$1" == "api" && "$*" == *"/comments"* ]]; then
       first=0
       [[ -z "$at" ]] && at="2026-08-25T10:00:00Z"
       if [[ "$sha" == "REQUEST" ]]; then
-        printf '{"user":{"login":"%s"},"created_at":"%s","body":"@codex review\\n\\nplease look again"}' \
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"@reviewer review\\n\\nplease look again"}' \
           "$login" "$at"
       elif [[ "$sha" == "REFUSED" ]]; then
-        printf '{"user":{"login":"%s"},"created_at":"%s","body":"You have reached your Codex usage limits for code reviews."}' \
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"Usage limit reached for reviews; none will run."}' \
+          "$login" "$at"
+      elif [[ "$sha" == "REFUSED_DASH" ]]; then
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"\\r\\nCannot review this PR — usage limit reached for reviews.\\r\\nTry later."}' \
           "$login" "$at"
       elif [[ "$sha" == "NOENV" ]]; then
-        printf '{"user":{"login":"%s"},"created_at":"%s","body":"To use Codex here, create an environment for this repo."}' \
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"No environment for this repo; none will run."}' \
           "$login" "$at"
       else
-        printf '{"user":{"login":"%s"},"created_at":"%s","body":"### Codex Review\\n\\n**Reviewed commit:** `%s`\\n"}' \
+        printf '{"user":{"login":"%s"},"created_at":"%s","body":"### Review\\n\\n**Reviewed commit:** `%s`\\n"}' \
           "$login" "$at" "$sha"
       fi
     done < "$S/verdicts" 2>/dev/null
@@ -413,8 +422,15 @@ run() {
     # stderr into one stream and no case ever asked what was in it.
     local __o __e
     __o="$(mktemp)"; __e="$(mktemp)"
+    # THE FIXTURE CONFIGURES AN AUTOMATED REVIEWER; the script ships with
+    # none (empty list, empty patterns — the review class is the review).
+    # `${VAR-default}`, not `:-`: an override set to the EMPTY string
+    # reaches the script as empty and exercises its own default, which is
+    # how the no-reviewer cases are written.
     PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
-        AGENT_FABRIC_VERDICT_AUTHORS="${VERDICT_AUTHORS_OVERRIDE:-}" \
+        AGENT_FABRIC_VERDICT_AUTHORS="${VERDICT_AUTHORS_OVERRIDE-[\"reviewer[bot]\"]}" \
+        AGENT_FABRIC_REVIEWER_REFUSAL_RE="${REFUSAL_RE_OVERRIDE-usage limit reached|no environment for this repo}" \
+        AGENT_FABRIC_REVIEW_REQUEST_RE="${REQUEST_RE_OVERRIDE-@reviewer[[:space:]]+review}" \
         timeout 20 bash "$UNDER_TEST" 77 o/r "$@" >"$__o" 2>"$__e"
     RUN_RC=$?
     RUN_ERR="$(cat "$__e")"
@@ -453,20 +469,25 @@ assert_rc "self-authored reviews are NOT coverage" 1
 assert_contains "  counted as self" "self reviews        : 3"
 assert_contains "  and not as independent" "independent reviews : 0"
 
-# A SUBSTITUTE blind review is coverage, and authorship cannot see it.
-# Every session pushes as the same account, so a substitute posted by
-# another session is authored by the PR author and used to land in the
-# "self reviews … not coverage" bucket. Across a three-day reviewer
-# blackout that reported 0 reviews on 29 PRs, five of which had a real
-# blind review sitting on them. The marker is what separates the two, and
-# it is an exact string rather than prose: three sessions wrote three
-# different sentences, and a coverage claim guessed from prose is worse
-# than no claim.
+# The review class's BLIND review is coverage, and authorship cannot see
+# it. Every session pushes as the same account, so the review posted by
+# the session that owns the PR is authored by the PR author and used to
+# land in the "self reviews … not coverage" bucket — once reported as 0
+# reviews on 29 PRs, five of which had a real blind review sitting on
+# them. The marker is what separates the two, and it is an exact string
+# rather than prose: three sessions wrote three different sentences, and
+# a coverage claim guessed from prose is worse than no claim.
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
-assert_rc       "a substitute at the head IS coverage" 0
-assert_contains "a marked review counts as a substitute" "substitute reviews  : 1"
-assert_contains "  and NOT as a self review"             "self reviews        : 0"
-assert_contains "  says what it is worth" "not a real review"
+assert_rc       "a blind review at the head IS coverage" 0
+assert_contains "a marked review counts as a blind review" "blind reviews       : 1"
+assert_contains "  and NOT as a self review"               "self reviews        : 0"
+assert_contains "  and says what it is" "the review class — coverage"
+
+# The marker the review class posted under before it was THE review is
+# built in: a review from that time keeps counting with nothing set.
+run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,BUILTIN"
+assert_rc       "the fabric's earlier marker still counts, unconfigured" 0
+assert_contains "  as a blind review" "blind reviews       : 1"
 
 # THE INVERSE RISK, and the worse one. `contains` counted any review whose
 # body merely QUOTED the marker, and subtracted it from `self` at the same
@@ -474,35 +495,29 @@ assert_contains "  says what it is worth" "not a real review"
 # answering that question.
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,QUOTES"
 assert_rc       "a review that only QUOTES the marker is not coverage" 1
-assert_contains "  not counted as a substitute" "substitute reviews  : 0"
+assert_contains "  not counted as a blind review" "blind reviews       : 0"
 assert_contains "  still counted as a self review" "self reviews        : 1"
 
 # A LEGACY marker — the one a project posted under before the tool became
 # the fabric's — counts only when that project's forwarder names it in
 # AGENT_FABRIC_LEGACY_REVIEW_MARKERS; a marker nobody named is not coverage.
-AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-substitute-review v1 -->' \
+AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-review v1 -->' \
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,LEGACY"
 assert_rc       "a legacy marker the forwarder names IS coverage" 0
-assert_contains "  counted as a substitute" "substitute reviews  : 1"
+assert_contains "  counted as a blind review" "blind reviews       : 1"
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,LEGACY"
 assert_rc       "the same marker, not named by the environment: not coverage" 1
 assert_contains "  counted as a self review" "self reviews        : 1"
-AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-substitute-review v1 -->' \
+AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-review v1 -->' \
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,STRANGER"
 assert_rc       "a marker nobody named is not coverage even with a legacy one set" 1
 
-# A marked review from ANOTHER account is a substitute, not an independent
-# reviewer. Gating the marker test on authorship let it through as genuine
-# independent coverage.
+# A marked review from ANOTHER account is a blind review, not an
+# independent reviewer. Gating the marker test on authorship let it
+# through as genuine independent coverage.
 run "OPEN:abc123:0" "somebodyelse,abc123,2026-08-07T10:00:00Z,MARKED"
-assert_contains "a marked review is a substitute whoever posted it" "substitute reviews  : 1"
-assert_contains "  and NOT an independent review"                   "independent reviews : 0"
-
-# And a substitute must satisfy the AUTOMATED-ONLY gate too — that flag
-# asks whether a machine-grade review reported, and during a reviewer
-# outage the substitute is the only one that can.
-run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED" --automated-only
-assert_rc "a substitute satisfies --automated-only" 0
+assert_contains "a marked review is a blind review whoever posted it" "blind reviews       : 1"
+assert_contains "  and NOT an independent review"                     "independent reviews : 0"
 
 # The two must not blur: an unmarked self-authored review is still a
 # thread reply, and marking must not turn every same-account review into
@@ -510,8 +525,8 @@ assert_rc "a substitute satisfies --automated-only" 0
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED
 me,abc123,2026-08-07T10:01:00Z
 me,abc123,2026-08-07T10:02:00Z"
-assert_contains "marked and unmarked are separated (substitute)" "substitute reviews  : 1"
-assert_contains "marked and unmarked are separated (self)"       "self reviews        : 2"
+assert_contains "marked and unmarked are separated (blind)" "blind reviews       : 1"
+assert_contains "marked and unmarked are separated (self)"  "self reviews        : 2"
 
 # Reviewed at an EARLIER commit, with a review still requested: a review
 # is pending, so this is "not yet" (1), not "never coming" (5).
@@ -527,7 +542,8 @@ assert_rc "reviewed then pushed, nothing requested, exits 5" 5
 assert_contains "  names the cause" "NO REVIEW COMING"
 
 # The distinction that makes 5 worth having: a FRESH PR has had no
-# review, but automated review fires on open — so it must NOT be 5.
+# review, and the one that owns it has yet to dispatch one — so it must
+# NOT be 5.
 run "OPEN:abc123:0" ""
 assert_rc "a never-reviewed PR is 1, not 5" 1
 assert_lacks "  and claims nothing about the cause" "NO REVIEW COMING"
@@ -670,8 +686,8 @@ assert_rc "a probe that dies halfway does not render stale data" 2
 
 echo "pr-review-status.sh — a merged pr is never told that no review is coming"
 
-# Review lands on MERGED prs here routinely — that is why the post-merge
-# sweep exists, and an `@codex review` on merged #460 was acknowledged in
+# Review lands on MERGED prs routinely — that is why a post-merge sweep
+# exists, and a review asked on a merged pr has been acknowledged in
 # 40 seconds. Firing exit 5 on one sends the caller off to request a
 # review instead of awaiting the sweep that was about to deliver it, and
 # contradicts the merged-pr exception in the same loop.
@@ -687,13 +703,13 @@ fi
 run "OPEN:newsha:0" "reviewer-a,oldsha1,2026-08-12T10:00:00Z"
 assert_rc "an open pr past its newest review still exits 5" 5
 
-echo "pr-review-status.sh — a clean review is a review"
-# The reviewer creates NO review object when it finds nothing; it posts
-# an ordinary issue comment naming the commit. Counting review objects
-# alone reported 'head reviewed? no' on exactly the prs that PASSED, and
-# then exit 5 — "no review is coming" — about a review that had already
-# happened and succeeded.
-run_with_verdicts "OPEN:e7eb89d90cabc:0" "" "chatgpt-codex-connector[bot],e7eb89d90c"
+echo "pr-review-status.sh — a configured reviewer's clean verdict is a review"
+# An automated reviewer a project runs creates NO review object when it
+# finds nothing; it posts an ordinary issue comment naming the commit.
+# Counting review objects alone reported 'head reviewed? no' on exactly
+# the prs that PASSED, and then exit 5 — "no review is coming" — about a
+# review that had already happened and succeeded.
+run_with_verdicts "OPEN:e7eb89d90cabc:0" "" "reviewer[bot],e7eb89d90c"
 assert_rc       "a verdict comment at the head exits 0, with zero reviews" 0
 assert_contains "  and says the head is reviewed" "head reviewed?      : yes"
 assert_contains "  and shows where the coverage came from" "verdict comments    : 1"
@@ -702,7 +718,7 @@ assert_contains "  and names it as a clean review" "a clean review leaves no rev
 echo "pr-review-status.sh — the verdict's sha is READ, never assumed"
 # A verdict comment can arrive after a push and still describe the
 # commit before it, so 'a comment exists' is not coverage of the head.
-run_with_verdicts "OPEN:bbbbbbbbbb:0" "" "chatgpt-codex-connector[bot],aaaaaaaaaa"
+run_with_verdicts "OPEN:bbbbbbbbbb:0" "" "reviewer[bot],aaaaaaaaaa"
 assert_rc       "a verdict naming an older commit is not coverage" 5
 assert_contains "  the verdict was READ, not ignored" "verdict comments    : 1"
 assert_contains "  head stays unreviewed" "head reviewed?      : no"
@@ -715,7 +731,7 @@ echo "pr-review-status.sh — abbreviated shas match by prefix, both ways"
 # The body carries a 10-char sha and headRefOid is 40. Neither string is
 # reliably the longer one, so the match cannot assume a direction.
 run_with_verdicts "OPEN:2756062690aaaabbbbccccddddeeeeffff00001111:0" "" \
-    "chatgpt-codex-connector[bot],2756062690"
+    "reviewer[bot],2756062690"
 assert_rc "a short verdict sha covers a full head" 0
 
 echo "pr-review-status.sh — only a RECOGNISED reviewer's verdict counts"
@@ -735,17 +751,23 @@ echo "pr-review-status.sh — a self-authored verdict is not coverage"
 run_with_verdicts "OPEN:dddddddddd:0" "" "me,dddddddddd"
 assert_rc "the pr author cannot certify their own head" 1
 
-echo "pr-review-status.sh — the allow-list is overridable"
-# A repo whose reviewer account differs must be able to say so without
-# editing the script.
+echo "pr-review-status.sh — the allow-list is the project's, and empty by default"
+# A project that runs an automated reviewer names it; the script assumes
+# none, so with nothing configured no comment from anyone is a verdict.
 VERDICT_AUTHORS_OVERRIDE='["some-other-bot"]' \
     run_with_verdicts "OPEN:eeeeeeeeee:0" "" "some-other-bot,eeeeeeeeee"
-assert_rc "AGENT_FABRIC_VERDICT_AUTHORS replaces the default list" 0
-# ...and the default is still what applies without it, so the previous
+assert_rc "AGENT_FABRIC_VERDICT_AUTHORS names the reviewer" 0
+# ...and the fixture's list is what applied elsewhere, so the previous
 # assertion is about the override rather than about a list that accepts
 # everybody.
 run_with_verdicts "OPEN:eeeeeeeeee:0" "" "some-other-bot,eeeeeeeeee"
-assert_rc "  without it, that account is not recognised" 1
+assert_rc "  an account the list does not name is not recognised" 1
+# The script's OWN default is the empty list: the review class is the
+# review, and no automated reviewer is presumed to exist.
+VERDICT_AUTHORS_OVERRIDE= \
+    run_with_verdicts "OPEN:eeeeeeeeee:0" "" "reviewer[bot],eeeeeeeeee"
+assert_rc       "unconfigured, no comment is a verdict" 1
+assert_contains "  and none is counted" "verdict comments    : 0"
 
 echo "pr-review-status.sh — an unreadable comments lookup is not 'no verdicts'"
 # Swallowing this failure would report a CLEAN review as no review,
@@ -754,32 +776,40 @@ VERDICTS_FAIL=1 run "OPEN:newsha:0" "reviewer-a,newsha,2026-08-12T10:00:00Z"
 assert_rc           "a failing comments lookup exits 2, not 0" 2
 assert_lacks        "  and renders no verdict from data it never had" "head reviewed?"
 
-echo "pr-review-status.sh — a reviewer that DECLINED ends the wait"
-# The reviewer says so in the same comment stream: a spent Codex
-# allowance (#470, #472) or a missing repo environment (#461). Neither
-# is slowness, and nothing in the review objects says it — so a
-# --wait sat out the full timeout and then reported "not yet" about
-# something permanent.
-run_with_verdicts "OPEN:ffffffffff:0" "" "chatgpt-codex-connector[bot],REFUSED" \
+echo "pr-review-status.sh — a configured reviewer that DECLINED ends the wait"
+# The reviewer says so in the same comment stream — a spent usage limit,
+# a repository it cannot open. Neither is slowness, and nothing in the
+# review objects says it — so a --wait sat out the full timeout and then
+# reported "not yet" about something permanent. The wording that counts
+# as a decline is the project's (AGENT_FABRIC_REVIEWER_REFUSAL_RE), and
+# the reason reported is the reviewer's own first line.
+run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED" \
     --wait 10m --interval 1s
-assert_rc       "a spent allowance exits 5 immediately, not after 10m" 5
+assert_rc       "a decline exits 5 immediately, not after 10m" 5
 assert_contains "  names the cause"          "the reviewer declined"
 assert_contains "  and reports the decline"  "reviewer declined   :"
-assert_contains "  and says WHICH decline it is — the allowance, not this diff" "decline reason      : usage limit"
-assert_contains "  in the verdict line too" "the reviewer declined: usage limit (exit 5)"
+assert_contains "  and says WHICH decline it is, in the reviewer's words" "decline reason      : Usage limit reached for reviews"
+assert_contains "  in the verdict line too" "the reviewer declined: Usage limit reached for reviews; none will run. (exit 5)"
 
-echo "pr-review-status.sh — a missing environment is the same verdict"
-run_with_verdicts "OPEN:ffffffffff:0" "" "chatgpt-codex-connector[bot],NOENV"
-assert_rc "a missing repo environment exits 5" 5
-assert_contains "  and names the environment as the reason" "decline reason      : no environment"
+echo "pr-review-status.sh — every configured phrase is the same verdict"
+run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],NOENV"
+assert_rc "the second phrase exits 5 too" 5
+assert_contains "  and names its reason" "decline reason      : No environment for this repo"
+
+echo "pr-review-status.sh — with no refusal wording configured, nothing is a decline"
+# The script's default. A decline is read only in a reviewer's own
+# configured words — never from a "sounds negative" guess, and never
+# when no reviewer is configured to begin with.
+REFUSAL_RE_OVERRIDE= run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED"
+assert_rc    "unconfigured, the comment is just a comment" 1
+assert_lacks "  and nothing is reported as declined" "reviewer declined   :"
 
 echo "pr-review-status.sh — a refusal a later review superseded is stale"
-# The allowance resets and the environment gets created. A decline from
-# before the coverage that followed it must not end every later wait on
-# this pr.
+# Whatever made the reviewer decline passes. A decline from before the
+# coverage that followed it must not end every later wait on this pr.
 run_with_verdicts "OPEN:ffffffffff:0" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-01T10:00:00Z
-chatgpt-codex-connector[bot],ffffffffff,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-01T10:00:00Z
+reviewer[bot],ffffffffff,2026-08-20T10:00:00Z"
 assert_rc       "the later verdict wins" 0
 assert_contains "  and the decline is marked superseded" "superseded by later coverage"
 
@@ -790,63 +820,34 @@ run_with_verdicts "OPEN:ffffffffff:0" "" "some-stranger,REFUSED"
 assert_rc    "a forged refusal is ignored" 1
 assert_lacks "  and nothing is reported as declined" "reviewer declined   :"
 
-echo "pr-review-status.sh — --automated-only: a human review is not the bot"
-# The security-boundary gate in CLAUDE.md asks "has the AUTOMATED
-# reviewer reported on this head", and the default mode answers a
-# different question: `independent` is every non-author reviewer, so one
-# human review against the head exits 0 and arms the merge the gate
-# meant to hold open for the bot. Same defect the verdict comments were
-# hardened against, on the review-object path.
-run "OPEN:cccccccccc:0" "a-human,cccccccccc,2026-08-20T10:00:00Z" --automated-only
-assert_rc       "a human review at the head does NOT satisfy the gate" 1
-assert_contains "  the review is still reported" "independent reviews : 1"
-assert_contains "  and named as not counting" "not the automated reviewer"
-assert_contains "  and the mode is stated"    "--automated-only"
-
-echo "pr-review-status.sh — ...and the DEFAULT still accepts it"
-# The flag narrows the question; it must not change the ordinary answer,
-# or every existing caller silently starts failing.
-run "OPEN:cccccccccc:0" "a-human,cccccccccc,2026-08-20T10:00:00Z"
-assert_rc "without the flag, a human review is coverage" 0
-
-echo "pr-review-status.sh — --automated-only: the bot still satisfies it"
-run "OPEN:cccccccccc:0" "chatgpt-codex-connector[bot],cccccccccc,2026-08-20T10:00:00Z" \
-    --automated-only
-assert_rc "the recognised reviewer covers the head" 0
-
-echo "pr-review-status.sh — --automated-only: a clean verdict still counts"
-# Verdict comments are already allow-listed, so the strict mode must not
-# reject the one form a PASSING review takes.
-run_with_verdicts "OPEN:cccccccccc:0" "" "chatgpt-codex-connector[bot],cccccccccc" \
-    --automated-only
-assert_rc "a clean review satisfies the strict gate too" 0
-
-echo "pr-review-status.sh — --automated-only: a human review is not 'not fresh'"
-# A human review must not make the pr look like one the bot has already
-# answered, or the head advancing past it reports 5 — "no review is
-# coming" — about a bot that has not run yet and still might.
-run "OPEN:dddddddddd:0" "a-human,cccccccccc,2026-08-20T10:00:00Z" --automated-only
-assert_rc    "reports 'not yet', not 'nothing is coming'" 1
-assert_lacks "  and claims nothing about the cause" "NO REVIEW COMING"
-
-echo "pr-review-status.sh — an @codex review ask in flight is not 'nothing coming'"
-# `@codex review` is how a review is asked for here and it is NOT a
-# GitHub review request, so `requested` stays 0 and the stale-review
-# branch fired "no review is coming" seconds after the ask — breaking
-# the exact request-then-wait sequence CLAUDE.md prescribes. Hit live on
-# #501: asked at 10:58:31, told nothing was coming at 10:59.
+echo "pr-review-status.sh — a configured review ask in flight is not 'nothing coming'"
+# A project that asks its automated reviewer with a phrase
+# (AGENT_FABRIC_REVIEW_REQUEST_RE) is NOT making a GitHub review request,
+# so `requested` stays 0 and the stale-review branch fired "no review is
+# coming" seconds after the ask — breaking the exact request-then-wait
+# sequence such a project prescribes. Hit live: asked at 10:58:31, told
+# nothing was coming at 10:59.
 run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z" \
     "someone,REQUEST,2026-08-20T10:00:00Z"
 assert_rc       "reports 'not yet', not 'nothing is coming'" 1
 assert_lacks    "  and claims nothing about the cause" "NO REVIEW COMING"
 assert_contains "  and says the ask is in flight" "in flight"
 
+echo "pr-review-status.sh — with no ask phrase configured, nothing is an ask"
+# The script's default: the review class is dispatched, not asked for in
+# a comment, so no comment holds a wait open.
+REQUEST_RE_OVERRIDE= \
+    run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z" \
+    "someone,REQUEST,2026-08-20T10:00:00Z"
+assert_rc    "unconfigured, the stale review is 'nothing is coming'" 5
+assert_lacks "  and no ask is reported" "review asked        :"
+
 echo "pr-review-status.sh — the review it asked for answers the ask"
 # Decides nothing — head_reviewed wins the exit first — but a report
 # saying "nothing has answered it yet" beside "head reviewed? yes" is
 # false, and this file exists to stop confident wrong statements.
 HEAD_DATE=2026-08-10T00:00:00Z \
-    run_with_verdicts "OPEN:ffffffffff:0" "chatgpt-codex-connector[bot],ffffffffff,2026-08-20T10:00:00Z" \
+    run_with_verdicts "OPEN:ffffffffff:0" "reviewer[bot],ffffffffff,2026-08-20T10:00:00Z" \
     "someone,REQUEST,2026-08-15T10:00:00Z"
 assert_rc       "the head is covered" 0
 assert_contains "  and the ask reads answered" "already answered"
@@ -1030,19 +1031,19 @@ assert_rc       "an ask for an older head does not suppress the verdict" 5
 assert_contains "  names the cause" "NO REVIEW COMING"
 
 echo "pr-review-status.sh — an ask ALREADY ANSWERED does not suppress the verdict"
-# Otherwise one old `@codex review` would mask the stale-review state
-# forever, and --wait would never return an answer again.
+# Otherwise one old ask would mask the stale-review state forever, and
+# --wait would never return an answer again.
 run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-20T10:00:00Z" \
     "someone,REQUEST,2026-08-01T10:00:00Z"
 assert_rc       "the answer that followed it wins" 5
 assert_contains "  and the ask is marked answered" "already answered"
 
 echo "pr-review-status.sh — a re-ask after a refusal supersedes it"
-# The allowance resets and the environment gets created. Asking again
-# once the cause is gone is the normal recovery, so a decline that
-# predates the re-ask is spent rather than standing.
+# Whatever made the reviewer decline passes. Asking again once the cause
+# is gone is the normal recovery, so a decline that predates the re-ask
+# is spent rather than standing.
 run_with_verdicts "OPEN:ffffffffff:0" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-01T10:00:00Z
+    "reviewer[bot],REFUSED,2026-08-01T10:00:00Z
 someone,REQUEST,2026-08-20T10:00:00Z"
 assert_rc    "the re-ask reopens the wait" 1
 assert_lacks "  and the decline no longer ends it" "the reviewer declined"
@@ -1052,27 +1053,15 @@ echo "pr-review-status.sh — a refusal AFTER the ask still ends the wait"
 # refusal answering the ask, not the ask outliving it.
 run_with_verdicts "OPEN:ffffffffff:0" "" \
     "someone,REQUEST,2026-08-01T10:00:00Z
-chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc       "the decline wins" 5
 assert_contains "  and names itself"  "the reviewer declined"
 
-echo "pr-review-status.sh — --automated-only narrows the REQUEST count too"
-# The mode narrowed coverage; the freshness terms have to read the same
-# population. A pending HUMAN reviewer must not keep the command waiting
-# for a bot review that is not coming.
-run "OPEN:ffffffffff:1@a-human" "chatgpt-codex-connector[bot],aaaaaaaaaa,2026-08-01T10:00:00Z" \
-    --automated-only
-assert_rc       "a human request does not suppress the verdict" 5
-assert_contains "  names the cause" "NO REVIEW COMING"
-
-echo "pr-review-status.sh — ...and a pending BOT request still does"
-run "OPEN:ffffffffff:1" "chatgpt-codex-connector[bot],aaaaaaaaaa,2026-08-01T10:00:00Z" \
-    --automated-only
-assert_rc "the recognised reviewer being requested means one is coming" 1
-
-echo "pr-review-status.sh — ...and the DEFAULT mode still counts any request"
+echo "pr-review-status.sh — a pending request from ANYONE suppresses the verdict"
+# The question is "did anyone independent look"; a person still on the
+# request list can still answer it.
 run "OPEN:ffffffffff:1@a-human" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z"
-assert_rc "without the flag, a human request suppresses the verdict" 1
+assert_rc "a pending request means a review may be coming" 1
 
 # The case that stood here asserted a pending request count alone
 # reopens the wait. That was the defect, not the behaviour: it is
@@ -1088,14 +1077,14 @@ echo "pr-review-status.sh — a formal request PREDATING the refusal does not su
 # instead of reporting the decline.
 FORMAL_DATE=2026-08-01T10:00:00Z \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc       "the refusal answered that request, and still stands" 5
 assert_contains "  names the decline" "the reviewer declined"
 
 echo "pr-review-status.sh — ...and one made AFTER it does supersede it"
 FORMAL_DATE=2026-08-25T10:00:00Z \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc    "a genuine re-request reopens the wait" 1
 assert_lacks "  and the decline no longer ends it" "the reviewer declined"
 
@@ -1111,34 +1100,21 @@ echo "pr-review-status.sh — a request since WITHDRAWN cannot supersede the ref
 # a reviewer who is STILL pending.
 FORMAL_DATE="2026-08-25T10:00:00Z,a-human" \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc       "a withdrawn request does not reopen the wait" 5
 assert_contains "  the decline still stands" "the reviewer declined"
 
 echo "pr-review-status.sh — a decline does not answer a PENDING HUMAN request"
-# Default mode asks "did anyone independent look", so a human review is
-# coverage. The bot saying its allowance is spent says nothing about a
-# human still on the request list — and the refusal exit fires ahead of
-# `no_review_coming`, which would have kept waiting on that request. The
-# result was "no review is coming" while one was.
-run_with_verdicts "OPEN:ffffffffff:2@a-human+chatgpt-codex-connector[bot]" "" \
+# The question is "did anyone independent look", so a human review is
+# coverage. The configured reviewer saying it will not review says
+# nothing about a human still on the request list — and the refusal exit
+# fires ahead of `no_review_coming`, which would have kept waiting on
+# that request. The result was "no review is coming" while one was.
+run_with_verdicts "OPEN:ffffffffff:2@a-human+reviewer[bot]" "" \
     "someone,REQUEST,2026-08-01T10:00:00Z
-chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
-assert_rc    "the human request outlives the bot's decline" 1
+reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
+assert_rc    "the human request outlives the reviewer's decline" 1
 assert_lacks "  and nothing declares the review dead" "the reviewer declined"
-
-echo "pr-review-status.sh — ...but under --automated-only it still ends the wait"
-# The other half. Here the mode has already narrowed the question to the
-# recognised reviewer, so a pending human is not an answer to it —
-# suppressing the decline would make the command wait out its whole
-# timeout for a review that has been declined, which is the one case the
-# flag exists to end.
-run_with_verdicts "OPEN:ffffffffff:2@a-human+chatgpt-codex-connector[bot]" "" \
-    "someone,REQUEST,2026-08-01T10:00:00Z
-chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z" \
-    --automated-only
-assert_rc       "a pending human does not keep the declined wait open" 5
-assert_contains "  names the decline" "the reviewer declined"
 
 echo "pr-review-status.sh — no gh api call invents a flag gh does not have"
 # The mock cannot catch this, by construction: it was the mock that was
@@ -1171,36 +1147,34 @@ else
          "these are jq options — pipe the response into jq instead"
 fi
 
-echo "pr-review-status.sh — --automated-only: a HUMAN request does not clear the bot's refusal"
+echo "pr-review-status.sh — a request event for someone NOT pending does not clear the refusal"
 # Taking the globally latest request event let any later ask for anyone
 # supersede the decline, so the command went on waiting for a reviewer
-# that had already refused because a human had since been requested.
-# The mode narrows every input to the decision or none of them.
-# THE BOT MUST BE THE ONE REQUESTED, or this proves nothing: under
-# --automated-only a human-only request count narrows to zero and the
-# override never runs, so the case would pass with the identity filter
-# deleted. It has to be a pr where the bot IS requested (count > 0) and
-# a human was asked LATER — that later event is what the unfiltered
-# query would wrongly take as superseding the decline.
-FORMAL_DATE="2026-08-19T10:00:00Z,chatgpt-codex-connector[bot]
+# that had already refused because a human had since been requested and
+# withdrawn. THE REVIEWER MUST BE THE ONE STILL REQUESTED, or this proves
+# nothing: it has to be a pr where the configured reviewer IS pending
+# (count 1, filled with it) and a human was asked LATER and is not — that
+# later event is what an unfiltered query would wrongly take as
+# superseding the decline.
+FORMAL_DATE="2026-08-19T10:00:00Z,reviewer[bot]
 2026-08-25T10:00:00Z,a-human" \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z" --automated-only
-assert_rc       "the bot's decline still stands" 5
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
+assert_rc       "the reviewer's decline still stands" 5
 assert_contains "  names the decline" "the reviewer declined"
 
-echo "pr-review-status.sh — ...and a BOT request after it still clears it"
-FORMAL_DATE="2026-08-25T10:00:00Z,chatgpt-codex-connector[bot]" \
+echo "pr-review-status.sh — ...and a request of the reviewer itself after it clears it"
+FORMAL_DATE="2026-08-25T10:00:00Z,reviewer[bot]" \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z" --automated-only
-assert_rc "a re-request of the recognised reviewer reopens the wait" 1
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
+assert_rc "a re-request of the configured reviewer reopens the wait" 1
 
 echo "pr-review-status.sh — unreadable timeline leaves the refusal standing"
 # The decline is the thing actually observed. Discarding it on evidence
 # that could not be read trades a fact for a guess.
 FORMAL_DATE= \
     run_with_verdicts "OPEN:ffffffffff:1" "" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc "no ordering evidence means the refusal is not superseded" 5
 
 echo "pr-review-status.sh — a CURRENT refusal outranks the stale-review message"
@@ -1211,15 +1185,40 @@ echo "pr-review-status.sh — a CURRENT refusal outranks the stale-review messag
 # message. The permanent, actionable one has to win: "request another
 # review" is advice that cannot work while the reviewer is declining.
 run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z" \
-    "chatgpt-codex-connector[bot],REFUSED,2026-08-20T10:00:00Z"
+    "reviewer[bot],REFUSED,2026-08-20T10:00:00Z"
 assert_rc       "still exits 5" 5
 assert_contains "names the DECLINE, not the stale review" "the reviewer declined"
-assert_lacks    "  and does not send the caller to request one" "request one; waiting cannot help"
+assert_lacks    "  and does not send the caller to re-review" "dispatch a re-review (exit 5)"
+
+echo "pr-review-status.sh — a configuration that cannot be applied is refused, never read as 'none'"
+# jq rejects the pattern; with stderr discarded and a fall-back to "no
+# ask", the pending request below vanished and the stale review became a
+# confident exit 5. A bad configuration is an invocation problem: exit 2.
+REQUEST_RE_OVERRIDE='@reviewer review(' \
+    run_with_verdicts "OPEN:ffffffffff:0" "reviewer-a,aaaaaaaaaa,2026-08-01T10:00:00Z" \
+    "someone,REQUEST,2026-08-20T10:00:00Z"
+assert_rc       "an invalid ask regex exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_REVIEW_REQUEST_RE"
+REFUSAL_RE_OVERRIDE='[unclosed' run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED"
+assert_rc       "an invalid refusal regex exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_REVIEWER_REFUSAL_RE"
+VERDICT_AUTHORS_OVERRIDE='reviewer[bot]' run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],ffffffffff"
+assert_rc       "a verdict-author list that is not a JSON array exits 2" 2
+assert_contains "  and names the variable" "AGENT_FABRIC_VERDICT_AUTHORS"
+
+echo "pr-review-status.sh — the decline reason is the reviewer's first line, whole"
+# A web-UI comment arrives with CRLF and may open with a blank line; a
+# reason with an em dash in it was cut at the dash by a consumer written
+# for the old fixed-format strings, and read as a refusal of the diff.
+run_with_verdicts "OPEN:ffffffffff:0" "" "reviewer[bot],REFUSED_DASH"
+assert_rc       "still a decline" 5
+assert_contains "  the reason is the first non-empty line, CR stripped" "decline reason      : Cannot review this PR — usage limit reached for reviews."
+assert_contains "  and the verdict line carries it whole" "the reviewer declined: Cannot review this PR — usage limit reached for reviews. (exit 5)"
 
 echo "pr-review-status.sh — a MERGED pr is not ended by a refusal"
-# Same exception the exit-5 path already carries: the post-merge sweep
-# runs long after any allowance has reset.
-run_with_verdicts "MERGED:ffffffffff:0" "" "chatgpt-codex-connector[bot],REFUSED"
+# Same exception the exit-5 path already carries: a post-merge sweep
+# runs long after whatever made the reviewer decline has passed.
+run_with_verdicts "MERGED:ffffffffff:0" "" "reviewer[bot],REFUSED"
 assert_rc "a merged pr keeps waiting despite a decline" 1
 
 echo

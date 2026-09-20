@@ -4,8 +4,9 @@
 # refuses them in runtime/, which is what keeps the tool every project's).
 # gzapp's tools/gh/pr-review-status.sh forwards here, argv and stdin untouched.
 #
-# The project posted substitute reviews under its own marker before the
-# tool became the fabric's (2026-09-19); the reader counts those as
+# The project posted the review class's reviews under its own marker
+# before the tool became the fabric's (2026-09-19), from when that review
+# was called a substitute; the reader counts those as
 # coverage only because this forwarder names the marker. The GZAPP_*
 # environment names the project's callers and skills still use are
 # mapped to the fabric's here, the fabric's winning when both are set.

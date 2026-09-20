@@ -1,44 +1,29 @@
 #!/usr/bin/env bash
-# runtime/github/post-substitute-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
+# runtime/github/post-review.sh (lifted from the first managed project's tools/gh/ on 2026-09-19 — the commit names it; general to every managed project, whose own tools/gh/ copy is a forwarder through projects/<id>/integration/gh/)
 #
 # >>> help
-# Post a SUBSTITUTE blind review to a PR, marked so tooling can count it.
+# Post THE review of a PR — the review class's blind review — as a
+# review object, marked so the tooling counts it as coverage of the head.
 #
-# WHY THIS EXISTS. When the recognised reviewer declines — a spent
-# allowance, a missing environment — CLAUDE.md's standing authorisation
-# says to dispatch a blind agent and treat its findings as the bot's.
-# Sessions duly did that. Nothing could see it afterwards.
+# WHY THIS EXISTS. Every session pushes as the SAME GitHub account, so a
+# review the review class wrote is indistinguishable from the author's
+# own thread reply by account alone, and pr-review-status.sh used to
+# bucket both as "self reviews … not coverage". Prose attribution drifts
+# — three sessions wrote three different sentences — and a coverage
+# claim guessed from prose is worse than none. So every review this
+# script posts is a REVIEW OBJECT (never an issue comment, which is not
+# a review) and carries REVIEW_MARKER (below) as its first line, the
+# exact string pr-review-status.sh tests for.
 #
-# Two reasons, and this script closes both:
-#
-#   1. NO MACHINE-READABLE MARKER. The guidance said to "attribute it in
-#      the body", i.e. in prose. Prose drifts: three sessions wrote
-#      "Substitute blind review…", "Findings from the second blind-review
-#      round…" and "Second independent blind review…". Nothing can count
-#      that reliably, and a coverage claim guessed from prose is worse
-#      than none. Every review this script posts carries
-#      SUBSTITUTE_REVIEW_MARKER (below) as its first line.
-#
-#   2. NO AGREED PLACE. Every session pushes as the SAME GitHub account,
-#      so a substitute review is indistinguishable from a thread reply by
-#      account alone — and pr-review-status.sh bucketed both as "self
-#      reviews … not coverage". Some sessions posted review OBJECTS,
-#      others posted issue comments, which are not reviews at all. This
-#      always posts a review object.
-#
-# Measured on 2026-09-06, across the 29 PRs of a three-day reviewer
-# blackout: 5 carried a substitute review as a review object, 2 as issue
-# comments, and 22 had none. The tooling reported 0 for all 29.
-#
-# THIS DOES NOT MAKE A SUBSTITUTE EQUIVALENT TO A REAL REVIEW. It makes
-# it VISIBLE. pr-review-status.sh reports substitutes on their own line,
-# never merged into the reviewer's count, so a later reader can always
-# tell which commits had which.
+# The review class is the review. There is no automated reviewer it
+# stands in for: the fabric dispatches a blind reviewer for every PR
+# (runtime/claude-code/agents/code-review.md, briefed by bin/fabric-review),
+# and this is how that review reaches the PR and the gate.
 #
 # Usage:
-#   tools/gh/post-substitute-review.sh <pr> [options]   # body on stdin
+#   post-review.sh <pr> [options]   # body on stdin
 #
-#   tools/gh/post-substitute-review.sh 552 <<'EOF'
+#   post-review.sh 552 <<'EOF'
 #   Found a P1 in the ownership guard: a four-segment branch typed
 #   `Fix/` was classified unowned, so pr-reply.sh would post to it.
 #   EOF
@@ -61,14 +46,14 @@
 
 set -uo pipefail
 
-die() { echo "post-substitute-review: $*" >&2; exit 2; }
+die() { echo "post-review: $*" >&2; exit 2; }
 
 # THE CONTRACT, in one string. pr-review-status.sh greps for exactly
-# this; test_post-substitute-review.sh and test_pr-review-status.sh both
+# this; test_post-review.sh and test_pr-review-status.sh both
 # pin it, so changing it here without changing the reader is caught.
 # Versioned because a later field addition must not silently reclassify
 # older reviews.
-SUBSTITUTE_REVIEW_MARKER='<!-- agent-fabric-substitute-review v1 -->'
+REVIEW_MARKER='<!-- agent-fabric-review v1 -->'
 
 PR=""
 MODEL=""
@@ -158,10 +143,10 @@ branch_names_a_session() {
 }
 
 if ! branch_names_a_session "$PR_BRANCH"; then
-    echo "post-substitute-review: #$PR is on '$PR_BRANCH', which names no session." >&2
+    echo "post-review: #$PR is on '$PR_BRANCH', which names no session." >&2
     echo "  No session owns it, so there is nobody to defer to — posting." >&2
 elif [[ "$OWNER" != "$ME" && "$OWNER" != "$ME_LEGACY" ]]; then
-    echo "post-substitute-review: #$PR belongs to '$OWNER', and this session is '$ME'." >&2
+    echo "post-review: #$PR belongs to '$OWNER', and this session is '$ME'." >&2
     echo "  Not posting. That session is mid-flight on work you cannot see," >&2
     echo "  and a review cannot be unsent. Raise it in the PR instead." >&2
     exit 2
@@ -171,19 +156,18 @@ fi
 #
 # The marker goes FIRST so it survives any truncation a reader applies,
 # and so `head -1` identifies the review without fetching the whole body.
-header="$SUBSTITUTE_REVIEW_MARKER"
+header="$REVIEW_MARKER"
 [[ -n "$MODEL" ]] && header+=$'\n'"<!-- model: $MODEL -->"
 
 FULL_BODY="$header
-**Substitute blind review** — the recognised reviewer did not cover this
-head, so this is a blind agent standing in for it. It is a substitute,
-not an equivalent: no session context was given to the reviewer, and a
-human-grade review has still not happened.
+**Blind review** — the review class, dispatched against this head with a
+brief of facts and none of the author's session context. Its findings
+are judged before they are answered; the judgement follows in the PR.
 
 $BODY"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "would post a substitute review to #$PR ($PR_STATE) at $PR_HEAD"
+    echo "would post a review to #$PR ($PR_STATE) at $PR_HEAD"
     echo "--- body ---"
     printf '%s\n' "$FULL_BODY"
     exit 0
@@ -202,5 +186,5 @@ url="$(gh api "repos/$REPO/pulls/$PR/reviews" --input "$payload" \
     || die "the review was rejected by GitHub (PR #$PR)."
 
 [[ -n "$url" ]] || die "GitHub accepted the request but returned no review URL — treat as NOT posted."
-echo "posted substitute review: $url"
-echo "  marked so pr-review-status.sh counts it; it is reported separately from a real review."
+echo "posted review: $url"
+echo "  marked so pr-review-status.sh counts it as the review of this head."

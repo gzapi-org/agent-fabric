@@ -20,7 +20,7 @@
     },
     "code-review": {
       "title": "The review class",
-      "description": "The adversarial substitute reviewer (the code-review agent). Not a coding class: its model is gated by routing/policies/review-grade.json — chosen there by architect-cto, never by a profile layer alone — and reaches the reviewer through its agent file rather than a tier export, so it never shares an export with code-plan on the tier they both ride (runtime/claude-code/aliases.json)."
+      "description": "The adversarial blind reviewer (the code-review agent) — the review of every PR, not a stand-in for another reviewer. Not a coding class: its model is gated by routing/policies/review-grade.json — chosen there by architect-cto, never by a profile layer alone — and reaches the reviewer through its agent file rather than a tier export, so it never shares an export with code-plan on the tier they both ride (runtime/claude-code/aliases.json)."
     }
   },
   "providers": {

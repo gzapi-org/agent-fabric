@@ -16,13 +16,14 @@ The isolation machinery below makes fan-out *safe*; it does not make it
 worth its cost. A task that looks parallelisable is not an invitation,
 and this was re-opened as a "gap" more than once — it is not one.
 
-Two standing exceptions exist, both named in the root file, both
-review: step 26 of the canonical lifecycle (judging an automated review
-claim with a subagent, added after two findings were dismissed by hand
-in a row and both dismissals were wrong), and the substitute review
-dispatched when the project's review-status tooling
-(`pr-review-status.sh`, the fabric's, reached through the project's
-`tools/gh/` forwarder) reports a DECLINE. Nothing else.
+One standing exception exists, named in the root file, and it is
+review: the review class — the blind review of a PR's head, the
+judgement of a finding before it is answered (step 26 of the canonical
+lifecycle, added after two findings were dismissed by hand in a row and
+both dismissals were wrong), and the re-review of a fix range. It is
+the review the project's review-status tooling (`pr-review-status.sh`,
+the fabric's, reached through the project's `tools/gh/` forwarder)
+counts. Nothing else.
 
 ## The `model` field — the ~40-agent bill
 
@@ -59,11 +60,11 @@ class on the wrong alias, and prompts on a premium one.
 
 ### Review is the standing premium-alias exception (`fable`)
 
-One role escapes the premium ban without a per-dispatch ask: a
-**substitute reviewer**, dispatched either at step 26 (judging an
-automated review claim) or when the project's review-status tooling
-(`pr-review-status.sh`) reports a
-DECLINE and no automated review is coming at all.
+One role escapes the premium ban without a per-dispatch ask: the
+**review class**, dispatched for the review of a PR's head, for judging
+a finding (step 26) and for the re-review of a fix range. It stands in
+for nothing: no automated reviewer runs ahead of it, and its review,
+posted with `post-review.sh`, is the one the gate counts.
 
 **`fable` is a tier alias, and the target is agent-fabric's routing.**
 The Agent tool's `model` field accepts ONLY the four harness aliases —
@@ -108,11 +109,10 @@ is worse than no review, because it manufactures assurance. The cost
 of the miss lands in production; the cost of the tier is a few cents.
 
 The scale of the miss is not hypothetical. On the strict-OTP-boundary
-branch, four rounds of automated review found seven real defects, and
-two of those rounds found defects introduced by the previous round's
-own fix. Every one had passed a full green suite and mutation checks
-first. That is the failure rate a substitute reviewer is being asked
-to match.
+branch, four rounds of review found seven real defects, and two of
+those rounds found defects introduced by the previous round's own fix.
+Every one had passed a full green suite and mutation checks first. That
+is the failure rate the review class is being asked to match.
 
 It covers review only. "This task looks hard" is not review, and the
 exception must not be read as a general licence — the ~40-agent bill

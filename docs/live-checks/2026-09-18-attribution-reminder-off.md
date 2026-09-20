@@ -65,7 +65,7 @@ not add attribution", else answer NONE.
 
 ## What it decides
 
-- `runtime/claude-code/attribution-off.py` writes the key into the
+- `runtime/claude-code/user-settings.py` (`attribution-off.py` until 2026-09-20) writes the key into the
   login's user settings; `bootstrap.sh` runs it for the account. User
   scope, because a session starts inside its clone and the workspace
   `.claude/settings.json` never reaches it (the terminal-title switch

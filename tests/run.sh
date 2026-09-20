@@ -50,7 +50,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "model fallback note" bash runtime/claude-code/hooks/test_model-fallback-note.sh
     run "tab title hook" bash runtime/claude-code/hooks/test_tab-title.sh
     run "install-agent-files (the locale worker)" bash runtime/claude-code/test_install-agent-files.sh
-    run "attribution off at the source (the user settings)" bash runtime/claude-code/test_attribution-off.sh
+    run "the fabric's user settings (attribution off, thinking summaries, verbose)" bash runtime/claude-code/test_user-settings.sh
     run "moveto" bash runtime/provisioning/moveto/test_moveto.sh
     run "hostexec (local and ssh backends)" bash runtime/hostexec/test_hostexec.sh
     run "fabric-secrets" bash policies/run_suite.sh runtime/provisioning/secrets/test_fabric-secrets.sh
@@ -59,7 +59,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "github pr-sessions" bash runtime/github/test_pr-sessions.sh
     run "github commit-class (work, review fix, merge)" bash runtime/github/test_commit-class.sh
     run "github pr-review-status" bash runtime/github/test_pr-review-status.sh
-    run "github post-substitute-review" bash runtime/github/test_post-substitute-review.sh
+    run "github post-review" bash runtime/github/test_post-review.sh
     run "github pr-gate (the count rule, the verdict)" bash runtime/github/test_pr-gate.sh
 fi
 

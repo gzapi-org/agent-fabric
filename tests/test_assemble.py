@@ -1272,6 +1272,114 @@ def test_supersede_retires_the_section_in_the_part_that_holds_it(tmp: str) -> No
     assert lint.returncode == 0, f"lint rejected the tree a supersede across parts left:\n{lint.stderr}"
 
 
+def _lintable(out: str) -> None:
+    lint_inputs(out)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+
+
+def _lint(out: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+
+
+def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains(tmp: str) -> None:
+    """The other ordering: the target lives in part ONE, which is full of
+    carried text, so the superseding claim is grouped into part two — and
+    part one was written and indexed before the retire touched it. Its
+    index line must follow: gone when the part is removed, re-described
+    when a section remains; lint accepts the tree; a part counts once in
+    files_written (re-review of 2026-09-20, finding 1)."""
+    big = "y " * 900
+    # Removed shape: part one holds First alone.
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    assert "## First" in read(dom(out, "alpha", "domain", "grow.md")), "precondition: First in part one"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "First", "body": "w " * 200, "evidence": ["h3"]}]), fh)
+    _lintable(out)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## First") for t in parts.values()) == 1 and any("w w w" in t for t in parts.values()), parts
+    index = read(proj(out, "alpha", "INDEX.md"))
+    for n in os.listdir(dom(out, "alpha", "domain")):
+        pass
+    listed = [ln for ln in index.splitlines() if "grow" in ln]
+    assert all(any(n in ln for n in parts) for ln in listed), f"the index lists a part that is not on disk: {listed}"
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+    report = json.loads(read(report_path(out)))
+    assert report["files_written"] == len(set(report.get("written", []) or [])) or "written" not in report, report
+
+    # Rewritten shape: part one keeps Second after First is retired from it.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "keep", "title": "Alpha one", "body": "z " * 400, "evidence": ["h4"]},
+            {"class": "domain", "topic": "keep", "title": "Beta two", "body": "z " * 400, "evidence": ["h5"]},
+            {"class": "domain", "topic": "keep", "title": "Gamma three", "body": big, "evidence": ["h6"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    first_part = read(dom(out, "alpha", "domain", "keep.md"))
+    assert "## Alpha one" in first_part and "## Beta two" in first_part, "precondition: two sections share part one"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "keep", "title": "Alpha one", "body": big, "evidence": ["h7"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    first_part = read(dom(out, "alpha", "domain", "keep.md"))
+    assert "## Alpha one" not in first_part and "## Beta two" in first_part and "description: Beta two" in first_part, first_part
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert "keep.md" in index and "Beta two" in index and "keep (domain)" not in index, index
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+
+
+def test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue(tmp: str) -> None:
+    """The rewritten part's frontmatter is edited as text: a `collisions:`
+    list whose only entry was the retired title disappears whole (with
+    (?s) the item pattern ran to the frontmatter's end and left a bare
+    key), and the refreshed description is clipped as every description
+    the assembler writes is (findings 2 and 3)."""
+    long_title = "A heading long enough to overrun the schema's description limit " * 5
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "First", "body": "y " * 900, "evidence": ["h1"]},
+        {"class": "domain", "topic": "grow", "title": "Third", "body": "z " * 300, "evidence": ["h2"]},
+        {"class": "domain", "topic": "grow", "title": long_title.strip(), "body": "z " * 300, "evidence": ["h3"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    sibling = dom(out, "alpha", "domain", "grow-2.md")
+    text = read(sibling)
+    assert "## Third" in text and "## A heading long" in text, "precondition: Third and the long heading share part two"
+    # Seed a collision record naming Third where the assembler writes it —
+    # BEFORE origin: and derived_from:, so a pattern that runs to the end
+    # of the frontmatter would swallow those keys' lines too.
+    assert "\norigin:\n" in text, text
+    text = text.replace("\norigin:\n", '\ncollisions:\n  - "Third"\norigin:\n', 1)
+    with open(sibling, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Third", "body": "Third, revised.", "evidence": ["h4"]}]), fh)
+    _lintable(out)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = read(sibling)
+    front = after.split("\n---\n")[0]
+    assert "collisions" not in front, front
+    desc = next(ln for ln in front.splitlines() if ln.startswith("description: "))
+    assert len(desc) - len("description: ") <= 242 and desc.rstrip('"').endswith("…"), desc
+    assert "origin:" in front and "derived_from:" in front, front
+    lint = _lint(out)
+    assert lint.returncode == 0, lint.stderr
+
+
 def test_each_colliding_claim_has_its_own_decision_key(tmp: str) -> None:
     """Two incoming claims under one heading against a corpus section: the
     owner supersedes with one and drops the other. A key per claim (its
@@ -1594,6 +1702,8 @@ def main() -> int:
         test_a_collision_inside_a_two_topic_flat_file_is_still_stopped,
         test_drop_on_a_shared_topic_keeps_it_in_every_owner_s_index,
         test_supersede_retires_the_section_in_the_part_that_holds_it,
+        test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains,
+        test_a_retired_sibling_loses_its_collision_record_and_clips_its_cue,
         test_each_colliding_claim_has_its_own_decision_key,
         test_non_english_slice_is_rejected_by_the_assembler,
         test_lint_detects_index_drift,

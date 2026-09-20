@@ -70,7 +70,7 @@ import shutil
 import tarfile
 import tempfile
 from collections import defaultdict
-from typing import Any
+from typing import Callable, Any
 
 _spec = importlib.util.spec_from_file_location(
     "fabric_layout", os.path.join(os.path.dirname(os.path.realpath(__file__)), "layout.py"))
@@ -338,7 +338,8 @@ def decode_scalar(text: str) -> str:
     return text
 
 
-def retire_in_siblings(directory: str, filename: str, target: str) -> list[tuple[str, str]]:
+def retire_in_siblings(directory: str, filename: str, target: str,
+                       clip: Callable[[str], str] = lambda d: d) -> list[tuple[str, str]]:
     """Remove the section `target` (and its "(n)" siblings) from every
     OTHER budget part of the same topic in `directory`. `filename` is the
     part being written: `<topic>.md`, `<topic>-<n>.md`,
@@ -379,9 +380,13 @@ def retire_in_siblings(directory: str, filename: str, target: str) -> list[tuple
             lines = [ln for ln in block.split("\n")]
             kept = [ln for ln in lines[1:] if decode_scalar(ln.strip()[2:]) != target]
             return "\n".join([lines[0]] + kept) if kept else ""
-        front = re.sub(r"(?ms)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
+        # (?m) alone: with (?s) the item pattern ran to the end of the
+        # frontmatter, the list never read as empty, and a bare
+        # `collisions:` key was left behind.
+        front = re.sub(r"(?m)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
         first = next(iter(sections))
-        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(first), front, count=1)
+        # The cue is clipped as every description the assembler writes is.
+        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first)), front, count=1)
         body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
@@ -916,14 +921,25 @@ def main() -> int:
                 # target in the part being written exited 0 with both texts
                 # standing in two files (connected reviewer, 2026-09-20).
                 # Every sibling touched is written and reported.
-                touched = retire_in_siblings(directory, filename, target)
+                touched = retire_in_siblings(directory, filename, target,
+                                             clip=lambda d: clip_description(d, os.path.join(directory, filename)))
                 if touched:
                     authorised = True
                     resolved.append(target)
                     for tpath, what in touched:
                         retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
-                        if what == "rewritten":
+                        if what == "rewritten" and tpath not in written:
                             written.append(tpath)
+                        # A sibling this run already indexed keeps a stale
+                        # line otherwise — a link to a removed file, or the
+                        # old cue: drop it, and the on-disk sweep re-lists a
+                        # rewritten part by its frontmatter.
+                        rel = layout.link_rel(tpath, project)
+                        if role == "shared":
+                            for owner in list(shared_index):
+                                shared_index[owner] = [e for e in shared_index[owner] if e["path"] != rel]
+                        else:
+                            index_entries[role] = [e for e in index_entries[role] if e["path"] != rel]
             if authorised:
                 # Replacement is opt-in, and this is the opt-in.
                 heading = target

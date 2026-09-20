@@ -23,6 +23,14 @@ export function scratch(prefix) {
   made.push(dir);
   return dir;
 }
-process.on('exit', () => {
-  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
-});
+const removeAll = () => { for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); };
+process.on('exit', removeAll);
+// A signal's default action ends the process WITHOUT the exit event — an
+// interrupted or timed-out run is exactly the run that leaves the most
+// behind. Handling the signal ourselves: remove, then end with the
+// conventional 128+signal status so the runner still sees a killed
+// process. Only one handler per signal: installing ours removes Node's
+// default, and nothing else in a suite process wants these.
+for (const [sig, num] of [['SIGINT', 2], ['SIGTERM', 15], ['SIGHUP', 1]]) {
+  process.on(sig, () => { removeAll(); process.exit(128 + num); });
+}

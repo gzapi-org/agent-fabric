@@ -32,8 +32,10 @@ echo "the directory"
 [[ "$(env -u TMPDIR TMP=/t bash -c '. "'"$HERE"'/leak-check.sh"; leak_dir')" == /t ]] && ok "then TMP" || bad "TMP"
 [[ "$(env -u TMPDIR -u TMP -u TEMP bash -c '. "'"$HERE"'/leak-check.sh"; leak_dir')" == /tmp ]] && ok "then /tmp" || bad "/tmp"
 
-echo "run.sh uses it"
+echo "run.sh uses it, on a directory of its own"
 grep -q 'leak-check.sh' "$HERE/run.sh" && grep -q 'leak_report' "$HERE/run.sh" && ok "run.sh sources the check and reports with it" || bad "run.sh wiring"
+grep -q 'export TMPDIR="\$SCRATCH_DIR"' "$HERE/run.sh" && ok "the run exports its own TMPDIR, so a concurrent writer is never a leak" || bad "TMPDIR export"
+grep -qE "trap 'rm -rf \"\\\$SCRATCH_DIR\"' EXIT INT TERM HUP" "$HERE/run.sh" && ok "and removes it however the run ends" || bad "trap"
 
 echo; echo "leak-check: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

@@ -14,15 +14,21 @@ fail=0
 run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 
 # A test run leaves behind nothing it did not find (the owner,
-# 2026-09-19). The temporary directory is listed before and after, and
-# every entry the run added is a failure named by path: seventy such
+# 2026-09-19). The run owns its temporary directory: a fresh one under
+# the account's, exported as TMPDIR so every suite — mktemp, Node's
+# os.tmpdir(), Python's tempfile — writes there and nowhere else. At the
+# end, every entry in it is a failure named by path: seventy such
 # directories per run had accumulated to 120 MB before anyone looked
-# (tests/scratch.mjs). A suite that needs scratch removes it on exit,
-# however it exits. tests/leak-check.sh is the check; test_leak-check.sh
-# is where a planted entry proves it fires.
+# (tests/scratch.mjs). The directory itself goes when the run ends,
+# however it ends; and because it is this run's alone, a second run, a
+# pip install or an editor writing into the account's directory at the
+# same time is never mistaken for a leak. tests/leak-check.sh is the
+# check; test_leak-check.sh is where a planted entry proves it fires.
 # shellcheck source=leak-check.sh
 . "$ROOT/tests/leak-check.sh"
-SCRATCH_DIR="$(leak_dir)"
+SCRATCH_DIR="$(mktemp -d "$(leak_dir)/agent-fabric-tests.XXXXXX")" || exit 1
+export TMPDIR="$SCRATCH_DIR"
+trap 'rm -rf "$SCRATCH_DIR"' EXIT INT TERM HUP
 scratch_before="$(leak_snapshot "$SCRATCH_DIR")"
 
 if [[ "$what" == all || "$what" == static ]]; then

@@ -78,7 +78,15 @@ else:
 json.dump(d, open(path, "w"), indent=1)
 PY
 }
-run() { (cd "$SANDBOX/repo" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_NO_ANNOUNCE=1 bash "$LAUNCHER" "$@"); }
+# TMPDIR is UNSET for the launcher unless a case says KEEP_TMPDIR=1: what
+# is asserted below is the launcher's default (a per-login directory
+# under /var/tmp), and a TMPDIR the caller set wins over it by design —
+# tests/run.sh exports one for every suite, and passing it through made
+# this test assert on the runner's directory rather than the launcher's.
+run() {
+    local strip=(-u TMPDIR); [[ -n "${KEEP_TMPDIR:-}" ]] && strip=()
+    (cd "$SANDBOX/repo" && env "${strip[@]}" HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_NO_ANNOUNCE=1 bash "$LAUNCHER" "$@")
+}
 run_err() { run "$@" >/dev/null 2>&1; }
 
 echo "launch: --print resolves the capability classes through model -> family shim"
@@ -277,7 +285,7 @@ printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","updated_
 grep -q "CLAUDE-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "tab-title writer off on plain claude too" || bad "terminal-title switch missing on plain claude" "$out"
 grep -q "CLAUDE-ENV:TMPDIR=/var/tmp/agent-fabric-$LOGIN" <<<"$out" && [[ -d "/var/tmp/agent-fabric-$LOGIN" && "$(stat -c %a "/var/tmp/agent-fabric-$LOGIN")" == 700 ]] && ok "TMPDIR is a per-login directory under /var/tmp, created 700" || bad "TMPDIR not exported under /var/tmp" "$out"
 mkdir -p "$SANDBOX/own-tmp"
-out2="$(TMPDIR="$SANDBOX/own-tmp" run --provider=anthropic --version 2>&1)"
+out2="$(KEEP_TMPDIR=1 TMPDIR="$SANDBOX/own-tmp" run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-ENV:TMPDIR=$SANDBOX/own-tmp" <<<"$out2" && ok "a TMPDIR the account set wins" || bad "the launcher overrode a set TMPDIR" "$out2"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"

@@ -84,7 +84,11 @@ prev="$(head -1 "$D/backend-test")"
 mkfifo "$SANDBOX/meminfo.fifo"
 AGENT_FABRIC_LEASES="$D" AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo.fifo" bash "$ROOT/bin/fabric-lease" backend-test --need-mem 1024 -- sh -c 'echo started' > "$SANDBOX/holder.out" 2>&1 &
 HOLDER=$!
-for _ in $(seq 50); do [[ "$(head -1 "$D/backend-test" 2>/dev/null)" != "$prev" ]] && break; sleep 0.1; done
+# Wait for the NEW holder's line, not merely for a change: the record is
+# truncated and rewritten in place (the file is the lock, so it cannot be
+# replaced by rename), and a read in that instant is empty — which is a
+# change, and made this case flake under load.
+for _ in $(seq 50); do [[ "$(head -1 "$D/backend-test" 2>/dev/null)" == "$(id -un) $HOLDER "* ]] && break; sleep 0.1; done
 now="$(head -1 "$D/backend-test")"
 refused="$(lease backend-test -- echo second 2>&1)"
 [[ "$now" == "$(id -un) $HOLDER "* ]] && ok "the record names the new holder while its memory check is still running" || bad "record during the memory check" "prev=$prev now=$now holder=$HOLDER"

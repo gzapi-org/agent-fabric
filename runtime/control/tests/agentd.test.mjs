@@ -3,13 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import { scratch } from '../../../tests/scratch.mjs';
 import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer } from '../agentd.mjs';
+import { memorySlug } from '../ops.mjs';
 
 const AGENTD = new URL('../agentd.mjs', import.meta.url).pathname;
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
@@ -49,7 +50,7 @@ test('operatorAddresses and controlConfig read the fabric\'s own files', () => {
 });
 
 test('watchSource: a changed .mjs in a watched directory fires once, after the quiet period; a .txt does not', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-src-'));
+  const dir = scratch('agentd-src-');
   let fired = 0;
   const ws = watchSource(() => { fired += 1; }, [dir]);
   try {
@@ -100,7 +101,7 @@ function relay(initial = []) {
   return { server, rows, hits, add, waiting, listen: () => new Promise(r => server.listen(0, '127.0.0.1', r)), url: () => `http://127.0.0.1:${server.address().port}`, close: () => { server.closeAllConnections(); server.close(); } };
 }
 function scratchHome() {
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-home-'));
+  const h = scratch('agentd-home-');
   fs.mkdirSync(path.join(h, '.config', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(h, '.config', 'agent-fabric', 'secrets.env'), "export CLAUDE_BRIDGE_AUTH_TOKEN='tok-fixture'\nexport OPENROUTER_API_KEY='sk-or-secret-value-0123456789'\n");
   return h;
@@ -109,9 +110,12 @@ function scratchHome() {
 test('answer: a memory reply is the report first, then one record per part in order; the parts never ride in the first record', async () => {
   const tar = crypto.randomBytes(2500);
   const exec = async () => ({ stdout: tar, stderr: JSON.stringify({ claims: 1, counts: { in_scope: 1, total: 1 }, needs_rendering: [], skipped_no_roles_class: [] }) });
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-mem-'));
+  const h = scratch('agentd-mem-');
   const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
-  const mem = path.join(h, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  // The slug is the op's own rule (every non-alphanumeric to '-'), not a
+  // '/'-only substitution: the run's TMPDIR carries a '.', and the two
+  // rules differed exactly there.
+  const mem = path.join(h, '.claude', 'projects', memorySlug(wc), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
   const ctx = { me: { address: 'h/db-admin' }, started: new Date().toISOString(), home: h, exec };
   const r = await answer({ id: 'q1', op: 'memory' }, ctx);
   assert.equal(r.op, 'memory'); assert.equal(r.in_reply_to, 'q1'); assert.equal(r.data.parts, 1);
@@ -127,7 +131,7 @@ test('answer: a memory reply is the report first, then one record per part in or
   assert.equal(crypto.createHash('sha256').update(tar).digest('hex'), b.sha256);
   const ping = await answer({ id: 'q2', op: 'ping' }, ctx);
   assert.ok(!('_followups' in ping), 'only a memory reply has follow-ups');
-  const empty = await answer({ id: 'q3', op: 'memory' }, { ...ctx, home: fs.mkdtempSync(path.join(os.tmpdir(), 'agentd-nomem-')) });
+  const empty = await answer({ id: 'q3', op: 'memory' }, { ...ctx, home: scratch('agentd-nomem-') });
   assert.deepEqual(empty.data.memory, { status: 'ok', bundles: [] }); assert.equal(empty.data.parts, 0); assert.deepEqual(empty._followups, []);
   // A tokens request names its window; unset, absurd or huge, the op's default or the 90-day cap decides.
   const tk = await answer({ id: 'q4', op: 'tokens', days: 3 }, ctx);
@@ -142,7 +146,7 @@ test('answer: a memory reply is the report first, then one record per part in or
 // else to the real interpreter (whoami needs it). The payload is bigger
 // than one relay message, so the parts are real at the real size.
 function fakeHarvester(payload) {
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-py-'));
+  const bin = scratch('fake-py-');
   fs.writeFileSync(path.join(bin, 'payload.tar'), payload);
   const real = process.env.PATH.split(':').map(d => path.join(d, 'python3')).find(f => fs.existsSync(f));
   fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in *harvest_memory.py) cat "${bin}/payload.tar"; printf '%s' '{"claims": 4, "counts": {"in_scope": 5, "total": 5}, "needs_rendering": ["ka-1"], "skipped_no_roles_class": []}' >&2; exit 0;; esac\nexec "${real}" "$@"\n`, { mode: 0o755 });
@@ -230,7 +234,7 @@ test('agentd --once: a memory request is answered with the report and then the b
   const bin = fakeHarvester(payload);
   const home = scratchHome();
   const wc = path.join(home, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
-  const mem = path.join(home, '.claude', 'projects', wc.replace(/\//g, '-'), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
+  const mem = path.join(home, '.claude', 'projects', memorySlug(wc), 'memory'); fs.mkdirSync(mem, { recursive: true }); fs.writeFileSync(path.join(mem, 'a.md'), 'x');
   const r = relay([['develop-qzapp/user', request({ op: 'ping', id: 'primer' })]]);
   await r.listen();
   try {

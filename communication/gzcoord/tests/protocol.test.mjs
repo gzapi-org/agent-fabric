@@ -508,7 +508,7 @@ test('slugOf finds the longest whole-token slug an instance carries', () => {
 // tree whose workflow blesses `git add -A`.
 const login = os.userInfo().username;
 function fixtureRoot(state) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-fixture-'));
+  const root = scratch('gzcoord-fixture-');
   fs.mkdirSync(`${root}/state/agents/${login}`, { recursive: true });
   fs.copyFileSync(taxonomy.path, `${root}/catalog.json`);
   if (state !== undefined) fs.writeFileSync(`${root}/state/agents/${login}/binding.json`, state);
@@ -632,6 +632,14 @@ test('a missing MESSAGE-ID is an error; a key that misspells one is named', () =
   // A real id silences everything.
   const good = validate(`${head}MESSAGE-ID: db-admin-0007\n`);
   assert.deepEqual(good.warnings, []);
+
+  // The converse, seen live (seq 3445): the id field holds the shell
+  // variable's NAME. Valid — §7.2 keeps the id opaque — but said.
+  const unexpanded = validate(`${head}MESSAGE-ID: $ID\n`);
+  assert.equal(unexpanded.ok, true, 'the grammar admits any identifier');
+  assert.ok(unexpanded.warnings.some(w => w === 'MESSAGE-ID is the literal $ID — the shell variable was not expanded; mint the id with gzmsg.mjs new-id and write its value'), unexpanded.warnings);
+  const odd = validate(`${head}MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\nIN-REPLY-TO: yesterday's message\n`);
+  assert.ok(odd.warnings.some(w => w.startsWith("IN-REPLY-TO is yesterday's message, not an identifier this deployment mints")), odd.warnings);
 });
 
 test('unknown fields that are real extensions stay silent — §6 preserves them', () => {
@@ -700,7 +708,7 @@ test('parseArgs: unknown, valueless, repeated and surplus arguments are refused'
 });
 
 test('CLI: an unknown flag is refused before any side effect', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gzcoord-flags-'));
+  const dir = scratch('gzcoord-flags-');
   try {
     const typo = gzmsg('new-id', '--seeed', '9');
     assert.equal(typo.status, 2);
@@ -867,7 +875,7 @@ test('waitLoop --keyword: a passing non-addressed message ends the arm with code
 // in. Found live on architect-cto-01, 2026-09-14: the workspace launch
 // drained nothing because the root fell back to the cwd.
 test('inboxRoot uses the binding working copy outside a checkout', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'inbox-root-'));
+  const tmp = scratch('inbox-root-');
   const wc = path.join(tmp, 'clone'); fs.mkdirSync(wc);
   const binding = path.join(tmp, 'binding.json');
   fs.writeFileSync(binding, JSON.stringify({ working_copy: wc }));
@@ -898,6 +906,7 @@ test('relay runtime dir resolves against the workspace, not a working copy', () 
 // this login's address, and posts exactly {channel, sender, content}.
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
+import { scratch } from '../../../tests/scratch.mjs';
 const SEND = new URL('../scripts/send.mjs', import.meta.url).pathname;
 function withRelay(fn) {
   const posts = [];
@@ -914,7 +923,7 @@ function withRelay(fn) {
 // Asynchronous on purpose: the stub relay lives in this process, and a
 // synchronous exec would block the event loop the server answers on.
 function sendWith(relay, text, extra = [], moreEnv = {}) {
-  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, text);
+  const f = path.join(scratch('send-'), 'm.txt'); fs.writeFileSync(f, text);
   // HOME is a scratch dir: the runner's own synced secrets.env must not be the token here.
   const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan', ...moreEnv };
   return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
@@ -961,12 +970,12 @@ test('integrationConfig comes from the project or the environment, never a defau
 
 test('send stops, named, when no integration is configured — nothing is posted anywhere', async () => {
   await withRelay(async (relay, posts) => {
-    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-')), 'm.txt'); fs.writeFileSync(f, valid);
+    const f = path.join(scratch('send-'), 'm.txt'); fs.writeFileSync(f, valid);
     // Outside any working copy, with no channel in the environment: whoami()
     // reports whatever project the runner's binding names; the fixture
     // strips the environment and points the fabric at an empty root so no
     // project file can be found.
-    const emptyFabric = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-'));
+    const emptyFabric = scratch('fabric-');
     const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', AGENT_FABRIC_ROOT: emptyFabric };
     delete env.GZCOORD_CHANNEL;
     const r = await new Promise(resolve => execFile('node', [SEND, f], { env, encoding: 'utf8', cwd: emptyFabric },
@@ -982,6 +991,18 @@ test('send refuses a message that does not validate, and posts nothing', async (
   await withRelay(async (relay, posts) => {
     const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001\n', ''));
     assert.equal(r.code, 2); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+  });
+});
+
+test('send refuses an id the deployment did not mint — the literal $ID reached the channel once', async () => {
+  await withRelay(async (relay, posts) => {
+    const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001', 'MESSAGE-ID: $ID'));
+    assert.equal(r.code, 2); assert.match(r.err, /MESSAGE-ID is the literal \$ID — the shell variable was not expanded/); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+    const reply = await sendWith(relay, valid.replace('SUBJECT: fixture', 'IN-REPLY-TO: ${PREV}\nSUBJECT: fixture'));
+    assert.equal(reply.code, 2); assert.match(reply.err, /IN-REPLY-TO is the literal \$\{PREV\}/); assert.equal(posts.length, 0);
+    // The retired counter shape is still an id: older traffic is answered by it.
+    const old = await sendWith(relay, valid.replace('SUBJECT: fixture', 'IN-REPLY-TO: db-admin-0007\nSUBJECT: fixture'));
+    assert.equal(old.code, 0, old.err); assert.equal(posts.length, 1);
   });
 });
 
@@ -1011,7 +1032,7 @@ test('send carries a long line as written, with no width warning (the bridge doe
 
 test('send reminds a session that fell back that the flagged text must not travel', async () => {
   await withRelay(async (relay, posts) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fallback-'));
+    const dir = scratch('fallback-');
     fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ session_id: 's', pid: process.pid, from_model: 'claude-opus-5[1m]', to_model: 'claude-opus-4-8', at: '2026-09-16T11:46:21Z', category: 'cyber', topic: 'a cybersecurity issue' }));
     const r = await sendWith(relay, valid, [], { AGENT_FABRIC_FALLBACK_DIR: dir, CLAUDE_PID: String(process.pid) });
     assert.equal(r.code, 0, r.err);
@@ -1038,7 +1059,7 @@ test('inbox reports a refused token as a rotation, exit 4', async () => {
   const server = http.createServer((req, res) => { res.statusCode = 401; res.setHeader('connection', 'close'); res.end('{}'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
   const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, err: String(err) })));
   server.closeAllConnections(); server.close();
   assert.equal(r.code, 4, r.err);
@@ -1058,7 +1079,7 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const run = args => new Promise(resolve => execFile('node', [INBOX, ...args], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
   const a = await run(['--replay', '7']);
   const b = await run(['--replay', '01a09fc1-0000-7000-8000-00000000000b']);
@@ -1076,7 +1097,7 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
 // token is retried once with the file's value, and that is what recovers
 // a watch re-armed from a pre-rotation shell.
 test('the synced file is the token; the environment snapshot is not consulted while it exists', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-'));
+  const home = scratch('home-');
   fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), "# x\nexport CLAUDE_BRIDGE_AUTH_TOKEN='fresh-token'\n");
   const seen = [];
@@ -1116,7 +1137,7 @@ test('inbox --follow prints a delivery and keeps running', async () => {
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
   let out = '';
   const done = new Promise(resolve => {
@@ -1145,7 +1166,7 @@ test('inbox --follow bounds a long delivery to one notification and names the re
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
+  const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
   let out = '';
   await new Promise(resolve => { child.stdout.on('data', d => { out += d; if (out.includes('--replay 77]')) setTimeout(resolve, 200); }); setTimeout(resolve, 8000); });
@@ -1158,7 +1179,7 @@ test('inbox --follow bounds a long delivery to one notification and names the re
 
 // The hold: while the session plans, the watch polls nothing.
 test('holdStatus: held iff some marker names a live harness of this login', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
+  const dir = scratch('hold-');
   const f = pid => path.join(dir, `${pid}.json`);
   const uid = process.getuid();
   assert.equal(holdStatus(path.join(dir, 'none')).held, false, 'no directory');
@@ -1194,10 +1215,9 @@ test('holdStatus: held iff some marker names a live harness of this login', () =
   // ownership: the directory and each file must be this login's
   assert.equal(holdStatus(dir, { uid: uid + 1 }).held, false);
   assert.match(holdStatus(dir, { uid: uid + 1 }).reason, /not this login's/);
-  const link = path.join(os.tmpdir(), `hold-link-${process.pid}`);
+  const link = path.join(scratch('hold-link-'), 'link');
   fs.symlinkSync(dir, link);
   assert.match(holdStatus(link).reason, /not a directory/, 'a symlinked directory is refused');
-  fs.unlinkSync(link);
   // the path is under the login's home, overridable for tests
   assert.equal(holdDir('/h'), '/h/.cache/agent-fabric/hold');
   process.env.AGENT_FABRIC_HOLD_DIR = dir;
@@ -1270,12 +1290,12 @@ test('inbox --follow polls nothing while the hold marker names a live pid', asyn
     res.end('{}');
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hold-'));
+  const holdDir = scratch('hold-');
   fs.chmodSync(holdDir, 0o700);
   const marker = path.join(holdDir, `${process.pid}.json`);
   fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, start: pidStart(process.pid), since: 'T' }));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), AGENT_FABRIC_HOLD_DIR: holdDir,
+  const env = { ...process.env, HOME: scratch('home-'), AGENT_FABRIC_HOLD_DIR: holdDir,
                 CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
   let out = '', err = '';
@@ -1382,7 +1402,7 @@ test('a :control channel is refused by the drain, the watch and send, before any
   const server = http.createServer((req, res) => { hits.push(req.url); res.setHeader('content-type', 'application/json'); res.end('{"messages":[]}'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
-  const env = { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'home-')), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fabric:control' };
+  const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fabric:control' };
   for (const args of [[], ['--follow'], ['--wait', '1']]) {
     const r = spawnSync('node', [INBOX, ...args], { env, encoding: 'utf8', timeout: 10000 });
     assert.equal(r.status, 2, `inbox ${args.join(' ')}: exit ${r.status}\n${r.stderr}`);
@@ -1401,14 +1421,14 @@ test('a :control channel is refused by the drain, the watch and send, before any
 // workspace without the venv is a client and hosts nothing; without a
 // unit file (or a user manager) the detached spawn stays the fallback.
 test('ensureRelay: a client hosts nothing; with the unit installed the relay is started by name, not spawned', () => {
-  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'gzc-'));
+  const runtime = scratch('gzc-');
   assert.deepEqual(ensureRelay(runtime, 'http://127.0.0.1:1'), { hosted: false, started: false }, 'no venv: a client');
   fs.mkdirSync(path.join(runtime, 'venv', 'bin'), { recursive: true });
   // a "claude-bridge" that would betray itself if spawned
   fs.writeFileSync(path.join(runtime, 'venv', 'bin', 'claude-bridge'), '#!/usr/bin/env bash\necho SPAWNED >> "$(dirname "$0")/../../spawned"\nsleep 30\n', { mode: 0o755 });
   fs.writeFileSync(path.join(runtime, 'bridge-token'), 'tok\n');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-')); const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bin-'));
-  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'xdg-')); fs.writeFileSync(path.join(xdg, 'bus'), '');
+  const home = scratch('home-'); const bin = scratch('bin-');
+  const xdg = scratch('xdg-'); fs.writeFileSync(path.join(xdg, 'bus'), '');
   fs.mkdirSync(path.join(home, '.config', 'systemd', 'user'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'gzcoord-relay.service'), '[Service]\n');
   // fake systemctl records the call; fake curl answers the probe only after systemctl ran

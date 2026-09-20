@@ -29,6 +29,15 @@ expect fix  "aaa" "docs(adr): ADR-071 §2.4 — a backfilled row with no known s
 expect fix  "aaa" "feat: anything at all" "re-review F1 (the rationale)"
 echo "commit-class: a subject that OPENS with the review word is an answer with no label, no fix word, no #PR (#894 review F3)"
 expect fix "aaa" "review: the classifier itself"
+expect fix "aaa" "re-review: wording only"
+echo "commit-class: the review word as a COMPONENT's name is not an opener (agent-fabric #25: two work commits read as fixes)"
+expect work "aaa" "review class: described as the review everywhere, not a stand-in"
+expect work "aaa" "review brief: the lens vocabulary lists every lens"
+expect fix  "aaa" "review tooling: the review round's fixes — configuration refused loudly"
+# Not a label: the file says so for v2, and the opener must not admit it
+# case-insensitively where the label rule is case-sensitive on purpose.
+expect work "aaa" "review v2: the brief"
+expect work "aaa" "review pe-6 is not a label"
 # ("re-review — wording only" is NOT an opener-only case: re-review sits in the
 # answer-word list too, so the fallback rule reads it as a fix as well.)
 expect work "aaa" "reviewing the roster is the admin's act"

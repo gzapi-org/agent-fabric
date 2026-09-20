@@ -18,6 +18,7 @@ A conforming parser:
 - rejects a `BROADCAST` value other than `true`;
 - rejects more than one of `TO`, `TO-ROLE` and `BROADCAST`, and any of them on `HELLO` or `GOODBYE`;
 - rejects a message with no `MESSAGE-ID`;
+- MAY warn when `MESSAGE-ID` or `IN-REPLY-TO` does not have the shape the deployment mints (§7.2 keeps the identifier opaque, so this is never a rejection);
 - does not infer project authority from messages.
 
 ## Agent sender
@@ -25,7 +26,8 @@ A conforming parser:
 A conforming sender:
 
 - validates every message with a conforming parser (§18) before sending;
-- does not send a message that fails validation.
+- does not send a message that fails validation;
+- where the deployment prescribes how identifiers are minted (here UUIDv7, `gzmsg.mjs new-id`), does not send a message whose `MESSAGE-ID` or `IN-REPLY-TO` is not one — a malformed identifier is always a composition error, and it degrades quietly: the message reads correctly and the thread cannot be reconstructed.
 
 ## Agent runtime
 

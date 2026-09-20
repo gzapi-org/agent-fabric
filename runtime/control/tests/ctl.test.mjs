@@ -3,12 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import { scratch } from '../../../tests/scratch.mjs';
 import { parseArgs, rows, table, writeBundles, manifestAgent, partKey } from '../ctl.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 
@@ -106,7 +106,7 @@ function tarWith(manifest, filler = 1200) {
 // gunzipped, checked against the sha the report named, written under the
 // login; anything short, corrupt or wrong-sha is a status, not a file.
 test('writeBundles: reassembly, and the three ways a bundle is refused', () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-out-'));
+  const out = scratch('drain-out-');
   const tar = tarWith({ format: 'agent-fabric-drain/1', agent: 'db-admin', host: 'h' }); const sha = crypto.createHash('sha256').update(tar).digest('hex');
   assert.equal(manifestAgent(tar), 'db-admin'); assert.equal(manifestAgent(crypto.randomBytes(2000)), null);
   const b64 = zlib.gzipSync(tar).toString('base64'); const cut = Math.ceil(b64.length / 2);
@@ -162,7 +162,7 @@ function relay() {
 }
 function run(url, registry, args) {
   return new Promise(resolve => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-home-'));
+    const home = scratch('ctl-home-');
     const child = spawn('node', [CTL, ...args], { env: { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: url, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: registry } });
     let out = '', err = ''; child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
     child.on('close', status => resolve({ status, out, err }));
@@ -172,7 +172,7 @@ function run(url, registry, args) {
 // they are (CI runs as runner): fabric-ctl refuses to send as a non-operator.
 const ME = whoami();
 const H = ME.host;
-const registryFile = (operator = ME.agent) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'reg-')), 'registry.json');
+const registryFile = (operator = ME.agent) => { const f = path.join(scratch('reg-'), 'registry.json');
   fs.writeFileSync(f, JSON.stringify({ hosts: { [H]: { operator } }, placement: { 'db-admin': H, 'web-dev-01': H, 'edge-hosting': H } })); return f; };
 
 test('fabric-ctl all usage: two of three answer — table, a no-answer row, exit 1; --json one line each', async () => {
@@ -240,7 +240,7 @@ test('fabric-ctl db-admin memory --out: the report record, then the parts, colle
       setTimeout(() => { rec({ part: { slug: 's-1', part: 2, parts: 3, chunk: chunks[1] } }); rec({ part: { slug: 's-1', part: 3, parts: 3, chunk: chunks[2] } }); }, 800);
     };
     setTimeout(answer, 50);
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-'));
+    const out = scratch('drain-');
     const res = await run(r.url(), reg, ['db-admin', 'memory', '--out', out, '--timeout', '8']);
     assert.equal(res.status, 0, res.err + res.out);
     assert.equal(JSON.parse(r.rows[0].content).op, 'memory');

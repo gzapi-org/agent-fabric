@@ -27,6 +27,19 @@ const KNOWN_KEYS = ['FROM','ROLE','PROJECT','TO','TO-ROLE','BROADCAST','MESSAGE-
 // An id-shaped value: a UUID (the deployment mints UUIDv7), or the retired
 // `<instance>-NNNN` counter form still seen in older traffic.
 const ID_SHAPED = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9._-]+-\d{4})$/;
+// What an id field holds when it is NOT id-shaped, as a sentence the
+// sender can act on. SPEC §7.2 makes the id opaque, so the validator
+// only warns; send.mjs, the deployment's sender, refuses. The literal
+// "$ID" reached the channel once (seq 3445, 2026-09-20): a compose step
+// wrote the shell variable's name instead of its value, and nothing said
+// so until the message was read back with "$ID" where the join key
+// should be.
+export function idComplaint(key, value) {
+  if (ID_SHAPED.test(value)) return null;
+  if (/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value))
+    return `${key} is the literal ${value} — the shell variable was not expanded; mint the id with gzmsg.mjs new-id and write its value`;
+  return `${key} is ${value}, not an identifier this deployment mints (a UUID from gzmsg.mjs new-id)`;
+}
 function editDistance(a, b) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 0; j <= b.length; j++) d[0][j] = j;
@@ -305,6 +318,13 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
     if (near) warnings.push(`${key} is not a known field — did you mean ${near}?`);
     else if (ID_SHAPED.test(value) && !['MESSAGE-ID','IN-REPLY-TO'].includes(key))
       warnings.push(`${key} carries an id-shaped value (${value}) but is not MESSAGE-ID or IN-REPLY-TO`);
+  }
+  // The converse: an id field whose value is not id-shaped. A warning,
+  // because §7.2 makes the identifier opaque and a validator must not
+  // narrow the grammar; the deployment's sender turns it into a refusal.
+  for (const key of ['MESSAGE-ID', 'IN-REPLY-TO']) {
+    const c = msg.metadata[key] ? idComplaint(key, msg.metadata[key]) : null;
+    if (c) warnings.push(c);
   }
   // A body line that is marker-shaped up to whitespace — indented, or with
   // trailing whitespace — is body text by SPEC §6, the grammar admits no

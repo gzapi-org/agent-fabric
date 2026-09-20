@@ -48,5 +48,11 @@ fi
 if grep -rn "ssh-keyscan" runtime/provisioning --include='*.sh' | grep -v "test_\|never\|# "; then
     echo "  ✗ ssh-keyscan in provisioning: host keys come from the committed published set"; fail=1
 fi
+# A node suite's temporary directory is made through tests/scratch.mjs,
+# which removes it when the process ends; the inline form was forgotten
+# seventy times per run (tests/scratch.mjs has the measurement).
+if git ls-files '*.test.mjs' | xargs grep -n "mkdtempSync" 2>/dev/null; then
+    echo "  ✗ mkdtempSync in a node suite: use scratch() from tests/scratch.mjs"; fail=1
+fi
 if (( fail )); then echo "static: FAILED"; exit 1; fi
 echo "static: all bash scripts parse, shellcheck and ruff clean"

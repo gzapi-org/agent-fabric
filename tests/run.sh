@@ -8,10 +8,35 @@
 #   tests/run.sh static     # only the static checks (bash -n, shellcheck, ruff)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 what="${1:-all}"
 fail=0
 run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
+
+# A test run leaves behind nothing it did not find (the owner,
+# 2026-09-19). The run owns its temporary directory: a fresh one under
+# the account's, exported as TMPDIR so every suite — mktemp, Node's
+# os.tmpdir(), Python's tempfile — writes there and nowhere else. At the
+# end, every entry in it is a failure named by path: seventy such
+# directories per run had accumulated to 120 MB before anyone looked
+# (tests/scratch.mjs). The directory itself goes when the run ends,
+# however it ends; and because it is this run's alone, a second run, a
+# pip install or an editor writing into the account's directory at the
+# same time is never mistaken for a leak. tests/leak-check.sh is the
+# check; test_leak-check.sh is where a planted entry proves it fires.
+# shellcheck source=leak-check.sh
+. "$ROOT/tests/leak-check.sh"
+SCRATCH_DIR="$(mktemp -d "$(leak_dir)/agent-fabric-tests.XXXXXX")" || exit 1
+export TMPDIR="$SCRATCH_DIR"
+# EXIT removes; a signal EXITS. Naming INT/TERM/HUP on the removal trap
+# itself made bash run the removal and then CONTINUE the script — every
+# remaining suite ran against a deleted TMPDIR and was reported failed,
+# and a harness that follows TERM with KILL got no cleanup at all. Bash
+# runs the EXIT trap when it dies of an untrapped signal, so the three
+# traps below only make the status conventional (128+signal).
+trap 'rm -rf "$SCRATCH_DIR"' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+scratch_before="$(leak_snapshot "$SCRATCH_DIR")"
 
 if [[ "$what" == all || "$what" == static ]]; then
     run "static (bash -n, shellcheck, ruff)" bash tests/static.sh
@@ -37,6 +62,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
     run "fabric-lease (one holder per host resource)" bash tests/test_fabric-lease.sh
+    run "leak check (what a run left behind)" bash tests/test_leak-check.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh
     run "new-agent (the sequence, its refusals, a failure at each step)" bash runtime/provisioning/test_new-agent.sh
     run "account persistence (the Qubes boot script, the snapshot writer)" bash runtime/provisioning/platform/test_qubes-accounts.sh
@@ -64,5 +90,6 @@ if [[ "$what" == all || "$what" == bash ]]; then
 fi
 
 echo
+leak_report "$SCRATCH_DIR" "$scratch_before" || fail=$((fail+1))
 if (( fail )); then echo "tests/run.sh: $fail suite(s) FAILED"; exit 1; fi
 echo "tests/run.sh: all suites passed"

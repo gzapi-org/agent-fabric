@@ -3,17 +3,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
+import { scratch } from '../../../tests/scratch.mjs';
 import { identity, usage, keys, fabric, session, host, script, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
 function home() {
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-home-'));
+  const h = scratch('ctl-home-');
   fs.mkdirSync(path.join(h, '.config', 'agent-fabric'), { recursive: true });
   fs.mkdirSync(path.join(h, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(h, '.config', 'agent-fabric', 'secrets.env'), Object.entries(SECRETS).map(([k, v]) => `export ${k}='${v}'`).join('\n') + '\n');
@@ -85,7 +85,7 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
   assert.deepEqual(scriptCounts('Hello, world! 123'), { latin: 10 });
   assert.deepEqual(scriptCounts('გამარჯობა hello'), { georgian: 9, latin: 5 });
   assert.deepEqual(scriptCounts('привет'), { cyrillic: 6 });
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'script-home-'));
+  const h = scratch('script-home-');
   const dir = path.join(h, '.claude', 'projects', '-home-x-projects-demo'); fs.mkdirSync(dir, { recursive: true });
   const turn = (thinking, text) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'thinking', thinking }, { type: 'text', text }] } });
   const lines = [turn('I think in English about this', 'გამარჯობა — the answer in Georgian, then its rendering'), turn('ვფიქრობ ქართულად', 'ok'),
@@ -158,7 +158,7 @@ test('script: letters by script, thinking and text apart, from the account\'s ow
 // parts with the report beside it. Nothing of a memory's text is in the
 // reply but the bundle itself.
 test('memoryDirs: every memory directory with a memory in it, matched to ~/projects/<wc> by slug; MEMORY.md alone is nothing', () => {
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-home-'));
+  const h = scratch('mem-home-');
   const wc = path.join(h, 'projects', 'gzapp'); fs.mkdirSync(wc, { recursive: true });
   const dotted = path.join(h, 'projects', 'gzapi.ge'); fs.mkdirSync(dotted, { recursive: true });
   fs.mkdirSync(path.join(h, 'projects', 'agent-fabric'), { recursive: true });
@@ -219,7 +219,7 @@ test('memory: one harvester run per directory — the tar from stdout, the repor
 });
 
 test('languages: CLD2 judges only paragraphs of twenty letters; shares weighted by letters, dominant per paragraph, unreliable counted; no venv is unavailable', () => {
-  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lang-home-'));
+  const h = scratch('lang-home-');
   assert.equal(languages(['ქართული აბზაცი საკმაოდ გრძელი'], { home: h }).status, 'unavailable');
   const venvPy = langidCmd(h, '/r')[0]; fs.mkdirSync(path.dirname(venvPy), { recursive: true }); fs.writeFileSync(venvPy, '');
   assert.equal(langidCmd(h, '/r')[1], '/r/runtime/langid/langid.py');
@@ -278,7 +278,7 @@ test('tokens: per model from the login\'s own records — deduplicated by reques
   assert.equal(t.first, new Date(now - 2 * day).toISOString()); assert.equal(t.last, new Date(now - day).toISOString());
   assert.ok(!JSON.stringify(t).includes('SECRET-TEXT'), 'counts only');
   assert.equal(tokens(h, { now, days: 0.5 }).status, 'no-records', 'a narrower window with nothing in it says so');
-  assert.equal(tokens(fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-empty-'))).status, 'no-records');
+  assert.equal(tokens(scratch('ctl-empty-')).status, 'no-records');
   const c = await collect('tokens', { home: h, who, days: 3 });
   assert.deepEqual(Object.keys(c).sort(), ['identity', 'tokens'], 'tokens rides with identity, so the coordinator can group by Claude account');
   assert.equal(c.tokens.days, 3);
@@ -301,7 +301,7 @@ test('collect: status is every section, a single op its own, and a failing secti
 });
 
 test('host: the machine from a scratch /proc and /sys — load, memory, the balloon, disks once per device, leases probed with flock, the largest processes; nothing but numbers, logins and program names', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-host-'));
+  const root = scratch('ctl-host-');
   const proc = path.join(root, 'proc'), sys = path.join(root, 'sys'), leases = path.join(root, 'leases');
   fs.mkdirSync(proc); fs.mkdirSync(leases, { recursive: true });
   fs.writeFileSync(path.join(proc, 'loadavg'), '3.37 3.44 3.22 5/1200 999\n');

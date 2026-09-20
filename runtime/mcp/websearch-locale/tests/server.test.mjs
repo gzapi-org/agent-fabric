@@ -5,9 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { scratch } from '../../../../tests/scratch.mjs';
 import { readLocale, request, search, handle, tools } from '../server.mjs';
 
 const SERVER = new URL('../server.mjs', import.meta.url).pathname;
@@ -16,7 +16,7 @@ const LOCALE = { timezone: 'Asia/Tbilisi',
                  brave: { country: 'ALL', tool_description: 'გლობალური ვებ-ძიება' } };
 const G = { SERPAPI_API_KEY: 'serpapi-secret-key-value-0123456789' };
 const B = { BRAVE_SEARCH_API_KEY: 'BSA-secret-key-value-0123456789' };
-const localeFile = (l = LOCALE) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'loc-')), 'locale.json'); fs.writeFileSync(f, JSON.stringify(l)); return f; };
+const localeFile = (l = LOCALE) => { const f = path.join(scratch('loc-'), 'locale.json'); fs.writeFileSync(f, JSON.stringify(l)); return f; };
 
 test('readLocale: an engine block is complete or absent; at least one; request per engine — the locale decides the parameters, the caller the query; the SerpAPI key rides only as its api_key', () => {
   assert.deepEqual(readLocale(localeFile()), LOCALE);
@@ -97,7 +97,7 @@ test('handle: the MCP subset — initialize, initialized, ping, the two tools, w
 });
 
 test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool error, not a crash; no secret on stderr or stdout', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-home-')); fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
+  const home = scratch('ws-home-'); fs.mkdirSync(path.join(home, '.config', 'agent-fabric'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'agent-fabric', 'secrets.env'), `export GH_TOKEN='${B.BRAVE_SEARCH_API_KEY}'\n`);   // neither search key
   // The synced file is the only source of a key here: a login that holds the
   // search keys in its environment (the ge holder) must not lend them to the child.

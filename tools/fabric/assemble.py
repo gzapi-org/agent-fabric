@@ -58,12 +58,14 @@ so it is never done implicitly.
 from __future__ import annotations
 
 import argparse
+import atexit
 import importlib.util
 import json
 import os
 import hashlib
 import re
 import sys
+import shutil
 import tarfile
 import tempfile
 from collections import defaultdict
@@ -404,6 +406,9 @@ def open_bundle(source: str) -> str:
     file, anything the manifest does not vouch for."""
     stream = sys.stdin.buffer if source == "-" else open(source, "rb")
     dest = tempfile.mkdtemp(prefix="assemble-bundle-")
+    # The unpacked bundle lives for this run only; a refusal below exits
+    # through sys.exit, so the removal is registered, not reached.
+    atexit.register(shutil.rmtree, dest, ignore_errors=True)
     members: dict[str, bytes] = {}
     try:
         with tarfile.open(fileobj=stream, mode="r|*") as tar:

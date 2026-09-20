@@ -13,6 +13,15 @@ what="${1:-all}"
 fail=0
 run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 
+# A test run leaves behind nothing it did not find (the owner,
+# 2026-09-19). The temporary directory is listed before and after, and
+# every entry the run added is a failure named by path: seventy such
+# directories per run had accumulated to 120 MB before anyone looked
+# (tests/scratch.mjs). A suite that needs scratch removes it on exit,
+# however it exits.
+SCRATCH_DIR="${TMPDIR:-/tmp}"
+scratch_before="$(ls -A "$SCRATCH_DIR" 2>/dev/null | sort)"
+
 if [[ "$what" == all || "$what" == static ]]; then
     run "static (bash -n, shellcheck, ruff)" bash tests/static.sh
 fi
@@ -64,5 +73,11 @@ if [[ "$what" == all || "$what" == bash ]]; then
 fi
 
 echo
+left="$(comm -13 <(printf '%s\n' "$scratch_before") <(ls -A "$SCRATCH_DIR" 2>/dev/null | sort) | grep -v '^$' || true)"
+if [[ -n "$left" ]]; then
+    echo "== scratch left behind under $SCRATCH_DIR (a suite did not clean up):"
+    printf '   %s\n' $left
+    fail=$((fail+1))
+fi
 if (( fail )); then echo "tests/run.sh: $fail suite(s) FAILED"; exit 1; fi
 echo "tests/run.sh: all suites passed"

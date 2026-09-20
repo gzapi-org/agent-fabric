@@ -77,6 +77,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import atexit
 import io
 import json
 import os
@@ -278,6 +279,9 @@ def main() -> int:
     if args.bundle:
         # The directory form, then packed: one writer for both shapes.
         args.out = tempfile.mkdtemp(prefix="harvest-bundle-")
+        # write_bundle removes it after packing; every earlier return
+        # (no role, no memory directory, a refused claim) would leave it.
+        atexit.register(shutil.rmtree, args.out, ignore_errors=True)
 
     working_copy = os.path.abspath(args.working_copy or os.getcwd())
     ctx = identity.resolve_context(cwd=working_copy)

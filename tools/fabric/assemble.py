@@ -338,35 +338,55 @@ def decode_scalar(text: str) -> str:
     return text
 
 
-def retire_in_siblings(directory: str, filename: str, target: str) -> bool:
+def retire_in_siblings(directory: str, filename: str, target: str) -> list[tuple[str, str]]:
     """Remove the section `target` (and its "(n)" siblings) from every
-    OTHER budget part of the same topic in `directory`, rewriting each
-    file touched; True if it was found anywhere. `filename` is the part
-    being written: `<topic>.md`, `<topic>-<n>.md`, `<class>-<topic>(-n).md`
-    for a shared slice, or the flat `<class>.md`."""
+    OTHER budget part of the same topic in `directory`. `filename` is the
+    part being written: `<topic>.md`, `<topic>-<n>.md`,
+    `<class>-<topic>(-n).md` for a shared slice, or the flat `<class>.md`.
+    Returns what was touched: (path, "rewritten" | "removed").
+
+    The frontmatter is kept VERBATIM and edited textually — the
+    `collisions:` list loses the target, the `description:` follows the
+    first remaining heading — never parsed and re-rendered: the parser
+    reads every scalar as a string, and a round trip wrote `tier: "2"`,
+    which the schema refuses (review, 2026-09-20). A part left with no
+    section is removed; the index sweep then stops pointing at an empty
+    file whose cue named the section that moved."""
     stem = re.sub(r"(-\d+)?\.md$", "", filename)
-    found = False
+    touched: list[tuple[str, str]] = []
     for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
         if name == filename or not name.endswith(".md"):
             continue
         if re.sub(r"(-\d+)?\.md$", "", name) != stem:
             continue
         path = os.path.join(directory, name)
-        meta, sections = read_existing_slice(path)
+        _meta, sections = read_existing_slice(path)
         victims = [h for h in sections if h == target or re.fullmatch(re.escape(target) + r" \(\d+\)", h)]
         if not victims:
             continue
         for h in victims:
             del sections[h]
-        found = True
-        if "collisions" in meta:
-            meta["collisions"] = [c for c in meta["collisions"] if c != target] or None
-            if meta["collisions"] is None:
-                del meta["collisions"]
-        body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + ("\n" if sections else "")
+        if not sections:
+            os.remove(path)
+            touched.append((path, "removed"))
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+        front = m.group(1) if m else ""
+        # collisions: drop the target's entry; drop the key when empty.
+        def prune(block: str) -> str:
+            lines = [ln for ln in block.split("\n")]
+            kept = [ln for ln in lines[1:] if decode_scalar(ln.strip()[2:]) != target]
+            return "\n".join([lines[0]] + kept) if kept else ""
+        front = re.sub(r"(?ms)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
+        first = next(iter(sections))
+        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(first), front, count=1)
+        body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write((render_frontmatter(meta) + "\n\n" + body).rstrip() + "\n")
-    return found
+            fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
+        touched.append((path, "rewritten"))
+    return touched
 
 
 def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
@@ -829,6 +849,7 @@ def main() -> int:
 
     collisions: list[str] = []
     written: list[str] = []
+    retired_in: list[str] = []   # sibling parts a supersede touched: path, section, rewritten|removed
     index_entries: dict[str, list[dict[str, str]]] = defaultdict(list)
 
     DESCRIPTION_MAX = 240  # identities/schemas/role-template.schema.json
@@ -888,14 +909,21 @@ def main() -> int:
             heading = claim_heading(claim)
             target = (claim.get("merge_target") or "").strip()
             authorised = bool(target and target in blocks)
-            if target and not authorised and retire_in_siblings(directory, filename, target):
+            if target and not authorised:
                 # THE SECTION LIVES IN ANOTHER PART of this topic (a slice
                 # split by budget): the owner's supersede retires it there
                 # and the superseding text lands here. Authorising only a
                 # target in the part being written exited 0 with both texts
                 # standing in two files (connected reviewer, 2026-09-20).
-                authorised = True
-                resolved.append(target)
+                # Every sibling touched is written and reported.
+                touched = retire_in_siblings(directory, filename, target)
+                if touched:
+                    authorised = True
+                    resolved.append(target)
+                    for tpath, what in touched:
+                        retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
+                        if what == "rewritten":
+                            written.append(tpath)
             if authorised:
                 # Replacement is opt-in, and this is the opt-in.
                 heading = target
@@ -1426,6 +1454,7 @@ def main() -> int:
         "hygiene_problems": problems,
         "rejected_hygiene": rejected_hygiene,
         "redactions": redactions,
+        "retired_in_siblings": retired_in,
         "oversized_claims": oversized,
         "clipped_descriptions": clipped_descriptions,
         "migrated": migrated,
@@ -1455,6 +1484,10 @@ def main() -> int:
     if rejected_hygiene:
         print("\nREJECTED (hygiene — fix the memory, the corpus did not receive it; this run exits 1):", file=sys.stderr)
         for note in rejected_hygiene:
+            print(f"  {note}", file=sys.stderr)
+    if retired_in:
+        print("\nRETIRED in another part of the topic (a supersede reached the section where it lived):", file=sys.stderr)
+        for note in retired_in:
             print(f"  {note}", file=sys.stderr)
     if oversized:
         print("\nOVER BUDGET (written whole; lint will fail until the memory is split):", file=sys.stderr)

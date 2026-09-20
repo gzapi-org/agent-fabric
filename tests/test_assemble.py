@@ -1232,6 +1232,44 @@ def test_supersede_retires_the_section_in_the_part_that_holds_it(tmp: str) -> No
     assert sum(t.count("## Second") for t in texts.values()) == 1, texts
     assert any("Second, revised." in t for t in texts.values()) and not any(big.strip() in t and "## Second" in t and "Second, revised." not in t for t in texts.values())
     assert not any("collisions:" in t for t in texts.values()), "the retired section's collision record goes with it"
+    # The part that held only the retired section is gone — not left as an
+    # empty file the index still points at under the moved section's cue.
+    assert not any("grow-2" in n for n in texts), texts.keys()
+    assert "grow-2" not in read(proj(out, "alpha", "INDEX.md"))
+    assert "RETIRED in another part" in proc.stderr and "grow-2.md: 'Second' removed" in proc.stderr, proc.stderr
+    assert json.loads(read(report_path(out)))["retired_in_siblings"], "the report names the sibling touched"
+    # A part rewritten with a section left keeps a schema-valid frontmatter
+    # (a round trip once wrote tier: "2") and a cue naming what remains.
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [
+            {"class": "domain", "topic": "grow", "title": "Third", "body": "z " * 400, "evidence": ["h4"]},
+            {"class": "domain", "topic": "grow", "title": "Fourth", "body": "z " * 400, "evidence": ["h5"]},
+        ]), fh)
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    holder = next(n for n, t in parts.items() if "## Third" in t)
+    assert "## Fourth" in parts[holder] and holder != "grow.md", "precondition: Third and Fourth share a later part"
+    with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "Third", "body": "Third, revised.", "evidence": ["h6"]}]), fh)
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    after = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
+    assert sum(t.count("## Third") for t in after.values()) == 1 and any("Third, revised." in t for t in after.values()), after
+    assert holder in after and "## Third" not in after[holder] and "## Fourth" in after[holder], after
+    assert "tier: 2" in after[holder] and 'tier: "2"' not in after[holder], after[holder]
+    assert "description: Fourth" in after[holder], after[holder]
+    assert "grow-2.md: 'Third' rewritten" in proc.stderr, proc.stderr
+    lint_inputs(out)
+    os.makedirs(os.path.join(out, "identities", "roles"), exist_ok=True)
+    with open(os.path.join(out, "identities", "roles", "catalog.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "roles": [{"id": "alpha", "title": "Alpha"}]}, fh)
+    with open(ident(out, "alpha", "charter.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nrole: alpha\nclass: charter\ndescription: d\ntier: 1\ndistilled_at: 2026-01-01\n---\n\n# alpha\n")
+    assert run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:grow#Third": "supersede"})).returncode == 0
+    lint = subprocess.run([sys.executable, LINT, "--fabric", out, "--working-copy", f"{PROJECT}={working_copy(out)}"], capture_output=True, text=True)
+    assert lint.returncode == 0, f"lint rejected the tree a supersede across parts left:\n{lint.stderr}"
 
 
 def test_each_colliding_claim_has_its_own_decision_key(tmp: str) -> None:

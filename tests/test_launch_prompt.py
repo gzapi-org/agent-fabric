@@ -295,8 +295,9 @@ def case_every_catalogue_role_renders_under_the_ceiling() -> None:
             "    except SystemExit as exc:\n"
             "        out[role] = str(exc)\n"
             "sys.stdout.write(json.dumps({'max': m.MAX_CHARS, 'sizes': out}))")
+    # The tree under test, not whatever AGENT_FABRIC_ROOT names in a session's environment.
     r = subprocess.run([sys.executable, "-c", code, os.path.join(ROOT, "tools", "fabric", "launch_prompt.py"), *roles],
-                       capture_output=True, text=True)
+                       env={**os.environ, "AGENT_FABRIC_ROOT": ROOT}, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
     over = [f"{role}: {size}" for role, size in got["sizes"].items() if not isinstance(size, int) or size > got["max"]]

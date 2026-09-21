@@ -52,6 +52,7 @@ REAL_PROJECT_SCHEMAS = os.path.join(ROOT, "projects", "schemas")
 REAL_ROUTING = os.path.join(ROOT, "routing")
 REAL_PROMPT = os.path.join(ROOT, "identities", "prompt")
 REAL_ALIASES = os.path.join(ROOT, "runtime", "claude-code", "aliases.json")
+REAL_I18N_SCHEMA = os.path.join(ROOT, "communication", "gzcoord", "i18n", "i18n.schema.json")
 PROJECT = "demo"
 
 SKILL = """---
@@ -136,6 +137,12 @@ def make_base(root: str) -> str:
     shutil.copy2(REAL_ALIASES, os.path.join(fabric, "runtime", "claude-code", "aliases.json"))
     # The launch-prompt sections every session appends; lint requires them.
     shutil.copytree(REAL_PROMPT, os.path.join(fabric, "identities", "prompt"))
+    # The real dictionary schema: it is where the key shape is stated, and
+    # lint READS it rather than restating it — so a fixture without it put
+    # every case on a fallback branch instead of the one that ships
+    # (re-review F-A on PR #28).
+    os.makedirs(os.path.join(fabric, "communication", "gzcoord", "i18n"))
+    shutil.copy2(REAL_I18N_SCHEMA, os.path.join(fabric, "communication", "gzcoord", "i18n", "i18n.schema.json"))
     write(os.path.join(fabric, "identities", "roles", "catalog.json"), json.dumps(CATALOG))
     write(os.path.join(fabric, "projects", PROJECT, "taxonomy.json"), json.dumps(TAXONOMY))
     write(os.path.join(fabric, "identities", "roles", "web-dev", "charter.md"), CHARTER)
@@ -788,6 +795,26 @@ def case_i18n_dictionary_is_complete_and_keeps_its_identifiers() -> None:
         write(ident(fabric, "locale", "ge", "ka-GE.json"), "{not json")
         code, out = run_lint(fabric)
         assert code == 1 and "not JSON" in out, out
+
+        # A control character in a value reaches a session's context.
+        write(ident(fabric, "locale", "ge", "ka-GE.json"),
+              json.dumps({**good, "inbox.others-header": "ᲐᲠ ᲐᲠᲘᲡ\x07 (SPEC §17):"}, ensure_ascii=False))
+        code, out = run_lint(fabric)
+        assert code == 1 and "carries a control character" in out, out
+
+        # The schema states the key shape and nothing else does, so lint
+        # SAYS when it cannot be read instead of quietly restating it.
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(good, ensure_ascii=False))
+        schema = os.path.join(fabric, "communication", "gzcoord", "i18n", "i18n.schema.json")
+        os.remove(schema)
+        code, out = run_lint(fabric)
+        assert code == 1 and "the key shape is stated here and nothing else states it" in out, out
+        write(schema, json.dumps({"type": "object"}))
+        code, out = run_lint(fabric)
+        assert code == 1 and "no propertyNames.pattern" in out, out
+        shutil.copy2(REAL_I18N_SCHEMA, schema)
+        code, out = run_lint(fabric)
+        assert code == 0, out
 
 
 def case_non_latin_translation_budget_is_stricter() -> None:

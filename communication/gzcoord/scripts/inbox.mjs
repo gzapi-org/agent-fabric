@@ -595,7 +595,6 @@ export async function main(argv = process.argv.slice(2)) {
   const follow = argv.includes('--follow');
   const replayIdx = argv.indexOf('--replay');
   const replayWhich = replayIdx >= 0 ? argv[replayIdx + 1] : null;
-  if (replayIdx >= 0 && !replayWhich) { console.error(en()('replay.usage')); return 1; }
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
   // Who this session is (the login) and which project it is working in
   // (from the working copy's remote, or the binding) — the second selects
@@ -613,6 +612,8 @@ export async function main(argv = process.argv.slice(2)) {
   // the budget. After `t`, so the refusal reads in the login's own
   // language like every other line (blind review F3 on PR #28).
   const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []), t);
+  // Also after `t`: a usage line is one of this login's lines (re-review §3).
+  if (replayIdx >= 0 && !replayWhich) { console.error(t('replay.usage')); return 1; }
   if (argv.includes('--held')) {
     const h = holdStatus(undefined, { t });
     const unknown = t('held.unknown');
@@ -715,6 +716,6 @@ if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.ex
   // throw inside this handler is an unhandled rejection — a stack trace
   // and exit 1 on a path whose whole contract is one line and exit 0
   // (blind review F1 on PR #28).
-  console.error(`gzcoord inbox: ${e.message}`);
+  console.error(`gzcoord inbox: ${e?.message ?? e}`);
   process.exit(0);
 });

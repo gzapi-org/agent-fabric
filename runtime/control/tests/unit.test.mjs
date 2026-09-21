@@ -3,8 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const UNIT = new URL('../agent-fabric-agentd.service', import.meta.url).pathname;
+const UNIT = fileURLToPath(new URL('../agent-fabric-agentd.service', import.meta.url));
 
 test('agent-fabric-agentd.service: the keys the daemon relies on', () => {
   const text = fs.readFileSync(UNIT, 'utf8');

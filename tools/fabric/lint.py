@@ -545,22 +545,28 @@ I18N_DEFAULT_REL = os.path.join("communication", "gzcoord", "i18n", "en-US.json"
 I18N_SCHEMA_REL = os.path.join("communication", "gzcoord", "i18n", "i18n.schema.json")
 
 
-def _i18n_key_re() -> "re.Pattern[str]":
-    """The key shape, from the schema that states it. Read rather than
-    restated: the rule had three copies (the schema, here, the node
-    suite) and only two of them could fail, which is how a recorded
-    contract drifts from the code (blind review F6 on PR #28)."""
+def _i18n_key_re() -> "tuple[re.Pattern[str] | None, str | None]":
+    """The key shape, from the schema that states it, or why it could not
+    be read. Read rather than restated: the rule had three copies (the
+    schema, here, the node suite) and only two could fail, which is how a
+    recorded contract drifts from the code. No fallback pattern — a
+    default here would BE the third copy, and it would be the branch the
+    suite runs while the read path went untested (re-review F-A)."""
+    path = os.path.join(layout.FABRIC_ROOT, I18N_SCHEMA_REL)
     try:
-        with open(os.path.join(layout.FABRIC_ROOT, I18N_SCHEMA_REL), encoding="utf-8") as fh:
-            return re.compile(json.load(fh)["propertyNames"]["pattern"])
-    except (OSError, ValueError, KeyError):
-        return re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$")
+        with open(path, encoding="utf-8") as fh:
+            return re.compile(json.load(fh)["propertyNames"]["pattern"]), None
+    except OSError:
+        return None, f"{I18N_SCHEMA_REL}: the key shape is stated here and nothing else states it; it cannot be read"
+    except (ValueError, KeyError) as exc:
+        return None, f"{I18N_SCHEMA_REL}: no propertyNames.pattern to hold a dictionary's keys to ({exc})"
 # Identifiers a dictionary value keeps byte-identical, beyond the ones
 # every translation keeps (PROTECTED_PATTERNS). These are the shapes a
 # LINE carries and a prompt does not: a long flag, the protocol marker, a
 # SPEC reference, the tool's own tag, and the word a reader types after
 # --replay. Kept separate so a prompt translation is judged by the rules
 # it was written under and gains no new finding from this.
+I18N_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 I18N_EXTRA_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("long flag", re.compile(r"(?<!\S)--[a-z][a-z0-9-]*")),
     ("protocol marker", re.compile(r"\bGZCOORD/\d+\b")),
@@ -568,6 +574,36 @@ I18N_EXTRA_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("wire word", re.compile(r"\b(?:gzcoord|seq)\b")),
     ("env file", re.compile(r"\b[a-z][\w-]*\.env\b")),
 )
+
+
+def i18n_default_dictionary_findings() -> list[str]:
+    """communication/gzcoord/i18n/en-US.json, held to the schema that
+    states the key shape. Called once for the tree: the default is one
+    file at a fixed path, and checking it inside the per-role walk made
+    it conditional on some role owning a locale/ directory and duplicated
+    when two did (re-review F-B)."""
+    out: list[str] = []
+    default_path = os.path.join(layout.FABRIC_ROOT, I18N_DEFAULT_REL)
+    # No default dictionary at all is no finding: a checkout that carries
+    # no tools carries no lines for them.
+    if not os.path.isfile(default_path):
+        return out
+    try:
+        with open(default_path, encoding="utf-8") as fh:
+            default = json.load(fh)
+    except ValueError as exc:
+        return [f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it"]
+    key_re, why = _i18n_key_re()
+    if why:
+        out.append(why)
+    for key in sorted(default):
+        if key_re and not key_re.match(key):
+            out.append(f"{I18N_DEFAULT_REL}: key {key!r} is not a dotted slug")
+        if not isinstance(default[key], str) or not default[key]:
+            out.append(f"{I18N_DEFAULT_REL}: {key} is {default[key]!r} — a value is a non-empty string")
+        elif I18N_CONTROL_RE.search(default[key]):
+            out.append(f"{I18N_DEFAULT_REL}: {key} carries a control character — a line is printed into a session's context")
+    return out
 
 
 def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
@@ -581,22 +617,15 @@ def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
     if not os.path.isdir(base):
         return out
     default_path = os.path.join(layout.FABRIC_ROOT, I18N_DEFAULT_REL)
-    # No default dictionary at all is no finding: a checkout that carries
-    # no tools carries no lines for them, and the GZCoord suite is where
-    # the real one's presence and key set are asserted.
     if not os.path.isfile(default_path):
         return out
     try:
         with open(default_path, encoding="utf-8") as fh:
             default = json.load(fh)
-    except ValueError as exc:
-        return [f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it"]
-    default_re = _i18n_key_re()
-    for key in sorted(default):
-        if not default_re.match(key):
-            out.append(f"{I18N_DEFAULT_REL}: key {key!r} is not a dotted slug")
-        if not isinstance(default[key], str) or not default[key]:
-            out.append(f"{I18N_DEFAULT_REL}: {key} is {default[key]!r} — a value is a non-empty string")
+    except ValueError:
+        return out      # named once, by i18n_default_dictionary_findings
+    # Once for the walk, not once per locale directory.
+    key_re, _why = _i18n_key_re()
     for suffix in sorted(os.listdir(base)):
         locale_file = os.path.join(base, suffix, "locale.json")
         try:
@@ -626,18 +655,19 @@ def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
                        "— an active locale is complete against the default")
         if extra:
             out.append(f"{rel}: key(s) {extra[:3]} are not in {I18N_DEFAULT_REL}; nothing prints them")
-        key_re = _i18n_key_re()
         # Over every key the file carries, not only the ones the default
         # also has: a key checked on the intersection alone can only fire
         # when en-US.json is itself malformed (blind review F6 on PR #28).
         for key in sorted(data):
-            if not key_re.match(key):
+            if key_re and not key_re.match(key):
                 out.append(f"{rel}: key {key!r} is not a dotted slug")
         for key in sorted(set(data) & set(default)):
             value = data[key]
             if not isinstance(value, str) or not value:
                 out.append(f"{rel}: {key} is {value!r} — a value is a non-empty string")
                 continue
+            if I18N_CONTROL_RE.search(value):
+                out.append(f"{rel}: {key} carries a control character — a line is printed into a session's context")
             out += protected_token_findings(rel, default[key], value, extra=I18N_EXTRA_PATTERNS)
         values = [v for v in data.values() if isinstance(v, str)]
         if values and not any(_is_mostly_non_latin(v) for v in values):
@@ -1412,6 +1442,8 @@ def main() -> int:
 
     # --- the review lenses ---------------------------------------------------
     findings += review_lens_findings(root)
+
+    findings += i18n_default_dictionary_findings()
 
     # --- routing profiles --------------------------------------------------
     profiles_schema = load_schema(root, os.path.join("routing", "schemas"), "model-profiles")

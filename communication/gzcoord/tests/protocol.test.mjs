@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { parse, validate, columns, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey, whoami } from '../scripts/gzmsg.mjs';
 
-const taxonomy = loadTaxonomy(new URL('../../../identities/roles/catalog.json', import.meta.url).pathname);
+const taxonomy = loadTaxonomy(fileURLToPath(new URL('../../../identities/roles/catalog.json', import.meta.url)));
 
 const gzmsg = (...args) =>
-  spawnSync(process.execPath, [new URL('../scripts/gzmsg.mjs', import.meta.url).pathname, ...args],
+  spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/gzmsg.mjs', import.meta.url)), ...args],
             { encoding: 'utf8' });
 
 // The format document's own inline examples are copied as much as the
@@ -496,7 +496,7 @@ test('slugOf finds the longest whole-token slug an instance carries', () => {
   assert.equal(slugOf('db-admin', taxonomy), 'db-admin');
   assert.equal(slugOf('legacy-clone-2', taxonomy), undefined);
   assert.equal(slugOf('web-developer', taxonomy), undefined);   // token match, not substring
-  assert.ok(findTaxonomy(new URL('.', import.meta.url).pathname).endsWith('/identities/roles/catalog.json'));
+  assert.ok(findTaxonomy(fileURLToPath(new URL('.', import.meta.url))).endsWith('/identities/roles/catalog.json'));
 });
 
 // A fixture for the derivation tests: a throwaway agent-fabric STATE
@@ -907,7 +907,8 @@ test('relay runtime dir resolves against the workspace, not a working copy', () 
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
-const SEND = new URL('../scripts/send.mjs', import.meta.url).pathname;
+import { fileURLToPath } from 'node:url';
+const SEND = fileURLToPath(new URL('../scripts/send.mjs', import.meta.url));
 function withRelay(fn) {
   const posts = [];
   const server = http.createServer((req, res) => {
@@ -1058,7 +1059,7 @@ test('send normalizes a pasted, indented message before validating', async () =>
 test('inbox reports a refused token as a rotation, exit 4', async () => {
   const server = http.createServer((req, res) => { res.statusCode = 401; res.setHeader('connection', 'close'); res.end('{}'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
   const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, err: String(err) })));
   server.closeAllConnections(); server.close();
@@ -1078,7 +1079,7 @@ test('inbox --replay shows a broadcast, withholds a body not for me, moves no cu
       { seq: 7, id: 'r7', ts: 'T7', sender: 'x/y', content: mine }, { seq: 8, id: 'r8', ts: 'T8', sender: 'x/y', content: theirs }] }));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const run = args => new Promise(resolve => execFile('node', [INBOX, ...args], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
   const a = await run(['--replay', '7']);
@@ -1108,7 +1109,7 @@ test('the synced file is the token; the environment snapshot is not consulted wh
     res.end(JSON.stringify({ messages: [], next_cursor: null }));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'dead', GZCOORD_CHANNEL: 'fixture:chan' };
   const r = await new Promise(resolve => execFile('node', [INBOX, '--wait', '1'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
   server.closeAllConnections(); server.close();
@@ -1136,7 +1137,7 @@ test('inbox --follow prints a delivery and keeps running', async () => {
     res.end('{}');   // ack
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
   let out = '';
@@ -1165,7 +1166,7 @@ test('inbox --follow bounds a long delivery to one notification and names the re
     res.end('{}');
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
   let out = '';
@@ -1294,7 +1295,7 @@ test('inbox --follow polls nothing while the hold marker names a live pid', asyn
   fs.chmodSync(holdDir, 0o700);
   const marker = path.join(holdDir, `${process.pid}.json`);
   fs.writeFileSync(marker, JSON.stringify({ session_id: 'plan', pid: process.pid, start: pidStart(process.pid), since: 'T' }));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), AGENT_FABRIC_HOLD_DIR: holdDir,
                 CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fixture:chan' };
   const child = spawn('node', [INBOX, '--follow'], { env });
@@ -1401,7 +1402,7 @@ test('a :control channel is refused by the drain, the watch and send, before any
   const hits = [];
   const server = http.createServer((req, res) => { hits.push(req.url); res.setHeader('content-type', 'application/json'); res.end('{"messages":[]}'); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const INBOX = new URL('../scripts/inbox.mjs', import.meta.url).pathname;
+  const INBOX = fileURLToPath(new URL('../scripts/inbox.mjs', import.meta.url));
   const env = { ...process.env, HOME: scratch('home-'), CLAUDE_BRIDGE_URL: `http://127.0.0.1:${server.address().port}`, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', GZCOORD_CHANNEL: 'fabric:control' };
   for (const args of [[], ['--follow'], ['--wait', '1']]) {
     const r = spawnSync('node', [INBOX, ...args], { env, encoding: 'utf8', timeout: 10000 });

@@ -222,10 +222,11 @@ writes) before the environment, and retry a refused token once with the
 file's value if it changed underneath a long wait — so the recovery is
 `bin/fabric-secrets sync`, then re-arm the watch; no login shell, no
 `source`, nothing pasted into a file, and no refused call per re-arm.
-Only when the synced file still holds the refused value does the inbox report
-`refused this token … it was rotated` and exit 4, and the watch loop
-stops on that rather than repeat it: sync had not run yet, or the account
-is not enrolled.
+Only when the synced file still holds the refused value does the inbox
+report that the relay refused the token and that it was rotated, and exit
+4 — the line reads in your own locale, the exit code is the same
+everywhere — and the watch loop stops on that rather than repeat it: sync
+had not run yet, or the account is not enrolled.
 
 ## 5. What the inbox tells you
 

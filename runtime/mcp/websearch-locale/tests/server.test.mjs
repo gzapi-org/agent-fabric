@@ -9,8 +9,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { scratch } from '../../../../tests/scratch.mjs';
 import { readLocale, request, search, handle, tools } from '../server.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SERVER = new URL('../server.mjs', import.meta.url).pathname;
+const SERVER = fileURLToPath(new URL('../server.mjs', import.meta.url));
 const LOCALE = { timezone: 'Asia/Tbilisi',
                  serpapi: { gl: 'ge', hl: 'ka', google_domain: 'google.ge', tool_description: 'ვებ-ძიება ქართულად', label: 'ძირითადი ძრავა' },
                  brave: { country: 'ALL', tool_description: 'გლობალური ვებ-ძიება' } };

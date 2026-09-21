@@ -62,6 +62,22 @@ directory's `locale.json` names the tag:
 No role bound, no locale directory, no `tag`, no `<tag>.json`: the
 default locale, and the session starts either way.
 
+## Running the tools in the default locale
+
+The tools speak the **reader's** language, so what they print depends on
+which login runs them. That is the point, and it is a trap for anything
+that asserts their output: a suite pinning English is green on a login
+with no locale directory and red on every holder's — the worst way round,
+because CI has no locale and so never says.
+
+`GZCOORD_DEFAULT_LOCALE_ONLY=1` in the environment pins the default
+locale whatever the login is. `tests/run.sh` exports it; use it to
+reproduce a holder's report in a language you can read.
+
+It governs the **ambient** resolution only — what a tool picks for the
+login running it. A caller that names a locale (`dictionary(me, { root,
+env: {} })`) is asking for that one and gets it, because it asked.
+
 ## What is never a key
 
 The wire's vocabulary: the message body as its sender wrote it, the

@@ -108,7 +108,10 @@ export function localeTag(dir) {
  *  such rule to be reminded of — so it lives with the locale's other
  *  facts and is appended to the head line, the one line a holder reads
  *  every time. Absent: nothing is appended. */
-export function localeReminder(me, root = FABRIC_ROOT) {
+export function localeReminder(me, root = FABRIC_ROOT, env = process.env) {
+  // The reminder is a line like any other: the same switch silences it, or
+  // a suite asserting a head line would break on a holder's login too.
+  if (env[DEFAULT_LOCALE_ONLY]) return '';
   if (!me?.agent || !me?.role) return '';
   const dir = path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
   try {
@@ -117,8 +120,21 @@ export function localeReminder(me, root = FABRIC_ROOT) {
   } catch { return ''; }
 }
 
+// Run the tools in the default locale whatever login is running them.
+// It governs the AMBIENT resolution — what a tool picks for the login
+// running it — and nothing else: a caller that names a locale passes its
+// own `env` and is answered with that locale, because it asked.
+// The suites need it: they assert the lines the tools print, and the tool
+// speaks the READER's language — so a suite that pins English is green on
+// a login with no locale (CI's) and red on every holder's, which is the
+// worst way round to find out. It is also how a coordinator reproduces a
+// holder's report in a language it can read (the ru holder, 2026-09-21,
+// who found this by being the first login to have a dictionary at all).
+export const DEFAULT_LOCALE_ONLY = 'GZCOORD_DEFAULT_LOCALE_ONLY';
+
 /** The dictionary file for this login, or null for the default locale. */
-export function dictionaryPath(me, root = FABRIC_ROOT) {
+export function dictionaryPath(me, root = FABRIC_ROOT, env = process.env) {
+  if (env[DEFAULT_LOCALE_ONLY]) return null;
   if (!me?.agent || !me?.role) return null;
   const dir = path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
   const tag = localeTag(dir);
@@ -132,9 +148,9 @@ export function dictionaryPath(me, root = FABRIC_ROOT) {
  *  fixed — tools/fabric/lint.py, before the file lands — so a key missing
  *  HERE falls back rather than failing a session start; nothing is ever
  *  invented (ADR-024 §2.5: a client MUST NOT fabricate fallback text). */
-export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH } = {}) {
+export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH, env = process.env } = {}) {
   const base = defaultDictionaryOrEmpty(file);
-  const p = dictionaryPath(me, root);
+  const p = dictionaryPath(me, root, env);
   if (!p) return base;
   try {
     const loc = JSON.parse(fs.readFileSync(p, 'utf8'));

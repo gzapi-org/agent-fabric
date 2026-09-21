@@ -69,7 +69,14 @@ export function defaultDictionary(file = DEFAULT_PATH) {
 // once (blind review F6 and the round after it, PR #28).
 let said = false;
 export function defaultDictionaryOrEmpty(file = DEFAULT_PATH) {
-  try { return defaultDictionary(file); }
+  try {
+    const d = defaultDictionary(file);
+    // Parsed is not usable: null, a string, a number and an array are all
+    // valid JSON and none of them is a dictionary. `key in null` throws at
+    // the first line printed, far from here (re-review N2).
+    if (!d || typeof d !== 'object' || Array.isArray(d)) throw new TypeError('not an object of lines');
+    return d;
+  }
   catch (e) {
     if (!said) {
       said = true;

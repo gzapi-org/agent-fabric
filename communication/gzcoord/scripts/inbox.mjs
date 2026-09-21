@@ -84,7 +84,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
-import { defaultDictionary, dictionary, localeReminder, printer } from './i18n.mjs';
+import { defaultDictionaryOrEmpty, dictionary, localeReminder, printer } from './i18n.mjs';
 
 // Every line below is printed through `t`, the catalogue of the login
 // that reads it (i18n.mjs). main() resolves the login's once and
@@ -92,7 +92,7 @@ import { defaultDictionary, dictionary, localeReminder, printer } from './i18n.m
 // function, so a caller that has no session — a test, another tool —
 // gets today's English without a whoami() and without a locale.
 let EN;
-const en = () => (EN ??= printer(defaultDictionary()));
+const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
 
 // Project integration: which relay, which channel, where the token and
 // the hosted relay's runtime live. It comes from the PROJECT —

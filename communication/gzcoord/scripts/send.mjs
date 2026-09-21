@@ -25,12 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
-import { defaultDictionaryOrEmpty, dictionary, printer } from './i18n.mjs';
-
-// For the one line printed before the login is known: the usage line, and
-// the file that could not be read. Everything after whoami() uses `t`.
-let EN;
-const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
+import { dictionary, printer } from './i18n.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -53,19 +48,20 @@ export function fallbackMarker(dir = process.env.AGENT_FABRIC_FALLBACK_DIR ?? pa
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  // The login first, before anything is printed: every line this function
+  // writes is then the reader's, the usage line included — which is the
+  // call inbox.mjs made for its own usage line, and the two tools should
+  // not disagree about whose language a usage line is in (re-review N1).
+  const who = whoami();
+  const t = printer(dictionary(who));
   const dry = argv.includes('--dry-run');
   const file = argv.find(a => !a.startsWith('--'));
-  if (!file) { console.error(en()('send.usage')); return 1; }
+  if (!file) { console.error(t('send.usage')); return 1; }
   let raw;
   try { raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); }
-  catch (e) { console.error(en()('send.cannot-read', { file, detail: e.message })); return 1; }
+  catch (e) { console.error(t('send.cannot-read', { file, detail: e.message })); return 1; }
   const text = normalize(raw);
 
-  const who = whoami();
-  // Immediately: every line from here down is this login's, and two
-  // refusals below used to print the default locale because this sat ten
-  // lines lower than it needed to.
-  const t = printer(dictionary(who));
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
   if (!cfg.configured) { console.error(t('send.not-configured', { reason: cfg.reason })); return 3; }
@@ -120,7 +116,8 @@ export async function main(argv = process.argv.slice(2)) {
     from_model: fb.from_model || t('send.fallback-unknown-model'),
     to_model: fb.to_model || t('send.fallback-unknown-target'),
     at: fb.at || t('send.fallback-unknown-time'),
-    topic: fb.topic || t('send.fallback-unknown-topic') }));
+    topic: fb.topic || t('send.fallback-unknown-topic'),
+    topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
   if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
 
   let tok = token(root, cfg);

@@ -796,11 +796,14 @@ def case_i18n_dictionary_is_complete_and_keeps_its_identifiers() -> None:
         code, out = run_lint(fabric)
         assert code == 1 and "not JSON" in out, out
 
-        # A control character in a value reaches a session's context.
-        write(ident(fabric, "locale", "ge", "ka-GE.json"),
-              json.dumps({**good, "inbox.others-header": "ᲐᲠ ᲐᲠᲘᲡ\x07 (SPEC §17):"}, ensure_ascii=False))
-        code, out = run_lint(fabric)
-        assert code == 1 and "carries a control character" in out, out
+        # A control character in a value reaches a session's context. A
+        # NEWLINE most of all: it prints a second line there, which the
+        # reader cannot tell from a line the tool itself wrote.
+        for bad in ("\x07", "\n", "\t", "\u009b", "\u2028", "\u202e"):
+            write(ident(fabric, "locale", "ge", "ka-GE.json"),
+                  json.dumps({**good, "inbox.others-header": f"ᲐᲠ ᲐᲠᲘᲡ{bad} (SPEC §17):"}, ensure_ascii=False))
+            code, out = run_lint(fabric)
+            assert code == 1 and "carries a control character" in out, f"{bad!r} passed:\n{out}"
 
         # The schema states the key shape and nothing else does, so lint
         # SAYS when it cannot be read instead of quietly restating it.
@@ -811,7 +814,20 @@ def case_i18n_dictionary_is_complete_and_keeps_its_identifiers() -> None:
         assert code == 1 and "the key shape is stated here and nothing else states it" in out, out
         write(schema, json.dumps({"type": "object"}))
         code, out = run_lint(fabric)
-        assert code == 1 and "no propertyNames.pattern" in out, out
+        assert code == 1 and "no usable propertyNames.pattern" in out, out
+        # A pattern that does not compile, and a schema that is not an
+        # object: both used to leave lint as a traceback.
+        for shape in (json.dumps({"propertyNames": {"pattern": "["}}), json.dumps(["not", "an", "object"])):
+            write(schema, shape)
+            code, out = run_lint(fabric)
+            assert code == 1 and "no usable propertyNames.pattern" in out, f"{shape}:\n{out}"
+        # And the schema is judged even when the default dictionary is not there.
+        os.remove(schema)
+        default_json = os.path.join(fabric, "communication", "gzcoord", "i18n", "en-US.json")
+        os.remove(default_json)
+        code, out = run_lint(fabric)
+        assert code == 1 and "the key shape is stated here and nothing else states it" in out, out
+        write(default_json, json.dumps(default))
         shutil.copy2(REAL_I18N_SCHEMA, schema)
         code, out = run_lint(fabric)
         assert code == 0, out

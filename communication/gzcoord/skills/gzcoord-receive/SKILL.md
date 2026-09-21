@@ -192,8 +192,9 @@ moves), shows the body only if the message is addressed to you, and
 otherwise prints its metadata line — SPEC §17 applies to a replay too.
 Never pipe the watch or a drain through anything that truncates.
 
-**A delivery that ends in a `[gzcoord: body cut here …]` line is not the
-whole message.** The harness shows about 3,000 characters of one
+**A delivery whose body ends in the watch's own cut notice — naming the
+replay command and the relay seq, in your locale — is not the whole
+message.** The harness shows about 3,000 characters of one
 notification and cuts the rest with "...(truncated)" — and the cut has
 landed inside REQUEST or VERIFIED, the sections that matter most. So the
 watch cuts first, at a place of its own: every

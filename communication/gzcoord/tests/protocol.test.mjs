@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { parse, validate, columns, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, parseArgs, nearestKnownKey, whoami } from '../scripts/gzmsg.mjs';
+import { fileURLToPath } from 'node:url';
 
 const taxonomy = loadTaxonomy(fileURLToPath(new URL('../../../identities/roles/catalog.json', import.meta.url)));
 
@@ -216,7 +217,7 @@ test('validate CLI reports a bad first line on one line and exits 1', () => {
   const file = new URL('./bad-first-line.tmp.txt', import.meta.url);
   fs.writeFileSync(file, 'GZCOORD/1 HELLO\nFROM: develop-gzapp/gzapp\nROLE: Tester\nPROJECT: gzapp\nMESSAGE-ID: test-0001\n');
   try {
-    const bad = gzmsg('validate', file.pathname);
+    const bad = gzmsg('validate', fileURLToPath(file));
     assert.equal(bad.status, 1);
     assert.equal(bad.stderr.trim(), 'invalid GZCOORD/1 first line');
     assert.equal(bad.stdout, '');
@@ -260,7 +261,7 @@ test('an empty-valued metadata key warns, and the CLI prints the warning beside 
   const file = new URL('./empty-value.tmp.txt', import.meta.url);
   fs.writeFileSync(file, text);
   try {
-    const run = gzmsg('validate', file.pathname);
+    const run = gzmsg('validate', fileURLToPath(file));
     assert.equal(run.status, 1);
     assert.match(run.stderr, /^warning: NOTES has an empty value/m);
     assert.match(run.stderr, /unparsable line in the metadata block: body here/);
@@ -410,7 +411,7 @@ test('normalize CLI prints the normalised message for validate to read', () => {
   const file = new URL('./pasted.tmp.txt', import.meta.url);
   fs.writeFileSync(file, '  [GZCOORD/1] HELLO\n  FROM: develop-gzapp/gzapp\n  ROLE: Tester\n  PROJECT: gzapp\nMESSAGE-ID: test-0001\n');
   try {
-    const run = gzmsg('normalize', file.pathname);
+    const run = gzmsg('normalize', fileURLToPath(file));
     assert.equal(run.status, 0);
     assert.equal(run.stdout, '[GZCOORD/1] HELLO\nFROM: develop-gzapp/gzapp\nROLE: Tester\nPROJECT: gzapp\nMESSAGE-ID: test-0001\n');
     assert.deepEqual(validate(run.stdout).errors, []);
@@ -907,7 +908,6 @@ test('relay runtime dir resolves against the workspace, not a working copy', () 
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
-import { fileURLToPath } from 'node:url';
 const SEND = fileURLToPath(new URL('../scripts/send.mjs', import.meta.url));
 function withRelay(fn) {
   const posts = [];

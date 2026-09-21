@@ -54,5 +54,13 @@ fi
 if git ls-files '*.test.mjs' | xargs grep -n "mkdtempSync" 2>/dev/null; then
     echo "  ✗ mkdtempSync in a node suite: use scratch() from tests/scratch.mjs"; fail=1
 fi
+# A file URL's .pathname is percent-encoded, so handing it to the
+# filesystem names a file that does not exist as soon as the checkout
+# path contains a space. fileURLToPath is the converter. The rule lived
+# only in the two modules that had been fixed, and the pattern came back
+# in sixteen places across four suites before anyone looked.
+if git ls-files '*.mjs' | xargs grep -n "import\.meta\.url)\.pathname" 2>/dev/null; then
+    echo "  ✗ URL(...).pathname on a module URL: use fileURLToPath(new URL(...))"; fail=1
+fi
 if (( fail )); then echo "static: FAILED"; exit 1; fi
 echo "static: all bash scripts parse, shellcheck and ruff clean"

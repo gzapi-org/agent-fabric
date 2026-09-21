@@ -195,6 +195,12 @@ for (const [what, contents] of [['unparsable', '{ not json'], ['absent', null]])
   });
 }
 
+test('--replay with no value is a usage line and exit 1', () => {
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'inbox.mjs'), '--replay'], { encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stderr.trim(), defaultDictionary()['replay.usage']);
+});
+
 test('a keyword refusal reads in the login\'s own language', () => {
   const ka = printer({ ...defaultDictionary(), 'keyword.too-short': 'ᲛᲝᲙᲚᲔᲐ {keyword} — {min}' });
   assert.throws(() => checkKeywords(['ab'], ka), /ᲛᲝᲙᲚᲔᲐ "ab" — 3/);

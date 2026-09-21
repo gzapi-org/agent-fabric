@@ -558,15 +558,26 @@ def _i18n_key_re() -> "tuple[re.Pattern[str] | None, str | None]":
             return re.compile(json.load(fh)["propertyNames"]["pattern"]), None
     except OSError:
         return None, f"{I18N_SCHEMA_REL}: the key shape is stated here and nothing else states it; it cannot be read"
-    except (ValueError, KeyError) as exc:
-        return None, f"{I18N_SCHEMA_REL}: no propertyNames.pattern to hold a dictionary's keys to ({exc})"
+    except Exception as exc:
+        # Deliberately every other failure, not a named few: re.error is
+        # not a ValueError, and a schema that is an array raises TypeError
+        # — both used to leave lint as a traceback rather than a finding
+        # (re-review Finding 2).
+        return None, f"{I18N_SCHEMA_REL}: no usable propertyNames.pattern to hold a dictionary's keys to ({exc})"
 # Identifiers a dictionary value keeps byte-identical, beyond the ones
 # every translation keeps (PROTECTED_PATTERNS). These are the shapes a
 # LINE carries and a prompt does not: a long flag, the protocol marker, a
 # SPEC reference, the tool's own tag, and the word a reader types after
 # --replay. Kept separate so a prompt translation is judged by the rules
 # it was written under and gains no new finding from this.
-I18N_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+# Every C0 (LF and TAB included), DEL, the C1 block a terminal reads as
+# escape introducers, the two Unicode line separators, and the bidi
+# overrides and isolates. LF is the one that matters most: a value
+# carrying one prints a second line into the reading session's context,
+# indistinguishable from a line the tool itself wrote (re-review Finding
+# 1). Every line the tools print is one line; nothing in the corpus needs
+# an exemption.
+I18N_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 I18N_EXTRA_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("long flag", re.compile(r"(?<!\S)--[a-z][a-z0-9-]*")),
     ("protocol marker", re.compile(r"\bGZCOORD/\d+\b")),
@@ -583,19 +594,26 @@ def i18n_default_dictionary_findings() -> list[str]:
     it conditional on some role owning a locale/ directory and duplicated
     when two did (re-review F-B)."""
     out: list[str] = []
+    # A tree that ships no dictionaries at all — an assembler fixture, a
+    # checkout without the tools — is asked nothing. That is the ONE
+    # gate; inside a tree that has the directory, the schema is judged
+    # before the default dictionary and regardless of it, because it
+    # states the key shape for every dictionary and a missing default is
+    # not an answer about the schema (re-review Finding 2).
+    if not os.path.isdir(os.path.join(layout.FABRIC_ROOT, os.path.dirname(I18N_DEFAULT_REL))):
+        return out
+    key_re, why = _i18n_key_re()
+    if why:
+        out.append(why)
     default_path = os.path.join(layout.FABRIC_ROOT, I18N_DEFAULT_REL)
-    # No default dictionary at all is no finding: a checkout that carries
-    # no tools carries no lines for them.
     if not os.path.isfile(default_path):
         return out
     try:
         with open(default_path, encoding="utf-8") as fh:
             default = json.load(fh)
     except ValueError as exc:
-        return [f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it"]
-    key_re, why = _i18n_key_re()
-    if why:
-        out.append(why)
+        out.append(f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it")
+        return out
     for key in sorted(default):
         if key_re and not key_re.match(key):
             out.append(f"{I18N_DEFAULT_REL}: key {key!r} is not a dotted slug")

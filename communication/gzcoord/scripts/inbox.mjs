@@ -84,6 +84,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
+import { defaultDictionaryOrEmpty, dictionary, localeReminder, printer } from './i18n.mjs';
+
+// Every line below is printed through `t`, the catalogue of the login
+// that reads it (i18n.mjs). main() resolves the login's once and
+// passes it down; the default locale here is the default of each exported
+// function, so a caller that has no session — a test, another tool —
+// gets today's English without a whoami() and without a locale.
+let EN;
+const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
 
 // Project integration: which relay, which channel, where the token and
 // the hosted relay's runtime live. It comes from the PROJECT —
@@ -103,7 +112,7 @@ export const WORKSPACE = path.dirname(FABRIC_ROOT);
 export function relayRuntimeDir(cfg, workspace = WORKSPACE) {
   return path.resolve(workspace, cfg.relay_runtime_dir ?? '.gzcoord');
 }
-export function integrationConfig(project, env = process.env) {
+export function integrationConfig(project, env = process.env, t = en()) {
   const file = project ? path.join(FABRIC_ROOT, 'projects', project, 'integration', 'gzcoord', 'config.json') : null;
   if (file) {
     try {
@@ -115,10 +124,10 @@ export function integrationConfig(project, env = process.env) {
   }
   if (env.CLAUDE_BRIDGE_URL && env.GZCOORD_CHANNEL)
     return { configured: true, source: 'environment', relay_url: env.CLAUDE_BRIDGE_URL, channel: env.GZCOORD_CHANNEL, relay_runtime_dir: '.gzcoord' };
-  const where = project ? `projects/${project}/integration/gzcoord/config.json` : 'a registered project (this working copy resolves to none)';
+  const where = project ? `projects/${project}/integration/gzcoord/config.json` : t('config.where-registered');
   return { configured: false, source: null,
-           reason: `no GZCoord integration configured for ${project ? `project ${project}` : 'this working copy'}: ` +
-                   `${where} with relay_url and channel, or CLAUDE_BRIDGE_URL and GZCOORD_CHANNEL in the environment` };
+           reason: t('config.not-configured', {
+             what: project ? t('config.for-project', { project }) : t('config.for-working-copy'), where }) };
 }
 // Module-level defaults for callers that import ensureRelay/api directly;
 // main() resolves the project's own values.
@@ -141,9 +150,9 @@ function gitToplevel() {
 // and the env override GZCOORD_CHANNEL would otherwise let one be named
 // (decided 2026-09-17). Throws; the CLIs print it and exit 2 before any
 // request reaches the relay.
-export function assertNotControlChannel(channel) {
+export function assertNotControlChannel(channel, t = en()) {
   if (typeof channel === 'string' && /:control$/.test(channel))
-    throw new Error(`${channel} is a control channel: machine records for the control agent (runtime/control/), never a session's inbox or outbox`);
+    throw new Error(t('config.control-channel', { channel }));
 }
 
 export function inboxRoot(who) {
@@ -219,14 +228,14 @@ export function forMe(msg, me) {
 // the runbook says. Workspaces without the venv return false and skip
 // silently: they are clients, not hosts, and nothing in a client session
 // may try to host.
-export function ensureRelay(runtimeDir, relayUrl = RELAY) {
+export function ensureRelay(runtimeDir, relayUrl = RELAY, t = en()) {
   const bin = path.join(runtimeDir, 'venv', 'bin', 'claude-bridge');
   if (!fs.existsSync(bin)) return { hosted: false, started: false };
   try { execFileSync('curl', ['-sf', '-m', '2', `${relayUrl}/status`], { stdio: 'ignore' }); return { hosted: true, started: false }; }
   catch { /* down or unreachable: start it */ }
   const tokenFile = path.join(runtimeDir, 'bridge-token');
   const db = path.join(runtimeDir, 'claude-bridge.db');
-  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${tokenFile}; cannot start` };
+  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: t('start.relay-no-token-file', { token_file: tokenFile }) };
   // Where bootstrap installed the relay's user unit and a user manager is
   // up, start THAT: a unit is supervised, restarted on failure, found by
   // name, and outlives the session; a detached spawn is none of those and
@@ -252,7 +261,7 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
           return { hosted: true, started: true, unit }; } catch { /* not up yet */ }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
       }
-      return { hosted: true, started: false, note: `${unit} was started and did not answer within 8s; systemctl --user status ${unit}, ${path.join(runtimeDir, 'bridge.log')}` };
+      return { hosted: true, started: false, note: t('start.relay-unit-silent', { unit, log: path.join(runtimeDir, 'bridge.log') }) };
     }
   }
   const out = fs.openSync(path.join(runtimeDir, 'bridge.log'), 'a');
@@ -265,7 +274,7 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
       return { hosted: true, started: true, pid: child.pid }; } catch { /* not up yet */ }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
   }
-  return { hosted: true, started: false, note: `relay did not answer within 8s; check ${path.join(runtimeDir, 'bridge.log')}` };
+  return { hosted: true, started: false, note: t('start.relay-silent', { log: path.join(runtimeDir, 'bridge.log') }) };
 }
 
 export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
@@ -310,10 +319,10 @@ export function syncedToken(home = os.homedir()) {
 // in its environment, and the fix is a re-sync, not a retry — say so, and
 // exit 4 so a watch loop can stop instead of printing the same line for
 // the rest of the session (web-dev-01, 2026-09-14).
-function explainRelayError(e, relayUrl) {
+function explainRelayError(e, relayUrl, t = en()) {
   if (e.status === 401 || e.status === 403)
-    return { line: `gzcoord inbox: the relay at ${relayUrl} refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync and re-arm the watch (the inbox reads the synced file itself)`, code: 4 };
-  return { line: `gzcoord inbox: relay unreachable at ${relayUrl} (${e.message}) — skipping`, code: 0 };
+    return { line: t('relay.refused', { relay_url: relayUrl, status: e.status }), code: 4 };
+  return { line: t('relay.unreachable', { relay_url: relayUrl, detail: e.message }), code: 0 };
 }
 
 // Re-read one message that is already past this session's cursor — the
@@ -321,31 +330,34 @@ function explainRelayError(e, relayUrl) {
 // Reads the channel's recent history (no consumer id, so no cursor moves),
 // and shows the body only when the message is addressed to this session:
 // SPEC §17 does not stop applying because the read is a replay.
-async function replay(tok, relayUrl, channel, which, me) {
+async function replay(tok, relayUrl, channel, which, me, t = en()) {
   const page = await api(tok, `/api/messages?${new URLSearchParams({ channel, limit: '500', full: '1' })}`, { relayUrl });
   const list = page.messages ?? page;
   // By relay seq, or by the GZCoord MESSAGE-ID inside the body (the
   // relay's own id is a transport detail nobody quotes).
   const midOf = r => { try { return parse(normalize(r.content)).metadata?.['MESSAGE-ID']; } catch { return undefined; } };
   const rec = list.find(r => String(r.seq) === String(which) || r.id === which || midOf(r) === which);
-  if (!rec) { console.error(`gzcoord inbox: no message ${which} in the last ${list.length} on ${channel}`); return 1; }
+  if (!rec) { console.error(t('replay.no-message', { which, n: list.length, channel })); return 1; }
   const text = normalize(rec.content);
   const when = rec.timestamp ?? rec.ts ?? '';
   let msg = null; try { msg = parse(text); } catch { /* shown as metadata only */ }
   if (!msg || !forMe(msg, me)) {
-    console.log(`relay seq ${rec.seq}, from ${rec.sender}, ${when} — not addressed to ${me.address}; body not shown (SPEC §17)`);
-    if (msg) console.log(`  ${oneLine(msg, text)}`);
+    console.log(t('replay.not-addressed', { seq: rec.seq, sender: rec.sender, when, address: me.address }));
+    if (msg) console.log(`  ${oneLine(msg, t)}`);
     return 2;
   }
-  console.log(`--- relay seq ${rec.seq}, from ${rec.sender}, ${when} (replay; cursor unchanged)`);
+  console.log(t('replay.title', { seq: rec.seq, sender: rec.sender, when }));
   console.log('```text'); console.log(text.replace(/\n$/, '')); console.log('```');
   return 0;
 }
 
-function oneLine(msg, raw) {
+// The addressing half is the WIRE's vocabulary, not this tool's: TO,
+// TO-ROLE, broadcast and the type are matched by name across locales and
+// are never translated (i18n.mjs). Only the missing-id placeholder is.
+function oneLine(msg, t = en()) {
   const m = msg.metadata;
   const to = m.TO ? `TO ${m.TO}` : m['TO-ROLE'] ? `TO-ROLE ${m['TO-ROLE']}` : 'broadcast';
-  return `${m['MESSAGE-ID'] ?? '(no id)'}  ${msg.type}  ${to}  ${m.SUBJECT ?? ''}`.trimEnd();
+  return `${m['MESSAGE-ID'] ?? t('inbox.no-id')}  ${msg.type}  ${to}  ${m.SUBJECT ?? ''}`.trimEnd();
 }
 
 // One arm of the waiter. `delivered` iff some slice carried a message
@@ -362,13 +374,13 @@ function oneLine(msg, raw) {
 // must not wake on its own echo.
 export const KEYWORD_MIN = 3;
 export const KEYWORD_MAX = 8;
-export function checkKeywords(keywords = []) {
+export function checkKeywords(keywords = [], t = en()) {
   const seen = [];
   for (const k of keywords) {
     if (typeof k !== 'string' || k.length < KEYWORD_MIN)
-      throw new Error(`keyword ${JSON.stringify(k)} is shorter than ${KEYWORD_MIN} characters — a short token fires on nearly everything`);
+      throw new Error(t('keyword.too-short', { keyword: JSON.stringify(k), min: KEYWORD_MIN }));
     if (seen.includes(k)) continue;
-    if (seen.length >= KEYWORD_MAX) throw new Error(`at most ${KEYWORD_MAX} keywords per arm`);
+    if (seen.length >= KEYWORD_MAX) throw new Error(t('keyword.too-many', { max: KEYWORD_MAX }));
     seen.push(k);
   }
   return seen;
@@ -401,27 +413,27 @@ export function pidStart(pid) {
 export function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
-export function holdStatus(dir = holdDir(), { isAlive = pidAlive, startOf = pidStart, uid = process.getuid() } = {}) {
+export function holdStatus(dir = holdDir(), { isAlive = pidAlive, startOf = pidStart, uid = process.getuid(), t = en() } = {}) {
   let st;
-  try { st = fs.lstatSync(dir); } catch { return { held: false, reason: 'no hold directory', sessions: [] }; }
-  if (st.isSymbolicLink() || !st.isDirectory()) return { held: false, reason: 'hold directory is not a directory', sessions: [] };
-  if (st.uid !== uid) return { held: false, reason: 'hold directory is not this login\'s', sessions: [] };
+  try { st = fs.lstatSync(dir); } catch { return { held: false, reason: t('held.no-directory'), sessions: [] }; }
+  if (st.isSymbolicLink() || !st.isDirectory()) return { held: false, reason: t('held.not-a-directory'), sessions: [] };
+  if (st.uid !== uid) return { held: false, reason: t('held.not-this-login'), sessions: [] };
   const sessions = [], stale = [];
   for (const name of fs.readdirSync(dir)) {
     if (!/^\d+\.json$/.test(name)) continue;
     const file = path.join(dir, name);
     let m;
     try {
-      if (fs.lstatSync(file).uid !== uid) { stale.push(`${name}: not this login's`); continue; }
+      if (fs.lstatSync(file).uid !== uid) { stale.push(t('held.stale-not-this-login', { name })); continue; }
       m = JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch { stale.push(`${name}: unreadable`); continue; }
-    if (!Number.isInteger(m.pid) || m.pid <= 0) { stale.push(`${name}: names no pid`); continue; }
-    if (!isAlive(m.pid)) { stale.push(`${name}: session ${m.pid} is gone`); continue; }
+    } catch { stale.push(t('held.stale-unreadable', { name })); continue; }
+    if (!Number.isInteger(m.pid) || m.pid <= 0) { stale.push(t('held.stale-no-pid', { name })); continue; }
+    if (!isAlive(m.pid)) { stale.push(t('held.stale-gone', { name, pid: m.pid })); continue; }
     const now = startOf(m.pid);
-    if (m.start && now && String(m.start) !== String(now)) { stale.push(`${name}: pid ${m.pid} reused`); continue; }
+    if (m.start && now && String(m.start) !== String(now)) { stale.push(t('held.stale-reused', { name, pid: m.pid })); continue; }
     sessions.push({ pid: m.pid, session_id: m.session_id, since: m.since });
   }
-  if (!sessions.length) return { held: false, reason: stale.length ? stale.join('; ') : 'no marker', sessions };
+  if (!sessions.length) return { held: false, reason: stale.length ? stale.join('; ') : t('held.no-marker'), sessions };
   return { held: true, sessions };
 }
 
@@ -517,34 +529,38 @@ export function splitMessage(text) {
   return { meta: lines.slice(0, metaEnd).join('\n'), body: lines.slice(at).join('\n') };
 }
 const MAX_FLAG_LINES = 4;
-export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
+export function render(res, me, channel, taxonomy, { cap = Infinity, t = en(), reminder = '' } = {}) {
   const mine = [], others = [];
   for (const { rec, msg, isMine } of res.classified) {
-    if (!msg) { others.push({ rec, line: `${rec.id}  (not a GZCOORD/1 message)  from ${rec.sender}` }); continue; }
+    if (!msg) { others.push({ rec, line: t('inbox.not-a-message', { id: rec.id, sender: rec.sender }) }); continue; }
     (isMine ? mine : others).push({ rec, msg });
   }
-  const head = `gzcoord inbox for ${me.address}${me.slug ? ` (${me.slug})` : ''}: ${mine.length} for you, ${others.length} not addressed to you, on ${channel}`;
+  // The reminder rides the head line and nothing else: it is the one
+  // line read on every drain and every delivery, and the cap arithmetic
+  // below measures the head as it will actually print.
+  const head = t('inbox.head', { who: `${me.address}${me.slug ? ` (${me.slug})` : ''}`,
+                                 mine: mine.length, others: others.length, channel }) + reminder;
   const parts = mine.map(({ rec }) => {
     // The message has arrived: the terminal-copy width warning does not apply.
-    const v = validate(rec.content, { taxonomy, maxColumns: 0 });
-    let flags = [...(v.errors.map(e => `INVALID: ${e}`)), ...v.warnings.map(w => `warning: ${w}`)];
+    const v = validate(rec.content, { taxonomy, maxColumns: 0, t });
+    let flags = [...(v.errors.map(e => t('delivery.invalid', { detail: e }))), ...v.warnings.map(w => t('delivery.warning', { detail: w }))];
     // Only under a cap: the drain shows every validator line.
-    if (Number.isFinite(cap) && flags.length > MAX_FLAG_LINES) flags = [...flags.slice(0, MAX_FLAG_LINES), `… and ${flags.length - MAX_FLAG_LINES} more validator lines`];
-    const title = `--- relay seq ${rec.seq}, from ${rec.sender}, ${rec.timestamp}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`;
+    if (Number.isFinite(cap) && flags.length > MAX_FLAG_LINES) flags = [...flags.slice(0, MAX_FLAG_LINES), t('delivery.flags-more', { n: flags.length - MAX_FLAG_LINES })];
+    const title = `${t('delivery.title', { seq: rec.seq, sender: rec.sender, when: rec.timestamp })}${flags.length ? `\n    ${flags.join('\n    ')}` : ''}`;
     const text = rec.content.replace(/\n$/, '');
     return { rec, title, text, ...splitMessage(text) };
   });
-  const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg)}`);
-  const othersBlock = others.length ? ['', 'Not addressed to you — listed, bodies not read (SPEC §17):', ...otherLines] : [];
+  const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg, t)}`);
+  const othersBlock = others.length ? ['', t('inbox.others-header'), ...otherLines] : [];
   const whole = [head, ...parts.flatMap(p => ['', p.title, '```text', p.text, '```']), ...othersBlock].join('\n');
   if (whole.length <= cap) return whole;
 
   // Over the cap. Metadata whole and others listed if that fits; the
   // bodies share what is left, each cut at a line and ending with the
   // replay command for its seq. Nothing is claimed to be elsewhere.
-  const seqs = list => list.length ? `seq ${list[0].rec.seq}–${list[list.length - 1].rec.seq}` : '';
-  const notice = p => `[gzcoord: body cut here to fit one notification — the whole message: ${REPLAY_CMD} ${p.rec.seq}]`;
-  const othersCount = others.length ? ['', `${others.length} not addressed to you (${seqs(others)}), not listed here: over the notification cap.`] : [];
+  const seqs = list => list.length ? t('cap.seq-range', { first: list[0].rec.seq, last: list[list.length - 1].rec.seq }) : '';
+  const notice = p => t('cap.notice', { replay_cmd: REPLAY_CMD, seq: p.rec.seq });
+  const othersCount = others.length ? ['', t('cap.others-count', { count: others.length, range: seqs(others) })] : [];
   const layout = othersTail => [head, ...parts.flatMap(p => ['', p.title, '```text', p.meta, '', notice(p), '```']), ...othersTail].join('\n').length;
   let othersTail = othersBlock;
   if (layout(othersTail) > cap) othersTail = othersCount;
@@ -552,10 +568,10 @@ export function render(res, me, channel, taxonomy, { cap = Infinity } = {}) {
   if (fixed > cap) {
     // Too many messages for one notification: one line each, read by seq,
     // and the tail says how many lines this listing itself dropped.
-    const lines = [head, `(over the notification cap: each message by its seq, read it with: ${REPLAY_CMD} <seq>)`];
-    const rows = parts.map(p => `  seq ${p.rec.seq}  ${oneLine(parse(p.rec.content))}`);
-    const tailFor = n => n < parts.length ? `  … and ${parts.length - n} more for you (${seqs(parts.slice(n))}), each read with --replay <seq>` : '';
-    const othersLine = others.length ? `  and ${others.length} not addressed to you (${seqs(others)})` : '';
+    const lines = [head, t('cap.by-seq', { replay_cmd: REPLAY_CMD })];
+    const rows = parts.map(p => t('cap.row', { seq: p.rec.seq, line: oneLine(parse(p.rec.content), t) }));
+    const tailFor = n => n < parts.length ? t('cap.more-for-you', { n: parts.length - n, range: seqs(parts.slice(n)) }) : '';
+    const othersLine = others.length ? t('cap.and-others', { count: others.length, range: seqs(others) }) : '';
     let n = 0;
     while (n < rows.length && [...lines, ...rows.slice(0, n + 1), tailFor(n + 1), othersLine].filter(Boolean).join('\n').length <= cap) n += 1;
     return [...lines, ...rows.slice(0, n), tailFor(n), othersLine].filter(Boolean).join('\n');
@@ -579,12 +595,7 @@ export async function main(argv = process.argv.slice(2)) {
   const follow = argv.includes('--follow');
   const replayIdx = argv.indexOf('--replay');
   const replayWhich = replayIdx >= 0 ? argv[replayIdx + 1] : null;
-  if (replayIdx >= 0 && !replayWhich) { console.error('usage: inbox.mjs --replay <seq|message-id>'); return 1; }
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
-  // --keyword K, repeatable, validated BEFORE the arm starts: a bad
-  // keyword refused at arm time costs nothing, refused mid-wait wastes
-  // the budget.
-  const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
   // Who this session is (the login) and which project it is working in
   // (from the working copy's remote, or the binding) — the second selects
   // the project's integration: relay, channel, where the token and runtime
@@ -592,26 +603,41 @@ export async function main(argv = process.argv.slice(2)) {
   // started outside one (the workspace, projects/), the working copy the
   // binding names is the root, not the current directory.
   const who = whoami();
+  // From here on every line is this login's: English, or the locale its
+  // name ends in when that locale has an active dictionary (i18n.mjs).
+  const t = printer(dictionary(who));
+  const reminder = localeReminder(who);
+  // --keyword K, repeatable, validated BEFORE the arm starts: a bad
+  // keyword refused at arm time costs nothing, refused mid-wait wastes
+  // the budget. After `t`, so the refusal reads in the login's own
+  // language like every other line (blind review F3 on PR #28).
+  const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []), t);
+  // Also after `t`: a usage line is one of this login's lines (re-review §3).
+  if (replayIdx >= 0 && !replayWhich) { console.error(t('replay.usage')); return 1; }
   if (argv.includes('--held')) {
-    const h = holdStatus();
-    console.log(h.held ? `held: ${who.agent}'s inbox is held by ${h.sessions.map(x => `session ${x.session_id ?? '?'} (pid ${x.pid}) since ${x.since ?? '?'}`).join(', ')}` : `not held: ${h.reason}`);
+    const h = holdStatus(undefined, { t });
+    const unknown = t('held.unknown');
+    console.log(h.held
+      ? t('held.held', { agent: who.agent, sessions: h.sessions.map(x =>
+          t('held.session', { session: x.session_id ?? unknown, pid: x.pid, since: x.since ?? unknown })).join(', ') })
+      : t('held.not-held', { reason: h.reason }));
     return h.held ? 0 : 1;
   }
   const root = inboxRoot(who);
-  const cfg = integrationConfig(who.project);
+  const cfg = integrationConfig(who.project, process.env, t);
   // Not configured is not an error at a session start, and not a guess
   // either: one line, exit 0, no relay, no channel.
-  if (!cfg.configured) { console.error(`gzcoord inbox: ${cfg.reason} — skipping`); return 0; }
-  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(`gzcoord inbox: ${e.message}`); return 2; }
+  if (!cfg.configured) { console.error(t('start.skipping', { reason: cfg.reason })); return 0; }
+  try { assertNotControlChannel(cfg.channel, t); } catch (e) { console.error(t('start.error', { detail: e.message })); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   // Activate what this session owns before anything else: the hosting
   // working copy starts its relay here, so a session restart is also the relay's.
-  const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
-  if (up.started) console.error(up.unit ? `gzcoord inbox: relay started (unit ${up.unit})` : `gzcoord inbox: relay started (pid ${up.pid})`);
-  else if (up.note) console.error(`gzcoord inbox: ${up.note}`);
+  const up = ensureRelay(relayRuntimeDir(cfg), relayUrl, t);
+  if (up.started) console.error(up.unit ? t('start.relay-started-unit', { unit: up.unit }) : t('start.relay-started-pid', { pid: up.pid }));
+  else if (up.note) console.error(t('start.error', { detail: up.note }));
   let tok = token(root, cfg);
-  if (!tok) { console.error(`gzcoord inbox: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment, ${cfg.token_env_file ?? '(no token_env_file configured)'}, .claude/settings.local.json or the relay runtime dir — skipping`); return 0; }
+  if (!tok) { console.error(t('start.no-token', { token_file: cfg.token_env_file ?? t('config.no-token-file') })); return 0; }
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
@@ -621,13 +647,13 @@ export async function main(argv = process.argv.slice(2)) {
     try { return await fn(tok); }
     catch (e) {
       const fresh = (e.status === 401 || e.status === 403) ? syncedToken() : undefined;
-      if (fresh && fresh !== tok) { tok = fresh; console.error('gzcoord inbox: token refused; retrying with the synced value from secrets.env'); return fn(tok); }
+      if (fresh && fresh !== tok) { tok = fresh; console.error(t('start.token-retry')); return fn(tok); }
       throw e;
     }
   };
   if (replayWhich) {
-    try { return await withFreshToken(t => replay(t, relayUrl, channel, replayWhich, me)); }
-    catch (e) { const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code || 1; }
+    try { return await withFreshToken(tok => replay(tok, relayUrl, channel, replayWhich, me, t)); }
+    catch (e) { const x = explainRelayError(e, relayUrl, t); console.error(x.line); return x.code || 1; }
   }
 
   // Drain mode spends 1 s on the cursor page and lists everything; wait
@@ -637,7 +663,10 @@ export async function main(argv = process.argv.slice(2)) {
   const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
   const fetchPage = async (slice, signal) => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl, signal });
   const held = () => holdStatus().held;
-  const onHold = h => console.error(h ? `gzcoord watch: inbox held — the session is planning; nothing is polled until the plan is approved` : 'gzcoord watch: hold released; polling again');
+  // Each key sits literally beside its t(: tests/i18n.test.mjs reads
+  // the source for them, and a key built in an expression is a key the
+  // dead-and-missing guard cannot see.
+  const onHold = h => console.error(h ? t('watch.held') : t('watch.hold-released'));
 
   if (follow) {
     // The watch. Each arm waits an hour of slices; a delivery is printed
@@ -650,14 +679,14 @@ export async function main(argv = process.argv.slice(2)) {
       try {
         r = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal: 3600, forMeFn: msg => forMe(msg, me), keywords: [], ownAddress: me.address, held, onHold }));
       } catch (e) {
-        const x = explainRelayError(e, relayUrl);
+        const x = explainRelayError(e, relayUrl, t);
         if (x.code === 4) { console.error(x.line); return 4; }
-        if (!down) { console.log(`gzcoord watch: relay unreachable at ${relayUrl} — waiting for it (this line prints once)`); down = true; }
+        if (!down) { console.log(t('watch.relay-down', { relay_url: relayUrl })); down = true; }
         await new Promise(r => setTimeout(r, 30000));
         continue;
       }
-      if (down) { console.log('gzcoord watch: relay is back; watching again'); down = false; }
-      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy, { cap: NOTIFICATION_CAP }));
+      if (down) { console.log(t('watch.relay-back')); down = false; }
+      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy, { cap: NOTIFICATION_CAP, t, reminder }));
     }
   }
 
@@ -665,21 +694,28 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     res = await withFreshToken(() => waitLoop({ fetchPage, ack, waitTotal, forMeFn: msg => forMe(msg, me), keywords, ownAddress: me.address }));
   } catch (e) {
-    const x = explainRelayError(e, relayUrl); console.error(x.line); return x.code;
+    const x = explainRelayError(e, relayUrl, t); console.error(x.line); return x.code;
   }
   if (res.keywordHit && waitIdx >= 0) {
     const m = res.classified.find(c => c.rec.id === res.keywordHit.id);
-    console.log(`gzcoord inbox: keyword watch on ${CHANNEL} — a message matching one of [${keywords.join(', ')}] landed (not addressed to you, metadata only):`);
-    console.log(`  ${(m?.msg ? oneLine(m.msg) : `${res.keywordHit.id} (unparsable)  from ${res.keywordHit.sender}`)}`);
+    console.log(t('keyword.hit', { channel: CHANNEL, keywords: keywords.join(', ') }));
+    console.log(`  ${(m?.msg ? oneLine(m.msg, t) : t('keyword.unparsable', { id: res.keywordHit.id, sender: res.keywordHit.sender }))}`);
     process.exit(3);
   }
   if (!res.delivered && waitIdx >= 0)
-    console.log(`gzcoord inbox: nothing for you on ${CHANNEL} in ${res.waited}s (${res.othersPassed} passed for others)`);
+    console.log(t('wait.nothing', { channel: CHANNEL, waited: res.waited, others_passed: res.othersPassed }));
   if (!res.delivered) return 0;
-  console.log(render(res, me, CHANNEL, taxonomy));
+  console.log(render(res, me, CHANNEL, taxonomy, { t, reminder }));
   // The cursor is already advanced past everything shown — waitLoop
   // acknowledges every slice it sees, delivered or passed.
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.exit(c)).catch(e => { console.error(`gzcoord inbox: ${e.message}`); process.exit(0); });
+if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.exit(c)).catch(e => {
+  // NOT through the dictionary: what failed may BE the dictionary, and a
+  // throw inside this handler is an unhandled rejection — a stack trace
+  // and exit 1 on a path whose whole contract is one line and exit 0
+  // (blind review F1 on PR #28).
+  console.error(`gzcoord inbox: ${e?.message ?? e}`);
+  process.exit(0);
+});

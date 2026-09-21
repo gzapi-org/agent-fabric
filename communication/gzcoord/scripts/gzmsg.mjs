@@ -4,9 +4,26 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-// The agent-fabric checkout this runtime belongs to: communication/gzcoord/scripts -> root.
-export const FABRIC_ROOT = process.env.AGENT_FABRIC_ROOT ?? new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
+// The agent-fabric checkout this runtime belongs to. Defined in
+// paths.mjs and re-exported here, so the validator below can take its
+// diagnostics from the dictionary without gzmsg and i18n importing each
+// other; every existing importer of FABRIC_ROOT from this module is
+// unaffected.
+export { FABRIC_ROOT } from './paths.mjs';
+import { FABRIC_ROOT } from './paths.mjs';
+import { defaultDictionaryOrEmpty, dictionary, printer } from './i18n.mjs';
+
+// The validator's own English, for a caller that passes no dictionary —
+// the CLI outside a session, a test. Read once, lazily, and NEVER
+// throwing: parse() is called inside bare catches that read any throw as
+// "not a GZCOORD/1 message" (inbox.mjs), so a filesystem fault here would
+// silently reclassify every message on the channel instead of being
+// reported. An empty dictionary degrades to key-named lines, which is
+// loud and alive (blind review F6 on PR #28).
+let EN;
+const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([
@@ -34,11 +51,11 @@ const ID_SHAPED = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // wrote the shell variable's name instead of its value, and nothing said
 // so until the message was read back with "$ID" where the join key
 // should be.
-export function idComplaint(key, value) {
+export function idComplaint(key, value, t = en()) {
   if (ID_SHAPED.test(value)) return null;
   if (/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(value))
-    return `${key} is the literal ${value} — the shell variable was not expanded; mint the id with gzmsg.mjs new-id and write its value`;
-  return `${key} is ${value}, not an identifier this deployment mints (a UUID from gzmsg.mjs new-id)`;
+    return t('validate.id-unexpanded', { key, value });
+  return t('validate.id-not-minted', { key, value });
 }
 function editDistance(a, b) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -118,13 +135,13 @@ export function columns(line) {
   return w;
 }
 
-export function parse(text) {
+export function parse(text, t = en()) {
   // A byte-order mark is an encoding artefact, not the first character of
   // the header; some editors prepend one on save.
   const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   const first = lines.shift() ?? '';
   const m = first.match(/^\[GZCOORD\/1\] ([A-Z][A-Z0-9-]*)$/);
-  if (!m) throw new Error('invalid GZCOORD/1 first line');
+  if (!m) throw new Error(t('validate.bad-first-line'));
   const type = m[1];
   const metadata = {};
   const duplicateKeys = new Set();
@@ -251,30 +268,30 @@ export function slugOf(instance, taxonomy) {
 }
 
 export const RELAY_MAX_COLUMNS = 72;   // the width a terminal copy keeps; not the bridge's
-export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}) {
+export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS, t = en() } = {}) {
   const errors = [];
   const warnings = [];
   let msg;
   // parse() throws on a bad header because nothing after it can be read;
   // validate() reports that like any other error, so the CLI prints one
   // line instead of a stack trace and callers see a uniform result shape.
-  try { msg = parse(text); }
+  try { msg = parse(text, t); }
   catch (e) { return { ok: false, errors: [e.message], warnings, message: null }; }
-  if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(`unknown type: ${msg.type}`);
+  if (!CORE_TYPES.has(msg.type) && !msg.type.startsWith('X-')) errors.push(t('validate.unknown-type', { type: msg.type }));
   // MESSAGE-ID joined the required set (§7.1) once a real transport made
   // its absence expensive: without one a message cannot be deduplicated by
   // an at-least-once carrier, answered by IN-REPLY-TO, or named in a
   // reconciliation by either side. Unnumbered messages were sent here and
   // had to be superseded. Uniqueness stays a SENDER obligation — a
   // validator sees one message and cannot know a sender's history.
-  for (const key of ['FROM','ROLE','PROJECT','MESSAGE-ID']) if (!msg.metadata[key]) errors.push(`missing ${key}`);
-  if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push('FROM must be <host>/<instance>');
-  if (msg.metadata.TO && !addressRe.test(msg.metadata.TO)) errors.push('TO must be <host>/<instance>');
-  if (msg.metadata['REPLY-EXPECTED'] !== undefined && !['yes','no'].includes(msg.metadata['REPLY-EXPECTED'])) errors.push('REPLY-EXPECTED must be yes or no');
+  for (const key of ['FROM','ROLE','PROJECT','MESSAGE-ID']) if (!msg.metadata[key]) errors.push(t('validate.missing', { key }));
+  if (msg.metadata.FROM && !addressRe.test(msg.metadata.FROM)) errors.push(t('validate.from-shape'));
+  if (msg.metadata.TO && !addressRe.test(msg.metadata.TO)) errors.push(t('validate.to-shape'));
+  if (msg.metadata['REPLY-EXPECTED'] !== undefined && !['yes','no'].includes(msg.metadata['REPLY-EXPECTED'])) errors.push(t('validate.reply-expected'));
   // SPEC §7.1: the field's only value is `true`. `BROADCAST: yes` used to fail
   // as "missing TO, TO-ROLE or BROADCAST: true", which names the wrong fault,
   // and `BROADCAST: false` beside a TO validated clean with undefined meaning.
-  if (msg.metadata.BROADCAST !== undefined && msg.metadata.BROADCAST !== 'true') errors.push('BROADCAST must be true, or absent');
+  if (msg.metadata.BROADCAST !== undefined && msg.metadata.BROADCAST !== 'true') errors.push(t('validate.broadcast-value'));
   // SPEC §7.1: the addressing field is the delivery scope, and there is
   // exactly one — a second answers "who receives" twice, and a transport
   // filtering by addressee cannot obey both. Live traffic carried TO beside
@@ -282,9 +299,9 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
   // broadcasts by definition and carry none.
   const addressing = ['TO', 'TO-ROLE', 'BROADCAST'].filter(k => msg.metadata[k] !== undefined);
   if (['HELLO','GOODBYE'].includes(msg.type)) {
-    if (addressing.length) errors.push(`${msg.type} is a broadcast by definition and carries no ${addressing.join(', ')}`);
-  } else if (addressing.length === 0) errors.push('missing TO, TO-ROLE or BROADCAST: true');
-  else if (addressing.length > 1) errors.push(`${addressing.join(' and ')} are exclusive: one addressing field, the delivery scope`);
+    if (addressing.length) errors.push(t('validate.type-carries-addressing', { type: msg.type, fields: addressing.join(', ') }));
+  } else if (addressing.length === 0) errors.push(t('validate.no-addressing'));
+  else if (addressing.length > 1) errors.push(t('validate.addressing-exclusive', { fields: addressing.join(' and ') }));
   // SPEC §13: an assignment — a REQUEST, or anything carrying a REQUEST:,
   // ACCEPTANCE: or DELIVER-TO: section — goes TO one instance. A role may
   // have several holders and the runtime delivers to all of them; each
@@ -294,36 +311,40 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
   // meant as prose still counts: that is the shape that misrouted.
   if (msg.metadata['TO-ROLE'] !== undefined) {
     const asks = ['REQUEST', 'ACCEPTANCE', 'DELIVER-TO'].filter(k => k in msg.sections);
-    if (msg.type === 'REQUEST') errors.push('a REQUEST is an assignment and goes TO one instance, never TO-ROLE (SPEC §13)');
-    else if (asks.length) errors.push(`${asks.join(' and ')} section${asks.length > 1 ? 's' : ''} make this an assignment; address it TO one instance, never TO-ROLE (SPEC §13)`);
+    if (msg.type === 'REQUEST') errors.push(t('validate.request-to-role'));
+    // Each key literally beside its t(: a key built in an expression is a
+    // key the dead-and-missing guard cannot see (tests/i18n.test.mjs).
+    else if (asks.length) errors.push(asks.length > 1
+      ? t('validate.sections-to-role', { sections: asks.join(' and ') })
+      : t('validate.section-to-role', { sections: asks.join(' and ') }));
   }
-  for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(`${key} is local/runtime data and forbidden on the wire`);
+  for (const key of Object.keys(msg.metadata)) if (FORBIDDEN.has(key)) errors.push(t('validate.forbidden-key', { key }));
   if (taxonomy) {
     const catalogue = taxonomy.path ?? 'the role catalogue';
     if (msg.metadata.ROLE && !taxonomy.roles.has(msg.metadata.ROLE))
-      errors.push(`ROLE "${msg.metadata.ROLE}" is not a role slug in ${catalogue}`);
+      errors.push(t('validate.role-unknown', { role: msg.metadata.ROLE, catalogue }));
     if (msg.metadata['TO-ROLE'] && !taxonomy.roles.has(msg.metadata['TO-ROLE']))
-      errors.push(`TO-ROLE "${msg.metadata['TO-ROLE']}" is not a role slug in ${catalogue}`);
+      errors.push(t('validate.to-role-unknown', { role: msg.metadata['TO-ROLE'], catalogue }));
     const fromSlug = msg.metadata.FROM && addressRe.test(msg.metadata.FROM) && slugOf(msg.metadata.FROM.split('/')[1], taxonomy);
     if (fromSlug && msg.metadata.ROLE && taxonomy.roles.has(msg.metadata.ROLE) && msg.metadata.ROLE !== fromSlug)
-      warnings.push(`FROM names ${fromSlug} but ROLE is ${msg.metadata.ROLE}; the role may have changed since the clone was named`);
+      warnings.push(t('validate.role-drift', { from_slug: fromSlug, role: msg.metadata.ROLE }));
   }
-  for (const line of msg.malformed) errors.push(`unparsable line in the metadata block: ${line}`);
-  for (const key of msg.duplicateKeys) errors.push(`${key} appears more than once in the metadata block`);
+  for (const line of msg.malformed) errors.push(t('validate.unparsable-line', { line }));
+  for (const key of msg.duplicateKeys) errors.push(t('validate.duplicate-key', { key }));
   // A key the sender believed was a known field. Two signals, neither of
   // which rejects: it reads as a misspelling of a common field, or it
   // carries an id-shaped value while not being an id field at all.
   for (const [key, value] of Object.entries(msg.metadata)) {
     const near = nearestKnownKey(key);
-    if (near) warnings.push(`${key} is not a known field — did you mean ${near}?`);
+    if (near) warnings.push(t('validate.near-key', { key, near }));
     else if (ID_SHAPED.test(value) && !['MESSAGE-ID','IN-REPLY-TO'].includes(key))
-      warnings.push(`${key} carries an id-shaped value (${value}) but is not MESSAGE-ID or IN-REPLY-TO`);
+      warnings.push(t('validate.id-shaped', { key, value }));
   }
   // The converse: an id field whose value is not id-shaped. A warning,
   // because §7.2 makes the identifier opaque and a validator must not
   // narrow the grammar; the deployment's sender turns it into a refusal.
   for (const key of ['MESSAGE-ID', 'IN-REPLY-TO']) {
-    const c = msg.metadata[key] ? idComplaint(key, msg.metadata[key]) : null;
+    const c = msg.metadata[key] ? idComplaint(key, msg.metadata[key], t) : null;
     if (c) warnings.push(c);
   }
   // A body line that is marker-shaped up to whitespace — indented, or with
@@ -337,13 +358,13 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
   for (const [name, body] of Object.entries(msg.sections))
     for (const line of body.split('\n'))
       if (/^\s*[A-Z][A-Z0-9-]*:\s*$/.test(line))
-        warnings.push(`possible swallowed section marker inside ${name}: ${JSON.stringify(line)}`);
+        warnings.push(t('validate.swallowed-marker', { name, line: JSON.stringify(line) }));
   // The same padding in the metadata block turns a marker into an
   // empty-valued key: `NOTES: ` is metadata NOTES="", and the body that
   // follows is then reported as unparsable — true, but not the fault.
   for (const [key, value] of Object.entries(msg.metadata))
     if (value === '')
-      warnings.push(`${key} has an empty value — a section marker with trailing whitespace reads as metadata`);
+      warnings.push(t('validate.empty-value', { key }));
   // Not a grammar rule — SPEC §14 keeps carrier limits off the wire — but
   // a terminal copy re-breaks a long line, and a re-broken metadata line
   // stops being metadata (docs/HUMAN-RELAY-TRANSPORT.md, "Sending"). The
@@ -356,7 +377,7 @@ export function validate(text, { taxonomy, maxColumns = RELAY_MAX_COLUMNS } = {}
     text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach((line, i) => {
       const w = columns(line);
       if (w > maxColumns)
-        warnings.push(`line ${i + 1} is ${w} columns wide; over ${maxColumns} a terminal copy re-breaks it`);
+        warnings.push(t('validate.wide-line', { n: i + 1, width: w, max: maxColumns }));
     });
   return { ok: errors.length === 0, errors, warnings, message: msg };
 }
@@ -481,7 +502,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (cmd === 'validate') {
     const file = ARGS.positional[0];
     if (!file) throw new Error('usage: gzmsg.mjs validate <file>');
-    const result = validate(fs.readFileSync(file, 'utf8'), { taxonomy });
+    const result = validate(fs.readFileSync(file, 'utf8'), { taxonomy, t: printer(dictionary(whoami())) });
     // Warnings print on both paths: on a failure they are often the cause
     // the errors only describe from downstream.
     for (const w of result.warnings) console.error(`warning: ${w}`);
@@ -523,7 +544,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // A HELLO is how peers learn an address, so emitting one this same tool
     // would reject publishes an identity nobody can route back to.
     const text = lines.join('\n');
-    const result = validate(text, { taxonomy });
+    const result = validate(text, { taxonomy, t: printer(dictionary(me)) });
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);

@@ -11,8 +11,9 @@ import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { parseArgs, rows, table, writeBundles, manifestAgent, partKey } from '../ctl.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
+import { fileURLToPath } from 'node:url';
 
-const CTL = new URL('../ctl.mjs', import.meta.url).pathname;
+const CTL = fileURLToPath(new URL('../ctl.mjs', import.meta.url));
 
 test('parseArgs: targets, op, flags, defaults', () => {
   assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null });

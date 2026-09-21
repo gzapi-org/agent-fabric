@@ -11,9 +11,10 @@ import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer } from '../agentd.mjs';
 import { memorySlug } from '../ops.mjs';
+import { fileURLToPath } from 'node:url';
 
-const AGENTD = new URL('../agentd.mjs', import.meta.url).pathname;
-const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
+const AGENTD = fileURLToPath(new URL('../agentd.mjs', import.meta.url));
+const ROOT = fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/$/, '');
 const me = { address: 'develop-qzapp/db-admin' };
 const operators = new Set(['develop-qzapp/user']);
 const req = (over = {}) => ({ content: JSON.stringify({ v: 1, kind: 'request', id: newId(), from: 'develop-qzapp/user', to: '*', op: 'ping', ts: new Date().toISOString(), ttl_s: 30, ...over }) });

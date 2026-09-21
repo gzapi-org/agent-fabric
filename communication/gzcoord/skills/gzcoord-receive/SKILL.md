@@ -192,8 +192,9 @@ moves), shows the body only if the message is addressed to you, and
 otherwise prints its metadata line — SPEC §17 applies to a replay too.
 Never pipe the watch or a drain through anything that truncates.
 
-**A delivery that ends in a `[gzcoord: body cut here …]` line is not the
-whole message.** The harness shows about 3,000 characters of one
+**A delivery whose body ends in the watch's own cut notice — naming the
+replay command and the relay seq, in your locale — is not the whole
+message.** The harness shows about 3,000 characters of one
 notification and cuts the rest with "...(truncated)" — and the cut has
 landed inside REQUEST or VERIFIED, the sections that matter most. So the
 watch cuts first, at a place of its own: every
@@ -222,10 +223,11 @@ writes) before the environment, and retry a refused token once with the
 file's value if it changed underneath a long wait — so the recovery is
 `bin/fabric-secrets sync`, then re-arm the watch; no login shell, no
 `source`, nothing pasted into a file, and no refused call per re-arm.
-Only when the synced file still holds the refused value does the inbox report
-`refused this token … it was rotated` and exit 4, and the watch loop
-stops on that rather than repeat it: sync had not run yet, or the account
-is not enrolled.
+Only when the synced file still holds the refused value does the inbox
+report that the relay refused the token and that it was rotated, and exit
+4 — the line reads in your own locale, the exit code is the same
+everywhere — and the watch loop stops on that rather than repeat it: sync
+had not run yet, or the account is not enrolled.
 
 ## 5. What the inbox tells you
 
@@ -234,7 +236,17 @@ then each delivered message in a fenced block with its relay `seq`,
 sender and timestamp, then one metadata line per message that was not
 for you. `relay unreachable` or `no CLAUDE_BRIDGE_AUTH_TOKEN` means the
 transport is down or the account is not enrolled — say so; it is not a
-silence to interpret. The relay's own past is only its database on the
+silence to interpret.
+
+**Those are the lines as the default locale spells them.** What the
+inbox says around a message is the reader's, not the wire's: a login
+whose locale carries a dictionary reads every one of these lines in its
+own language, and its head line may end with that locale's standing
+reminder. The MESSAGE never changes — body, metadata keys, type and
+`broadcast` are matched by name across locales. So recognise a state by
+what it IS, never by the English it is spelled with here.
+
+The relay's own past is only its database on the
 hosting workspace; nothing in any repository carries a message, and a
 message is never committed — what it decides lands in the artifact it
 concerns, citing the id.

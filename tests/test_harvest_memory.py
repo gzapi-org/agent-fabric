@@ -89,6 +89,21 @@ def test_a_claim_carries_the_date_the_memory_was_written(tmp: str) -> None:
     assert got == {"stamped": "2026-09-12", "unstamped": "2026-09-11"}, got
 
 
+def test_merge_target_travels_from_the_memory_to_the_claim(tmp: str) -> None:
+    """`merge_target: "<heading>"` in a memory's metadata is the author's own
+    supersession; the README promised it and the harvest dropped it. It
+    reaches the claim as written; a memory without it carries no key."""
+    mem, out = os.path.join(tmp, "mt"), os.path.join(tmp, "ot")
+    os.makedirs(mem)
+    with open(os.path.join(mem, "newer.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: newer\ndescription: d\nmetadata:\n  type: project\n  roles_class: solution\n"
+                 "  merge_target: \"The dictionary has never had a native pass\"\n---\n\nIt has, since the native pass merged.\n")
+    write_memory(mem, "plain", "project", roles_class="solution")
+    assert run(mem, out).returncode == 0
+    got = {c["topic"]: c.get("merge_target") for c in claims_of(out)}
+    assert got == {"newer": "The dictionary has never had a native pass", "plain": None}, got
+
+
 def test_role_knowledge_is_opt_in(tmp: str) -> None:
     """A memory reaches the shared corpus only if it says so. Nothing is
     inferred from `type`: memory has four types, .roles/ has nine classes,
@@ -317,6 +332,47 @@ def test_the_assembler_actually_consumes_the_drain(tmp: str) -> None:
     assert "admitted=" in r.stdout and "admitted=?" not in r.stdout, r.stdout
 
 
+def test_an_author_s_merge_target_supersedes_without_a_question(tmp: str) -> None:
+    """End to end, from the memory: an author writes a newer memory that
+    names the section it replaces; the drain lands it in the section's
+    place and asks the owner nothing — the case the README promised and a
+    hand-written claims file had been standing in for."""
+    assemble = os.path.join(os.path.dirname(TOOL), "assemble.py")
+    if not os.path.exists(assemble):
+        return
+    wc = os.path.join(tmp, "wc-mt"); os.makedirs(os.path.join(wc, ".agent-fabric", "memory"))
+    mem = os.path.join(tmp, "m-mt"); os.makedirs(mem)
+    write_memory(mem, "dictionary", "project", roles_class="solution", description="The dictionary has never had a native pass",
+                 body="Machine-filled, never reviewed by a native speaker.")
+    out1 = os.path.join(tmp, "o-mt1")
+    assert run(mem, out1, "--working-copy", wc, "--project", "demo", "--host", "hostA").returncode == 0
+    fabric = os.path.join(tmp, "assembled-mt")
+    r = subprocess.run([sys.executable, assemble, "--claims", os.path.join(out1, "claims"), "--drain", out1,
+                        "--fabric", fabric, "--project", "demo", "--working-copy", wc, "--stamp", "2026-01-01"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    slice_path = os.path.join(wc, ".agent-fabric", "memory", "architect-cto", "solution.md")
+    assert "never reviewed by a native speaker" in open(slice_path, encoding="utf-8").read()
+    # The author retires the old memory and writes the newer one, naming
+    # the section it supersedes.
+    os.remove(os.path.join(mem, "dictionary.md"))
+    with open(os.path.join(mem, "dictionary-native-pass.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: dictionary-native-pass\ndescription: The dictionary has had its native pass\n"
+                 "metadata:\n  type: project\n  roles_class: solution\n"
+                 "  merge_target: \"The dictionary has never had a native pass\"\n---\n\n"
+                 "Reviewed by a native speaker; the machine fill is gone.\n")
+    out2 = os.path.join(tmp, "o-mt2")
+    assert run(mem, out2, "--working-copy", wc, "--project", "demo", "--host", "hostA", "--all").returncode == 0
+    r = subprocess.run([sys.executable, assemble, "--claims", os.path.join(out2, "claims"), "--drain", out2,
+                        "--fabric", fabric, "--project", "demo", "--working-copy", wc, "--stamp", "2026-01-02"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, "no question asked when the author named the section: " + r.stderr
+    assert "SUPERSEDING?" not in r.stderr
+    text = open(slice_path, encoding="utf-8").read()
+    assert "Reviewed by a native speaker" in text and "never reviewed" not in text, text
+    assert text.count("## The dictionary has") == 1 and "(2)" not in text, text
+
+
 def test_the_watermark_round_trips_through_the_committed_report(tmp: str) -> None:
     """A drain reads only what is newer than the watermark the project's
     last report recorded for this host, writes harvest-report.json with
@@ -530,9 +586,11 @@ def test_a_co_owner_that_is_not_a_slug_refuses_the_drain(tmp: str) -> None:
 
 def main() -> int:
     cases = [
+        test_an_author_s_merge_target_supersedes_without_a_question,
         test_the_watermark_round_trips_through_the_committed_report,
         test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file,
         test_a_claim_carries_the_date_the_memory_was_written,
+        test_merge_target_travels_from_the_memory_to_the_claim,
         test_role_knowledge_is_opt_in,
         test_a_memory_in_another_language_drains_through_its_rendering,
         test_the_class_is_taken_verbatim_not_mapped,

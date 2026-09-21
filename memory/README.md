@@ -266,8 +266,10 @@ owner's decision), `keep-both` (both stand, side by side, dated), or
 `drop` (the incoming claim is wrong). Every applied decision is
 recorded in the drain report under `collision_decisions`. Two claims of
 one drain under one heading collide the same way. An author who knows
-the older text is superseded says so in the memory itself
-(`merge_target`), and no question is asked.
+the older text is superseded says so in the memory itself — in its
+`metadata:` block, `merge_target: "<the section's heading>"` — and no
+question is asked: the harvest carries the field to the claim and the
+assembler replaces the section and retires its siblings.
 
 **Every section is dated.** A claim carries `observed_at` — the
 memory's own `modified` stamp, else the file's mtime — and the section

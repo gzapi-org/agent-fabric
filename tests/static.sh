@@ -54,5 +54,34 @@ fi
 if git ls-files '*.test.mjs' | xargs grep -n "mkdtempSync" 2>/dev/null; then
     echo "  ✗ mkdtempSync in a node suite: use scratch() from tests/scratch.mjs"; fail=1
 fi
+# A file URL's .pathname is percent-encoded, so handing it to the
+# filesystem names a file that does not exist as soon as the checkout
+# path contains a space. fileURLToPath is the converter. The rule lived
+# only in the modules already fixed: at the branch point the idiom stood
+# in twenty places across five suites and one module. The FIRST guard
+# written here matched the inline spelling only — not the
+# `const f = new URL(..., import.meta.url); … f.pathname` form, which is
+# the one that had actually shipped — so it would have guarded nothing
+# the fix had just removed. Hence a binding pass rather than a grep.
+python3 - <<'PY' || fail=1
+import re, subprocess, sys
+files = subprocess.run(["git", "ls-files", "*.mjs"], capture_output=True, text=True).stdout.split()
+bound = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*new URL\([^;]*?import\.meta\.url\s*\)")
+inline = re.compile(r"import\.meta\.url\s*\)\s*\.pathname")
+bad = []
+for f in files:
+    src = open(f, encoding="utf-8").read()
+    names = sorted(set(bound.findall(src)))
+    named = re.compile(r"\b(?:%s)\.pathname" % "|".join(map(re.escape, names))) if names else None
+    for n, line in enumerate(src.split("\n"), 1):
+        if line.lstrip().startswith("//"):
+            continue            # a comment may name the idiom to forbid it
+        if inline.search(line) or (named and named.search(line)):
+            bad.append("  %s:%d: %s" % (f, n, line.strip()))
+print("\n".join(bad))
+if bad:
+    print("  \u2717 a module URL reaching the filesystem as .pathname: use fileURLToPath(new URL(...))")
+sys.exit(1 if bad else 0)
+PY
 if (( fail )); then echo "static: FAILED"; exit 1; fi
 echo "static: all bash scripts parse, shellcheck and ruff clean"

@@ -1,4 +1,6 @@
 {
+  "tag": "ru-RU",
+  "reminder": " - Думай по-русски",
   "timezone": "Asia/Tbilisi",
   "serpapi": {
     "label": "основной движок",

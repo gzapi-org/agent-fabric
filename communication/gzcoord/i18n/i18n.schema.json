@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-fabric:schemas:i18n:dictionary",
+  "title": "GZCoord tool dictionary",
+  "description": "The complete key -> string dictionary for one active locale of the GZCoord tools — every line the inbox prints around a message, never the message itself. The house i18n shape (gzapp ADR-024 §2.4, contracts/i18n/i18n.schema.json): one flat dictionary per locale, keys as dotted slugs, values non-empty, `{name}` interpolation. Completeness against en-US.json is enforced by tools/fabric/lint.py before a dictionary lands; at runtime a key the dictionary lacks falls back to en-US rather than failing a session start, and nothing is ever fabricated.",
+  "type": "object",
+  "propertyNames": {
+    "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$",
+    "description": "A flat dotted slug, <area>.<thing>: lower-case, kebab inside a segment."
+  },
+  "additionalProperties": {
+    "type": "string",
+    "minLength": 1,
+    "description": "The translated line. Non-empty; an empty string is not a localization value."
+  }
+}

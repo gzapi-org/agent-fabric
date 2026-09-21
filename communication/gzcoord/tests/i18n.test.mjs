@@ -220,12 +220,26 @@ test('a validator diagnostic reaches a locale reader whole, not just its prefix'
     'validate.no-addressing': 'ᲐᲠᲐᲕᲘᲡᲗᲕᲘᲡ: TO, TO-ROLE ᲐᲜ BROADCAST: true',
   }));
   const t = printer(dictionary(me, { root }));
-  const v = validate('[GZCOORD/1] INFO\nFROM: h/s\nROLE: backend-dev\nPROJECT: gzapp\n', { t, maxColumns: 0 });
+  // FROM is malformed on purpose: validate.from-shape is a key this
+  // locale does NOT carry, so the same call proves both halves at once.
+  const v = validate('[GZCOORD/1] INFO\nFROM: not-an-address\nROLE: backend-dev\nPROJECT: gzapp\n', { t, maxColumns: 0 });
   // The substance, not only the wrapper — the whole point of the finding.
   assert.ok(v.errors.includes('ᲐᲙᲚᲘᲐ MESSAGE-ID'), v.errors.join(' | '));
   assert.ok(v.errors.includes('ᲐᲠᲐᲕᲘᲡᲗᲕᲘᲡ: TO, TO-ROLE ᲐᲜ BROADCAST: true'), v.errors.join(' | '));
-  // A key the locale does not carry still falls back, never invents.
-  assert.ok(v.errors.some(e => e === defaultDictionary()['validate.from-shape']) === false);
+  // A key the locale lacks falls back to en-US, never to invented text.
+  assert.ok(v.errors.includes(defaultDictionary()['validate.from-shape']), v.errors.join(' | '));
+});
+
+test('the assignment diagnostic agrees with its own number', () => {
+  // The old code built both from one template with a `${plural}` on the
+  // noun only, so the singular read "REQUEST section make this an
+  // assignment". Splitting the key fixed the verb; these pin both, which
+  // nothing did before — the blind review found the change by reading.
+  const msg = n => `[GZCOORD/1] INFO\nFROM: h/s\nROLE: backend-dev\nPROJECT: gzapp\nMESSAGE-ID: x\nTO-ROLE: backend-dev\n\n${n}`;
+  const one = validate(msg('REQUEST:\na\n'), { maxColumns: 0 }).errors.join(' | ');
+  const two = validate(msg('REQUEST:\na\n\nACCEPTANCE:\nb\n'), { maxColumns: 0 }).errors.join(' | ');
+  assert.match(one, /REQUEST section makes this an assignment/);
+  assert.match(two, /REQUEST and ACCEPTANCE sections make this an assignment/);
 });
 
 test('the default locale still produces the validator\'s English, byte for byte', () => {

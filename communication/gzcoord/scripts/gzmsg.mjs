@@ -16,9 +16,17 @@ import { FABRIC_ROOT } from './paths.mjs';
 import { defaultDictionary, dictionary, printer } from './i18n.mjs';
 
 // The validator's own English, for a caller that passes no dictionary —
-// the CLI outside a session, a test. Read once, lazily.
+// the CLI outside a session, a test. Read once, lazily, and NEVER
+// throwing: parse() is called inside bare catches that read any throw as
+// "not a GZCOORD/1 message" (inbox.mjs), so a filesystem fault here would
+// silently reclassify every message on the channel instead of being
+// reported. An empty dictionary degrades to key-named lines, which is
+// loud and alive (blind review F6 on PR #28).
 let EN;
-const en = () => (EN ??= printer(defaultDictionary()));
+const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
+function defaultDictionaryOrEmpty() {
+  try { return defaultDictionary(); } catch { return {}; }
+}
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([
@@ -539,7 +547,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // A HELLO is how peers learn an address, so emitting one this same tool
     // would reject publishes an identity nobody can route back to.
     const text = lines.join('\n');
-    const result = validate(text, { taxonomy, t: printer(dictionary(whoami())) });
+    const result = validate(text, { taxonomy, t: printer(dictionary(me)) });
     for (const w of result.warnings) console.error(`warning: ${w}`);
     if (!result.ok) { console.error(result.errors.join('\n')); process.exit(1); }
     console.log(text);

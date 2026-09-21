@@ -25,7 +25,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
-import { dictionary, printer } from './i18n.mjs';
+import { defaultDictionary, dictionary, printer } from './i18n.mjs';
+
+// The lines printed before the login's own dictionary is resolved.
+let EN;
+const en = () => (EN ??= printer(defaultDictionary()));
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -53,19 +57,23 @@ export async function main(argv = process.argv.slice(2)) {
   if (!file) { console.error('usage: send.mjs <file>|- [--dry-run]'); return 1; }
   let raw;
   try { raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); }
-  catch (e) { console.error(`send: cannot read ${file}: ${e.message}`); return 1; }
+  catch (e) { console.error(en()('send.cannot-read', { file, detail: e.message })); return 1; }
   const text = normalize(raw);
 
   const who = whoami();
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
-  if (!cfg.configured) { console.error(`send: ${cfg.reason} — not sent`); return 3; }
-  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(`send: ${e.message} — not sent`); return 2; }
+  if (!cfg.configured) { console.error(en()('send.not-configured', { reason: cfg.reason })); return 3; }
+  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(en()('send.error-not-sent', { detail: e.message })); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
+  // One printer for this run: every line below is this login's, the
+  // validator's diagnostics and send's own refusals alike. Resolved once —
+  // dictionary() reads files and whoami() spawns a process.
+  const t = printer(dictionary(who));
 
   // Validate as the last step before sending; the validator's own words go
   // to stderr. The line-width check is off: the bridge carries a line as
@@ -73,14 +81,21 @@ export async function main(argv = process.argv.slice(2)) {
   // A refusal the sender reads is that sender's line, in that sender's
   // language: validate() is one function and its diagnostics are the
   // fabric's own text wherever they are printed.
-  const result = validate(text, { taxonomy, maxColumns: 0, t: printer(dictionary(who)) });
-  // An id complaint is repeated below as the refusal; once is enough.
-  for (const w of result.warnings ?? []) if (!/^(MESSAGE-ID|IN-REPLY-TO) is /.test(w)) console.error(`send: warning: ${w}`);
-  if (!result.ok) { for (const e of result.errors ?? []) console.error(`send: ${e}`); console.error('send: not sent — the message does not validate'); return 2; }
+  const result = validate(text, { taxonomy, maxColumns: 0, t });
+  // An id complaint is repeated below as the refusal; once is enough. The
+  // duplicate is found by IDENTITY, not by matching the English the
+  // complaint used to start with: once the complaint is a dictionary line
+  // it begins with whatever the locale begins with, and a text match
+  // silently stopped suppressing anything (blind review F2 on PR #28).
+  const alsoRefused = new Set(['MESSAGE-ID', 'IN-REPLY-TO']
+    .map(k => result.message?.metadata?.[k] ? idComplaint(k, result.message.metadata[k], t) : null)
+    .filter(Boolean));
+  for (const w of result.warnings ?? []) if (!alsoRefused.has(w)) console.error(t('send.warning', { detail: w }));
+  if (!result.ok) { for (const e of result.errors ?? []) console.error(t('send.error', { detail: e })); console.error(t('send.does-not-validate')); return 2; }
   const msg = parse(text);
   const from = msg.metadata?.FROM;
   if (from !== me.address) {
-    console.error(`send: FROM is ${from ?? '(missing)'} but this session is ${me.address}; not sent — the sender is the login, never a claim`);
+    console.error(t('send.from-is-not-this-login', { from: from ?? t('send.from-missing'), address: me.address }));
     return 2;
   }
   const id = msg.metadata?.['MESSAGE-ID'] ?? '(none)';
@@ -91,8 +106,8 @@ export async function main(argv = process.argv.slice(2)) {
   // rule, because a malformed id degrades quietly: the message reads
   // fine and the thread cannot be reconstructed later.
   for (const key of ['MESSAGE-ID', 'IN-REPLY-TO']) {
-    const c = msg.metadata?.[key] ? idComplaint(key, msg.metadata[key]) : null;
-    if (c) { console.error(`send: ${c}; not sent`); return 2; }
+    const c = msg.metadata?.[key] ? idComplaint(key, msg.metadata[key], t) : null;
+    if (c) { console.error(t('send.id-refused', { detail: c })); return 2; }
   }
   // This session's model fell back after a safeguard flagged a request
   // (runtime/claude-code/hooks/model-fallback-note.sh leaves the marker):
@@ -100,11 +115,15 @@ export async function main(argv = process.argv.slice(2)) {
   // the moment of sending. A reminder, never a content check — nothing
   // can tell flagged text from any other.
   const fb = fallbackMarker();
-  if (fb) console.error(`send: reminder — this session fell back from ${fb.from_model || 'its model'} to ${fb.to_model || 'a fallback model'} at ${fb.at || '?'} after a safeguard flagged a request as ${fb.topic || 'the flagged category'}; filter anything that could be read as ${fb.topic || 'that'} out of this message — name where a finding is and what class of problem it is, never its content.`);
-  if (dry) { console.error(`send: would post ${msg.type} ${id} from ${me.address} to ${channel} at ${relayUrl}`); return 0; }
+  if (fb) console.error(t('send.fallback-reminder', {
+    from_model: fb.from_model || t('send.fallback-unknown-model'),
+    to_model: fb.to_model || t('send.fallback-unknown-target'),
+    at: fb.at || t('send.fallback-unknown-time'),
+    topic: fb.topic || t('send.fallback-unknown-topic') }));
+  if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
 
   let tok = token(root, cfg);
-  if (!tok) { console.error('send: no CLAUDE_BRIDGE_AUTH_TOKEN in the environment or the working copy — not sent'); return 3; }
+  if (!tok) { console.error(t('send.no-token')); return 3; }
   let res;
   const post = t => api(t, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });
   try {
@@ -116,12 +135,14 @@ export async function main(argv = process.argv.slice(2)) {
       tok = fresh; res = await post(tok);
     }
   } catch (e) {
-    if (e.status === 401 || e.status === 403) { console.error(`send: the relay refused this token (HTTP ${e.status}) — it was rotated; run bin/fabric-secrets sync — not sent`); return 3; }
-    console.error(`send: relay unreachable at ${relayUrl} (${e.message}) — not sent`); return 3;
+    if (e.status === 401 || e.status === 403) { console.error(t('send.token-refused', { status: e.status })); return 3; }
+    console.error(t('send.relay-unreachable', { relay_url: relayUrl, detail: e.message })); return 3;
   }
-  console.log(`sent seq ${res.seq} ${msg.type} ${id}${res.deduplicated ? ' (deduplicated: the relay already had it)' : ''}`);
+  console.log(t('send.sent', { seq: res.seq, type: msg.type, id, deduplicated: res.deduplicated ? t('send.deduplicated') : '' }));
   return 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  main().then(code => process.exit(code), e => { console.error(`send: ${e.message}`); process.exit(1); });
+  // NOT through the dictionary: what failed may BE the dictionary, and a
+  // throw inside this handler is an unhandled rejection (blind review F1).
+  main().then(code => process.exit(code), e => { console.error(`send: ${e?.message ?? e}`); process.exit(1); });

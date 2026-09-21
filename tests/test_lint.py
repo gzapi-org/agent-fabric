@@ -713,6 +713,16 @@ def case_locale_file_shape() -> None:
         write(ident(fabric, "locale", "ge", "locale.json"), '{"tag": "ka-GE", "timezone": "Asia/Tbilisi"}')
         code, out = run_lint(fabric)
         assert code == 1 and "no engine block" in out, out
+        # The standing reminder is optional, and in the locale when present.
+        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "reminder": " - იფიქრე ქართულად"}')
+        code, out = run_lint(fabric)
+        assert code == 0, f"a reminder in the locale passes: {out}"
+        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "reminder": " - think in Georgian"}')
+        code, out = run_lint(fabric)
+        assert code == 1 and "reminder ' - think in Georgian' is not in the locale" in out, out
+        write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "reminder": "  "}')
+        code, out = run_lint(fabric)
+        assert code == 1 and "a non-empty line, or absent" in out, out
         write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "country": "GE"}')
         code, out = run_lint(fabric)
         assert code == 1 and "unknown field(s) ['country']" in out, out

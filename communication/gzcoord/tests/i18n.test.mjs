@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
 import { DEFAULT_LOCALE, DEFAULT_PATH, defaultDictionary, dictionary, dictionaryPath,
-         fill, localeTag, printer, suffix } from '../scripts/i18n.mjs';
+         fill, localeReminder, localeTag, printer, suffix } from '../scripts/i18n.mjs';
 import { render } from '../scripts/inbox.mjs';
 
 const SCRIPTS = new URL('../scripts/', import.meta.url).pathname;
@@ -129,6 +129,36 @@ test('the locale reaches the fabric\'s own lines and stops at the wire', () => {
   assert.match(out, /^MESSAGE-ID: 01a0-1$/m);
   assert.match(out, /^the body, as its sender wrote it$/m);
   assert.match(out, /01a0-2 {2}OBSERVATION {2}TO h\/other {2}other/);
+});
+
+test('the locale\'s standing reminder rides the head line, and only it', () => {
+  const { root, me } = active(JSON.stringify({ 'inbox.head': 'ᲨᲔᲛᲝᲡᲣᲚᲘ {who}, {channel}' }),
+                              { locale: { tag: 'ka-GE', reminder: ' - ᲘᲤᲘᲥᲠᲔ' } });
+  const reminder = localeReminder(me, root);
+  assert.equal(reminder, ' - ᲘᲤᲘᲥᲠᲔ');
+  const out = render(fixture(), ME, 'gzapp:gzcoord', undefined,
+                     { t: printer(dictionary(me, { root })), reminder });
+  assert.match(out, /^ᲨᲔᲛᲝᲡᲣᲚᲘ h\/me \(language-culture\), gzapp:gzcoord - ᲘᲤᲘᲥᲠᲔ$/m);
+  assert.equal(out.split('\n').filter(l => l.includes('ᲘᲤᲘᲥᲠᲔ')).length, 1, 'the head line and no other');
+});
+
+test('no locale, no reminder: nothing is appended for a default-locale login', () => {
+  const root = scratch('locale-');
+  assert.equal(localeReminder({ agent: 'user', role: 'fabric-coordinator' }, root), '');
+  assert.equal(localeReminder({ agent: 'language-culture-ge' }, root), '', 'no role bound');
+  const { root: r } = active('{}', { locale: { tag: 'ka-GE' } });
+  assert.equal(localeReminder({ agent: 'language-culture-ge', role: 'language-culture' }, r), '',
+               'a locale that declares none');
+});
+
+test('the reminder each real locale carries is the owner\'s, in that locale', () => {
+  const root = new URL('../../../', import.meta.url).pathname;
+  const of = s => localeReminder({ agent: `language-culture-${s}`, role: 'language-culture' }, root);
+  for (const s of ['ge', 'ru']) {
+    assert.notEqual(of(s), '', `${s} carries one`);
+    assert.match(of(s), /^ - /, `${s} appends to the head line`);
+    assert.ok(/[^\u0000-\u024F]/.test(of(s)), `${s} is in its own script`);
+  }
 });
 
 test('a default-locale login renders exactly what it rendered before a dictionary existed', () => {

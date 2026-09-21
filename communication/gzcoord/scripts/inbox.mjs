@@ -84,7 +84,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
-import { defaultDictionary, dictionary, printer } from './i18n.mjs';
+import { defaultDictionary, dictionary, localeReminder, printer } from './i18n.mjs';
 
 // Every line below is printed through `t`, the catalogue of the login
 // that reads it (i18n.mjs). main() resolves the login's once and
@@ -529,14 +529,17 @@ export function splitMessage(text) {
   return { meta: lines.slice(0, metaEnd).join('\n'), body: lines.slice(at).join('\n') };
 }
 const MAX_FLAG_LINES = 4;
-export function render(res, me, channel, taxonomy, { cap = Infinity, t = en() } = {}) {
+export function render(res, me, channel, taxonomy, { cap = Infinity, t = en(), reminder = '' } = {}) {
   const mine = [], others = [];
   for (const { rec, msg, isMine } of res.classified) {
     if (!msg) { others.push({ rec, line: t('inbox.not-a-message', { id: rec.id, sender: rec.sender }) }); continue; }
     (isMine ? mine : others).push({ rec, msg });
   }
+  // The reminder rides the head line and nothing else: it is the one
+  // line read on every drain and every delivery, and the cap arithmetic
+  // below measures the head as it will actually print.
   const head = t('inbox.head', { who: `${me.address}${me.slug ? ` (${me.slug})` : ''}`,
-                                  mine: mine.length, others: others.length, channel });
+                                 mine: mine.length, others: others.length, channel }) + reminder;
   const parts = mine.map(({ rec }) => {
     // The message has arrived: the terminal-copy width warning does not apply.
     const v = validate(rec.content, { taxonomy, maxColumns: 0 });
@@ -608,6 +611,7 @@ export async function main(argv = process.argv.slice(2)) {
   // From here on every line is this login's: English, or the locale its
   // name ends in when that locale has an active dictionary (i18n.mjs).
   const t = printer(dictionary(who));
+  const reminder = localeReminder(who);
   if (argv.includes('--held')) {
     const h = holdStatus(undefined, { t });
     const unknown = t('held.unknown');
@@ -680,7 +684,7 @@ export async function main(argv = process.argv.slice(2)) {
         continue;
       }
       if (down) { console.log(t('watch.relay-back')); down = false; }
-      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy, { cap: NOTIFICATION_CAP, t }));
+      if (r.delivered) console.log(render(r, me, CHANNEL, taxonomy, { cap: NOTIFICATION_CAP, t, reminder }));
     }
   }
 
@@ -699,7 +703,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!res.delivered && waitIdx >= 0)
     console.log(t('wait.nothing', { channel: CHANNEL, waited: res.waited, others_passed: res.othersPassed }));
   if (!res.delivered) return 0;
-  console.log(render(res, me, CHANNEL, taxonomy, { t }));
+  console.log(render(res, me, CHANNEL, taxonomy, { t, reminder }));
   // The cursor is already advanced past everything shown — waitLoop
   // acknowledges every slice it sees, delivered or passed.
   return 0;

@@ -65,6 +65,22 @@ export function localeTag(dir) {
   catch { return undefined; }
 }
 
+/** The standing reminder this locale's holder reads on every drain and
+ *  every delivery: "think in <the language>", the owner's own words, in
+ *  the locale (the owner, 2026-09-21). It is not a dictionary key —
+ *  there is no English line it translates, and an en-US login has no
+ *  such rule to be reminded of — so it lives with the locale's other
+ *  facts and is appended to the head line, the one line a holder reads
+ *  every time. Absent: nothing is appended. */
+export function localeReminder(me, root = FABRIC_ROOT) {
+  if (!me?.agent || !me?.role) return '';
+  const dir = path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
+  try {
+    const r = JSON.parse(fs.readFileSync(path.join(dir, 'locale.json'), 'utf8')).reminder;
+    return typeof r === 'string' ? r : '';
+  } catch { return ''; }
+}
+
 /** The dictionary file for this login, or null for the default locale. */
 export function dictionaryPath(me, root = FABRIC_ROOT) {
   if (!me?.agent || !me?.role) return null;

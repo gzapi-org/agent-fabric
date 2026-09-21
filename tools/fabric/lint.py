@@ -459,6 +459,11 @@ LOCALE_ENGINES = {
 # i18n/README.md).
 LOCALE_FILE_RE = {"timezone": re.compile(r"^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$"),
                   "tag": re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")}
+# Optional, and in the locale: the standing "think in <the language>" the
+# holder reads on every drain and every delivery, appended to the inbox's
+# head line. Not a dictionary key — it translates no English line, and an
+# en-US login has no such rule (communication/gzcoord/scripts/i18n.mjs).
+LOCALE_FILE_OPTIONAL = ("reminder",)
 
 
 def locale_file_findings(role: str, role_path: str) -> list[str]:
@@ -490,6 +495,12 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
             value = data.get(key)
             if not isinstance(value, str) or not pattern.match(value):
                 out.append(f"{rel}: {key} {value!r} does not match {pattern.pattern}")
+        reminder = data.get("reminder")
+        if reminder is not None:
+            if not isinstance(reminder, str) or not reminder.strip():
+                out.append(f"{rel}: reminder {reminder!r} — a non-empty line, or absent")
+            elif not _is_mostly_non_latin(reminder):
+                out.append(f"{rel}: reminder {reminder!r} is not in the locale — it exists to be read in the locale")
         engines = [e for e in LOCALE_ENGINES if e in data]
         if not engines:
             out.append(f"{rel}: no engine block (serpapi, brave) — the tool would have nothing to search with")
@@ -517,7 +528,7 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
             extra = sorted(set(block) - set(required) - set(optional) - {"tool_description", "label"})
             if extra:
                 out.append(f"{rel}: {engine}: unknown field(s) {extra}; the search tool reads none of them")
-        extra = sorted(set(data) - set(LOCALE_FILE_RE) - set(LOCALE_ENGINES))
+        extra = sorted(set(data) - set(LOCALE_FILE_RE) - set(LOCALE_ENGINES) - set(LOCALE_FILE_OPTIONAL))
         if extra:
             out.append(f"{rel}: unknown field(s) {extra}; the search tool reads none of them")
     return out

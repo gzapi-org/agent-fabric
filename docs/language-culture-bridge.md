@@ -206,6 +206,59 @@ without `locale/<suffix>/harness.md` the launch is today's (append, the
 harness's English, the locale's charter); without any one piece, that
 piece's English.
 
+## The tools' own lines
+
+*2026-09-21. What changed in meaning: the inbox stopped being one
+English surface and became two — what the fabric says, which is the
+reader's, and what a sender wrote, which is nobody's to translate.*
+
+The owner's rule: any system text the inbox returns to a
+language-culture login is in that login's locale. The seam is
+`communication/gzcoord/scripts/i18n.mjs`, and everything the inbox
+prints around a message goes through it — the head line, the delivery
+title, the validator flags it echoes, the cut notice, the watch's
+transport lines, every error, the `--held` diagnostics.
+
+What does **not**: the message body, the metadata keys (`FROM`, `TO`,
+`TO-ROLE`, `MESSAGE-ID`), the type names and `broadcast`. A reader
+matches those by name, across locales; a translated one would name
+nothing. It is the same line the prompt translations draw — prose is
+free, identifiers are the whole risk — drawn inside a JSON value
+instead of a markdown body.
+
+The dictionaries are the **house i18n standard**, not a shape invented
+here: one flat key -> string JSON file per locale, named for the
+locale's BCP-47 tag, keys as dotted slugs, `{name}` interpolation,
+values non-empty, every active locale complete against the default.
+`communication/gzcoord/i18n/README.md` states it, cites where the house
+keeps it, and says the one thing the fabric's copy cannot keep — the
+dictionaries do not sit in one directory, because a translation is
+authored by its locale's holder and the fence that makes that true is a
+path rule (`policies/AUTHORITY.md`). An active locale's dictionary lives
+with the rest of its translations, `identities/roles/<role>/locale/
+<suffix>/<tag>.json`, where its own author can commit it.
+
+Which one a login reads is the launcher's rule, so the prompt and the
+tools resolve alike: the login's suffix, and that locale directory's
+`locale.json` for the tag. `ge` is Georgian (`ka-GE`), not German — the
+tag is data for exactly that reason.
+
+Two fallbacks, and the difference matters. A key an active dictionary
+lacks falls back to `en-US`; an unreadable dictionary leaves `en-US`
+standing whole. Neither invents text — this is the standard's own last
+step, not a client fabricating a string. The fallback exists because
+this code runs at a session start and a session start never fails on a
+translation; it does **not** exist so an incomplete dictionary can
+ship. Completeness is enforced by `tools/fabric/lint.py`, before the
+file lands, together with the identifiers each value keeps and a check
+that the values are in the locale at all.
+
+**The translation is the holder's, entirely**, as every other piece
+here: fabric-coordinator commits `en-US.json`, the machinery, the lint
+and the tests, and authors no Georgian. Until a holder authors
+`<tag>.json`, that login reads English and its session starts exactly as
+before.
+
 ## The costs, stated
 
 - **Tokens.** A locale render of the charter is allowed 1.35× the
@@ -231,10 +284,12 @@ piece's English.
   session-start hook — the three CLAUDE.md files, the harness's
   Environment block and attribution reminder, the tool, agent and
   skill listings and MCP instructions (except `locale-worker` and the
-  search tool, whose descriptions are in the locale), and the inbox
-  drain (the wire is English). Of these only the remit is the role's
-  own prompt layer with no locale copy; whether it gets one is the
-  owner's call, not yet made.
+  search tool, whose descriptions are in the locale). The inbox drain
+  left this list on 2026-09-21 — what the inbox SAYS is the locale's
+  now; the messages it carries are the wire and stay as their senders
+  wrote them (below). Of these only the remit is the role's own prompt
+  layer with no locale copy; whether it gets one is the owner's call,
+  not yet made.
 - **A second model call per request.** The bridge dispatches a worker
   for what it once did in one turn. The bridge's own turn is the
   translation and the rendering; the judgement is the worker's.

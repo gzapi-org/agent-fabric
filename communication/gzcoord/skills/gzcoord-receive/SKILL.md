@@ -234,7 +234,17 @@ then each delivered message in a fenced block with its relay `seq`,
 sender and timestamp, then one metadata line per message that was not
 for you. `relay unreachable` or `no CLAUDE_BRIDGE_AUTH_TOKEN` means the
 transport is down or the account is not enrolled — say so; it is not a
-silence to interpret. The relay's own past is only its database on the
+silence to interpret.
+
+**Those are the lines as the default locale spells them.** What the
+inbox says around a message is the reader's, not the wire's: a login
+whose locale carries a dictionary reads every one of these lines in its
+own language, and its head line may end with that locale's standing
+reminder. The MESSAGE never changes — body, metadata keys, type and
+`broadcast` are matched by name across locales. So recognise a state by
+what it IS, never by the English it is spelled with here.
+
+The relay's own past is only its database on the
 hosting workspace; nothing in any repository carries a message, and a
 message is never committed — what it decides lands in the artifact it
 concerns, citing the id.

@@ -35,6 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from './gzmsg.mjs';
 
 // Beside the code, not under FABRIC_ROOT: the default dictionary ships
@@ -43,7 +44,10 @@ import { whoami, FABRIC_ROOT } from './gzmsg.mjs';
 // right. A test (or a tool) that points AGENT_FABRIC_ROOT at a fixture
 // is naming where the roles live, never where this module's source is.
 export const DEFAULT_LOCALE = 'en-US';
-export const I18N_DIR = new URL('../i18n/', import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: a checkout under a path with a space
+// in it is percent-encoded in the URL, and .pathname hands back a name
+// no file has (blind review F2 on PR #28).
+export const I18N_DIR = fileURLToPath(new URL('../i18n/', import.meta.url));
 export const DEFAULT_PATH = path.join(I18N_DIR, `${DEFAULT_LOCALE}.json`);
 
 export function defaultDictionary(file = DEFAULT_PATH) {
@@ -103,7 +107,7 @@ export function dictionary(me = whoami(), { root = FABRIC_ROOT, file = DEFAULT_P
   try {
     const loc = JSON.parse(fs.readFileSync(p, 'utf8'));
     for (const [k, v] of Object.entries(loc))
-      if (typeof v === 'string' && v !== '' && k in base) base[k] = v;
+      if (typeof v === 'string' && v !== '' && Object.hasOwn(base, k)) base[k] = v;
   } catch { /* unreadable or not JSON: the default locale, silently — this is a session start */ }
   return base;
 }

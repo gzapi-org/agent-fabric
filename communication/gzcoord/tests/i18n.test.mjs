@@ -9,13 +9,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
 import { DEFAULT_LOCALE, DEFAULT_PATH, defaultDictionary, dictionary, dictionaryPath,
          fill, localeReminder, localeTag, printer, suffix } from '../scripts/i18n.mjs';
-import { render } from '../scripts/inbox.mjs';
+import { checkKeywords, render } from '../scripts/inbox.mjs';
 
-const SCRIPTS = new URL('../scripts/', import.meta.url).pathname;
-const SLUG = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
+const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
+const FABRIC = fileURLToPath(new URL('../../../', import.meta.url));
+// The key shape is the schema's, read — not a third copy of the rule
+// (blind review F6 on PR #28).
+const SLUG = new RegExp(JSON.parse(
+  fs.readFileSync(fileURLToPath(new URL('../i18n/i18n.schema.json', import.meta.url)), 'utf8')
+).propertyNames.pattern);
 
 test('the default dictionary is the house i18n shape: dotted slugs, non-empty strings', () => {
   const en = defaultDictionary();
@@ -35,7 +42,7 @@ test('the locale a login reads is the launcher\'s rule: what follows the last da
 });
 
 test('the suffix names its tag in locale.json — ge is Georgian, not German', () => {
-  const root = new URL('../../../', import.meta.url).pathname;
+  const root = FABRIC;
   const dir = s => path.join(root, 'identities', 'roles', 'language-culture', 'locale', s);
   assert.equal(localeTag(dir('ge')), 'ka-GE');
   assert.equal(localeTag(dir('ru')), 'ru-RU');
@@ -152,13 +159,48 @@ test('no locale, no reminder: nothing is appended for a default-locale login', (
 });
 
 test('the reminder each real locale carries is the owner\'s, in that locale', () => {
-  const root = new URL('../../../', import.meta.url).pathname;
+  const root = FABRIC;
   const of = s => localeReminder({ agent: `language-culture-${s}`, role: 'language-culture' }, root);
   for (const s of ['ge', 'ru']) {
     assert.notEqual(of(s), '', `${s} carries one`);
     assert.match(of(s), /^ - /, `${s} appends to the head line`);
     assert.ok(/[^\u0000-\u024F]/.test(of(s)), `${s} is in its own script`);
   }
+});
+
+// The dictionary is the one thing whose failure the last-resort handler
+// cannot report through the dictionary. Copying scripts/ and i18n/ into a
+// scratch tree is what makes a damaged en-US.json reachable at all: the
+// default is resolved from the MODULE, deliberately, so nothing in the
+// environment can point it elsewhere (blind review F1 on PR #28).
+const brokenTree = (contents) => {
+  const dir = scratch('i18n-broken-');
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'i18n'), { recursive: true });
+  for (const f of fs.readdirSync(SCRIPTS)) fs.copyFileSync(path.join(SCRIPTS, f), path.join(dir, 'scripts', f));
+  fs.writeFileSync(path.join(dir, 'i18n', 'en-US.json'), contents);
+  return path.join(dir, 'scripts', 'inbox.mjs');
+};
+
+for (const [what, contents] of [['unparsable', '{ not json'], ['absent', null]]) {
+  test(`a ${what} default dictionary is one line and exit 0, never a stack trace`, () => {
+    const entry = brokenTree(contents ?? '{}');
+    if (contents === null) fs.rmSync(path.join(path.dirname(entry), '..', 'i18n', 'en-US.json'));
+    const r = spawnSync(process.execPath, [entry, '--held'],
+                        { env: { ...process.env, AGENT_FABRIC_ROOT: FABRIC.replace(/\/$/, '') }, encoding: 'utf8' });
+    const { status, stderr } = r;
+    assert.equal(status, 0, `exited ${status}: ${stderr}`);
+    assert.ok(!/^\s+at /m.test(stderr), `a stack trace reached the session:\n${stderr}`);
+    assert.match(stderr, /gzcoord inbox: /, stderr);
+  });
+}
+
+test('a keyword refusal reads in the login\'s own language', () => {
+  const ka = printer({ ...defaultDictionary(), 'keyword.too-short': 'ᲛᲝᲙᲚᲔᲐ {keyword} — {min}' });
+  assert.throws(() => checkKeywords(['ab'], ka), /ᲛᲝᲙᲚᲔᲐ "ab" — 3/);
+  const many = Array.from({ length: 9 }, (_, i) => `kw${i}`);
+  const ka2 = printer({ ...defaultDictionary(), 'keyword.too-many': 'ᲖᲔᲓᲐ ᲖᲦᲕᲐᲠᲘ {max}' });
+  assert.throws(() => checkKeywords(many, ka2), /ᲖᲔᲓᲐ ᲖᲦᲕᲐᲠᲘ 8/);
 });
 
 test('a default-locale login renders exactly what it rendered before a dictionary existed', () => {

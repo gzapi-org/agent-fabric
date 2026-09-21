@@ -542,7 +542,19 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
 # runtime fallback exists so a session start never fails — not so a
 # missing key can be shipped.
 I18N_DEFAULT_REL = os.path.join("communication", "gzcoord", "i18n", "en-US.json")
-I18N_KEY_RE = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$")
+I18N_SCHEMA_REL = os.path.join("communication", "gzcoord", "i18n", "i18n.schema.json")
+
+
+def _i18n_key_re() -> "re.Pattern[str]":
+    """The key shape, from the schema that states it. Read rather than
+    restated: the rule had three copies (the schema, here, the node
+    suite) and only two of them could fail, which is how a recorded
+    contract drifts from the code (blind review F6 on PR #28)."""
+    try:
+        with open(os.path.join(layout.FABRIC_ROOT, I18N_SCHEMA_REL), encoding="utf-8") as fh:
+            return re.compile(json.load(fh)["propertyNames"]["pattern"])
+    except (OSError, ValueError, KeyError):
+        return re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$")
 # Identifiers a dictionary value keeps byte-identical, beyond the ones
 # every translation keeps (PROTECTED_PATTERNS). These are the shapes a
 # LINE carries and a prompt does not: a long flag, the protocol marker, a
@@ -579,6 +591,12 @@ def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
             default = json.load(fh)
     except ValueError as exc:
         return [f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it"]
+    default_re = _i18n_key_re()
+    for key in sorted(default):
+        if not default_re.match(key):
+            out.append(f"{I18N_DEFAULT_REL}: key {key!r} is not a dotted slug")
+        if not isinstance(default[key], str) or not default[key]:
+            out.append(f"{I18N_DEFAULT_REL}: {key} is {default[key]!r} — a value is a non-empty string")
     for suffix in sorted(os.listdir(base)):
         locale_file = os.path.join(base, suffix, "locale.json")
         try:
@@ -608,13 +626,18 @@ def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
                        "— an active locale is complete against the default")
         if extra:
             out.append(f"{rel}: key(s) {extra[:3]} are not in {I18N_DEFAULT_REL}; nothing prints them")
+        key_re = _i18n_key_re()
+        # Over every key the file carries, not only the ones the default
+        # also has: a key checked on the intersection alone can only fire
+        # when en-US.json is itself malformed (blind review F6 on PR #28).
+        for key in sorted(data):
+            if not key_re.match(key):
+                out.append(f"{rel}: key {key!r} is not a dotted slug")
         for key in sorted(set(data) & set(default)):
             value = data[key]
             if not isinstance(value, str) or not value:
                 out.append(f"{rel}: {key} is {value!r} — a value is a non-empty string")
                 continue
-            if not I18N_KEY_RE.match(key):
-                out.append(f"{rel}: key {key!r} is not a dotted slug")
             out += protected_token_findings(rel, default[key], value, extra=I18N_EXTRA_PATTERNS)
         values = [v for v in data.values() if isinstance(v, str)]
         if values and not any(_is_mostly_non_latin(v) for v in values):

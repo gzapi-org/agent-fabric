@@ -228,14 +228,14 @@ export function forMe(msg, me) {
 // the runbook says. Workspaces without the venv return false and skip
 // silently: they are clients, not hosts, and nothing in a client session
 // may try to host.
-export function ensureRelay(runtimeDir, relayUrl = RELAY) {
+export function ensureRelay(runtimeDir, relayUrl = RELAY, t = en()) {
   const bin = path.join(runtimeDir, 'venv', 'bin', 'claude-bridge');
   if (!fs.existsSync(bin)) return { hosted: false, started: false };
   try { execFileSync('curl', ['-sf', '-m', '2', `${relayUrl}/status`], { stdio: 'ignore' }); return { hosted: true, started: false }; }
   catch { /* down or unreachable: start it */ }
   const tokenFile = path.join(runtimeDir, 'bridge-token');
   const db = path.join(runtimeDir, 'claude-bridge.db');
-  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: `no ${tokenFile}; cannot start` };
+  if (!fs.existsSync(tokenFile)) return { hosted: true, started: false, note: t('start.relay-no-token-file', { token_file: tokenFile }) };
   // Where bootstrap installed the relay's user unit and a user manager is
   // up, start THAT: a unit is supervised, restarted on failure, found by
   // name, and outlives the session; a detached spawn is none of those and
@@ -261,7 +261,7 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
           return { hosted: true, started: true, unit }; } catch { /* not up yet */ }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
       }
-      return { hosted: true, started: false, note: `${unit} was started and did not answer within 8s; systemctl --user status ${unit}, ${path.join(runtimeDir, 'bridge.log')}` };
+      return { hosted: true, started: false, note: t('start.relay-unit-silent', { unit, log: path.join(runtimeDir, 'bridge.log') }) };
     }
   }
   const out = fs.openSync(path.join(runtimeDir, 'bridge.log'), 'a');
@@ -274,7 +274,7 @@ export function ensureRelay(runtimeDir, relayUrl = RELAY) {
       return { hosted: true, started: true, pid: child.pid }; } catch { /* not up yet */ }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
   }
-  return { hosted: true, started: false, note: `relay did not answer within 8s; check ${path.join(runtimeDir, 'bridge.log')}` };
+  return { hosted: true, started: false, note: t('start.relay-silent', { log: path.join(runtimeDir, 'bridge.log') }) };
 }
 
 export async function api(tok, pathAndQuery, { relayUrl = RELAY, ...init } = {}) {
@@ -343,7 +343,7 @@ async function replay(tok, relayUrl, channel, which, me, t = en()) {
   let msg = null; try { msg = parse(text); } catch { /* shown as metadata only */ }
   if (!msg || !forMe(msg, me)) {
     console.log(t('replay.not-addressed', { seq: rec.seq, sender: rec.sender, when, address: me.address }));
-    if (msg) console.log(`  ${oneLine(msg, text, t)}`);
+    if (msg) console.log(`  ${oneLine(msg, t)}`);
     return 2;
   }
   console.log(t('replay.title', { seq: rec.seq, sender: rec.sender, when }));
@@ -354,7 +354,7 @@ async function replay(tok, relayUrl, channel, which, me, t = en()) {
 // The addressing half is the WIRE's vocabulary, not this tool's: TO,
 // TO-ROLE, broadcast and the type are matched by name across locales and
 // are never translated (i18n.mjs). Only the missing-id placeholder is.
-function oneLine(msg, raw, t = en()) {
+function oneLine(msg, t = en()) {
   const m = msg.metadata;
   const to = m.TO ? `TO ${m.TO}` : m['TO-ROLE'] ? `TO-ROLE ${m['TO-ROLE']}` : 'broadcast';
   return `${m['MESSAGE-ID'] ?? t('inbox.no-id')}  ${msg.type}  ${to}  ${m.SUBJECT ?? ''}`.trimEnd();
@@ -374,13 +374,13 @@ function oneLine(msg, raw, t = en()) {
 // must not wake on its own echo.
 export const KEYWORD_MIN = 3;
 export const KEYWORD_MAX = 8;
-export function checkKeywords(keywords = []) {
+export function checkKeywords(keywords = [], t = en()) {
   const seen = [];
   for (const k of keywords) {
     if (typeof k !== 'string' || k.length < KEYWORD_MIN)
-      throw new Error(`keyword ${JSON.stringify(k)} is shorter than ${KEYWORD_MIN} characters — a short token fires on nearly everything`);
+      throw new Error(t('keyword.too-short', { keyword: JSON.stringify(k), min: KEYWORD_MIN }));
     if (seen.includes(k)) continue;
-    if (seen.length >= KEYWORD_MAX) throw new Error(`at most ${KEYWORD_MAX} keywords per arm`);
+    if (seen.length >= KEYWORD_MAX) throw new Error(t('keyword.too-many', { max: KEYWORD_MAX }));
     seen.push(k);
   }
   return seen;
@@ -550,7 +550,7 @@ export function render(res, me, channel, taxonomy, { cap = Infinity, t = en(), r
     const text = rec.content.replace(/\n$/, '');
     return { rec, title, text, ...splitMessage(text) };
   });
-  const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg, undefined, t)}`);
+  const otherLines = others.map(o => `  ${o.line ?? oneLine(o.msg, t)}`);
   const othersBlock = others.length ? ['', t('inbox.others-header'), ...otherLines] : [];
   const whole = [head, ...parts.flatMap(p => ['', p.title, '```text', p.text, '```']), ...othersBlock].join('\n');
   if (whole.length <= cap) return whole;
@@ -569,7 +569,7 @@ export function render(res, me, channel, taxonomy, { cap = Infinity, t = en(), r
     // Too many messages for one notification: one line each, read by seq,
     // and the tail says how many lines this listing itself dropped.
     const lines = [head, t('cap.by-seq', { replay_cmd: REPLAY_CMD })];
-    const rows = parts.map(p => t('cap.row', { seq: p.rec.seq, line: oneLine(parse(p.rec.content), undefined, t) }));
+    const rows = parts.map(p => t('cap.row', { seq: p.rec.seq, line: oneLine(parse(p.rec.content), t) }));
     const tailFor = n => n < parts.length ? t('cap.more-for-you', { n: parts.length - n, range: seqs(parts.slice(n)) }) : '';
     const othersLine = others.length ? t('cap.and-others', { count: others.length, range: seqs(others) }) : '';
     let n = 0;
@@ -597,10 +597,6 @@ export async function main(argv = process.argv.slice(2)) {
   const replayWhich = replayIdx >= 0 ? argv[replayIdx + 1] : null;
   if (replayIdx >= 0 && !replayWhich) { console.error(en()('replay.usage')); return 1; }
   const waitTotal = waitIdx >= 0 ? (Number(argv[waitIdx + 1]) || 1800) : 0;
-  // --keyword K, repeatable, validated BEFORE the arm starts: a bad
-  // keyword refused at arm time costs nothing, refused mid-wait wastes
-  // the budget.
-  const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []));
   // Who this session is (the login) and which project it is working in
   // (from the working copy's remote, or the binding) — the second selects
   // the project's integration: relay, channel, where the token and runtime
@@ -612,6 +608,11 @@ export async function main(argv = process.argv.slice(2)) {
   // name ends in when that locale has an active dictionary (i18n.mjs).
   const t = printer(dictionary(who));
   const reminder = localeReminder(who);
+  // --keyword K, repeatable, validated BEFORE the arm starts: a bad
+  // keyword refused at arm time costs nothing, refused mid-wait wastes
+  // the budget. After `t`, so the refusal reads in the login's own
+  // language like every other line (blind review F3 on PR #28).
+  const keywords = checkKeywords(argv.flatMap((a, i) => a === '--keyword' ? [argv[i + 1]] : []), t);
   if (argv.includes('--held')) {
     const h = holdStatus(undefined, { t });
     const unknown = t('held.unknown');
@@ -631,7 +632,7 @@ export async function main(argv = process.argv.slice(2)) {
   const channel = cfg.channel;
   // Activate what this session owns before anything else: the hosting
   // working copy starts its relay here, so a session restart is also the relay's.
-  const up = ensureRelay(relayRuntimeDir(cfg), relayUrl);
+  const up = ensureRelay(relayRuntimeDir(cfg), relayUrl, t);
   if (up.started) console.error(up.unit ? t('start.relay-started-unit', { unit: up.unit }) : t('start.relay-started-pid', { pid: up.pid }));
   else if (up.note) console.error(t('start.error', { detail: up.note }));
   let tok = token(root, cfg);
@@ -661,7 +662,7 @@ export async function main(argv = process.argv.slice(2)) {
   const ack = id => api(tok, '/api/ack', { method: 'POST', body: JSON.stringify({ consumer_id: me.address, channel: CHANNEL, message_id: id }), relayUrl });
   const fetchPage = async (slice, signal) => api(tok, `/api/wait?${new URLSearchParams({ channel: CHANNEL, consumer_id: me.address, timeout_seconds: String(slice), limit: '50' })}`, { relayUrl, signal });
   const held = () => holdStatus().held;
-  // Each key sits literally beside its t(: tests/messages.test.mjs reads
+  // Each key sits literally beside its t(: tests/i18n.test.mjs reads
   // the source for them, and a key built in an expression is a key the
   // dead-and-missing guard cannot see.
   const onHold = h => console.error(h ? t('watch.held') : t('watch.hold-released'));
@@ -697,7 +698,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (res.keywordHit && waitIdx >= 0) {
     const m = res.classified.find(c => c.rec.id === res.keywordHit.id);
     console.log(t('keyword.hit', { channel: CHANNEL, keywords: keywords.join(', ') }));
-    console.log(`  ${(m?.msg ? oneLine(m.msg, undefined, t) : t('keyword.unparsable', { id: res.keywordHit.id, sender: res.keywordHit.sender }))}`);
+    console.log(`  ${(m?.msg ? oneLine(m.msg, t) : t('keyword.unparsable', { id: res.keywordHit.id, sender: res.keywordHit.sender }))}`);
     process.exit(3);
   }
   if (!res.delivered && waitIdx >= 0)
@@ -709,4 +710,11 @@ export async function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.exit(c)).catch(e => { console.error(en()('start.error', { detail: e.message })); process.exit(0); });
+if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.exit(c)).catch(e => {
+  // NOT through the dictionary: what failed may BE the dictionary, and a
+  // throw inside this handler is an unhandled rejection — a stack trace
+  // and exit 1 on a path whose whole contract is one line and exit 0
+  // (blind review F1 on PR #28).
+  console.error(`gzcoord inbox: ${e.message}`);
+  process.exit(0);
+});

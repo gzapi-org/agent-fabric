@@ -4,9 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // The agent-fabric checkout this runtime belongs to: communication/gzcoord/scripts -> root.
-export const FABRIC_ROOT = process.env.AGENT_FABRIC_ROOT ?? new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
+// fileURLToPath, not URL.pathname: the same percent-encoding defect as
+// i18n.mjs had, masked here only because the launcher exports the
+// variable (blind review §2 on PR #28).
+export const FABRIC_ROOT = process.env.AGENT_FABRIC_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/$/, '');
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([

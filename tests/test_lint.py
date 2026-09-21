@@ -694,7 +694,7 @@ def case_locale_file_shape() -> None:
     in the locale. Kills: an unchecked file the server would refuse at start."""
     with tempfile.TemporaryDirectory() as root:
         fabric = make_base(root)
-        good = ('{"timezone": "Asia/Tbilisi", "serpapi": {"gl": "ge", "hl": "ka", "google_domain": "google.ge", "lr": "lang_ka", "tool_description": "ვებ-ძიება ქართულად"},'
+        good = ('{"tag": "ka-GE", "timezone": "Asia/Tbilisi", "serpapi": {"gl": "ge", "hl": "ka", "google_domain": "google.ge", "lr": "lang_ka", "tool_description": "ვებ-ძიება ქართულად"},'
                 ' "brave": {"country": "ALL", "tool_description": "გლობალური ვებ-ძიება"}}')
         write(ident(fabric, "locale", "ge", "locale.json"), good)
         code, out = run_lint(fabric)
@@ -704,19 +704,78 @@ def case_locale_file_shape() -> None:
         assert code == 1, out
         for phrase in ("serpapi.gl 'GE'", "serpapi.hl 'KA-'", "serpapi.lr 'ka'", "serpapi.tool_description is not in the locale", "brave.country 'all'"):
             assert phrase in out, f"{phrase!r} not reported:\n{out}"
-        write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi", "brave": {"country": "US", "search_lang": "en", "ui_lang": "en-US", "tool_description": "ძიება"}}')
+        write(ident(fabric, "locale", "ge", "locale.json"), '{"tag": "ka-GE", "timezone": "Asia/Tbilisi", "brave": {"country": "US", "search_lang": "en", "ui_lang": "en-US", "tool_description": "ძიება"}}')
         code, out = run_lint(fabric)
         assert code == 0, f"one engine alone, with the languages Brave has: {out}"
         write(ident(fabric, "locale", "ge", "locale.json"), good.replace('"tool_description": "ვებ-ძიება ქართულად"', '"label": "main engine", "tool_description": "ვებ-ძიება ქართულად"'))
         code, out = run_lint(fabric)
         assert code == 1 and "serpapi.label 'main engine'" in out, f"a label not in the locale is refused: {out}"
-        write(ident(fabric, "locale", "ge", "locale.json"), '{"timezone": "Asia/Tbilisi"}')
+        write(ident(fabric, "locale", "ge", "locale.json"), '{"tag": "ka-GE", "timezone": "Asia/Tbilisi"}')
         code, out = run_lint(fabric)
         assert code == 1 and "no engine block" in out, out
         write(ident(fabric, "locale", "ge", "locale.json"), good[:-1] + ', "country": "GE"}')
         code, out = run_lint(fabric)
         assert code == 1 and "unknown field(s) ['country']" in out, out
         write(ident(fabric, "locale", "ge", "locale.json"), "{not json")
+        code, out = run_lint(fabric)
+        assert code == 1 and "not JSON" in out, out
+
+
+def case_i18n_dictionary_is_complete_and_keeps_its_identifiers() -> None:
+    """An active locale's <tag>.json carries EVERY key of the default
+    dictionary and no other, every value a non-empty string, and every
+    identifier inside a value byte-identical — a flag, the protocol
+    marker, a SPEC reference, a path. A dictionary with no non-Latin value
+    is the default copied, not translated. Kills: a key that falls back
+    silently for the life of a release; a translated `--replay` nobody can
+    type; an English copy that looks active."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        default = {"inbox.head": "gzcoord inbox for {who}, on {channel}",
+                   "replay.usage": "usage: inbox.mjs --replay <seq|message-id>",
+                   "inbox.others-header": "Not addressed to you (SPEC §17):"}
+        write(os.path.join(fabric, "communication", "gzcoord", "i18n", "en-US.json"), json.dumps(default))
+        write(ident(fabric, "locale", "ge", "locale.json"),
+              '{"tag": "ka-GE", "timezone": "Asia/Tbilisi", "brave": {"country": "ALL", "tool_description": "ძიება"}}')
+        good = {"inbox.head": "ᲨᲔᲛᲝᲡᲣᲚᲘ gzcoord {who}, {channel}",
+                "replay.usage": "ᲒᲐᲛᲝᲧᲔᲜᲔᲑᲐ: inbox.mjs --replay <seq|message-id>",
+                "inbox.others-header": "ᲐᲠ ᲐᲠᲘᲡ ᲨᲔᲜᲗᲕᲘᲡ (SPEC §17):"}
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(good, ensure_ascii=False))
+        code, out = run_lint(fabric)
+        assert code == 0, out
+
+        # No dictionary at all is not a finding: the default locale is served.
+        os.remove(ident(fabric, "locale", "ge", "ka-GE.json"))
+        code, out = run_lint(fabric)
+        assert code == 0, f"an inactive locale is not a finding: {out}"
+
+        short = dict(good); del short["replay.usage"]
+        short["invented.key"] = "ᲠᲐᲦᲐᲪ"
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(short, ensure_ascii=False))
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        assert "1 key(s) of communication/gzcoord/i18n/en-US.json missing" in out, out
+        assert "['invented.key'] are not in" in out, out
+
+        broken = dict(good)
+        broken["replay.usage"] = "ᲒᲐᲛᲝᲧᲔᲜᲔᲑᲐ: inbox.mjs --ᲒᲐᲨᲚᲐ <seq|message-id>"
+        broken["inbox.others-header"] = "ᲐᲠ ᲐᲠᲘᲡ ᲨᲔᲜᲗᲕᲘᲡ (ᲡᲞᲔᲪᲘᲤᲘᲙᲐᲪᲘᲐ §17):"
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(broken, ensure_ascii=False))
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        assert "long flag '--replay'" in out, out
+        assert "SPEC" in out, out
+
+        empty = dict(good); empty["inbox.head"] = ""
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(empty, ensure_ascii=False))
+        code, out = run_lint(fabric)
+        assert code == 1 and "inbox.head is '' — a value is a non-empty string" in out, out
+
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), json.dumps(default))
+        code, out = run_lint(fabric)
+        assert code == 1 and "no value is in the locale" in out, out
+
+        write(ident(fabric, "locale", "ge", "ka-GE.json"), "{not json")
         code, out = run_lint(fabric)
         assert code == 1 and "not JSON" in out, out
 
@@ -1120,6 +1179,7 @@ def main() -> int:
         case_harness_source_shape,
         case_prompt_templates_carry_their_placeholders,
         case_locale_file_shape,
+        case_i18n_dictionary_is_complete_and_keeps_its_identifiers,
         case_non_latin_translation_budget_is_stricter,
         case_model_profiles_layered_file_passes,
         case_model_profiles_cheap_review_is_refused,

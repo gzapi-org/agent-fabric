@@ -249,7 +249,7 @@ PROTECTED_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
 )
 
 
-def _protected_tokens(text: str) -> "collections.Counter[tuple[str, str]]":
+def _protected_tokens(text: str, extra: tuple[tuple[str, "re.Pattern[str]"], ...] = ()) -> "collections.Counter[tuple[str, str]]":
     """Every protected token of `text` with its category, counted. A fenced
     block is one token and its contents are not matched again; a
     backticked span likewise."""
@@ -259,16 +259,17 @@ def _protected_tokens(text: str) -> "collections.Counter[tuple[str, str]]":
         for m in pattern.findall(rest):
             counts[(category, re.sub(r"\s+", " ", m))] += 1   # a span wrapped at another column is the same span
         rest = pattern.sub(" ", rest)
-    for category, pattern in PROTECTED_PATTERNS[2:]:
+    for category, pattern in PROTECTED_PATTERNS[2:] + extra:
         for m in pattern.findall(rest):
             counts[(category, m)] += 1
     return counts
 
 
-def protected_token_findings(rel: str, source_body: str, translation_body: str) -> list[str]:
+def protected_token_findings(rel: str, source_body: str, translation_body: str,
+                            extra: tuple[tuple[str, "re.Pattern[str]"], ...] = ()) -> list[str]:
     """One finding per protected token whose count differs between the
     English source and the translation, naming the category and both counts."""
-    want, got = _protected_tokens(source_body), _protected_tokens(translation_body)
+    want, got = _protected_tokens(source_body, extra), _protected_tokens(translation_body, extra)
     out: list[str] = []
     for key in sorted(set(want) | set(got)):
         if want[key] != got[key]:
@@ -451,7 +452,13 @@ LOCALE_ENGINES = {
               {"search_lang": re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$"),
                "ui_lang": re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")}),
 }
-LOCALE_FILE_RE = {"timezone": re.compile(r"^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$")}
+# The locale file's own scalars. `tag` is the locale's BCP-47 tag and the
+# one place that says what a login's suffix MEANS — `ge` is Georgian
+# (ka-GE), not German — so the dictionary that suffix reads is found by
+# data and never by reading the directory name (communication/gzcoord/
+# i18n/README.md).
+LOCALE_FILE_RE = {"timezone": re.compile(r"^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$"),
+                  "tag": re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")}
 
 
 def locale_file_findings(role: str, role_path: str) -> list[str]:
@@ -513,6 +520,94 @@ def locale_file_findings(role: str, role_path: str) -> list[str]:
         extra = sorted(set(data) - set(LOCALE_FILE_RE) - set(LOCALE_ENGINES))
         if extra:
             out.append(f"{rel}: unknown field(s) {extra}; the search tool reads none of them")
+    return out
+
+
+# THE TOOL DICTIONARIES (communication/gzcoord/i18n/README.md, which
+# states the house i18n standard and cites it): one flat key -> string
+# JSON file per locale, named for the locale's tag, values non-empty,
+# `{name}` interpolation, every active locale COMPLETE against the default.
+# Completeness is enforced here, before the file lands, because the
+# runtime fallback exists so a session start never fails — not so a
+# missing key can be shipped.
+I18N_DEFAULT_REL = os.path.join("communication", "gzcoord", "i18n", "en-US.json")
+I18N_KEY_RE = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$")
+# Identifiers a dictionary value keeps byte-identical, beyond the ones
+# every translation keeps (PROTECTED_PATTERNS). These are the shapes a
+# LINE carries and a prompt does not: a long flag, the protocol marker, a
+# SPEC reference, the tool's own tag, and the word a reader types after
+# --replay. Kept separate so a prompt translation is judged by the rules
+# it was written under and gains no new finding from this.
+I18N_EXTRA_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("long flag", re.compile(r"(?<!\S)--[a-z][a-z0-9-]*")),
+    ("protocol marker", re.compile(r"\bGZCOORD/\d+\b")),
+    ("spec reference", re.compile(r"§\s?\d+(?:\.\d+)?")),
+    ("wire word", re.compile(r"\b(?:gzcoord|seq)\b")),
+    ("env file", re.compile(r"\b[a-z][\w-]*\.env\b")),
+)
+
+
+def i18n_dictionary_findings(role: str, role_path: str) -> list[str]:
+    """identities/roles/<role>/locale/<suffix>/<tag>.json: the GZCoord
+    tools' lines in that locale. The shape is the house standard's; the
+    key set is the default locale's, exactly, in both directions; every
+    identifier inside a value survives; and a dictionary with no
+    non-Latin value at all is a copy of the English, not a translation."""
+    out: list[str] = []
+    base = os.path.join(role_path, LOCALE_DIRNAME)
+    if not os.path.isdir(base):
+        return out
+    default_path = os.path.join(layout.FABRIC_ROOT, I18N_DEFAULT_REL)
+    # No default dictionary at all is no finding: a checkout that carries
+    # no tools carries no lines for them, and the GZCoord suite is where
+    # the real one's presence and key set are asserted.
+    if not os.path.isfile(default_path):
+        return out
+    try:
+        with open(default_path, encoding="utf-8") as fh:
+            default = json.load(fh)
+    except ValueError as exc:
+        return [f"{I18N_DEFAULT_REL}: the default locale is not JSON ({exc}) — every dictionary is judged against it"]
+    for suffix in sorted(os.listdir(base)):
+        locale_file = os.path.join(base, suffix, "locale.json")
+        try:
+            with open(locale_file, encoding="utf-8") as fh:
+                tag = json.load(fh).get("tag")
+        except (OSError, ValueError):
+            continue        # locale_file_findings already names it
+        if not isinstance(tag, str) or not tag:
+            continue
+        path = os.path.join(base, suffix, f"{tag}.json")
+        rel = f"identities/roles/{role}/{LOCALE_DIRNAME}/{suffix}/{tag}.json"
+        if not os.path.isfile(path):
+            continue        # not an active locale: the default is served
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            out.append(f"{rel}: not JSON ({exc})")
+            continue
+        if not isinstance(data, dict):
+            out.append(f"{rel}: not an object — a dictionary is flat key -> string")
+            continue
+        missing = sorted(set(default) - set(data))
+        extra = sorted(set(data) - set(default))
+        if missing:
+            out.append(f"{rel}: {len(missing)} key(s) of {I18N_DEFAULT_REL} missing, first {missing[:3]} "
+                       "— an active locale is complete against the default")
+        if extra:
+            out.append(f"{rel}: key(s) {extra[:3]} are not in {I18N_DEFAULT_REL}; nothing prints them")
+        for key in sorted(set(data) & set(default)):
+            value = data[key]
+            if not isinstance(value, str) or not value:
+                out.append(f"{rel}: {key} is {value!r} — a value is a non-empty string")
+                continue
+            if not I18N_KEY_RE.match(key):
+                out.append(f"{rel}: key {key!r} is not a dotted slug")
+            out += protected_token_findings(rel, default[key], value, extra=I18N_EXTRA_PATTERNS)
+        values = [v for v in data.values() if isinstance(v, str)]
+        if values and not any(_is_mostly_non_latin(v) for v in values):
+            out.append(f"{rel}: no value is in the locale — this is the default locale copied, not translated")
     return out
 
 
@@ -1325,6 +1420,7 @@ def main() -> int:
         findings += locale_translation_findings(role, role_path, template_schema)
         findings += locale_worker_findings(role, role_path)
         findings += locale_file_findings(role, role_path)
+        findings += i18n_dictionary_findings(role, role_path)
         for rel in identity_slices[role]:
             klass = (parse_frontmatter(open(os.path.join(root, rel), encoding="utf-8").read()) or {}).get("class")
             if klass not in layout.IDENTITY_CLASSES:

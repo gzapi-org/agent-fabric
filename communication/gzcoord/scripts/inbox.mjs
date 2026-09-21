@@ -604,7 +604,9 @@ export async function main(argv = process.argv.slice(2)) {
   // binding names is the root, not the current directory.
   const who = whoami();
   // From here on every line is this login's: English, or the locale its
-  // name ends in when that locale has an active dictionary (i18n.mjs).
+  // name ends in when that locale has an active dictionary — unless
+  // GZCOORD_DEFAULT_LOCALE_ONLY=1 pins the default, which says so once
+  // on stderr rather than quietly (i18n.mjs).
   const t = printer(dictionary(who));
   const reminder = localeReminder(who);
   // --keyword K, repeatable, validated BEFORE the arm starts: a bad

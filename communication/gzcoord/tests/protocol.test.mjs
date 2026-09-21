@@ -219,7 +219,10 @@ test('validate CLI reports a bad first line on one line and exits 1', () => {
   try {
     const bad = gzmsg('validate', fileURLToPath(file));
     assert.equal(bad.status, 1);
-    assert.equal(bad.stderr.trim(), 'invalid GZCOORD/1 first line');
+    // The LAST line: a tool may say something else first — a login whose
+    // locale is pinned away is told so — and an assertion that forbids any
+    // other line is testing the absence of diagnostics, not this behaviour.
+    assert.equal(bad.stderr.trim().split('\n').pop(), 'invalid GZCOORD/1 first line');
     assert.equal(bad.stdout, '');
   } finally { fs.unlinkSync(file); }
 });

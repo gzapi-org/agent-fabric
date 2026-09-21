@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
+import { dictionary, printer } from './i18n.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -69,7 +70,10 @@ export async function main(argv = process.argv.slice(2)) {
   // Validate as the last step before sending; the validator's own words go
   // to stderr. The line-width check is off: the bridge carries a line as
   // written, and a warning nobody can act on (a path, an id) is noise.
-  const result = validate(text, { taxonomy, maxColumns: 0 });
+  // A refusal the sender reads is that sender's line, in that sender's
+  // language: validate() is one function and its diagnostics are the
+  // fabric's own text wherever they are printed.
+  const result = validate(text, { taxonomy, maxColumns: 0, t: printer(dictionary(who)) });
   // An id complaint is repeated below as the refusal; once is enough.
   for (const w of result.warnings ?? []) if (!/^(MESSAGE-ID|IN-REPLY-TO) is /.test(w)) console.error(`send: warning: ${w}`);
   if (!result.ok) { for (const e of result.errors ?? []) console.error(`send: ${e}`); console.error('send: not sent — the message does not validate'); return 2; }

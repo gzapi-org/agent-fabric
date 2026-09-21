@@ -15,6 +15,7 @@ import { scratch } from '../../../tests/scratch.mjs';
 import { DEFAULT_LOCALE, DEFAULT_PATH, defaultDictionary, dictionary, dictionaryPath,
          fill, localeReminder, localeTag, printer, suffix } from '../scripts/i18n.mjs';
 import { checkKeywords, render } from '../scripts/inbox.mjs';
+import { validate } from '../scripts/gzmsg.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const FABRIC = fileURLToPath(new URL('../../../', import.meta.url));
@@ -52,7 +53,10 @@ test('the suffix names its tag in locale.json — ge is Georgian, not German', (
 test('every key the code prints is in en-US.json, and en-US.json has no key nothing prints', () => {
   const en = defaultDictionary();
   const used = new Set();
-  for (const file of ['inbox.mjs']) {
+  // Every module that prints a dictionary line, not just the inbox: the
+  // validator's diagnostics are keys too, and a guard scoped to one file
+  // would call every one of them dead (the automated review's claim 2).
+  for (const file of ['inbox.mjs', 'gzmsg.mjs', 'send.mjs']) {
     const src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8');
     for (const m of src.matchAll(/\bt\('([a-z][a-z.-]+)'/g)) used.add(m[1]);
     for (const m of src.matchAll(/\ben\(\)\('([a-z][a-z.-]+)'/g)) used.add(m[1]);
@@ -207,6 +211,28 @@ test('a keyword refusal reads in the login\'s own language', () => {
   const many = Array.from({ length: 9 }, (_, i) => `kw${i}`);
   const ka2 = printer({ ...defaultDictionary(), 'keyword.too-many': 'ᲖᲔᲓᲐ ᲖᲦᲕᲐᲠᲘ {max}' });
   assert.throws(() => checkKeywords(many, ka2), /ᲖᲔᲓᲐ ᲖᲦᲕᲐᲠᲘ 8/);
+});
+
+test('a validator diagnostic reaches a locale reader whole, not just its prefix', () => {
+  const { root, me } = active(JSON.stringify({
+    'delivery.invalid': 'ᲐᲠᲐᲡᲬᲝᲠᲘ: {detail}',
+    'validate.missing': 'ᲐᲙᲚᲘᲐ {key}',
+    'validate.no-addressing': 'ᲐᲠᲐᲕᲘᲡᲗᲕᲘᲡ: TO, TO-ROLE ᲐᲜ BROADCAST: true',
+  }));
+  const t = printer(dictionary(me, { root }));
+  const v = validate('[GZCOORD/1] INFO\nFROM: h/s\nROLE: backend-dev\nPROJECT: gzapp\n', { t, maxColumns: 0 });
+  // The substance, not only the wrapper — the whole point of the finding.
+  assert.ok(v.errors.includes('ᲐᲙᲚᲘᲐ MESSAGE-ID'), v.errors.join(' | '));
+  assert.ok(v.errors.includes('ᲐᲠᲐᲕᲘᲡᲗᲕᲘᲡ: TO, TO-ROLE ᲐᲜ BROADCAST: true'), v.errors.join(' | '));
+  // A key the locale does not carry still falls back, never invents.
+  assert.ok(v.errors.some(e => e === defaultDictionary()['validate.from-shape']) === false);
+});
+
+test('the default locale still produces the validator\'s English, byte for byte', () => {
+  const v = validate('[GZCOORD/1] INFO\nFROM: h/s\nROLE: backend-dev\nPROJECT: gzapp\n', { maxColumns: 0 });
+  assert.ok(v.errors.includes('missing MESSAGE-ID'), v.errors.join(' | '));
+  assert.ok(v.errors.includes('missing TO, TO-ROLE or BROADCAST: true'), v.errors.join(' | '));
+  assert.deepEqual(validate('nonsense').errors, ['invalid GZCOORD/1 first line']);
 });
 
 test('a default-locale login renders exactly what it rendered before a dictionary existed', () => {

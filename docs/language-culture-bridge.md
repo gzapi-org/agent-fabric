@@ -216,8 +216,17 @@ The owner's rule: any system text the inbox returns to a
 language-culture login is in that login's locale. The seam is
 `communication/gzcoord/scripts/i18n.mjs`, and everything the inbox
 prints around a message goes through it — the head line, the delivery
-title, the validator flags it echoes, the cut notice, the watch's
-transport lines, every error, the `--held` diagnostics.
+title, the validator's diagnostics it echoes, the cut notice, the
+watch's transport lines, every error, the `--held` diagnostics.
+
+Those diagnostics put the seam inside `gzmsg.mjs`, not at the inbox's
+edge: `validate()` is one function and its sentences are printed by
+`send.mjs` and the `gzmsg` CLI as well, so a refusal a holder reads
+while composing is that holder's line too. An automated review found
+the first cut translating only the `INVALID:` and `warning:` prefixes
+and leaving the substance English, which the module's own comment had
+already promised was covered — the failure this role's brief names, a
+comment saying what the code does not do.
 
 What does **not**: the message body, the metadata keys (`FROM`, `TO`,
 `TO-ROLE`, `MESSAGE-ID`), the type names and `broadcast`. A reader

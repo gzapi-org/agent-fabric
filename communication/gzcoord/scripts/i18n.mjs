@@ -8,9 +8,15 @@
 // as residue there — "the inbox drain (the wire is English)" — and it is
 // two things, not one: the MESSAGE is the wire and stays as its sender
 // wrote it, while everything the inbox says AROUND it (the head line,
-// the delivery title, the validator flags, the cut notice, every error)
-// is the fabric's own text and is the reader's to have in its language.
-// This module is that seam. The owner, 2026-09-21.
+// the delivery title, the validator's diagnostics, the cut notice, every
+// error) is the fabric's own text and is the reader's to have in its
+// language. This module is that seam. The owner, 2026-09-21.
+//
+// The validator's diagnostics are keys like the rest, which puts the
+// seam INSIDE gzmsg.mjs rather than at the inbox's edge: the same
+// sentences are printed by send.mjs and the gzmsg CLI, and a refusal a
+// holder reads when composing is that holder's line too. It also means
+// paths.mjs exists — see there.
 //
 // The dictionaries are the house i18n standard: one flat key -> string
 // JSON file per locale, named for the locale's BCP-47 tag, keys as
@@ -36,7 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { whoami, FABRIC_ROOT } from './gzmsg.mjs';
+import { FABRIC_ROOT } from './paths.mjs';
 
 // Beside the code, not under FABRIC_ROOT: the default dictionary ships
 // WITH the script and is the last fallback there is, while the locale
@@ -100,7 +106,7 @@ export function dictionaryPath(me, root = FABRIC_ROOT) {
  *  fixed — tools/fabric/lint.py, before the file lands — so a key missing
  *  HERE falls back rather than failing a session start; nothing is ever
  *  invented (ADR-024 §2.5: a client MUST NOT fabricate fallback text). */
-export function dictionary(me = whoami(), { root = FABRIC_ROOT, file = DEFAULT_PATH } = {}) {
+export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH } = {}) {
   const base = defaultDictionary(file);
   const p = dictionaryPath(me, root);
   if (!p) return base;
@@ -127,6 +133,9 @@ export function printer(dict) {
   return (key, vars) => (key in dict ? fill(dict[key], vars) : key);
 }
 
-export function t(me = whoami(), opts) {
+/** The printer for a given login. `me` is passed, never discovered here:
+ *  whoami() lives in gzmsg.mjs and this module must not import it — the
+ *  validator there takes its diagnostics from this one (paths.mjs). */
+export function t(me, opts) {
   return printer(dictionary(me, opts));
 }

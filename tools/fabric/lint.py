@@ -197,10 +197,19 @@ def hygiene_findings(where: str, text: str) -> list[str]:
     return out
 
 
+PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
+
+
 def _is_mostly_non_latin(text: str) -> bool:
     """True when at least half the letters of `text` are outside the Latin
-    range — a body written in Georgian, Cyrillic, Arabic, CJK …"""
-    letters = [ch for ch in text if ch.isalpha()]
+    range — a body written in Georgian, Cyrillic, Arabic, CJK …
+
+    A `{placeholder}` is stripped first: its name is an identifier the
+    translation must keep byte-identical, so counting it as Latin letters
+    made a real translation read as English. "ᲨᲔᲛᲝᲡᲣᲚᲘ {who}: {mine}/
+    {others}, {channel}" is nine Georgian letters against twenty-one
+    Latin ones (a blind review hit this building a fixture)."""
+    letters = [ch for ch in PLACEHOLDER_RE.sub(" ", text) if ch.isalpha()]
     if not letters:
         return False
     non_latin = sum(1 for ch in letters if ord(ch) > 0x024F)

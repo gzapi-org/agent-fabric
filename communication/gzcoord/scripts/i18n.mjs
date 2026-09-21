@@ -60,6 +60,25 @@ export function defaultDictionary(file = DEFAULT_PATH) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+// The reader every entry point uses. A tool that cannot read its own
+// default dictionary must not die of it — parse() is called inside bare
+// catches that would read the throw as "not a GZCOORD/1 message", and
+// send.mjs's exit codes mean something to its callers — but it must not
+// go quiet either: an empty dictionary prints every line as its own key,
+// which is unreadable unless something says why. So: degrade, and say so
+// once (blind review F6 and the round after it, PR #28).
+let said = false;
+export function defaultDictionaryOrEmpty(file = DEFAULT_PATH) {
+  try { return defaultDictionary(file); }
+  catch (e) {
+    if (!said) {
+      said = true;
+      console.error(`gzcoord: ${file} could not be read (${e.message}); every line will print as its own key`);
+    }
+    return {};
+  }
+}
+
 /** The locale directory a login is named for: what follows its last dash
  *  (language-culture-ge -> ge). tools/fabric/launch_prompt.py::_suffix. */
 export function suffix(agent) {
@@ -107,7 +126,7 @@ export function dictionaryPath(me, root = FABRIC_ROOT) {
  *  HERE falls back rather than failing a session start; nothing is ever
  *  invented (ADR-024 §2.5: a client MUST NOT fabricate fallback text). */
 export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH } = {}) {
-  const base = defaultDictionary(file);
+  const base = defaultDictionaryOrEmpty(file);
   const p = dictionaryPath(me, root);
   if (!p) return base;
   try {

@@ -25,11 +25,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
-import { defaultDictionary, dictionary, printer } from './i18n.mjs';
+import { defaultDictionaryOrEmpty, dictionary, printer } from './i18n.mjs';
 
-// The lines printed before the login's own dictionary is resolved.
+// For the one line printed before the login is known: the usage line, and
+// the file that could not be read. Everything after whoami() uses `t`.
 let EN;
-const en = () => (EN ??= printer(defaultDictionary()));
+const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -54,26 +55,26 @@ export function fallbackMarker(dir = process.env.AGENT_FABRIC_FALLBACK_DIR ?? pa
 export async function main(argv = process.argv.slice(2)) {
   const dry = argv.includes('--dry-run');
   const file = argv.find(a => !a.startsWith('--'));
-  if (!file) { console.error('usage: send.mjs <file>|- [--dry-run]'); return 1; }
+  if (!file) { console.error(en()('send.usage')); return 1; }
   let raw;
   try { raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); }
   catch (e) { console.error(en()('send.cannot-read', { file, detail: e.message })); return 1; }
   const text = normalize(raw);
 
   const who = whoami();
+  // Immediately: every line from here down is this login's, and two
+  // refusals below used to print the default locale because this sat ten
+  // lines lower than it needed to.
+  const t = printer(dictionary(who));
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project);
-  if (!cfg.configured) { console.error(en()('send.not-configured', { reason: cfg.reason })); return 3; }
-  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(en()('send.error-not-sent', { detail: e.message })); return 2; }
+  if (!cfg.configured) { console.error(t('send.not-configured', { reason: cfg.reason })); return 3; }
+  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(t('send.error-not-sent', { detail: e.message })); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   const taxPath = findTaxonomy(root);
   const taxonomy = taxPath ? loadTaxonomy(taxPath) : undefined;
   const me = identity(who, taxonomy);
-  // One printer for this run: every line below is this login's, the
-  // validator's diagnostics and send's own refusals alike. Resolved once —
-  // dictionary() reads files and whoami() spawns a process.
-  const t = printer(dictionary(who));
 
   // Validate as the last step before sending; the validator's own words go
   // to stderr. The line-width check is off: the bridge carries a line as
@@ -125,7 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
   let tok = token(root, cfg);
   if (!tok) { console.error(t('send.no-token')); return 3; }
   let res;
-  const post = t => api(t, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });
+  const post = authToken => api(authToken, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });
   try {
     try { res = await post(tok); }
     catch (e) {

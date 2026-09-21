@@ -51,6 +51,7 @@
   "send.cannot-read": "send: cannot read {file}: {detail}",
   "send.not-configured": "send: {reason} — not sent",
   "send.error-not-sent": "send: {detail} — not sent",
+  "send.usage": "usage: send.mjs <file>|- [--dry-run]",
   "send.warning": "send: warning: {detail}",
   "send.error": "send: {detail}",
   "send.does-not-validate": "send: not sent — the message does not validate",

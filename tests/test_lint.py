@@ -794,8 +794,7 @@ def case_i18n_dictionary_is_complete_and_keeps_its_identifiers() -> None:
 
         # A placeholder's NAME is an identifier the translation must keep
         # byte-identical, so counting it as Latin letters made a real
-        # translation read as an English copy: this value is nine Georgian
-        # letters against twenty-one Latin ones.
+        # translation read as an English copy.
         # Every value here fails the old letter count and only the first
         # passes the new one, so the case turns on the placeholder rule
         # alone: 8 Georgian letters against 17 Latin with the placeholder

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 // unaffected.
 export { FABRIC_ROOT } from './paths.mjs';
 import { FABRIC_ROOT } from './paths.mjs';
-import { defaultDictionary, dictionary, printer } from './i18n.mjs';
+import { defaultDictionaryOrEmpty, dictionary, printer } from './i18n.mjs';
 
 // The validator's own English, for a caller that passes no dictionary —
 // the CLI outside a session, a test. Read once, lazily, and NEVER
@@ -24,9 +24,6 @@ import { defaultDictionary, dictionary, printer } from './i18n.mjs';
 // loud and alive (blind review F6 on PR #28).
 let EN;
 const en = () => (EN ??= printer(defaultDictionaryOrEmpty()));
-function defaultDictionaryOrEmpty() {
-  try { return defaultDictionary(); } catch { return {}; }
-}
 
 const CORE_TYPES = new Set(['HELLO','GOODBYE','INFO','OBSERVATION','QUESTION','REQUEST','REVIEW','DECISION','HANDOFF','REPLY']);
 const FORBIDDEN = new Set([

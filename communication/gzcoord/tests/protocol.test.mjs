@@ -999,6 +999,11 @@ test('send refuses an id the deployment did not mint — the literal $ID reached
   await withRelay(async (relay, posts) => {
     const r = await sendWith(relay, valid.replace('MESSAGE-ID: 01a09fc1-0000-7000-8000-000000000001', 'MESSAGE-ID: $ID'));
     assert.equal(r.code, 2); assert.match(r.err, /MESSAGE-ID is the literal \$ID — the shell variable was not expanded/); assert.match(r.err, /not sent/); assert.equal(posts.length, 0);
+    // ONCE: the complaint is also the refusal, and send suppresses the
+    // duplicate warning. That suppression matched its own English until a
+    // translated warning silently stopped matching, and nothing counted —
+    // so this counts (blind review, PR #28).
+    assert.equal(r.err.match(/is the literal \$ID/g).length, 1, r.err);
     const reply = await sendWith(relay, valid.replace('SUBJECT: fixture', 'IN-REPLY-TO: ${PREV}\nSUBJECT: fixture'));
     assert.equal(reply.code, 2); assert.match(reply.err, /IN-REPLY-TO is the literal \$\{PREV\}/); assert.equal(posts.length, 0);
     // The retired counter shape is still an id: older traffic is answered by it.

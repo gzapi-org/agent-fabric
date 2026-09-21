@@ -187,15 +187,18 @@ const brokenTree = (contents) => {
 };
 
 for (const [what, contents] of [['unparsable', '{ not json'], ['absent', null]]) {
-  test(`a ${what} default dictionary is one line and exit 0, never a stack trace`, () => {
+  test(`a ${what} default dictionary degrades loudly and the tool still runs`, () => {
     const entry = brokenTree(contents ?? '{}');
     if (contents === null) fs.rmSync(path.join(path.dirname(entry), '..', 'i18n', 'en-US.json'));
     const r = spawnSync(process.execPath, [entry, '--held'],
                         { env: { ...process.env, AGENT_FABRIC_ROOT: FABRIC.replace(/\/$/, '') }, encoding: 'utf8' });
-    const { status, stderr } = r;
-    assert.equal(status, 0, `exited ${status}: ${stderr}`);
+    const { stdout, stderr } = r;
+    // Never a stack trace, and never silence: the tool says which file it
+    // could not read and what that costs, then finishes its job with every
+    // line printed as its own key.
     assert.ok(!/^\s+at /m.test(stderr), `a stack trace reached the session:\n${stderr}`);
-    assert.match(stderr, /gzcoord inbox: /, stderr);
+    assert.match(stderr, /could not be read .*every line will print as its own key/, stderr);
+    assert.match(stdout, /^held\.(not-)?held/m, `the tool did not finish: ${stdout}|${stderr}`);
   });
 }
 

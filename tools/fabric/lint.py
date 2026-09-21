@@ -207,8 +207,8 @@ def _is_mostly_non_latin(text: str) -> bool:
     A `{placeholder}` is stripped first: its name is an identifier the
     translation must keep byte-identical, so counting it as Latin letters
     made a real translation read as English. "ᲨᲔᲛᲝᲡᲣᲚᲘ {who}: {mine}/
-    {others}, {channel}" is nine Georgian letters against twenty-one
-    Latin ones (a blind review hit this building a fixture)."""
+    {others}, {channel}" is eight Georgian letters against twenty Latin
+    ones (a blind review hit this building a fixture)."""
     letters = [ch for ch in PLACEHOLDER_RE.sub(" ", text) if ch.isalpha()]
     if not letters:
         return False

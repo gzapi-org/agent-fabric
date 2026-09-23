@@ -115,15 +115,36 @@ ALIAS_JSON="$(jq -c '.aliases // {}' "$ALIASES" 2>/dev/null || echo '{}')"
 # of this account on the other provider rewrites it, and a reviewer on a
 # model nothing chose for this session is denied, not run. Only under a
 # fabric launch; anywhere else the alias reaches the harness as written.
-PINNED_JSON='{}'; FILE_MODEL=""
+PINNED_JSON='{}'; FILE_MODEL=""; ROUTED_EFFORT_JSON='{}'; FILE_EFFORT_JSON='{}'
 if [[ -n "${AGENT_FABRIC_LAUNCH_PROVIDER:-}" ]]; then
   ROUTING="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)/tools/fabric/routing.py"
   PINNED_JSON="$(python3 "$ROUTING" pins --me --provider "$AGENT_FABRIC_LAUNCH_PROVIDER" 2>/dev/null | awk '{printf "%s\"%s\":\"%s\"", (NR>1?",":""), $1, $3} END {print ""}' | sed 's/^/{/; s/$/}/')"
   jq -e . <<<"$PINNED_JSON" >/dev/null 2>&1 || PINNED_JSON='{}'
   FILE_MODEL="$(sed -n '0,/^model: /s/^model: //p' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/code-review.md" 2>/dev/null || true)"
+  # THE SAME CHECK, FOR THE OTHER ROUTED DIMENSION. install-agent-files.sh
+  # writes an `effort:` into EVERY class file, not just the reviewer's
+  # `model:`, so the cross-provider rewrite this guard already catches for
+  # the review model can strand any class at the other provider's level —
+  # an openrouter launch leaves GLM's clamp in code-medium.md and an
+  # anthropic session dispatches at it. Both maps are built here, for all
+  # five classes, and handed to jq like the two above: the dispatched class
+  # need not be known before jq, so nothing reads the call first.
+  # Compared FILE-first and only when the file carries a line: a missing
+  # one is an install that predates effort, not another launch's value,
+  # and denying on absence would block every dispatch on every account
+  # until it relaunched. A cross-provider rewrite always WRITES a line,
+  # so the direction that matters is still caught.
+  ROUTED_EFFORT_JSON="$(python3 "$ROUTING" efforts --me --provider "$AGENT_FABRIC_LAUNCH_PROVIDER" 2>/dev/null | awk '$2 != "-" {printf "%s\"%s\":\"%s\"", (n++ ? "," : ""), $1, $2} END {print ""}' | sed 's/^/{/; s/$/}/')"
+  jq -e . <<<"$ROUTED_EFFORT_JSON" >/dev/null 2>&1 || ROUTED_EFFORT_JSON='{}'
+  FILE_EFFORT_JSON="$(for k in code-low code-medium code-high code-plan code-review; do
+        v="$(sed -n '0,/^effort: /s/^effort: //p' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/$k.md" 2>/dev/null || true)"
+        [[ -n "$v" ]] && printf '%s\n' "$k $v"
+      done | awk '{printf "%s\"%s\":\"%s\"", (n++ ? "," : ""), $1, $2} END {print ""}' | sed 's/^/{/; s/$/}/')"
+  jq -e . <<<"$FILE_EFFORT_JSON" >/dev/null 2>&1 || FILE_EFFORT_JSON='{}'
 fi
 
-jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file_model "$FILE_MODEL" '
+jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file_model "$FILE_MODEL" \
+      --argjson routed_effort "${ROUTED_EFFORT_JSON:-{\}}" --argjson file_effort "${FILE_EFFORT_JSON:-{\}}" '
   def deny(reason): {hookSpecificOutput:{hookEventName:"PreToolUse",
                      permissionDecision:"deny",
                      permissionDecisionReason:reason}};
@@ -148,6 +169,8 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
         deny("Review dispatch sets isolation. A review writes nothing, so isolation protects nothing, and it hurts: worktree.baseRef is head, so a reviewer in a worktree cannot see uncommitted work. Omit isolation, pass the repository path, and tell the agent the tree is read-only and it runs no git writes. See CLAUDE.md - Subagent dispatch.")
       elif ($pinned["code-review"] // "") != "" and $file_model != $pinned["code-review"] then
         deny("Review dispatch under a fabric launch, but the agent file of the reviewer says model \"" + $file_model + "\" while this launch resolves code-review to \"" + $pinned["code-review"] + "\". Another launch of this account (the other provider) has rewritten ~/.claude/agents/code-review.md since this session started; a reviewer would run on a model nothing chose for this session. Re-run agent-fabric/bin/fabric-model apply from this session, or relaunch. See CLAUDE.md - Subagent dispatch.")
+      elif ($file_effort | has("code-review")) and ($routed_effort["code-review"] // "") != $file_effort["code-review"] then
+        deny("Review dispatch under a fabric launch, but the agent file of the reviewer says effort \"" + $file_effort["code-review"] + "\" while this launch resolves code-review to \"" + ($routed_effort["code-review"] // "none") + "\". Another launch of this account has rewritten it since this session started. Re-run agent-fabric/bin/fabric-model apply from this session, or relaunch. See CLAUDE.md - Subagent dispatch.")
       elif ($pinned["code-review"] // "") != "" then
         # The rules held; under a fabric launch the reviewer file carries the pin.
         {hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"allow",
@@ -173,6 +196,8 @@ jq -c --argjson aliases "$ALIAS_JSON" --argjson pinned "$PINNED_JSON" --arg file
           deny("Dispatch names the class \"" + $type + "\" with model \"" + ($t.model // "unset") + "\"; that class rides the " + $alias + " alias (runtime/claude-code/aliases.json), and the two must agree -- a class whose tier a call can override is a label, and " + $type + " on another tier is that work on a model nothing chose for it. Set model: " + $alias + ", or name the class that rides the tier you mean. See CLAUDE.md - Subagent dispatch.")
         elif $iso != "worktree" then
           deny("Agent dispatch does not set isolation to worktree. Every writing subagent works in its own worktree, never the session clone: the dispatcher opens and closes it, the agent stays in the path it is given, runs no git, and never commits. A premium-model authorisation grants a model tier, not an isolation exemption. Forks and the review class are the only carve-outs. See CLAUDE.md - Subagent dispatch.")
+        elif ($file_effort | has($type)) and ($routed_effort[$type] // "") != $file_effort[$type] then
+          deny("Dispatch of \"" + $type + "\" under a fabric launch, but its agent file says effort \"" + $file_effort[$type] + "\" while this launch resolves " + $type + " to \"" + ($routed_effort[$type] // "none") + "\". Another launch of this account (the other provider) has rewritten ~/.claude/agents/" + $type + ".md since this session started; the agent would think at a level nothing chose for this session. Re-run agent-fabric/bin/fabric-model apply from this session, or relaunch. See CLAUDE.md - Subagent dispatch.")
         elif $type == "code-high" or $type == "code-plan" then
           ask("Agent dispatch names " + $type + ", a premium class (" + $alias + "). Per CLAUDE.md, the premium tier is for a subagent only when you explicitly asked for it -- the task looking hard is not authorisation. Approve only if you did.")
         else empty end

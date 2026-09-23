@@ -105,6 +105,23 @@ code-review  deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> ~
 session      deepseek/deepseek-v4-pro-0813  + @preset/deepseek2claude-shim  -> --model  (routing/profiles.json defaults; a local layer overrides it)
 ```
 
+Effort rides the same resolution, in its own file (`routing/effort.json`)
+and out through a different channel. EVERY class's agent file carries an
+`effort:` line, not only the review class's `model:` — the Agent tool has
+no per-dispatch effort, so the file is the only per-class channel there
+is. A class whose model admits no effort gets no line, which is not the
+same as a default. The session's level rides `--effort` and is stamped as
+`AGENT_FABRIC_LAUNCH_EFFORT`; `docs/effort-is-routed.md` is the concept.
+
+```text
+code-low     low    -> ~/.claude/agents/code-low.md      (effort: low)
+code-medium  high   -> ~/.claude/agents/code-medium.md   (asked medium; GLM 5.2 remaps it up)
+code-high    high   -> ~/.claude/agents/code-high.md
+code-plan    high   -> ~/.claude/agents/code-plan.md     (asked xhigh; the committed acknowledgement for this column)
+code-review  high   -> ~/.claude/agents/code-review.md
+session      high   -> --effort                          (routing/effort.json `session`)
+```
+
 A shim is an OpenRouter preset whose text and routing config live in
 `routing/shims/<slug>/` and move to and from the account with
 `tools/fabric/shim.py` (`pull`, `diff`, `push`); a candidate family is

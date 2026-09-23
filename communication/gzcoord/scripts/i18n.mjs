@@ -101,6 +101,41 @@ export function localeTag(dir) {
   catch { return undefined; }
 }
 
+// Run the tools in the default locale whatever login is running them.
+// It governs the AMBIENT resolution — what a tool picks for the login
+// running it — and nothing else: a caller that names a locale passes its
+// own `env` and is answered with that locale, because it asked.
+//
+// The suites need it: they assert the lines the tools print, and the tool
+// speaks the READER's language — so a suite that pins English is green on
+// a login with no locale (CI's) and red on every holder's, which is the
+// worst way round to find out. It is also how a coordinator reproduces a
+// holder's report in a language it can read (the ru holder, 2026-09-21,
+// who found this by being the first login to have a dictionary at all).
+//
+// Exactly '1' turns it on. Truthiness would make `=0`, `=false` and `=no`
+// all mean yes, which is the one reading an operator setting it that way
+// cannot have intended; `GZCOORD_TEST_BUS_ANY === '1'` one file away is
+// the house form (blind review F2 on PR #30).
+export const DEFAULT_LOCALE_ONLY = 'GZCOORD_DEFAULT_LOCALE_ONLY';
+const pinnedToDefault = env => env[DEFAULT_LOCALE_ONLY] === '1';
+
+const localeDir = (me, root) => path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
+
+// A configured locale that is suppressed is visible to its reader — the
+// same rule this module already applies to a dictionary it cannot read.
+// Silence is the case the switch's threat model asks about: a holder
+// served English, and losing the standing reminder its bridge appends to
+// every drain, with nothing to distinguish that from a missing file
+// (blind review F3 on PR #30). Said once, only when there was something
+// to suppress.
+let pinSaid = false;
+function sayPinnedOnce(dir) {
+  if (pinSaid || !fs.existsSync(dir)) return;
+  pinSaid = true;
+  console.error(`gzcoord: ${DEFAULT_LOCALE_ONLY}=1 — printing the default locale, not ${dir}`);
+}
+
 /** The standing reminder this locale's holder reads on every drain and
  *  every delivery: "think in <the language>", the owner's own words, in
  *  the locale (the owner, 2026-09-21). It is not a dictionary key —
@@ -108,9 +143,12 @@ export function localeTag(dir) {
  *  such rule to be reminded of — so it lives with the locale's other
  *  facts and is appended to the head line, the one line a holder reads
  *  every time. Absent: nothing is appended. */
-export function localeReminder(me, root = FABRIC_ROOT) {
+export function localeReminder(me, root = FABRIC_ROOT, env = process.env) {
   if (!me?.agent || !me?.role) return '';
-  const dir = path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
+  const dir = localeDir(me, root);
+  // The reminder is a line like any other: the same switch silences it, or
+  // a suite asserting a head line would break on a holder's login too.
+  if (pinnedToDefault(env)) { sayPinnedOnce(dir); return ''; }
   try {
     const r = JSON.parse(fs.readFileSync(path.join(dir, 'locale.json'), 'utf8')).reminder;
     return typeof r === 'string' ? r : '';
@@ -118,9 +156,10 @@ export function localeReminder(me, root = FABRIC_ROOT) {
 }
 
 /** The dictionary file for this login, or null for the default locale. */
-export function dictionaryPath(me, root = FABRIC_ROOT) {
+export function dictionaryPath(me, root = FABRIC_ROOT, env = process.env) {
   if (!me?.agent || !me?.role) return null;
-  const dir = path.join(root, 'identities', 'roles', me.role, 'locale', suffix(me.agent));
+  const dir = localeDir(me, root);
+  if (pinnedToDefault(env)) { sayPinnedOnce(dir); return null; }
   const tag = localeTag(dir);
   if (!tag || tag === DEFAULT_LOCALE) return null;
   const file = path.join(dir, `${tag}.json`);
@@ -132,9 +171,9 @@ export function dictionaryPath(me, root = FABRIC_ROOT) {
  *  fixed — tools/fabric/lint.py, before the file lands — so a key missing
  *  HERE falls back rather than failing a session start; nothing is ever
  *  invented (ADR-024 §2.5: a client MUST NOT fabricate fallback text). */
-export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH } = {}) {
+export function dictionary(me, { root = FABRIC_ROOT, file = DEFAULT_PATH, env = process.env } = {}) {
   const base = defaultDictionaryOrEmpty(file);
-  const p = dictionaryPath(me, root);
+  const p = dictionaryPath(me, root, env);
   if (!p) return base;
   try {
     const loc = JSON.parse(fs.readFileSync(p, 'utf8'));

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""tools/fabric/routing.py — capability -> model -> family shim.
+"""tools/fabric/routing.py — capability -> model + effort -> family shim.
 
-Two independent dimensions, one derived artifact:
+Three independent dimensions, one derived artifact:
 
     CAPABILITY CLASS -> CONCRETE MODEL       routing/capabilities.json (+ profile layers)
+    CAPABILITY CLASS -> REASONING EFFORT     routing/effort.json (+ profile layers)
     MODEL FAMILY     -> COMPATIBILITY SHIM   routing/shims.json
     model @ shim                             derived here, at runtime, never committed
+
+The effort a class ASKS for is one vocabulary; what a given model will
+actually be given is (intent, model) resolved through that provider's
+adapter, and is computed here every time, never stored.
 
     routing.py resolve code-high                      # openrouter by default
     routing.py resolve code-high --provider anthropic
@@ -14,6 +19,8 @@ Two independent dimensions, one derived artifact:
     routing.py shim <model>                           # the family shim a bare model id needs, if any
 
     routing.py pins [--provider P] [--me]             # the file-pinned classes (the review class): <class> <alias> <model>
+    routing.py efforts [--provider P] [--me]          # every class's level: <class> <level|-> <outcome>
+    routing.py session-effort [--provider P] [--me]   # the session's level, or nothing
 
 Profile layers (routing/profiles.json and the agent's local override) may
 override a class's model and name the session's; the shim is looked up on
@@ -104,17 +111,126 @@ class ProviderAdapter:
         OpenRouter ids (review-grade)."""
         return model
 
+    # ── effort ──────────────────────────────────────────────────────
+    # The level set is a property of the (provider, MODEL) pair, never of
+    # the provider: OpenAI's own set moved three times across one model
+    # family, and Haiku 4.5 rejects the parameter the rest of the Claude
+    # line accepts. So an adapter answers "which levels?" only when told
+    # which model. A table here goes stale the way a model id does — it is
+    # declared, and a live read-back proves it (docs/live-checks/).
+    effort_channel: str = "none"          # "agent-file" | "session" | "none"
+    # (glob, levels the model DISTINGUISHES, the vendor's own remap of the
+    # rest). First match wins. The remap matters as much as the set: a
+    # vendor may map a level UP — GLM-5.2 documents low/medium -> high —
+    # so a fabric that only ever clamps downward would ask for LESS
+    # thinking than sending the level untouched. Found by running it.
+    effort_by_model: tuple[tuple[str, tuple[str, ...], dict[str, str]], ...] = ()
+
+    def effort_levels(self, model: str | None) -> tuple[str, ...] | None:
+        """The levels `model` distinguishes, or None — effort cannot be
+        expressed for it at all, which is a thing to say, not to ignore."""
+        row = self._effort_row(model)
+        return row[1] or None if row else None
+
+    def _effort_row(self, model: str | None):
+        if self.effort_channel == "none" or not model:
+            return None
+        bare = model.split("@preset/")[0]
+        for row in self.effort_by_model:
+            if fnmatch.fnmatchcase(bare, row[0]):
+                return row
+        return None
+
+    def effort_for(self, model: str | None, asked: str, scale: list[str]) -> tuple[str | None, str]:
+        """(served, outcome) for a class asking `asked` on `model`.
+
+        Resolution order: the model distinguishes the level (applied); the
+        vendor documents what it becomes (approximated, the vendor's own
+        mapping, in either direction); otherwise the fabric clamps down to
+        the nearest level below.
+
+        The clamp is the FABRIC's and happens before the request leaves,
+        because the vendors disagree about what an unsupported level
+        means: OpenAI answers 400, xAI and Claude Code quietly drop a
+        level, GLM-5.3-Flash errors, DeepSeek remaps. One routing decision
+        must not mean two things depending on who serves it."""
+        row = self._effort_row(model)
+        if row is None:
+            # No row means no model was given (a class the harness's tier
+            # decides). Nothing is known about what it admits, which is
+            # not the same as knowing it admits nothing.
+            return None, "unknown-model"
+        if not row[1]:
+            return None, "unexpressible"
+        _, levels, remap = row
+        if asked in levels:
+            return asked, "applied"
+        if asked in remap:
+            return remap[asked], "approximated"
+        below = [l for l in scale[:scale.index(asked)] if l in levels] if asked in scale else []
+        if below:
+            return below[-1], "approximated"
+        # Asked for LESS than the model's own floor. Sending nothing would
+        # hand the vendor its default, which on a model defaulting to
+        # `high` is a silent UPGRADE — the mirror image of the drop this
+        # dimension exists to prevent. Clamp UP to the floor and say so
+        # (review of 2026-09-23, F5).
+        # From the SCALE's order, not the row's: its sibling `below` above
+        # already derives from the scale, and a row written out of order
+        # would otherwise return the wrong floor silently (re-review).
+        floor = next((l for l in scale if l in levels), None)
+        return (floor, "raised") if floor else (None, "unexpressible")
+
 
 class OpenRouterAdapter(ProviderAdapter):
     name, resolution = "openrouter", "model-id"
     pattern, runtime = MODEL_ID, COMPOSITE
     describe = f"an OpenRouter model id (vendor/model, {MODEL_ID.pattern})"
+    # The harness is still Claude Code here — ori proxies, it does not
+    # replace — so the channel is the same agent file. OpenRouter's
+    # Anthropic-shaped endpoint takes output_config.effort and re-emits it
+    # in the upstream's own form. What differs is the models: each admits
+    # its own set, and the levels a vendor ACCEPTS are not the levels it
+    # DISTINGUISHES (GLM-5.2 takes seven and collapses them to three).
+    # Listed here are the distinct outcomes, so a clamp means something.
+    effort_channel = "agent-file"
+    effort_by_model = (
+        # DeepSeek V4: low/high/max + none, and it remaps the rest itself.
+        ("deepseek/deepseek-v4*", ("none", "low", "high", "max"),
+         {"minimal": "low", "medium": "high", "xhigh": "high"}),
+        # GLM-5.3-Flash: "any other input will result in an error" — no
+        # vendor remap, so the fabric clamps rather than let it 400.
+        ("z-ai/glm-5.3*", ("low", "high", "max"), {}),
+        # GLM-5.2 accepts seven and collapses them UPWARD to three.
+        # xhigh -> high, not -> max as Z.ai documents: measured through the
+        # broker, four of four xhigh runs sat in the same reasoning-token
+        # band as medium and high and none approached max
+        # (docs/live-checks/2026-09-23-effort-registry.md).
+        ("z-ai/glm-5.2*", ("none", "minimal", "high", "max"),
+         {"low": "high", "medium": "high", "xhigh": "high"}),
+    )
 
 
 class AnthropicAdapter(ProviderAdapter):
     name, resolution = "anthropic", "harness"
     pattern, runtime = NATIVE_ID, NATIVE_ID
     describe = "a native Claude id (claude-…); a tier alias is the adapter's, never named here"
+    # Claude Code carries effort per class in the agent file's frontmatter
+    # and per session on --effort; the Agent tool has no per-dispatch
+    # effort, exactly as it takes no full model id (2.1.280, read back).
+    effort_channel = "agent-file"
+    # Every row read out of 2.1.280's own bundled model registry, not from
+    # documentation: each entry carries a `capabilities` list, and a model
+    # without "effort" in it is gated out before any request is built, so
+    # no level is ever sent for it. "max_effort"/"xhigh_effort" are
+    # separate capabilities, which is why 4.6 stops at max and 4.7 does
+    # not (docs/live-checks/2026-09-23-effort-registry.md).
+    effort_by_model = (
+        ("claude-haiku-*", (), {}),                   # no "effort" capability: none is sent
+        ("claude-opus-4-6*", ("low", "medium", "high", "max"), {}),   # no xhigh before 4.7
+        ("claude-sonnet-4-6*", ("low", "medium", "high", "max"), {}),
+        ("claude-*", ("low", "medium", "high", "xhigh", "max"), {}),
+    )
 
     def column_findings(self, klass: str, model: Any, where: str) -> list[str]:
         if model is not None and not self.is_model(model):
@@ -157,6 +273,43 @@ def load_review_grade(root: str | None = None) -> dict[str, Any]:
     return _load(path) if os.path.exists(path) else {"capability": "code-review", "models": []}
 
 
+def load_effort(root: str | None = None) -> dict[str, Any]:
+    path = os.path.join(routing_dir(root), "effort.json")
+    return _load(path) if os.path.exists(path) else {"levels": [], "classes": {}, "providers": {}}
+
+
+def effort_for(capability: str, provider: str, model: str | None, role: str | None = None,
+               agent: str | None = None, local: dict[str, Any] | None = None,
+               root: str | None = None) -> dict[str, Any]:
+    """What this class asks for, what the model will actually be given,
+    and which of the two it is. `intent` is the fabric's one vocabulary;
+    `level` is what leaves. They differ only where a provider's model
+    admits less, and then `outcome` says so — the downgrade is on the
+    record rather than discovered later in a bill or a worse answer."""
+    doc = load_effort(root)
+    scale = list(doc.get("levels") or [])
+    intent = (doc.get("classes") or {}).get(capability)
+    source = "effort.json"
+    # Order matters, and it is the order a MODEL id already follows:
+    # committed file first, then the profile and agent layers over it. A
+    # provider acknowledgement is the committed INTENT for that column,
+    # not the last word — placing it after the layers let a file in the
+    # repository outrank the agent's own choice, so an agent asking for
+    # `max` on a model that admits `max` was served `high` and told its
+    # intent WAS `high` (review of 2026-09-23, F3).
+    committed = ((doc.get("providers") or {}).get(provider, {}).get("classes") or {}).get(capability)
+    if committed:
+        intent, source = committed, f"effort.json:providers.{provider}"
+    over = merged_provider(provider, role, agent, local, root).get("effort", {}).get(capability)
+    if over:
+        intent, source = over["level"], over["source"]
+    if not intent:
+        return {"level": None, "intent": None, "outcome": "unset", "how": "none", "source": source}
+    served, outcome = adapter(provider).effort_for(model, intent, scale)
+    return {"level": served, "intent": intent, "outcome": outcome,
+            "how": adapter(provider).effort_channel if served else "none", "source": source}
+
+
 def load_profiles(root: str | None = None) -> dict[str, Any]:
     path = os.path.join(routing_dir(root), "profiles.json")
     return _load(path) if os.path.exists(path) else {"version": 2, "defaults": {}}
@@ -178,6 +331,27 @@ def shim_for(model: str, shims: list[dict[str, Any]], harness: str = "claude-cod
 def composite(model: str, shim: str | None) -> str:
     """The runtime string: `model@preset/slug`, or the model alone."""
     return f"{model}{shim}" if shim else model
+
+
+def effort_phrase(effort: dict[str, Any] | None) -> str:
+    """How a resolved effort reads beside its model, for every printer that
+    shows one. Kept here so `launch --print` and `fabric-status` cannot
+    describe the same downgrade in two different words — the point of the
+    dimension is that `asked -> served` is legible wherever it appears."""
+    e = effort or {}
+    outcome = e.get("outcome")
+    if outcome == "applied":
+        return "effort %s" % e["level"]
+    if outcome in ("approximated", "raised"):
+        return "effort %s (asked %s)" % (e["level"], e["intent"])
+    if outcome == "unexpressible":
+        return "effort - (asked %s; this model expresses none)" % e.get("intent")
+    if outcome == "unknown-model":
+        # No model is pinned, so nothing is known about what it admits.
+        # Saying "expresses none" here would assert a fact about a model
+        # nobody has chosen (review of 2026-09-23, F6).
+        return "effort - (asked %s; no model pinned, the harness's tier decides)" % e.get("intent")
+    return ""
 
 
 PROVIDERS = tuple(ADAPTERS)
@@ -232,7 +406,14 @@ def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dic
             raise ValueError(f"{field}: {name!r} is not a capability class ({', '.join(sorted(classes))})")
         return name
 
-    out: dict[str, dict[str, Any]] = {p: {"capabilities": {}} for p in PROVIDERS}
+    scale = list(load_effort(root).get("levels") or [])
+
+    def level(value: Any, field: str) -> str:
+        if value not in scale:
+            raise ValueError(f"{field}: {value!r} is not an effort level ({', '.join(scale)})")
+        return value
+
+    out: dict[str, dict[str, Any]] = {p: {"capabilities": {}, "effort": {}} for p in PROVIDERS}
     if "session" in layer:
         value = session("openrouter", layer["session"], prefix + "session")
         out["openrouter"]["session"] = value
@@ -249,14 +430,18 @@ def normalize_layer(layer: Any, where: str = "", root: str | None = None) -> dic
             raise ValueError(f"{p}: unknown provider; known: {', '.join(ADAPTERS)}")
         body = _object(body, p)
         for key in body:
-            if key not in ("session", "capabilities"):
-                raise ValueError(f"{p}.{key}: not a field of a provider layer (session, capabilities); "
+            if key not in ("session", "capabilities", "effort"):
+                raise ValueError(f"{p}.{key}: not a field of a provider layer (session, capabilities, effort); "
                                  "a class is set under capabilities, a tier alias is never named")
         if "session" in body:
             out[provider]["session"] = session(provider, body["session"], p + ".session")
         for name, model in _object(body.get("capabilities"), p + ".capabilities").items():
             out[provider]["capabilities"][klass(name, p + ".capabilities")] = \
                 ADAPTERS[provider].model(model, f"{p}.capabilities.{name}")
+        # Effort is layered like a model (the owner, 2026-09-23), but its
+        # vocabulary is the fabric's — a level, never a provider spelling.
+        for name, lvl in _object(body.get("effort"), p + ".effort").items():
+            out[provider]["effort"][klass(name, p + ".effort")] = level(lvl, f"{p}.effort.{name}")
     return out
 
 
@@ -277,13 +462,15 @@ def merged_provider(provider: str, role: str | None = None, agent: str | None = 
     Per key, the nearest layer naming it wins. A malformed layer raises
     ValueError (normalize_layer)."""
     adapter(provider)
-    out: dict[str, Any] = {"session": None, "capabilities": {}}
+    out: dict[str, Any] = {"session": None, "capabilities": {}, "effort": {}}
     for name, body in layers(role, agent, local, root):
         norm = normalize_layer(body, name, root)[provider]
         if "session" in norm:
             out["session"] = {"model": norm["session"], "source": name}
         for klass, model in norm["capabilities"].items():
             out["capabilities"][klass] = {"model": model, "source": name}
+        for klass, lvl in norm.get("effort", {}).items():
+            out["effort"][klass] = {"level": lvl, "source": name}
     return out
 
 
@@ -336,18 +523,23 @@ def resolve(capability: str, provider: str = "openrouter", role: str | None = No
             # as the alias, which is what plain claude takes.
             if not alias:
                 raise KeyError(f"provider {provider!r} pins no model to {capability!r} and it rides no alias")
+            # Nothing pinned, so nothing is known about the model that
+            # will serve it — effort cannot be judged against a tier.
             return {"capability": capability, "provider": provider, "model": alias, "shim": None,
                     "composite": alias, "resolution": "harness", "source": "harness",
-                    "alias": alias, "pinned": False, "via": "harness"}
+                    "alias": alias, "pinned": False, "via": "harness",
+                    "effort": effort_for(capability, provider, None, role, agent, local, root)}
         return {"capability": capability, "provider": provider, "model": model, "shim": None,
                 "composite": model, "resolution": "harness", "source": source,
-                "alias": alias, "pinned": True, "via": "file" if in_file else "export"}
+                "alias": alias, "pinned": True, "via": "file" if in_file else "export",
+                "effort": effort_for(capability, provider, model, role, agent, local, root)}
     if not model:
         raise KeyError(f"provider {provider!r} binds no model to {capability!r}")
     shim = shim_for(model, load_shims(root), harness)
     return {"capability": capability, "provider": provider, "model": model, "shim": shim,
             "composite": composite(model, shim), "resolution": "model-id", "source": source,
-            "alias": alias, "pinned": True, "via": "file" if in_file else "export"}
+            "alias": alias, "pinned": True, "via": "file" if in_file else "export",
+            "effort": effort_for(capability, provider, model, role, agent, local, root)}
 
 
 def exports(provider: str = "openrouter", role: str | None = None, agent: str | None = None,
@@ -405,6 +597,28 @@ def resolve_session(role: str | None = None, agent: str | None = None,
     shim = shim_for(model, load_shims(root), harness)
     return {"model": model, "shim": shim, "composite": composite(model, shim), "capability": None,
             "source": entry["source"]}
+
+
+def session_effort(provider: str = "anthropic", role: str | None = None, agent: str | None = None,
+                   local: dict[str, Any] | None = None, root: str | None = None) -> str | None:
+    """The level the SESSION runs at, already clamped to what its model
+    admits, or None when that model expresses no effort at all.
+
+    `session` in routing/effort.json names a level or a capability class
+    whose level to take, as routing/profiles.json's own `session` may name
+    a class. Naming the class keeps the session's thinking with the
+    session's model, so one edit moves both."""
+    doc = load_effort(root)
+    want = doc.get("session")
+    if not want:
+        return None
+    if want in (doc.get("classes") or {}):
+        want = (resolve(want, provider, role, agent, local, root) or {}).get("effort", {}).get("intent")
+    if not want:
+        return None
+    model = resolve_session(role, agent, local, root, provider=provider)["model"]
+    served, _ = adapter(provider).effort_for(model, want, list(doc.get("levels") or []))
+    return served
 
 
 def review_grade_ok(model: str, root: str | None = None) -> bool:
@@ -493,6 +707,94 @@ def check(root: str | None = None) -> list[str]:
         if grade.get("capability") in classes and grade.get("capability") not in pinned:
             findings.append(f"runtime/claude-code/aliases.json: the gated class {grade.get('capability')!r} is not "
                             "file_pinned; through an export it would follow whatever shares its alias")
+
+    # ── effort ──────────────────────────────────────────────────────
+    # The rule this file exists for: a level the fabric asks for and the
+    # provider will not give is WRITTEN DOWN, or check refuses. A
+    # computed downgrade is the silent re-tuning the whole dimension was
+    # added to stop (docs/live-checks/2026-09-23-opus-5-5.md).
+    effort = load_effort(root)
+    scale = list(effort.get("levels") or [])
+    if not scale:
+        findings.append("routing/effort.json: no levels; the vocabulary is this file's, not an adapter's")
+    if sorted(dict.fromkeys(scale)) != sorted(set(scale)):
+        findings.append("routing/effort.json: levels repeat; the scale is ordered and distinct")
+    declared = set(effort.get("classes") or {})
+    if declared != set(classes):
+        missing, extra = sorted(set(classes) - declared), sorted(declared - set(classes))
+        findings.append(f"routing/effort.json: classes {sorted(declared)} but capabilities.json defines "
+                        f"{sorted(classes)}" + (f"; missing {missing}" if missing else "")
+                        + (f"; unknown {extra}" if extra else ""))
+    for klass, lvl in (effort.get("classes") or {}).items():
+        if lvl not in scale:
+            findings.append(f"routing/effort.json: classes.{klass} is {lvl!r}, not one of {', '.join(scale)}")
+    sess = effort.get("session")
+    if sess is not None and sess not in scale and sess not in classes:
+        findings.append(f"routing/effort.json: session {sess!r} is neither a level nor a capability class")
+    for provider in (effort.get("providers") or {}):
+        if provider not in ADAPTERS:
+            findings.append(f"routing/effort.json: providers.{provider} has no adapter; known: {', '.join(ADAPTERS)}")
+    for provider in ADAPTERS:
+        if provider not in caps.get("providers", {}):
+            continue
+        ack = ((effort.get("providers") or {}).get(provider, {}).get("classes") or {})
+        notes = ((effort.get("providers") or {}).get(provider, {}).get("notes") or {})
+        base = (effort.get("classes") or {})
+        for klass in classes:
+            try:
+                res = resolve(klass, provider, root=root)
+            except KeyError:
+                continue
+            if klass in ack:
+                # An acknowledgement is a committed statement about a
+                # (provider, MODEL) pair, but it is keyed only by class —
+                # so it outlives the model it was written for. Re-judge it
+                # rather than skipping: an ack that no longer matches what
+                # the adapter yields was written for a model that has since
+                # been replaced, and is as wrong as a missing one (review
+                # of 2026-09-23, F3).
+                if klass not in notes:
+                    findings.append(
+                        f"routing/effort.json: providers.{provider}.classes.{klass} has no matching entry in "
+                        f"providers.{provider}.notes — an acknowledged downgrade without its reason is the "
+                        "commit this file exists to require, with the reason left out.")
+                if res["via"] == "harness" or not res.get("model"):
+                    continue
+                want = base.get(klass)
+                if want:
+                    now, _ = adapter(provider).effort_for(res["model"], want, scale)
+                    if now != ack[klass]:
+                        findings.append(
+                            f"routing/effort.json: providers.{provider}.classes.{klass} is {ack[klass]!r}, but "
+                            f"{klass} asks for {want!r} and {res['model']} now yields {now!r}. The "
+                            "acknowledgement was written for a different model; re-decide it or delete it.")
+                continue
+            if res["via"] == "harness":
+                # Nothing is pinned, so which model serves this class is
+                # the harness's choice of its tier — there is no model to
+                # ask about a level, and inventing a finding here would
+                # demand an acknowledgement of something nobody decided.
+                continue
+            e = res.get("effort") or {}
+            if e.get("outcome") == "raised" and e.get("intent"):
+                findings.append(
+                    f"routing/effort.json: {klass} asks for {e['intent']!r}; {res['model']} on {provider} "
+                    f"admits nothing that low and is given {e['level']!r} instead. Write "
+                    f"providers.{provider}.classes.{klass}: {e['level']!r} with a note, or raise the class — "
+                    "a class given MORE thinking than anyone asked for is the same defect upside down.")
+            elif e.get("outcome") == "unexpressible" and e.get("intent"):
+                findings.append(
+                    f"routing/effort.json: {klass} asks for {e['intent']!r}; {res['model']} on {provider} "
+                    f"expresses no effort at all. Write providers.{provider}.classes.{klass}: null with a "
+                    "note, or change the model — a class whose thinking nobody chose is the defect this file "
+                    "was added for.")
+            elif e.get("outcome") == "approximated" and e.get("level") and e.get("intent") \
+                    and scale.index(e["level"]) < scale.index(e["intent"]):
+                findings.append(
+                    f"routing/effort.json: {klass} asks for {e['intent']!r}; {res['model']} on {provider} "
+                    f"gives {e['level']!r}. Write providers.{provider}.classes.{klass}: {e['level']!r} with a "
+                    "note, or lower the class — a level lost with no commit and nothing to review is exactly "
+                    "what this dimension exists to stop.")
     return findings
 
 
@@ -518,19 +820,29 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
     s.add_argument("--me", action="store_true",
                    help="this login's role binding and local override (runtime/identity.py)")
+    s = sub.add_parser("session-effort", help="the session's resolved effort level on a provider, or nothing")
+    s.add_argument("--provider", default="anthropic")
+    s.add_argument("--role", default=None)
+    s.add_argument("--agent", default=None)
+    s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
+    s.add_argument("--me", action="store_true",
+                   help="this login's role binding and local override (runtime/identity.py)")
+    s = sub.add_parser("efforts", help="every class's resolved effort on a provider: `<class> <level|-> <outcome>`")
+    s.add_argument("--provider", default="anthropic")
+    s.add_argument("--role", default=None)
+    s.add_argument("--agent", default=None)
+    s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
+    s.add_argument("--me", action="store_true",
+                   help="this login's role binding and local override (runtime/identity.py)")
     s = sub.add_parser("shim", help="the family shim a model id needs, or nothing")
     s.add_argument("model")
     s.add_argument("--harness", default="claude-code")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.fabric) if args.fabric else None
 
-    if args.cmd == "pins":
-        # For the dispatch guard and the agent-file installer: the classes
-        # whose model goes through their agent file (file_pinned — the
-        # review class, which must never follow the class sharing its
-        # alias), resolved on the given provider, with the alias each
-        # rides. Nothing when the merged model is the harness's; exit 0
-        # either way. Every other class is an alias export (`exports`).
+    def _whose(args):
+        """(role, agent, local) for a subcommand that may say --me: this
+        login's binding and its local layer, or whatever the flags name."""
         role, agent, local = args.role, args.agent, None
         if args.me:
             spec = importlib.util.spec_from_file_location(
@@ -540,6 +852,38 @@ def main(argv: list[str] | None = None) -> int:
             role = role or identity.read_binding(agent).get("role")
         if args.local or args.me:
             local = load_local(agent, args.local)
+        return role, agent, local
+
+    if args.cmd == "session-effort":
+        # One line for the launcher's --effort, or nothing at all when the
+        # session's model expresses none. Never a default: a level this
+        # model cannot take is not a decision worth stamping.
+        role, agent, local = _whose(args)
+        level = session_effort(args.provider, role, agent, local, root)
+        if level:
+            print(level)
+        return 0
+    if args.cmd == "efforts":
+        # For the agent-file installer and the launcher: every class and the
+        # effort level that actually leaves for it, already clamped by the
+        # adapter. `<class> <level|-> <outcome>`; `-` means the model
+        # expresses no effort and NO `effort:` line should be written, which
+        # is different from writing a default. The caller decides what an
+        # outcome costs — the launcher refuses an unexpressible review class,
+        # a coding class only warns (the owner, 2026-09-23).
+        role, agent, local = _whose(args)
+        for klass in load_capabilities(root)["classes"]:
+            e = resolve(klass, args.provider, role, agent, local, root=root).get("effort") or {}
+            print(f"{klass} {e.get('level') or '-'} {e.get('outcome') or 'unset'}")
+        return 0
+    if args.cmd == "pins":
+        # For the dispatch guard and the agent-file installer: the classes
+        # whose model goes through their agent file (file_pinned — the
+        # review class, which must never follow the class sharing its
+        # alias), resolved on the given provider, with the alias each
+        # rides. Nothing when the merged model is the harness's; exit 0
+        # either way. Every other class is an alias export (`exports`).
+        role, agent, local = _whose(args)
         for klass in file_pinned(root):
             res = resolve(klass, args.provider, role, agent, local, root=root)
             if res["via"] == "file":

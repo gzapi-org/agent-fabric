@@ -170,6 +170,34 @@ out="$(launched openrouter "$R")"
 reviewer_file "claude-opus-5[1m]"
 out="$(launched openrouter "$R")"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "rewritten" <<<"$out" && pass "a reviewer file that disagrees with this launch's resolution is denied, not run" || fail "stale reviewer file admitted" "$out"
+# THE SAME STALENESS, FOR EFFORT. A level is written into every class's
+# file, not just the reviewer's model, so the cross-provider rewrite
+# strands any class. Compared only when the file carries a line: a missing
+# one is an install older than effort, and denying on it would block every
+# dispatch on every account until it relaunched.
+class_file() {  # class_file <name> <model> [level]  — [level] omitted writes no effort: line
+    mkdir -p "$SCRATCH_HOME/agents"
+    { printf -- '---\nname: %s\nmodel: %s\n' "$1" "$2"
+      [[ -n "${3:-}" ]] && printf 'effort: %s\n' "$3"
+      printf -- '---\n'; } > "$SCRATCH_HOME/agents/$1.md"
+}
+HIGH='{"subagent_type":"code-high","model":"opus","isolation":"worktree","description":"do the thing"}'
+class_file code-high opus
+out="$(vanilla "$HIGH")"
+! grep -q "think at a level nothing chose" <<<"$out" && pass "no effort: line in the class file — an older install is not treated as another launch's value" || fail "denied on a missing effort line" "$out"
+class_file code-high opus high
+out="$(vanilla "$HIGH")"
+! grep -q "think at a level nothing chose" <<<"$out" && pass "the file's level agrees with this launch: not denied for it" || fail "denied on an agreeing level" "$out"
+class_file code-high opus low
+out="$(vanilla "$HIGH")"
+[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "think at a level nothing chose" <<<"$out" && pass "a class file another launch rewrote to a different level is denied, not run" || fail "stranded effort admitted" "$out"
+rm -f "$SCRATCH_HOME/agents/code-high.md"
+reviewer_file "claude-opus-5[1m]"
+printf -- '---\nname: code-review\nmodel: claude-opus-5[1m]\neffort: low\n---\n' > "$SCRATCH_HOME/agents/code-review.md"
+out="$(vanilla "$R")"
+[[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "effort" <<<"$out" && pass "…and the review class is checked the same way" || fail "reviewer effort not checked" "$out"
+reviewer_file "claude-opus-5[1m]"
+
 # The runner may itself be a fabric-launched session; "unlaunched" is the variable absent, not inherited.
 [[ -z "$(printf '{"tool_name":"Agent","tool_input":%s}' "$R" | env -u AGENT_FABRIC_LAUNCH_PROVIDER bash "$UNDER_TEST" 2>/dev/null)" ]] && pass "unlaunched vanilla: plain allow, fable is the harness's" || fail "rewrite leaked to an unlaunched session"
 

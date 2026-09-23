@@ -66,7 +66,14 @@ identity = _load("fabric_identity", os.path.join(FABRIC_ROOT, "runtime", "identi
 routing = _load("fabric_routing", os.path.join(HERE, "routing.py"))
 
 CLASSES = tuple(routing.load_capabilities()["classes"])
-TARGETS = {p: ("session",) + CLASSES for p in routing.PROVIDERS}
+# `<class>-effort` is a target beside `<class>`, because effort layers
+# exactly as a model id does (the owner, 2026-09-23): routing/effort.json,
+# then the profile layers, then this file. The suffix keeps one flat
+# namespace — `set code-high opus` and `set code-high-effort max` are the
+# same shape — and the model's own name stays what it always was.
+EFFORT_SUFFIX = "-effort"
+EFFORT_TARGETS = tuple(k + EFFORT_SUFFIX for k in CLASSES)
+TARGETS = {p: ("session",) + CLASSES + EFFORT_TARGETS for p in routing.PROVIDERS}
 PROVIDER_OF_THIS_SESSION = os.environ.get("AGENT_FABRIC_LAUNCH_PROVIDER") or "anthropic"
 
 
@@ -123,6 +130,8 @@ def place(local: dict[str, Any], provider: str, target: str, model: str | None) 
     layer = out.setdefault("providers", {}).setdefault(provider, {})
     if target == "session":
         container, key = layer, "session"
+    elif target.endswith(EFFORT_SUFFIX):
+        container, key = layer.setdefault("effort", {}), target[:-len(EFFORT_SUFFIX)]
     else:
         container, key = layer.setdefault("capabilities", {}), target
     if model is None:
@@ -130,8 +139,9 @@ def place(local: dict[str, Any], provider: str, target: str, model: str | None) 
     else:
         container[key] = model
     # Drop what became empty, so an unset file reads as no choice at all.
-    if "capabilities" in layer and not layer["capabilities"]:
-        del layer["capabilities"]
+    for sub in ("capabilities", "effort"):
+        if sub in layer and not layer[sub]:
+            del layer[sub]
     if not layer:
         del out["providers"][provider]
     if not out["providers"]:
@@ -160,6 +170,9 @@ def resolved(provider: str, role: str | None, agent: str, local: dict[str, Any])
         r = routing.resolve(klass, provider, role, agent, local)
         rows[klass] = {"model": r["composite"], "source": r["source"], "via": r["via"],
                        "pinned": r["pinned"]}
+        e = r.get("effort") or {}
+        rows[klass + EFFORT_SUFFIX] = {"model": e.get("level"), "source": e.get("source"),
+                                       "effort": e, "via": e.get("how") or "none", "pinned": bool(e.get("level"))}
     return rows
 
 
@@ -167,18 +180,25 @@ def print_list(provider: str, rows: dict[str, Any]) -> None:
     print(f"provider {provider}")
     for target, row in rows.items():
         if row.get("error"):
-            print(f"  {target:12} (unresolved: {row['error']})")
+            print(f"  {target:18} (unresolved: {row['error']})")
             continue
         if target == "session":
             extra = f"  (the {row['capability']} class)" if row.get("capability") else ""
-            print(f"  {target:12} {row['model']:44} {row['source']}{extra}")
+            print(f"  {target:18} {row['model']:38} {row['source']}{extra}")
+            continue
+        if target.endswith(EFFORT_SUFFIX):
+            e = row.get("effort") or {}
+            # asked -> served whenever they differ, the same phrasing
+            # --print and fabric-status use (routing.effort_phrase).
+            level = routing.effort_phrase(e).removeprefix("effort ") or "(no level configured for this class)"
+            print(f"  {target:18} {level:38} {row['source'] or '-'}")
             continue
         if row["via"] == "harness":
             model, source, how = "(harness default for its tier)", "-", ""
         else:
             model, source = row["model"], row["source"]
             how = "  via the agent file" if row["via"] == "file" else ""
-        print(f"  {target:12} {model:44} {source}{how}")
+        print(f"  {target:18} {model:38} {source}{how}")
 
 
 # ── commands ─────────────────────────────────────────────────────────
@@ -245,6 +265,16 @@ def _change(ctx: dict[str, Any], path: str, provider: str, target: str, model: s
         print(f"  resolves now to {row['model']} (from {row['source']})")
     elif row:
         print("  resolves now to the harness default")
+    # A model change moves the effort with it: the level a class asks for
+    # is clamped to what the NEW model admits, so changing the model can
+    # silently change the thinking — the exact bump that made effort a
+    # routed dimension (docs/live-checks/2026-09-23-opus-5-5.md). Say the
+    # resulting level here so the two are read in one step.
+    if target in CLASSES:
+        e = (rows.get(target + EFFORT_SUFFIX) or {}).get("effort") or {}
+        phrase = routing.effort_phrase(e)
+        print("  %s (%s)" % (phrase, e.get("source")) if phrase
+              else "  no effort: this model expresses none, so the class runs on its own default")
     if target == "code-review" and provider == PROVIDER_OF_THIS_SESSION:
         return apply_agent_files()
     print("  takes effect at the next launch (runtime/openrouter/launch)")
@@ -271,6 +301,25 @@ def cmd_seed(args: argparse.Namespace, ctx: dict[str, Any], path: str) -> int:
             if not row.get("model") or row.get("source") in ("local", "harness"):
                 continue  # a harness default has nothing to seed; a local choice is already one
             model = row["model"]
+            if target.endswith(EFFORT_SUFFIX):
+                # The INTENT, never the served level. A level is a function
+                # of (intent, model): freezing what today's model happens
+                # to admit records a choice the fabric never made, and it
+                # keeps applying after the model moves under it — seeding
+                # openrouter's code-medium wrote `high` where effort.json
+                # says `medium` (review of 2026-09-23, F2).
+                e = row.get("effort") or {}
+                # …and for an ACKNOWLEDGED class the intent IS the
+                # acknowledgement, which compensates for one (provider,
+                # model) pair and is not this agent's choice. Seeding it
+                # copies a compensation into a layer that now outranks the
+                # acknowledgement it came from, so it survives the model
+                # change the acknowledgement existed for (re-review, N1).
+                if str(e.get("source") or "").startswith("effort.json:providers."):
+                    continue
+                model = e.get("intent")
+                if not model:
+                    continue
             if target == "session" and row.get("capability"):
                 model = row["capability"]  # a class-named session is seeded as the class
             if provider == "openrouter":

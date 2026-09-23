@@ -28,6 +28,12 @@ run() { echo; echo "== $1"; shift; "$@" || fail=$((fail+1)); }
 . "$ROOT/tests/leak-check.sh"
 SCRATCH_DIR="$(mktemp -d "$(leak_dir)/agent-fabric-tests.XXXXXX")" || exit 1
 export TMPDIR="$SCRATCH_DIR"
+# The GZCoord tools speak the READER's language, so a suite that asserts
+# their lines depends on which login runs it: green on a login with no
+# locale directory (CI's) and red on every holder's. The run pins the
+# default locale; the cases that exercise a locale build their own
+# dictionary and pass it explicitly (communication/gzcoord/scripts/i18n.mjs).
+export GZCOORD_DEFAULT_LOCALE_ONLY=1
 # EXIT removes; a signal EXITS. Naming INT/TERM/HUP on the removal trap
 # itself made bash run the removal and then CONTINUE the script — every
 # remaining suite ran against a deleted TMPDIR and was reported failed,

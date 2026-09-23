@@ -71,7 +71,8 @@ fallback_drift = (f"session model fell back from {fallback.get('from_model') or 
                   "after a safeguard flagged a request (sticky until /model; nothing from that exchange travels)") if fallback else None
 pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                                        "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL")}
-present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_") or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL"))
+present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_")
+                 or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"))
 credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BASE_URL"}
 
 # --- how the classes resolve on that provider --------------------------
@@ -91,11 +92,24 @@ for klass in routing.load_capabilities(root)["classes"]:
         r = routing.resolve(klass, provider, binding.get("role"), ctx["agent"], local, root=root)
         how = {"export": " (exported)" if pins.get(alias_env.get(r.get("alias") or "", "")) else " (not exported in this session)",
                "file": " (the agent file)", "harness": " (the harness's tier)"}[r["via"]]
-        classes[klass] = r["composite"] + how + " (from %s)" % r["source"]
+        eff = routing.effort_phrase(r.get("effort"))
+        classes[klass] = r["composite"] + how + " (from %s)" % r["source"] + (" " + eff if eff else "")
     except (KeyError, ValueError) as exc:
         classes[klass] = "unresolved: %s" % exc
     if local_error:
         classes[klass] += " (local layer ignored: %s)" % local_error
+# One implementation of one decision: the launcher asks
+# `routing.py session-effort`, so this asks the same function rather than
+# walking effort.json again. The two had drifted — a session pinned to a
+# model with no effort control got no flag from the launcher and a
+# confident level from here (review of 2026-09-23, F4).
+session_effort = None
+try:
+    session_effort = {"asked": routing.session_effort(provider, binding.get("role"), ctx["agent"], local, root),
+                      "reported": os.environ.get("CLAUDE_EFFORT"),
+                      "launched": os.environ.get("AGENT_FABRIC_LAUNCH_EFFORT")}
+except (KeyError, ValueError):
+    pass
 checks = routing.check(root)
 
 # --- memory: what this agent wrote that no drain has taken yet -----------
@@ -151,6 +165,22 @@ if stamp and launch_provider in ("openrouter", "anthropic"):
             model_drift = f"launched on {stamp}, the {launch_provider} session now resolves to {current_session} — relaunch to apply"
     except (KeyError, ValueError):
         pass
+# Effort drift is gated on the launcher having actually DELIVERED a level,
+# exactly as model drift is gated on AGENT_FABRIC_LAUNCH_SESSION_MODEL.
+# Nothing sets this stamp yet: routing/effort.json records what each class
+# SHOULD get, and until the launcher pins it the asked-for level is an
+# intention, not something this session was started with — reporting the
+# gap as drift would accuse the fabric of a change it never made. It is
+# also not a one-way clamp: measured 2026-09-23, one session read `high`
+# and, untouched, `xhigh` an hour later, so the harness re-resolves effort
+# mid-session and a difference in either direction is ordinary.
+effort_drift = None
+effort_stamp = os.environ.get("AGENT_FABRIC_LAUNCH_EFFORT")
+if effort_stamp and session_effort and session_effort["reported"] \
+        and effort_stamp != session_effort["reported"]:
+    effort_drift = (f"launched at effort {effort_stamp}, the session is running at "
+                    f"{session_effort['reported']} — a settings maxEffortLevel, an organisation cap or a "
+                    "model that does not admit the level clamped it (CLAUDE_EFFORT is the harness's read-back)")
 prompt_drift = None
 digest = os.environ.get("AGENT_FABRIC_LAUNCH_PROMPT_DIGEST")
 if digest:
@@ -190,7 +220,8 @@ report = {
     "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
     "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
     "launch_prompt_digest": digest,
-    "drift": [d for d in (role_drift, model_drift, prompt_drift, placement_drift, fallback_drift) if d] or None,
+    "drift": [d for d in (role_drift, model_drift, effort_drift, prompt_drift, placement_drift, fallback_drift) if d] or None,
+    "session_effort": session_effort,
     "undrained_memories": undrained,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",
@@ -216,6 +247,19 @@ print(f"session      {report['session'] or '(unknown)'}    binding updated {repo
 print()
 print(f"api          {path}")
 print(f"session model {report['api']['session_model']}")
+if report.get("session_effort") and (report["session_effort"].get("asked")
+                                    or report["session_effort"].get("launched")):
+    _se = report["session_effort"]
+    _rep, _stamp = _se.get("reported"), _se.get("launched")
+    # "asks for" until the launcher pins one: routing/effort.json is the
+    # fabric's intent, and the running level is the harness's own, so the
+    # two are printed side by side without either claiming to cause the other.
+    # The stamp is what this session was STARTED with, so it is the
+    # headline once there is one; the resolved intent only describes what
+    # a relaunch would do, and saying it first described another session.
+    _head = _stamp or _se["asked"]
+    _verb = "session effort %s" % _head if _stamp else "session effort %s (asked; not pinned at launch)" % _head
+    print("%s%s" % (_verb, "" if not _rep else (" (running %s)" % _rep if _rep != _head else " (confirmed)")))
 if report['api']['launch_profile']: print(f"launch profile {report['api']['launch_profile']}")
 print(f"pins         {report['api']['pins'] if isinstance(report['api']['pins'], str) else ', '.join(f'{k}={v}' for k, v in report['api']['pins'].items())}")
 print(f"credentials  {report['api']['credentials'] if isinstance(report['api']['credentials'], str) else ', '.join(f'{k}: set' for k in report['api']['credentials'])}")

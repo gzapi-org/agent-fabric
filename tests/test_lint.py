@@ -1214,9 +1214,36 @@ def case_review_lenses_are_named_described_and_bounded() -> None:
         assert code == 1 and "no general.md" in out, f"a lens directory without general passed:\n{out}"
 
 
+def case_a_committed_agent_source_may_not_pin_effort() -> None:
+    """The one-writer invariant: a class's level is routing/effort.json's
+    and is written into the INSTALLED copy by install-agent-files.sh. A
+    hand-written one in the source is the second place it is decided, and
+    the one nobody updates. Kills: dropping agent_source_findings."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        agent = os.path.join(fabric, "runtime", "claude-code", "agents", "code-high.md")
+        write(agent, "---\nname: code-high\ndescription: x\nmodel: opus\n---\n\nDo the work.\n")
+        code, out = run_lint(fabric)
+        assert code == 0, f"an agent source without a level tripped the linter:\n{out}"
+
+        write(agent, "---\nname: code-high\ndescription: x\nmodel: opus\neffort: max\n---\n\nDo the work.\n")
+        code, out = run_lint(fabric)
+        assert code != 0 and "effort:" in out and "code-high.md" in out, \
+            f"a hand-written effort: in a committed agent source was not refused:\n{out}"
+
+        # The locale worker is installed the same way, so it is the same rule.
+        write(agent, "---\nname: code-high\ndescription: x\nmodel: opus\n---\n\nDo the work.\n")
+        worker = os.path.join(fabric, "identities", "roles", "language-culture", "locale", "ge", "worker.md")
+        write(worker, "---\nname: locale-worker\ndescription: (agent-fabric) x\nmodel: opus\neffort: low\n---\n\nx\n")
+        code, out = run_lint(fabric)
+        assert code != 0 and "worker.md" in out, \
+            f"the locale worker is outside the one-writer rule:\n{out}"
+
+
 def main() -> int:
     cases = [
         case_clean_base_passes,
+        case_a_committed_agent_source_may_not_pin_effort,
         case_index_description_drift_is_caught,
         case_a_sibling_working_copy_is_linted_unasked,
         case_index_lists_domain_slices,

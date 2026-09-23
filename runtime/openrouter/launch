@@ -86,9 +86,13 @@
 #     ~/.claude/settings.local.json, $CLAUDE_CONFIG_DIR/settings.json, the
 #     launch working copy's and $PWD's .claude/settings{,.local}.json)
 #     carrying a model pin — env.ANTHROPIC_*, env.CLAUDE_CODE_SUBAGENT_MODEL,
-#     modelOverrides — or CLAUDE_CODE_SUBAGENT_MODEL in the caller's
-#     environment (a settings-scope pin outranks the profile's exports;
-#     the subagent variable overrides every dispatch's model)
+#     modelOverrides — or an EFFORT pin: effortLevel, maxEffortLevel,
+#     modelSettings, env.CLAUDE_CODE_EFFORT_LEVEL; or
+#     CLAUDE_CODE_SUBAGENT_MODEL or CLAUDE_CODE_EFFORT_LEVEL (set to
+#     anything, the empty string included) in the caller's environment
+#     (a settings-scope pin outranks the profile's exports; the subagent
+#     variable overrides every dispatch's model, and the effort variable
+#     outranks every agent file's effort: in every subagent at once)
 #   - a merged model that is not a model id (a local override of null, a
 #     number, "" or prose)
 #   - ori not authenticated, or authenticated from anything but the
@@ -259,8 +263,31 @@ except Exception:
 bad = []
 env = d.get("env") or {}
 if isinstance(env, dict):
-    bad += sorted("env." + k for k in env if k.startswith("ANTHROPIC_") or k == "CLAUDE_CODE_SUBAGENT_MODEL")
+    # env.CLAUDE_CODE_EFFORT_LEVEL is merged into the CHILD by the harness,
+    # so a settings scope carrying it walks straight past the process-env
+    # refusal below — the scan and that refusal have to name the same
+    # variables or neither is a fence (review of 2026-09-23, F1).
+    bad += sorted("env." + k for k in env
+                  if k.startswith("ANTHROPIC_")
+                  or k in ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+                           "CLAUDE_CODE_EFFORT_LEVEL"))
 if "modelOverrides" in d: bad.append("modelOverrides")
+# Only `maxEffortLevel` here, and NOT effortLevel/modelSettings, which the
+# committed-scope guard still refuses. Two reasons, both measured:
+#   - precedence. `--effort` (turnEffort) is resolved BEFORE the configured
+#     level that effortLevel and modelSettings feed, so the launcher's own
+#     flag already outranks them. maxEffortLevel is different in kind: it
+#     is a CAP, and the LOWEST value across all scopes wins, so nothing the
+#     launcher passes can raise it back.
+#   - the harness writes modelSettings itself. `/effort` persists
+#     `modelSettings.<model>.effortLevel` into ~/.claude/settings.json
+#     ("saved as your default for new sessions"), so refusing it here would
+#     stop a launch on every account that has ever used the command — found
+#     when this fence refused its own author's account.
+# A COMMITTED scope is different: nothing should pin anything there and no
+# harness writes to it, so all four stay refused in
+# policies/check_repo_settings_carry_no_model_pins.sh.
+bad += [k for k in ("maxEffortLevel",) if k in d]
 print(" ".join(bad))
 PY
 )"
@@ -270,6 +297,18 @@ done
     die "CLAUDE_CODE_SUBAGENT_MODEL is set in the environment; it overrides every subagent's model regardless of the review gate. Unset it."
 [[ -z "${CLAUDE_CODE_SUBAGENT_MODEL_FORCE:-}" ]] ||
     die "CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set; it discards every dispatch's own model. Unset it."
+# Same bug class as the two above, for the other routed dimension. Read
+# out of 2.1.280: this variable outranks --effort, /effort AND an agent
+# file's effort:, and process environment reaches every subagent — so one
+# value here flattens every per-class level the fabric writes. `unset` and
+# `auto` are not neutral: both mean "ignore the configured level and use
+# the model's own default", which defeats the routing just as thoroughly
+# (docs/live-checks/2026-09-23-effort-registry.md).
+# `+x`, not `:-`: an EXPORTED-but-empty value is still set, and the
+# harness reads the variable rather than testing it for emptiness. "For
+# any value" has to include the empty one (review of 2026-09-23).
+[[ -z "${CLAUDE_CODE_EFFORT_LEVEL+x}" ]] ||
+    die "CLAUDE_CODE_EFFORT_LEVEL is set to '${CLAUDE_CODE_EFFORT_LEVEL}'; it outranks every per-class effort the fabric writes, in every subagent. Unset it (routing/effort.json is where a level is decided)."
 
 # ── resolve ─────────────────────────────────────────────────────────
 RESOLVED="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 - "$ROUTING" "$ALIASES" "$LOCAL_OVERRIDE" "$ROLE" "$AGENT" "$PROVIDER" <<'PY'
@@ -374,6 +413,31 @@ for arg in "$@"; do
     if [[ "$arg" == --model=* ]]; then EFFECTIVE_SESSION="${arg#--model=}"; CALLER_MODEL=1; fi
     prev="$arg"
 done
+# The same trailing-flag hole --effort had, and older: `launch --model`
+# with no value appended the launcher's too.
+[[ "$prev" == "--model" ]] && CALLER_MODEL=1
+# The session's own effort, beside its model: routing/effort.json names a
+# level or a class whose level to take, and the adapter has already
+# clamped it to what this model admits. The caller's own --effort wins and
+# is stamped instead, exactly as --model is — the stamp must never
+# disagree with what the child applies. Empty when the session's model
+# expresses no effort; then no flag is passed and nothing is stamped,
+# because a level the model cannot take is not a decision to record.
+SESSION_EFFORT="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" session-effort --me --provider "$PROVIDER" 2>/dev/null || true)"
+CALLER_EFFORT=0
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--effort" ]]; then SESSION_EFFORT="$arg"; CALLER_EFFORT=1; fi
+    if [[ "$arg" == --effort=* ]]; then SESSION_EFFORT="${arg#--effort=}"; CALLER_EFFORT=1; fi
+    prev="$arg"
+done
+# A TRAILING `--effort` with no value never entered the loop body as a
+# `prev`, so the launcher appended its own and the child saw
+# `--effort --effort <level>` — claude would read "--effort" as the level.
+# The caller meant to pass one; let their (malformed) flag stand and let
+# claude report it, rather than adding a second.
+[[ "$prev" == "--effort" ]] && CALLER_EFFORT=1 && SESSION_EFFORT=""
+[[ -z "$SESSION_EFFORT" ]] || export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
 export AGENT_FABRIC_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
 export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"
 export AGENT_FABRIC_LAUNCH_AGENT="$AGENT"
@@ -446,9 +510,26 @@ if (( PRINT_ONLY )); then
     [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
     echo "  (from the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer; bin/fabric-model list --provider $PROVIDER shows every choice with its source)"
     [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
-    python3 - "$RESOLVED" <<'PY'
-import json, sys
+    if [[ -n "$SESSION_EFFORT" ]]; then
+        echo "  effort  : $SESSION_EFFORT$( (( CALLER_EFFORT )) && echo "  (--effort on the command line)" || echo "  (routing/effort.json)")"
+    else
+        # Never "the model expresses none" without knowing that: a caller's
+        # valueless --effort empties this too (re-review, N4).
+        if (( CALLER_EFFORT )); then
+            echo "  effort  : -  (--effort on the command line carries no value; none is added)"
+        else
+            echo "  effort  : -  (this session's model expresses none; no --effort is passed)"
+        fi
+    fi
+    # `|| exit 1`: the script runs without `set -e`, so this block can die
+    # on its first class, print a traceback to stderr, and leave --print
+    # exiting 0 with the bash-echoed lines around it intact — measured.
+    # A --print missing half its profile must fail, not look successful.
+    python3 - "$RESOLVED" "$ROUTING" <<'PY' || exit 1
+import importlib.util, json, sys
 d = json.loads(sys.argv[1])
+spec = importlib.util.spec_from_file_location("fabric_routing", sys.argv[2])
+routing = importlib.util.module_from_spec(spec); spec.loader.exec_module(routing)
 for klass, res in d["classes"].items():
     if res["via"] == "harness":
         how = "(harness default for its tier)"
@@ -456,10 +537,15 @@ for klass, res in d["classes"].items():
         how = "(pinned in the agent file; the dispatch guard applies it; from %s)" % res["source"]
     else:
         how = "(exported for its tier; from %s)" % res["source"]
+    # Effort is routed beside the model (routing/effort.json), so it is
+    # printed beside it: `asked -> served` whenever they differ, because
+    # a downgrade nobody can see is the defect the dimension exists for.
+    eff = routing.effort_phrase(res.get("effort"))
+    eff = "  " + eff if eff else ""
     if d.get("provider") == "anthropic":
-        print("  %-12s: %s  %s" % (klass, res["model"], how))
+        print("  %-12s: %s  %s%s" % (klass, res["model"], how, eff))
     else:
-        print("  %-12s: %s  shim %s  => %s  %s" % (klass, res["model"], res["shim"] or "-", res["composite"], how))
+        print("  %-12s: %s  shim %s  => %s  %s%s" % (klass, res["model"], res["shim"] or "-", res["composite"], how, eff))
 print()
 for k, v in sorted(d["exports"].items()):
     print("  export %s=%s" % (k, v))
@@ -514,6 +600,7 @@ CMD=()
 [[ "$PROVIDER" == anthropic ]] || CMD+=(ori)
 CMD+=(claude)
 (( CALLER_MODEL )) || CMD+=(--model "$SESSION")
+(( CALLER_EFFORT )) || [[ -z "$SESSION_EFFORT" ]] || CMD+=(--effort "$SESSION_EFFORT")
 # A language-culture login whose locale the fabric authored a search for
 # (identities/roles/language-culture/locale/<suffix>/locale.json, served
 # by runtime/mcp/websearch-locale) searches through that alone: the

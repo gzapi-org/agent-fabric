@@ -152,15 +152,53 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     assert got["session"] == "deepseek/deepseek-v4-pro-0813" and "@preset" not in json.dumps(got), "the shim is derived, never seeded"
     assert got["capabilities"] == {"code-low": "z-ai/glm-5.3-flash", "code-medium": "z-ai/glm-5.2", "code-high": "deepseek/deepseek-v4-pro-0813",
                                    "code-plan": "deepseek/deepseek-v4-pro-0813", "code-review": "deepseek/deepseek-v4-pro-0813"}, got
+    # The INTENT, not the level today's model happens to admit: on this
+    # column code-medium asks `medium` and GLM 5.2 remaps it up to `high`,
+    # so the two differ and seeding the wrong one is visible here (it was
+    # not on anthropic, where intent == served for every class).
+    assert got["effort"]["code-medium"] == "medium", got["effort"]
+    # code-plan carries a committed acknowledgement for this column. That
+    # is a compensation for one (provider, model) pair, not this agent's
+    # choice, and freezing it into a layer that now outranks it would
+    # outlive the model it was written for.
+    assert "code-plan" not in got["effort"], got["effort"]
     assert "anthropic" not in f.read()["providers"], "only the provider asked for"
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr
     got = f.read()["providers"]["anthropic"]
+    # Effort is seeded with the model, because it is the same kind of
+    # choice — but as the INTENT `seed` would freeze, never the level a
+    # model happens to serve. code-low is absent by design: haiku
+    # expresses no effort, and a seeded level there would be a decision
+    # the model cannot carry out.
     assert got == {"session": "claude-opus-5", "capabilities": {
         "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
-        "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"}}, got
+        "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},
+        "effort": {"code-medium": "medium", "code-high": "high",
+                   "code-plan": "xhigh", "code-review": "high"}}, got
     j = json.loads(f.run("list", "--json").stdout)
     assert j["providers"]["openrouter"]["code-low"]["source"] == "local", "a seeded value is now the agent's own"
+
+
+def test_effort_is_a_target_that_layers_like_a_model(f: Fixture) -> None:
+    """The owner's decision: effort layers exactly as a model id does, so
+    `<class>-effort` is settable, unsettable and prunes the same way."""
+    p = f.run("set", "--provider", "anthropic", "code-high-effort", "max")
+    assert p.returncode == 0, p.stderr
+    assert f.read()["providers"]["anthropic"]["effort"] == {"code-high": "max"}, f.read()
+    j = json.loads(f.run("list", "--provider", "anthropic", "--json").stdout)
+    row = j["providers"]["anthropic"]["code-high-effort"]
+    assert row["model"] == "max" and row["source"] == "local", row
+    # A model whose class expresses no effort still has no level to set on.
+    out = f.run("list", "--provider", "anthropic").stdout
+    assert "code-low-effort" in out and "expresses none" in out, out
+    p = f.run("unset", "--provider", "anthropic", "code-high-effort")
+    assert p.returncode == 0, p.stderr
+    # It was the only choice in the file, so pruning takes the whole way
+    # back out: no effort map, no anthropic layer, no providers at all.
+    assert "providers" not in f.read(), f"nothing was pruned: {f.read()}"
+    p = f.run("set", "--provider", "anthropic", "code-high-effort", "not-a-level")
+    assert p.returncode != 0, "a value outside the vocabulary was accepted"
 
 
 def main() -> int:
@@ -173,6 +211,7 @@ def main() -> int:
         test_a_flat_local_file_is_migrated_on_first_write,
         test_a_malformed_local_file_is_refused_not_rewritten,
         test_seed_copies_the_merged_defaults_as_pins,
+        test_effort_is_a_target_that_layers_like_a_model,
     ]
     failures = 0
     for case in cases:

@@ -63,6 +63,70 @@ run_install >/dev/null; [[ -f "$DEST" ]] || bad "precondition: installed"
 rm -rf "$FABRIC/identities/roles/language-culture/locale/$SUFFIX"; mkdir -p "$FABRIC/identities/roles/language-culture/locale/xx"; cp "$WORKER" "$FABRIC/identities/roles/language-culture/locale/xx/worker.md" 2>/dev/null || printf -- '---\nname: locale-worker\ndescription: (agent-fabric)\nmodel: opus\ntools:\n---\nx\n' > "$FABRIC/identities/roles/language-culture/locale/xx/worker.md"
 out="$(run_install)"; [[ ! -e "$DEST" ]] && grep -q "no worker authored for locale $SUFFIX" <<<"$out" && ok "removed and the reason names the locale" || bad "wrong-locale removal" "$out"
 
+echo "the class files carry the effort routing resolves, and only where a model expresses one"
+bind backend-dev; rm -rf "$HOME/.claude/agents"; run_install >/dev/null
+A="$HOME/.claude/agents"
+for klass in code-low code-medium code-high code-plan code-review; do
+    want="$(AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" python3 "$FABRIC/tools/fabric/routing.py" efforts --me --provider anthropic | awk -v k="$klass" '$1==k {print $2}')"
+    got="$(sed -n 's/^effort: //p' "$A/$klass.md")"
+    if [[ "$want" == "-" ]]; then
+        [[ -z "$got" ]] && ok "$klass: the model expresses no effort, so no effort: line at all" || bad "$klass got effort: $got where none is expressible"
+    else
+        [[ "$got" == "$want" ]] && ok "$klass: effort: $want, as routing resolves it" || bad "$klass effort: wanted $want, got '${got:-none}'"
+    fi
+done
+grep -q "^effort:" "$FABRIC/runtime/claude-code/agents/code-high.md" && bad "the committed source carries a hand-written effort:" || ok "the committed sources carry none: the installer is the only writer"
+out="$(run_install)"; grep -q "0 written, 5 already current" <<<"$out" && ok "a second run rewrites nothing" || bad "not idempotent" "$out"
+
+echo "the pre-fabric backup is taken once, not on every run"
+rm -rf "$HOME/.claude/agents"; mkdir -p "$A"
+printf -- '---
+name: code-high
+model: sonnet
+---
+
+the user own file.
+' > "$A/code-high.md"
+run_install >/dev/null
+grep -q "the user own file" "$A/code-high.md.before-agent-fabric" && ok "a file the fabric did not write is kept aside" || bad "the original was not kept"
+printf -- '---
+name: code-high
+model: opus
+effort: max
+---
+
+fabric.
+' > "$A/code-high.md"
+run_install >/dev/null
+grep -q "the user own file" "$A/code-high.md.before-agent-fabric" && ok "…and a later run never overwrites it with the fabric's own previous file" || bad "the backup was clobbered by a second run" "$(cat "$A/code-high.md.before-agent-fabric")"
+
+echo "a routing failure refuses the whole run rather than writing files with no routing"
+bind backend-dev; rm -rf "$HOME/.claude/agents"
+printf '{"providers":{"anthropic":{"effort":{"code-high":"not-a-level"}}}}\n' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run_install)"; rc=$?
+[[ $rc -ne 0 ]] && ok "a local layer routing.py refuses fails the installer" || bad "exit 0 with no routing" "$out"
+grep -q "refusing to write agent files with no routing" <<<"$out" && ok "…and says so, naming the subcommand" || bad "failure not named" "$out"
+[[ ! -e "$HOME/.claude/agents/code-high.md" ]] && ok "…and wrote nothing" || bad "wrote a file with an empty routing map"
+# EACH call is guarded, not just the first. Every data-shaped break fails
+# `pins` before `efforts` is reached (resolve() loads effort.json too), so
+# the second guard is proved by failing that ONE subcommand: the fixture's
+# own copy of routing.py is made to exit non-zero for `efforts` alone.
+rm -f "$STATE/agents/$LOGIN/model-profile.local.json"
+cp "$FABRIC/tools/fabric/routing.py" "$SANDBOX/routing.py.bak"
+# A STUB in front of the real module, not an edit to it: routing.py opens
+# with `from __future__`, which must be the first statement, so there is
+# nowhere at the top to inject a check.
+cp "$SANDBOX/routing.py.bak" "$FABRIC/tools/fabric/routing.real.py"
+cat > "$FABRIC/tools/fabric/routing.py" <<'STUB'
+import os, runpy, sys
+if "efforts" in sys.argv:
+    sys.exit(3)
+runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "routing.real.py"), run_name="__main__")
+STUB
+out="$(run_install)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "routing.py efforts failed" <<<"$out" && ok "a failure of efforts alone is caught too, and named" || bad "the efforts guard is unreachable" "$out"
+cp "$SANDBOX/routing.py.bak" "$FABRIC/tools/fabric/routing.py"; rm -f "$FABRIC/tools/fabric/routing.real.py"
+
 echo "a worker file the fabric did not write is left alone"
 bind backend-dev
 mkdir -p "$HOME/.claude/agents"; printf -- '---\nname: locale-worker\ndescription: my own\n---\nmine\n' > "$DEST"

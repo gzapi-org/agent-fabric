@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -15,12 +16,15 @@ import { scratch } from '../../../tests/scratch.mjs';
 import { DEFAULT_LOCALE, DEFAULT_PATH, defaultDictionary, dictionary, dictionaryPath,
          fill, localeReminder, localeTag, printer, suffix } from '../scripts/i18n.mjs';
 import { checkKeywords, render } from '../scripts/inbox.mjs';
-import { validate } from '../scripts/gzmsg.mjs';
+import { validate, whoami } from '../scripts/gzmsg.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const FABRIC = fileURLToPath(new URL('../../../', import.meta.url));
 // The key shape is the schema's, read — not a third copy of the rule
 // (blind review F6 on PR #28).
+// A tool may print a diagnostic before the line under test — the
+// pinned-locale notice does, on a login that has a dictionary.
+const lastLine = (text) => text.trim().split('\n').pop();
 const SLUG = new RegExp(JSON.parse(
   fs.readFileSync(fileURLToPath(new URL('../i18n/i18n.schema.json', import.meta.url)), 'utf8')
 ).propertyNames.pattern);
@@ -76,17 +80,17 @@ const active = (body, { tag = 'ka-GE', locale = { tag } } = {}) => {
 
 test('a login with no active dictionary reads the default locale', () => {
   const root = scratch('locale-');
-  assert.equal(dictionaryPath({ agent: 'user', role: 'fabric-coordinator' }, root), null);
-  assert.equal(dictionaryPath({ agent: 'language-culture-ge' }, root), null, 'no role bound');
+  assert.equal(dictionaryPath({ agent: 'user', role: 'fabric-coordinator' }, root, {}), null);
+  assert.equal(dictionaryPath({ agent: 'language-culture-ge' }, root, {}), null, 'no role bound');
   const { root: r1, me } = active(null);
-  assert.equal(dictionaryPath(me, r1), null, 'a tag with no dictionary file');
+  assert.equal(dictionaryPath(me, r1, {}), null, 'a tag with no dictionary file');
   const { root: r2 } = active('{}', { locale: null });
-  assert.equal(dictionaryPath({ agent: 'language-culture-ge', role: 'language-culture' }, r2), null, 'no tag');
+  assert.equal(dictionaryPath({ agent: 'language-culture-ge', role: 'language-culture' }, r2, {}), null, 'no tag');
 });
 
 test('an active locale is found by its tag', () => {
   const { root, dir, me } = active('{}');
-  assert.equal(dictionaryPath(me, root), path.join(dir, 'ka-GE.json'));
+  assert.equal(dictionaryPath(me, root, {}), path.join(dir, 'ka-GE.json'));
 });
 
 test('an active locale covers the keys it carries; the default stands for the rest', () => {
@@ -95,7 +99,7 @@ test('an active locale covers the keys it carries; the default stands for the re
     'inbox.head': '',                     // not a localization value
     'nothing.like-this': 'invented',      // not a key of the default
   }));
-  const dict = dictionary(me, { root }), en = defaultDictionary();
+  const dict = dictionary(me, { root, env: {} }), en = defaultDictionary();
   assert.equal(dict['inbox.others-header'], 'ᲗᲐᲠᲒᲛᲐᲜᲘ (SPEC §17):');
   assert.equal(dict['inbox.head'], en['inbox.head'], 'an empty value is not a translation');
   assert.equal(dict['delivery.title'], en['delivery.title'], 'a key it lacks falls back, never invented');
@@ -104,7 +108,7 @@ test('an active locale covers the keys it carries; the default stands for the re
 
 test('an unreadable dictionary leaves the default standing — a session start never fails on it', () => {
   const { root, me } = active('{ this is not json');
-  assert.deepEqual(dictionary(me, { root }), defaultDictionary());
+  assert.deepEqual(dictionary(me, { root, env: {} }), defaultDictionary());
 });
 
 test('a placeholder the caller did not supply is left standing, not blanked', () => {
@@ -131,7 +135,7 @@ test('the locale reaches the fabric\'s own lines and stops at the wire', () => {
     'inbox.head': 'ᲨᲔᲛᲝᲡᲣᲚᲘ {who}: {mine} / {others}, {channel}',
     'inbox.others-header': 'ᲐᲠ ᲐᲠᲘᲡ ᲨᲔᲜᲗᲕᲘᲡ (SPEC §17):',
   }));
-  const out = render(fixture(), ME, 'gzapp:gzcoord', undefined, { t: printer(dictionary(me, { root })) });
+  const out = render(fixture(), ME, 'gzapp:gzcoord', undefined, { t: printer(dictionary(me, { root, env: {} })) });
   assert.match(out, /^ᲨᲔᲛᲝᲡᲣᲚᲘ h\/me \(language-culture\): 1 \/ 1, gzapp:gzcoord$/m);
   assert.match(out, /^ᲐᲠ ᲐᲠᲘᲡ ᲨᲔᲜᲗᲕᲘᲡ \(SPEC §17\):$/m);
   // The wire, untouched: the sender's body, the metadata keys, the type,
@@ -145,26 +149,26 @@ test('the locale reaches the fabric\'s own lines and stops at the wire', () => {
 test('the locale\'s standing reminder rides the head line, and only it', () => {
   const { root, me } = active(JSON.stringify({ 'inbox.head': 'ᲨᲔᲛᲝᲡᲣᲚᲘ {who}, {channel}' }),
                               { locale: { tag: 'ka-GE', reminder: ' - ᲘᲤᲘᲥᲠᲔ' } });
-  const reminder = localeReminder(me, root);
+  const reminder = localeReminder(me, root, {});
   assert.equal(reminder, ' - ᲘᲤᲘᲥᲠᲔ');
   const out = render(fixture(), ME, 'gzapp:gzcoord', undefined,
-                     { t: printer(dictionary(me, { root })), reminder });
+                     { t: printer(dictionary(me, { root, env: {} })), reminder });
   assert.match(out, /^ᲨᲔᲛᲝᲡᲣᲚᲘ h\/me \(language-culture\), gzapp:gzcoord - ᲘᲤᲘᲥᲠᲔ$/m);
   assert.equal(out.split('\n').filter(l => l.includes('ᲘᲤᲘᲥᲠᲔ')).length, 1, 'the head line and no other');
 });
 
 test('no locale, no reminder: nothing is appended for a default-locale login', () => {
   const root = scratch('locale-');
-  assert.equal(localeReminder({ agent: 'user', role: 'fabric-coordinator' }, root), '');
-  assert.equal(localeReminder({ agent: 'language-culture-ge' }, root), '', 'no role bound');
+  assert.equal(localeReminder({ agent: 'user', role: 'fabric-coordinator' }, root, {}), '');
+  assert.equal(localeReminder({ agent: 'language-culture-ge' }, root, {}), '', 'no role bound');
   const { root: r } = active('{}', { locale: { tag: 'ka-GE' } });
-  assert.equal(localeReminder({ agent: 'language-culture-ge', role: 'language-culture' }, r), '',
+  assert.equal(localeReminder({ agent: 'language-culture-ge', role: 'language-culture' }, r, {}), '',
                'a locale that declares none');
 });
 
 test('the reminder each real locale carries is the owner\'s, in that locale', () => {
   const root = FABRIC;
-  const of = s => localeReminder({ agent: `language-culture-${s}`, role: 'language-culture' }, root);
+  const of = s => localeReminder({ agent: `language-culture-${s}`, role: 'language-culture' }, root, {});
   for (const s of ['ge', 'ru']) {
     assert.notEqual(of(s), '', `${s} carries one`);
     assert.match(of(s), /^ - /, `${s} appends to the head line`);
@@ -210,7 +214,7 @@ for (const [what, contents] of [['unparsable', '{ not json'], ['absent', null]])
 test('--replay with no value is a usage line and exit 1', () => {
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'inbox.mjs'), '--replay'], { encoding: 'utf8' });
   assert.equal(r.status, 1, r.stderr);
-  assert.equal(r.stderr.trim(), defaultDictionary()['replay.usage']);
+  assert.equal(lastLine(r.stderr), defaultDictionary()['replay.usage']);
 });
 
 test('a keyword refusal reads in the login\'s own language', () => {
@@ -227,7 +231,7 @@ test('a validator diagnostic reaches a locale reader whole, not just its prefix'
     'validate.missing': 'ᲐᲙᲚᲘᲐ {key}',
     'validate.no-addressing': 'ᲐᲠᲐᲕᲘᲡᲗᲕᲘᲡ: TO, TO-ROLE ᲐᲜ BROADCAST: true',
   }));
-  const t = printer(dictionary(me, { root }));
+  const t = printer(dictionary(me, { root, env: {} }));
   // FROM is malformed on purpose: validate.from-shape is a key this
   // locale does NOT carry, so the same call proves both halves at once.
   const v = validate('[GZCOORD/1] INFO\nFROM: not-an-address\nROLE: backend-dev\nPROJECT: gzapp\n', { t, maxColumns: 0 });
@@ -255,6 +259,75 @@ test('the default locale still produces the validator\'s English, byte for byte'
   assert.ok(v.errors.includes('missing MESSAGE-ID'), v.errors.join(' | '));
   assert.ok(v.errors.includes('missing TO, TO-ROLE or BROADCAST: true'), v.errors.join(' | '));
   assert.deepEqual(validate('nonsense').errors, ['invalid GZCOORD/1 first line']);
+});
+
+// Nothing exercised the tools AS a login that has a dictionary — every
+// case either had no locale or called render()/validate() with a printer
+// built by hand. So the suite asserted English and was green on a login
+// with no locale directory and red on every holder's, which is how the
+// first real dictionary found it (the ru holder, agent-fabric#29).
+//
+// The fixture owns the IDENTITY as well as the dictionary. Taking the
+// role from the running login's binding was the first attempt and simply
+// inverted the dependency: CI's login has no binding, so `role` is unset,
+// `dictionaryPath` refuses before it ever looks for a tag, and the case
+// went red exactly where the old one was green (blind review F1 on
+// PR #30, confirmed by this PR's own CI).
+const ROLE = 'language-culture';
+const liveLocale = (values) => {
+  // The LOGIN is whatever is running the suite — os.userInfo() reads the
+  // uid's passwd entry and no environment variable can dress it up — so
+  // the fixture supplies the one thing that varies and must not: the
+  // BINDING, and with it the role. A scratch root carries no
+  // identity.py, so whoami() falls back to the login plus this binding.
+  const agent = os.userInfo().username;
+  const root = scratch('live-locale-');
+  const state = scratch('live-state-');
+  fs.mkdirSync(path.join(state, 'agents', agent), { recursive: true });
+  fs.writeFileSync(path.join(state, 'agents', agent, 'binding.json'),
+                   JSON.stringify({ role: ROLE, project: 'agent-fabric' }));
+  const dir = path.join(root, 'identities', 'roles', ROLE, 'locale', suffix(agent));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'locale.json'), JSON.stringify({ tag: 'xx-XX', reminder: ' - ᲛᲘᲜᲘᲨᲜᲔᲑᲐ' }));
+  const en = defaultDictionary();
+  fs.writeFileSync(path.join(dir, 'xx-XX.json'),
+                   JSON.stringify(Object.fromEntries(Object.keys(en).map(k => [k, values[k] ?? `ᲗᲐᲠᲒᲛᲐᲜᲘ ${en[k]}`]))));
+  const env = { ...process.env, AGENT_FABRIC_ROOT: root, AGENT_FABRIC_STATE_DIR: state };
+  return { root, me: { agent, role: ROLE }, env };
+};
+
+const USAGE_KA = 'ᲒᲐᲛᲝᲧᲔᲜᲔᲑᲐ: inbox.mjs --replay <seq|message-id>';
+
+test('the tools run as a login that HAS a dictionary, and print it', () => {
+  const { env } = liveLocale({ 'replay.usage': USAGE_KA });
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'inbox.mjs'), '--replay'],
+                      { env: { ...env, GZCOORD_DEFAULT_LOCALE_ONLY: '' }, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(lastLine(r.stderr), USAGE_KA);
+});
+
+test('and the same run pinned to the default locale prints English, whoever runs it', () => {
+  const { env } = liveLocale({ 'replay.usage': USAGE_KA });
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'inbox.mjs'), '--replay'],
+                      { env: { ...env, GZCOORD_DEFAULT_LOCALE_ONLY: '1' }, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stderr);
+  // The English line, and the notice that a configured locale was pinned
+  // away — silence there is what the switch's threat model asks about.
+  assert.match(r.stderr, new RegExp(`^${defaultDictionary()['replay.usage'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.match(r.stderr, /GZCOORD_DEFAULT_LOCALE_ONLY=1 — printing the default locale, not /);
+  assert.ok(!r.stderr.includes(USAGE_KA), r.stderr);
+});
+
+test('the switch silences the standing reminder too, and only for exactly 1', () => {
+  const { root, me } = liveLocale({});
+  assert.equal(localeReminder(me, root, {}), ' - ᲛᲘᲜᲘᲨᲜᲔᲑᲐ');
+  assert.equal(localeReminder(me, root, { GZCOORD_DEFAULT_LOCALE_ONLY: '1' }), '');
+  assert.equal(dictionaryPath(me, root, { GZCOORD_DEFAULT_LOCALE_ONLY: '1' }), null);
+  // A value that reads as "no" must not pin.
+  for (const off of ['0', 'false', 'no', 'off', '']) {
+    assert.equal(localeReminder(me, root, { GZCOORD_DEFAULT_LOCALE_ONLY: off }), ' - ᲛᲘᲜᲘᲨᲜᲔᲑᲐ', off);
+    assert.ok(dictionaryPath(me, root, { GZCOORD_DEFAULT_LOCALE_ONLY: off }), off);
+  }
 });
 
 test('a default-locale login renders exactly what it rendered before a dictionary existed', () => {

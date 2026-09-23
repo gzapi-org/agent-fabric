@@ -33,11 +33,14 @@ found=0
 # count stopped at the newline (review on PR #679, judged CONFIRMED).
 while IFS= read -r -d '' kv; do
     k="${kv%%=*}"; v="${kv#*=}"
-    [[ "$k" == ANTHROPIC_* || "$k" == CLAUDE_CODE_SUBAGENT_MODEL ]] || continue
+    # CLAUDE_CODE_EFFORT_LEVEL decides the OTHER routed dimension and
+    # outranks every agent file, so an audit that cannot see it reports a
+    # session it does not fully describe (review of 2026-09-23, F1).
+    [[ "$k" == ANTHROPIC_* || "$k" == CLAUDE_CODE_SUBAGENT_MODEL || "$k" == CLAUDE_CODE_EFFORT_LEVEL ]] || continue
     [[ -n "$v" ]] || continue
     found=1
     case "$k" in
-        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_FABLE_MODEL|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)
+        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_FABLE_MODEL|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|CLAUDE_CODE_SUBAGENT_MODEL|CLAUDE_CODE_EFFORT_LEVEL)
             say "  $k = $v" ;;
         ANTHROPIC_BASE_URL)
             # scheme://host[:port] only, PARSED, failing closed: a base URL can

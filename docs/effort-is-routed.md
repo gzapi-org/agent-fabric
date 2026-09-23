@@ -100,17 +100,22 @@ guard refuses `effortLevel`, `maxEffortLevel` and `modelSettings` for the
 same reason — and `maxEffortLevel` especially, because the *lowest* value
 across scopes wins, so a committed cap cannot be raised back by a launch.
 
-## What you cannot see, and what follows
+## What you can see, and where
 
-A subagent's applied effort is **not observable**: it is in neither the
-subagent's environment nor its transcript (measured, `2026-09-23-effort-registry.md`).
-There is no after-the-fact check on a per-class level.
+A subagent's effort is **recorded in its own transcript**: every entry of
+`~/.claude/projects/<cwd>/<session>/subagents/agent-<id>.jsonl` carries an
+`"effort"` field with the level that subagent resolved to — absent for a
+model with no effort capability. Measured with the channel isolated: a
+`code-medium` dispatch whose agent file says `medium`, from a session
+running at `high`, recorded `medium` (`2026-09-23-effort-registry.md`).
+So the per-class level is checkable after the fact, per dispatch.
 
-That is an argument for the design rather than against it. Because
-nothing can verify the level afterwards, being right before the request
-leaves is the entire guarantee — which is what the fabric-side clamp and
-the refusal-until-written-down are for. It also means a drift hook
-comparing asked with applied cannot be built as the plan imagined; the
-session's level is the one thing that *can* be read back
-(`CLAUDE_EFFORT`), and `bin/fabric-status` reports it against the
-launcher's stamp.
+It is not in the subagent's *environment*: `CLAUDE_EFFORT` is exported to
+the session's tools only, and `bin/fabric-status` reports that one against
+the launcher's stamp.
+
+An earlier version of this note said the opposite, from one control
+dispatch on Haiku — the one model with no effort to record. The clamp and
+the refusal-until-written-down still matter, but as the first line of
+defence rather than the only one: a drift check comparing the asked level
+with the recorded one can now be built.

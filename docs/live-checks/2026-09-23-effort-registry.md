@@ -109,28 +109,40 @@ give it. That is the dimension doing its job — a level chosen rather
 than inherited — but it is a real reduction, so it is written into
 `routing/effort.json` as a note rather than left to be discovered.
 
-## Control: a subagent has no effort read-back at all
+## Control: where a subagent's effort can and cannot be read
 
-`CLAUDE_EFFORT` is exported into the **session's** tool environment
-(`bin/fabric-status` reads it and reports `confirmed` or a drift line).
-It is not exported into a subagent's. Measured: a `code-low` dispatch
-asked to print every matching variable returned the four
-`ANTHROPIC_DEFAULT_*` pins and nothing else. The subagent's JSONL
-transcript does not record an applied effort either — the only matches in
-it are prose in tool descriptions.
+**Corrected the same day.** This section first said a subagent's effort
+is observable nowhere. That was drawn from one control dispatch, on
+`code-low` — Haiku 4.5, the one pinned model with **no** effort capability,
+so the one sample that could not show the field. It was wrong.
 
-So a subagent's effort is **not observable after the fact**, by the
-parent or by itself. Two consequences:
+Measured properly, three dispatches' JSONL transcripts
+(`~/.claude/projects/<cwd>/<session>/subagents/agent-<id>.jsonl`):
 
-- The plan's step 5, a `SubagentStop` drift hook comparing asked with
-  applied, has nothing to read. It is not merely later work; as
-  specified it cannot be built, and that step should be reopened rather
-  than scheduled.
-- Because there is no after-the-fact check, being right *before* the
-  request leaves is the whole guarantee. That is the argument for the
-  fabric-side clamp and for `check()` refusing an unacknowledged
-  downgrade, and it is stronger than it looked when the plan was
-  written.
+```
+code-low     haiku-4-5    file: no effort: line   transcript: no "effort" field at all
+code-review  opus-5       file: effort: high      transcript: "effort": "high" on every entry
+code-medium  sonnet-5     file: effort: medium    transcript: "effort": "medium"
+                          parent session running at high (CLAUDE_EFFORT=high)
+```
+
+The last row isolates the channel: the agent file said `medium`, the
+session that dispatched it ran at `high`, and the subagent recorded
+`medium`. So an agent file's `effort:` reaches the subagent **and
+overrides the session's level**, and the transcript is its read-back.
+That is the plan's check A, done end to end.
+
+What stays true: `CLAUDE_EFFORT` is exported to the **session's** tools
+only — a subagent's environment carries the four `ANTHROPIC_DEFAULT_*`
+pins and nothing about effort.
+
+Consequences, replacing the ones first written here:
+
+- The plan's step 5, a drift check comparing asked with applied, **can**
+  be built: the applied level is in the transcript. It is later work, not
+  impossible work.
+- The fabric-side clamp and `check()`'s refusal are the first line of
+  defence, not the only one.
 
 The `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5` the subagent reported is
 this session's launch-time export, not the `claude-opus-5-5` now in the
@@ -211,13 +223,16 @@ indistinguishable from the effort being ignored.
 
 ## What is not established here
 
-- That an agent file's `effort:` changes the served level. The chain
-  above says it enters at the `configured` slot, and the frontmatter
-  schema accepts the field (`effort` is optional and loosely typed —
-  `xhigh` passes it, despite the describe text listing only
-  `low, medium, high, max, or an integer`). But with no read-back inside
-  a subagent, this was not measured end to end. Nothing is delivered yet
-  on the strength of it.
+- That a level the model does not admit is recorded after the harness's
+  own clamp or before it. Every measured dispatch asked a level its model
+  admits, so the recorded value and the asked one could not differ. The
+  agent frontmatter field is a **strict enum**, not loosely typed:
+  `effort: Fe([V(["low","medium","high","xhigh","max"]), int])`, and the
+  loader rejects anything else ("has invalid effort '…'. Valid options:
+  low, medium, high, xhigh, max or an integer"). The looser text quoted
+  here at first — `low, medium, high, max, or an integer` — is the
+  skill/command `effort` field's, a different field. Corrected after the
+  blind review of #31 read it out of 2.1.280; verified the same way.
 - Anything about the broker path. OpenRouter's translation of
   `output_config.effort` for GLM and DeepSeek is still unmeasured;
   `routing/effort.json` carries the committed downgrade for `code-plan`

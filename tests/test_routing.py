@@ -203,13 +203,13 @@ def test_a_downgrade_is_refused_until_it_is_written_down(tmp: str) -> None:
     # An acknowledgement with no note is still refused: "with a note" is
     # the whole point, and a bare value is a downgrade nobody explained.
     doc["providers"] = {"anthropic": {"classes": {"code-low": None}},
-                        "openrouter": {"classes": {"code-plan": "high"}}}
+                        "openrouter": {"classes": {"code-plan": "high", "code-review": "high"}}}
     json.dump(doc, open(path, "w", encoding="utf-8"))
     bare = [f for f in routing.check(root) if "notes" in f]
-    assert len(bare) == 2, routing.check(root)
+    assert len(bare) == 3, routing.check(root)
 
-    for prov, klass in (("anthropic", "code-low"), ("openrouter", "code-plan")):
-        doc["providers"][prov]["notes"] = {klass: "why, in one committed sentence"}
+    for prov, klass in (("anthropic", "code-low"), ("openrouter", "code-plan"), ("openrouter", "code-review")):
+        doc["providers"][prov].setdefault("notes", {})[klass] = "why, in one committed sentence"
     json.dump(doc, open(path, "w", encoding="utf-8"))
     assert not [f for f in routing.check(root) if "effort.json" in f], routing.check(root)
 

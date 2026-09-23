@@ -118,7 +118,7 @@ code-low     low    -> ~/.claude/agents/code-low.md      (effort: low)
 code-medium  high   -> ~/.claude/agents/code-medium.md   (asked medium; GLM 5.2 remaps it up)
 code-high    high   -> ~/.claude/agents/code-high.md
 code-plan    high   -> ~/.claude/agents/code-plan.md     (asked xhigh; the committed acknowledgement for this column)
-code-review  high   -> ~/.claude/agents/code-review.md
+code-review  high   -> ~/.claude/agents/code-review.md   (asked xhigh; the committed acknowledgement for this column)
 session      high   -> --effort                          (routing/effort.json `session`)
 ```
 

@@ -162,6 +162,7 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     # choice, and freezing it into a layer that now outranks it would
     # outlive the model it was written for.
     assert "code-plan" not in got["effort"], got["effort"]
+    assert "code-review" not in got["effort"], got["effort"]   # acknowledged on this column too
     assert "anthropic" not in f.read()["providers"], "only the provider asked for"
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr
@@ -175,7 +176,7 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
         "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},
         "effort": {"code-medium": "medium", "code-high": "high",
-                   "code-plan": "xhigh", "code-review": "high"}}, got
+                   "code-plan": "xhigh", "code-review": "xhigh"}}, got
     j = json.loads(f.run("list", "--json").stdout)
     assert j["providers"]["openrouter"]["code-low"]["source"] == "local", "a seeded value is now the agent's own"
 

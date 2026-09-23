@@ -16,7 +16,7 @@
     "code-medium": "medium",
     "code-high": "high",
     "code-plan": "xhigh",
-    "code-review": "high"
+    "code-review": "xhigh"
   },
   "session": "code-high",
   "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Naming the class keeps the session's thinking with the session's model: both are code-high on the anthropic path, and one edit moves both.",
@@ -32,10 +32,12 @@
     },
     "openrouter": {
       "classes": {
-        "code-plan": "high"
+        "code-plan": "high",
+        "code-review": "high"
       },
       "notes": {
-        "code-plan": "code-plan asks for xhigh; deepseek/deepseek-v4-pro distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve. Written down because the alternative is a level of thinking lost between the routing file and the wire. Note the consequence while this column stands: code-high, code-plan and code-review all resolve to the same model AND now the same effort, so on the broker those three classes differ in neither. That is a true statement about today's broker column, not a property of the design — on the anthropic path they are high/xhigh/high."
+        "code-plan": "code-plan asks for xhigh; deepseek/deepseek-v4-pro distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve. Written down because the alternative is a level of thinking lost between the routing file and the wire. Note the consequence while this column stands: code-high, code-plan and code-review all resolve to the same model AND now the same effort, so on the broker those three classes differ in neither. That is a true statement about today's broker column, not a property of the design — on the anthropic path they are high/xhigh/high.",
+        "code-review": "The owner's decision of 2026-09-23: the review class thinks at xhigh, one level above code-high, because a review is judgement work of the same kind as code-plan and its failure mode — a defect that merges — is the expensive one. On the broker the reviewer is deepseek/deepseek-v4-pro, which distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve; written down rather than lost. On plain claude the reviewer is claude-opus-5, which admits xhigh, and gets it."
       }
     }
   }

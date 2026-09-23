@@ -58,9 +58,21 @@ if "modelOverrides" in d:
     fails.append('"modelOverrides" present: taken as the WHOLE MAP from the '
                  'highest-precedence scope that sets it, so it binds the '
                  'claude path too — model choice belongs to the launcher.')
+# Effort is the second routed dimension (routing/effort.json) and its
+# settings keys outrank the launcher the same way a model pin does:
+# effortLevel sets the session's, modelSettings carries a per-model one,
+# and maxEffortLevel is a CAP whose LOWEST value across scopes wins — so a
+# committed cap silently lowers every class on every clone, which is the
+# silent re-tuning the dimension exists to prevent.
+for key, why in (("effortLevel", "pins the session's thinking for every session on this repo"),
+                 ("maxEffortLevel", "caps it — the lowest value across all scopes wins, so this one "
+                                    "cannot be raised back by a launch"),
+                 ("modelSettings", "carries per-model settings, effort included")):
+    if key in d:
+        fails.append(f'"{key}" present: it {why}. Effort is routed in routing/effort.json.')
 env = d.get("env") or {}
 bad_env = sorted(k for k in env
-                 if k.startswith("ANTHROPIC_") or k == "CLAUDE_CODE_SUBAGENT_MODEL")
+                 if k.startswith("ANTHROPIC_") or k in ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"))
 for k in bad_env:
     fails.append(f'env.{k} present — provider/routing env in a committed scope '
                  'would outrank the launcher pins.')

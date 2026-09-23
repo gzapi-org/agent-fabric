@@ -20,7 +20,9 @@ printf '%s\n' '{"env":{"GZAPP_ACTIONS_INCLUDED_MINUTES":"50000"},"enabledMcpjson
 echo "check_repo_settings_carry_no_model_pins: each pin shape is caught"
 for case in '{"model":"claude-opus-5"}' '{"modelOverrides":{"claude-opus-5":"z-ai/glm-5.3"}}' \
             '{"env":{"ANTHROPIC_DEFAULT_OPUS_MODEL":"x"}}' '{"env":{"ANTHROPIC_API_KEY":"x"}}' \
-            '{"env":{"CLAUDE_CODE_SUBAGENT_MODEL":"x"}}' '{"env":{"ANTHROPIC_BASE_URL":"http://x"}}'; do
+            '{"env":{"CLAUDE_CODE_SUBAGENT_MODEL":"x"}}' '{"env":{"ANTHROPIC_BASE_URL":"http://x"}}' \
+            '{"effortLevel":"low"}' '{"maxEffortLevel":"low"}' '{"modelSettings":{"claude-opus-5":{"effort":"low"}}}' \
+            '{"env":{"CLAUDE_CODE_EFFORT_LEVEL":"max"}}'; do
     printf '%s' "$case" > "$F"
     out="$(AGENT_FABRIC_SETTINGS_FILE=$F bash "$GUARD" 2>&1)"; rc=$?
     [[ $rc -ne 0 ]] && ok "$(python3 -c "import json;print(sorted(json.load(open('$F')).keys()) or json.load(open('$F')).get('env',{}))" | head -c 40) rejected" || bad "green on $case" "$out"

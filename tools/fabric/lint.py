@@ -1076,6 +1076,32 @@ def class_doc_findings(root: str) -> list[str]:
     return findings
 
 
+def agent_source_findings(root: str) -> list[str]:
+    """A committed agent definition carries no routed value.
+
+    `model:` and `effort:` are written into the installed copy by
+    runtime/claude-code/install-agent-files.sh, from routing/. A value
+    hand-written into the source here would be the second place a class's
+    model or thinking is decided, and the one nobody updates — the source's
+    `model:` is the tier alias the class rides, never a resolved id."""
+    findings: list[str] = []
+    agents = os.path.join(root, "runtime", "claude-code", "agents")
+    for name in sorted(os.listdir(agents)) if os.path.isdir(agents) else []:
+        if not name.endswith(".md"):
+            continue
+        rel = os.path.join("runtime", "claude-code", "agents", name)
+        try:
+            text = open(os.path.join(agents, name), encoding="utf-8").read()
+        except OSError:
+            continue
+        head = text.split("---", 2)[1] if text.startswith("---") and "---" in text[3:] else text
+        if re.search(r"^effort:", head, flags=re.M):
+            findings.append(f"{rel}: carries a hand-written 'effort:'. The level is routing/effort.json's and is "
+                            "written into the installed copy by install-agent-files.sh; a second source here is "
+                            "the one that goes stale.")
+    return findings
+
+
 # Generic surfaces: what every managed project shares. A project's name
 # there is project truth in the control plane — the review of 2026-09-16
 # found one project's port variable in a role skill, its gpg wrapper in
@@ -1460,6 +1486,7 @@ def main() -> int:
 
     # --- the class list a reader sees --------------------------------------
     findings += class_doc_findings(root)
+    findings += agent_source_findings(root)
 
     # --- the hosts and where each account lives -----------------------------
     findings += host_registry_findings(root)

@@ -270,6 +270,15 @@ done
     die "CLAUDE_CODE_SUBAGENT_MODEL is set in the environment; it overrides every subagent's model regardless of the review gate. Unset it."
 [[ -z "${CLAUDE_CODE_SUBAGENT_MODEL_FORCE:-}" ]] ||
     die "CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set; it discards every dispatch's own model. Unset it."
+# Same bug class as the two above, for the other routed dimension. Read
+# out of 2.1.280: this variable outranks --effort, /effort AND an agent
+# file's effort:, and process environment reaches every subagent — so one
+# value here flattens every per-class level the fabric writes. `unset` and
+# `auto` are not neutral: both mean "ignore the configured level and use
+# the model's own default", which defeats the routing just as thoroughly
+# (docs/live-checks/2026-09-23-effort-registry.md).
+[[ -z "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]] ||
+    die "CLAUDE_CODE_EFFORT_LEVEL is set to '${CLAUDE_CODE_EFFORT_LEVEL}'; it outranks every per-class effort the fabric writes, in every subagent. Unset it (routing/effort.json is where a level is decided)."
 
 # ── resolve ─────────────────────────────────────────────────────────
 RESOLVED="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 - "$ROUTING" "$ALIASES" "$LOCAL_OVERRIDE" "$ROLE" "$AGENT" "$PROVIDER" <<'PY'
@@ -374,6 +383,22 @@ for arg in "$@"; do
     if [[ "$arg" == --model=* ]]; then EFFECTIVE_SESSION="${arg#--model=}"; CALLER_MODEL=1; fi
     prev="$arg"
 done
+# The session's own effort, beside its model: routing/effort.json names a
+# level or a class whose level to take, and the adapter has already
+# clamped it to what this model admits. The caller's own --effort wins and
+# is stamped instead, exactly as --model is — the stamp must never
+# disagree with what the child applies. Empty when the session's model
+# expresses no effort; then no flag is passed and nothing is stamped,
+# because a level the model cannot take is not a decision to record.
+SESSION_EFFORT="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" session-effort --me --provider "$PROVIDER" 2>/dev/null || true)"
+CALLER_EFFORT=0
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--effort" ]]; then SESSION_EFFORT="$arg"; CALLER_EFFORT=1; fi
+    if [[ "$arg" == --effort=* ]]; then SESSION_EFFORT="${arg#--effort=}"; CALLER_EFFORT=1; fi
+    prev="$arg"
+done
+[[ -z "$SESSION_EFFORT" ]] || export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
 export AGENT_FABRIC_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
 export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"
 export AGENT_FABRIC_LAUNCH_AGENT="$AGENT"
@@ -446,6 +471,11 @@ if (( PRINT_ONLY )); then
     [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
     echo "  (from the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer; bin/fabric-model list --provider $PROVIDER shows every choice with its source)"
     [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
+    if [[ -n "$SESSION_EFFORT" ]]; then
+        echo "  effort  : $SESSION_EFFORT$( (( CALLER_EFFORT )) && echo "  (--effort on the command line)" || echo "  (routing/effort.json)")"
+    else
+        echo "  effort  : -  (this session's model expresses none; no --effort is passed)"
+    fi
     # `|| exit 1`: the script runs without `set -e`, so this block can die
     # on its first class, print a traceback to stderr, and leave --print
     # exiting 0 with the bash-echoed lines around it intact — measured.
@@ -525,6 +555,7 @@ CMD=()
 [[ "$PROVIDER" == anthropic ]] || CMD+=(ori)
 CMD+=(claude)
 (( CALLER_MODEL )) || CMD+=(--model "$SESSION")
+(( CALLER_EFFORT )) || [[ -z "$SESSION_EFFORT" ]] || CMD+=(--effort "$SESSION_EFFORT")
 # A language-culture login whose locale the fabric authored a search for
 # (identities/roles/language-culture/locale/<suffix>/locale.json, served
 # by runtime/mcp/websearch-locale) searches through that alone: the

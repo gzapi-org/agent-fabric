@@ -559,6 +559,28 @@ def resolve_session(role: str | None = None, agent: str | None = None,
             "source": entry["source"]}
 
 
+def session_effort(provider: str = "anthropic", role: str | None = None, agent: str | None = None,
+                   local: dict[str, Any] | None = None, root: str | None = None) -> str | None:
+    """The level the SESSION runs at, already clamped to what its model
+    admits, or None when that model expresses no effort at all.
+
+    `session` in routing/effort.json names a level or a capability class
+    whose level to take, as routing/profiles.json's own `session` may name
+    a class. Naming the class keeps the session's thinking with the
+    session's model, so one edit moves both."""
+    doc = load_effort(root)
+    want = doc.get("session")
+    if not want:
+        return None
+    if want in (doc.get("classes") or {}):
+        want = (resolve(want, provider, role, agent, local, root) or {}).get("effort", {}).get("intent")
+    if not want:
+        return None
+    model = resolve_session(role, agent, local, root, provider=provider)["model"]
+    served, _ = adapter(provider).effort_for(model, want, list(doc.get("levels") or []))
+    return served
+
+
 def review_grade_ok(model: str, root: str | None = None) -> bool:
     """Admitted by routing/policies/review-grade.json, whose entries are
     OpenRouter ids; a native id (claude-…) is the same model spelled as
@@ -728,19 +750,29 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
     s.add_argument("--me", action="store_true",
                    help="this login's role binding and local override (runtime/identity.py)")
+    s = sub.add_parser("session-effort", help="the session's resolved effort level on a provider, or nothing")
+    s.add_argument("--provider", default="anthropic")
+    s.add_argument("--role", default=None)
+    s.add_argument("--agent", default=None)
+    s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
+    s.add_argument("--me", action="store_true",
+                   help="this login's role binding and local override (runtime/identity.py)")
+    s = sub.add_parser("efforts", help="every class's resolved effort on a provider: `<class> <level|-> <outcome>`")
+    s.add_argument("--provider", default="anthropic")
+    s.add_argument("--role", default=None)
+    s.add_argument("--agent", default=None)
+    s.add_argument("--local", default=None, help="a model-profile.local.json to merge as the local layer")
+    s.add_argument("--me", action="store_true",
+                   help="this login's role binding and local override (runtime/identity.py)")
     s = sub.add_parser("shim", help="the family shim a model id needs, or nothing")
     s.add_argument("model")
     s.add_argument("--harness", default="claude-code")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.fabric) if args.fabric else None
 
-    if args.cmd == "pins":
-        # For the dispatch guard and the agent-file installer: the classes
-        # whose model goes through their agent file (file_pinned — the
-        # review class, which must never follow the class sharing its
-        # alias), resolved on the given provider, with the alias each
-        # rides. Nothing when the merged model is the harness's; exit 0
-        # either way. Every other class is an alias export (`exports`).
+    def _whose(args):
+        """(role, agent, local) for a subcommand that may say --me: this
+        login's binding and its local layer, or whatever the flags name."""
         role, agent, local = args.role, args.agent, None
         if args.me:
             spec = importlib.util.spec_from_file_location(
@@ -750,6 +782,38 @@ def main(argv: list[str] | None = None) -> int:
             role = role or identity.read_binding(agent).get("role")
         if args.local or args.me:
             local = load_local(agent, args.local)
+        return role, agent, local
+
+    if args.cmd == "session-effort":
+        # One line for the launcher's --effort, or nothing at all when the
+        # session's model expresses none. Never a default: a level this
+        # model cannot take is not a decision worth stamping.
+        role, agent, local = _whose(args)
+        level = session_effort(args.provider, role, agent, local, root)
+        if level:
+            print(level)
+        return 0
+    if args.cmd == "efforts":
+        # For the agent-file installer and the launcher: every class and the
+        # effort level that actually leaves for it, already clamped by the
+        # adapter. `<class> <level|-> <outcome>`; `-` means the model
+        # expresses no effort and NO `effort:` line should be written, which
+        # is different from writing a default. The caller decides what an
+        # outcome costs — the launcher refuses an unexpressible review class,
+        # a coding class only warns (the owner, 2026-09-23).
+        role, agent, local = _whose(args)
+        for klass in load_capabilities(root)["classes"]:
+            e = resolve(klass, args.provider, role, agent, local, root=root).get("effort") or {}
+            print(f"{klass} {e.get('level') or '-'} {e.get('outcome') or 'unset'}")
+        return 0
+    if args.cmd == "pins":
+        # For the dispatch guard and the agent-file installer: the classes
+        # whose model goes through their agent file (file_pinned — the
+        # review class, which must never follow the class sharing its
+        # alias), resolved on the given provider, with the alias each
+        # rides. Nothing when the merged model is the harness's; exit 0
+        # either way. Every other class is an alias export (`exports`).
+        role, agent, local = _whose(args)
         for klass in file_pinned(root):
             res = resolve(klass, args.provider, role, agent, local, root=root)
             if res["via"] == "file":

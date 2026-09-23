@@ -48,7 +48,12 @@ put() {  # put <dest> <content-file>
     fi
     if (( DRY_RUN )); then echo "  +  $dest (would write)"; return; fi
     mkdir -p "$(dirname "$dest")"
-    if [[ -f "$dest" ]] && ! grep -q "agent-fabric" "$dest" 2>/dev/null; then
+    # Only ONCE, and only for a file the fabric did not write: the marker
+    # test alone re-made this backup on every run, so the second run
+    # replaced the user's original with the fabric's own previous file and
+    # the thing the backup exists for was gone. Found when effort: started
+    # rewriting files that were already the fabric's.
+    if [[ -f "$dest" && ! -e "$dest.before-agent-fabric" ]] && ! grep -q "agent-fabric" "$dest" 2>/dev/null; then
         cp "$dest" "$dest.before-agent-fabric"
         echo "     (kept the previous file as $dest.before-agent-fabric)"
     fi
@@ -61,14 +66,30 @@ declare -A PIN_BY_CLASS=()
 while read -r klass alias model; do
     [[ -n "$klass" ]] && PIN_BY_CLASS["$klass"]="$model"
 done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" pins --me --provider "$PROVIDER")
+# The agent file is the ONLY per-class channel for effort: the Agent tool
+# takes no effort on a dispatch (2.1.280, read back), and the environment
+# variable would reach every subagent at once and flatten the per-class
+# decision. So the level routing resolves for each class is written into
+# its frontmatter here, exactly as the review class's model is.
+# A class whose model expresses no effort gets NO line — absent is not the
+# same as a default, and writing one would claim a decision nobody made.
+declare -A EFFORT_BY_CLASS=()
+while read -r klass level outcome; do
+    [[ -n "$klass" && "$level" != "-" ]] && EFFORT_BY_CLASS["$klass"]="$level"
+done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" efforts --me --provider "$PROVIDER")
 for f in code-low.md code-medium.md code-high.md code-plan.md code-review.md; do
-    pin="${PIN_BY_CLASS[${f%.md}]:-}"
-    if [[ -n "$pin" ]]; then
-        sed "0,/^model: .*/s||model: $pin|" "$FABRIC_ROOT/runtime/claude-code/agents/$f" > "$TMP/$f"
-        put "$CLAUDE_HOME/agents/$f" "$TMP/$f"
-    else
-        put "$CLAUDE_HOME/agents/$f" "$FABRIC_ROOT/runtime/claude-code/agents/$f"
+    klass="${f%.md}"
+    pin="${PIN_BY_CLASS[$klass]:-}"; effort="${EFFORT_BY_CLASS[$klass]:-}"
+    src="$FABRIC_ROOT/runtime/claude-code/agents/$f"
+    if [[ -n "$pin" || -n "$effort" ]]; then
+        cp "$src" "$TMP/$f"
+        [[ -n "$pin" ]] && sed -i "0,/^model: .*/s||model: $pin|" "$TMP/$f"
+        # After `model:`, so the two routed values sit together; the
+        # committed sources carry no effort: line, and lint refuses one.
+        [[ -n "$effort" ]] && sed -i "0,/^model: .*/s||&\neffort: $effort|" "$TMP/$f"
+        src="$TMP/$f"
     fi
+    put "$CLAUDE_HOME/agents/$f" "$src"
 done
 # The locale worker: the language-culture role's subagent, one inert tool, whose
 # system prompt is the locale's language (docs/language-culture-bridge.md).

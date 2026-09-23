@@ -34,7 +34,7 @@ fi
 echo "ORI-EXECCED:$*"
 # The child's ENVIRONMENT, not only its argv: a pin that lost its `export`
 # would still print under --print and still be absent here.
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_EFFORT AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "ORI-ENV:$v=${!v:-}"
 done
 FAKE
@@ -246,7 +246,7 @@ echo "launch: --provider anthropic execs plain claude with only the pinned tiers
 cat > "$SANDBOX/bin/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo "CLAUDE-EXECCED:$*"
-for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
+for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_EFFORT AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "CLAUDE-ENV:$v=${!v:-}"
 done
 FAKE
@@ -259,6 +259,32 @@ grep -q "session : claude-opus-5$" <<<"$out" && ok "the session is the anthropic
 grep -q "code-review : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
 grep -q "code-high   : claude-opus-5  (exported for its tier; from capabilities.providers.anthropic)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "a coding class pinned by the column is exported for the tier it rides (the top of each class)" || bad "column pin not exported" "$out"
 grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "the fable export is code-plan's pin; the reviewer never rides it" || bad "fable export wrong" "$out"
+
+echo "launch: the session's effort — resolved, stamped, overridable, and never from the environment"
+mkfabric
+out="$(run --provider anthropic --print 2>&1)"
+grep -q "^  effort  : high  (routing/effort.json)" <<<"$out" && ok "--print names the session level and where it came from" || bad "effort not printed for the session" "$out"
+out="$(run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--effort high" <<<"$out" && ok "…and it reaches claude as --effort" || bad "no --effort on the command line" "$out"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_EFFORT=high" <<<"$out" && ok "…and is stamped, so fabric-status can compare it with the read-back" || bad "no effort stamp in the child env" "$out"
+# The stamp must say what the CHILD applies, never what the fabric wanted:
+# the same rule --model already follows, and the reason fabric-status can
+# treat a difference as drift at all.
+out="$(run --provider anthropic --effort low --version 2>&1)"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_EFFORT=low" <<<"$out" && ok "a caller's --effort is what gets stamped" || bad "stamped the fabric's level over the caller's" "$out"
+[[ "$(grep -c -- "--effort" <<<"$(grep CLAUDE-EXECCED <<<"$out")")" == 1 ]] && ok "…and only one --effort reaches the child" || bad "two --effort flags" "$out"
+out="$(CLAUDE_CODE_EFFORT_LEVEL=max run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q "EXECCED" <<<"$out" && ok "CLAUDE_CODE_EFFORT_LEVEL in the environment: REFUSED, never launched" || bad "launched with an environment effort that outranks every class" "$out"
+out="$(CLAUDE_CODE_EFFORT_LEVEL=auto run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ok "…'auto' too: it is a value meaning 'use the model default', not an absence" || bad "auto admitted" "$out"
+# A session on a model with no effort control gets no flag at all — absent
+# is not the same as a default, and a stamp would invent a decision.
+mkfabric; profile defaults '{"providers":{"anthropic":{"session":"claude-haiku-4-5-20251001"}}}'
+out="$(run --provider anthropic --print 2>&1)"
+grep -q "^  effort  : -  (this session's model expresses none" <<<"$out" && ok "a session model with no effort control says so" || bad "invented a level for a model without one" "$out"
+out="$(run --provider anthropic --version 2>&1)"
+! grep -q -- "--effort" <<<"$out" && ! grep -q "AGENT_FABRIC_LAUNCH_EFFORT=." <<<"$out" && ok "…and passes no --effort and stamps nothing" || bad "passed an effort to a model that takes none" "$out"
+
 python3 - "$FABRIC/routing/capabilities.json" <<'PY2'
 import json, sys
 d = json.load(open(sys.argv[1])); d["providers"]["anthropic"]["models"]["code-high"] = None
@@ -268,7 +294,7 @@ out="$(run --provider anthropic --print 2>&1)"; rc=$?
 grep -q "code-high   : opus  (harness default for its tier)" <<<"$out" && ! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "a null in the column is the harness's own tier: nothing exported for it" || bad "null column not the harness's" "$out"
 mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
-grep -q "CLAUDE-EXECCED:--model claude-opus-5 --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
+grep -q "CLAUDE-EXECCED:--model claude-opus-5 --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
 ! grep -q -- "--disallowedTools" <<<"$out" && ok "no tool removed from a login that is not language-culture" || bad "WebSearch removed from the wrong login" "$out"
 # A language-culture login whose locale has a search: the harness's WebSearch is removed at exec.
@@ -372,13 +398,13 @@ grep -q "ORI-ENV:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" <<<"$out" && ok "the harn
 mkfabric
 out="$(run --model vendor/override --version 2>&1)"
 grep -q "ORI-ENV:AGENT_FABRIC_LAUNCH_SESSION_MODEL=vendor/override" <<<"$out" && ok "a caller's --model is what gets stamped" || bad "stamp disagrees with argv" "$out"
-grep -q "ORI-EXECCED:claude --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --model vendor/override --version" <<<"$out" && ! grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "…and the launcher's own --model is omitted, so the child sees one; the prompt file still rides" || bad "two --model flags reached the child, or no prompt file" "$out"
+grep -q "ORI-EXECCED:claude --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --model vendor/override --version" <<<"$out" && ! grep -q -- "--model anthropic/claude-sonnet-5" <<<"$out" && ok "…and the launcher's own --model is omitted, so the child sees one; the prompt file still rides" || bad "two --model flags reached the child, or no prompt file" "$out"
 mkfabric
 out="$(run --print --model=vendor/override2 2>&1)"
 grep -q "overridden by --model on the command line: vendor/override2" <<<"$out" && ok "--print shows the override" || bad "--print hides the override" "$out"
 mkfabric
 out="$(run -p hi 2>&1)"
-grep -q "ORI-EXECCED:claude --model deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
+grep -q "ORI-EXECCED:claude --model deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
 
 echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project

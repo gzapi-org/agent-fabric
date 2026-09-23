@@ -369,7 +369,34 @@ VIOLATION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("review
 
 SESSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["composite"])' <<<"$RESOLVED")"
 
+# PLAIN CLAUDE MEANS ANTHROPIC DIRECT. A launch started from inside a
+# broker session inherits OpenRouter's ANTHROPIC_BASE_URL (and whatever
+# credential rides with it for that host), and the child then ran and
+# billed on the broker while every stamp, --print and fabric-status said
+# "anthropic" (review of #31, confirmed by planting the value). Cleared
+# only when it names OpenRouter — the same host test model-audit.sh
+# classifies a session by — because that value is the fabric's own, left
+# by its own broker launch. A base URL naming anything else is someone's
+# deliberate choice and is left exactly as it was: that question was not
+# reviewed, and silently dropping it would be a decision nobody made.
+if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_BASE_URL:-}" ]] && python3 -c 'import sys
+from urllib.parse import urlsplit
+try: h = urlsplit(sys.argv[1]).hostname or ""
+except ValueError: h = ""
+sys.exit(0 if h == "openrouter.ai" or h.endswith(".openrouter.ai") else 1)' "$ANTHROPIC_BASE_URL"; then
+    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+fi
+
 # ── the pins ─────────────────────────────────────────────────────────
+# Every alias variable starts EMPTY, then only the resolved ones are set.
+# A class whose column is null rides the harness's own tier, which means
+# NO export — and a launch started from inside another fabric session
+# arrived carrying that session's export for the alias, silently pinning
+# the tier to the parent's model (review of #31). The four names are the
+# adapter's (runtime/claude-code/aliases.json), read, never repeated here.
+while IFS= read -r name; do
+    [[ -n "$name" ]] && unset "$name"
+done < <(python3 -c 'import json,sys; [print(v) for v in json.load(open(sys.argv[1]))["env"].values()]' "$ALIASES")
 while IFS='=' read -r name value; do
     [[ -n "$name" ]] || continue
     export "$name=$value"
@@ -437,9 +464,11 @@ done
 # The caller meant to pass one; let their (malformed) flag stand and let
 # claude report it, rather than adding a second.
 [[ "$prev" == "--effort" ]] && CALLER_EFFORT=1 && SESSION_EFFORT=""
-# Cleared, not just left unset, when there is no level: this is the one
-# CONDITIONAL stamp, so it is the one a launch started from inside another
-# fabric session would otherwise inherit — a child given no --effort
+# Cleared, not just left unset, when there is no level: this stamp is
+# CONDITIONAL, so a launch started from inside another fabric session
+# would otherwise inherit it (so is AGENT_FABRIC_LAUNCH_CLAUDE_VERSION,
+# cleared the same way below; the alias pins and a broker base URL are the
+# unconditional cousins, cleared above) — a child given no --effort
 # carrying its parent's `high`, which fabric-status then compares with a
 # level the child never had. Found when a relaunched session ran the suite.
 if [[ -n "$SESSION_EFFORT" ]]; then export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
@@ -477,6 +506,11 @@ if [[ "$ROLE" == language-culture && -f "$HARNESS_FILE" ]]; then
     PROMPT_FLAG=--system-prompt-file
     AGENT_FABRIC_LAUNCH_CLAUDE_VERSION="$(claude --version 2>/dev/null | head -1 || true)"
     export AGENT_FABRIC_LAUNCH_CLAUDE_VERSION
+else
+    # Its documented meaning is "the prompt is replaced", so inherited
+    # from a replaced session it would say that of a child whose prompt
+    # is only appended (review of #31).
+    unset AGENT_FABRIC_LAUNCH_CLAUDE_VERSION
 fi
 export AGENT_FABRIC_LAUNCH_ROLE="$ROLE"
 export AGENT_FABRIC_LAUNCH_PROMPT_DIGEST="$PROMPT_DIGEST"

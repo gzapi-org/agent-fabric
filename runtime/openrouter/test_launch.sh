@@ -320,6 +320,12 @@ json.dump(d, open(sys.argv[1], "w"))
 PY2
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 grep -q "code-high   : opus  (harness default for its tier)" <<<"$out" && ! grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL" <<<"$out" && ok "a null in the column is the harness's own tier: nothing exported for it" || bad "null column not the harness's" "$out"
+# --print only shows the plan; the CHILD's environment is what runs. A
+# launch from inside another fabric session arrives carrying that session's
+# export for the alias, which would pin the "harness's own" tier to the
+# parent's model. Planted, since CI has no parent to inherit from.
+out="$(ANTHROPIC_DEFAULT_OPUS_MODEL=claude-parent-leftover run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=$" <<<"$out" && ok "…and an alias export inherited from a parent session is cleared, not passed on" || bad "the harness tier inherited the parent's pin" "$(grep OPUS <<<"$out")"
 mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-EXECCED:--model claude-opus-5 --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
@@ -332,6 +338,11 @@ printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"language-culture","upd
 outlc="$(run --provider anthropic -- --version 2>&1)"
 grep -q "CLAUDE-EXECCED:.*--version --disallowedTools WebSearch$" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch — the variadic flag last, after the caller's arguments" || bad "WebSearch not removed on the language-culture login, or not last" "$outlc"
 grep -q "CLAUDE-EXECCED:.*--append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outlc" && grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$" <<<"$outlc" && ok "…with the prompt still appended and no build stamp: the locale carries no harness text" || bad "append expected without a harness translation" "$outlc"
+# The build stamp means "the prompt is replaced". Inherited from a session
+# whose prompt WAS replaced, it would say so of this child, whose prompt
+# is only appended. Planted, since CI has nothing to inherit.
+outlc="$(AGENT_FABRIC_LAUNCH_CLAUDE_VERSION="9.9.9 (Claude Code)" run --provider anthropic -- --version 2>&1)"
+grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$" <<<"$outlc" && ok "…and a build stamp inherited from a replaced session is cleared" || bad "an appended prompt inherited the replaced one's build stamp" "$(grep CLAUDE_VERSION <<<"$outlc")"
 # The locale carries the harness text: the whole prompt is replaced, the build stamped, on both providers.
 printf -- '---\nclass: harness-translation\ntranslates: runtime/claude-code/harness/en.md\ntranslates_digest: sha256:x\n---\nშენ ხარ Claude Code. მეხსიერება: `{memory_dir}`.\n' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/harness.md"
 outlc="$(run --provider anthropic -- --version 2>&1)"
@@ -362,6 +373,18 @@ grep -q "^model: deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" "$H
 grep -q "^model: fable$" "$HOME/.claude/agents/code-plan.md" && ok "code-plan keeps its alias line: its pin is the export" || bad "code-plan file pinned" "$(head -5 "$HOME/.claude/agents/code-plan.md")"
 out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=$" <<<"$out" && ok "no base URL: Anthropic direct" || bad "base URL set" "$out"
+# The same assertion, over a base URL the CALLER carries: a launch started
+# from inside a broker session inherits OpenRouter's, and without clearing
+# it the child runs and bills on the broker while every stamp, --print and
+# fabric-status says "anthropic". CI has none to inherit, so it is planted.
+out="$(ANTHROPIC_BASE_URL=https://openrouter.ai/api run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=$" <<<"$out" && ok "an inherited broker base URL is cleared on the anthropic path" || bad "the child inherited the broker's base URL while stamped anthropic" "$(grep -E 'BASE_URL|PROVIDER' <<<"$out")"
+# …and ONLY the broker's. Any other base URL is someone's deliberate choice,
+# never reviewed as such, so it is left exactly as it was.
+out="$(ANTHROPIC_BASE_URL=https://gateway.example.com run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=https://gateway.example.com$" <<<"$out" && ok "a base URL naming anything else is left alone" || bad "cleared a base URL that was not the broker's" "$(grep BASE_URL <<<"$out")"
+out="$(ANTHROPIC_BASE_URL=https://example.com/openrouter.ai run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=https://example.com/openrouter.ai$" <<<"$out" && ok "…including a look-alike with openrouter.ai in its path: the host decides" || bad "a look-alike path was read as the broker" "$(grep BASE_URL <<<"$out")"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROVIDER=anthropic" <<<"$out" && ok "provider stamped" || bad "no provider stamp" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped on vanilla too" || bad "no profile stamp" "$out"
 mkfabric

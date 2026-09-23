@@ -21,8 +21,15 @@ DIGEST="sha256:$(sha256sum "$STATE/agents/$LOGIN/launch-prompt.md" | cut -d' ' -
 # not know a CI runner's login) unless a case names another.
 PLACED="$SANDBOX/placed.json"
 printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operator":"%s","fabric":"x"}},"placement":{"%s":"%s"}}\n' "$(hostname -s)" "$LOGIN" "$LOGIN" "$(hostname -s)" > "$PLACED"
+# CLAUDE_EFFORT is the RUNNING session's own read-back, not the fabric's:
+# it is set in every real agent's environment and in none on CI, and it
+# moves mid-session (measured 2026-09-23: high, then xhigh untouched). Left
+# unscrubbed it reached the fixture and every case saw a spurious effort
+# line — green on CI, red on every holder, the same shape as the locale
+# leak this branch already fixed. A case that wants one sets it explicitly.
 status() { env -u AGENT_FABRIC_LAUNCH_ROLE -u AGENT_FABRIC_LAUNCH_PROMPT_DIGEST -u AGENT_FABRIC_LAUNCH_SESSION_MODEL \
                -u AGENT_FABRIC_LAUNCH_PROVIDER -u AGENT_FABRIC_LAUNCH_PROFILE -u ANTHROPIC_BASE_URL \
+               -u CLAUDE_EFFORT -u AGENT_FABRIC_LAUNCH_EFFORT \
                AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_HOSTS_REGISTRY="$PLACED" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
 MODE=()
 
@@ -55,6 +62,17 @@ grep -q "^DRIFT        launched on claude-sonnet-5, the anthropic session now re
 current="$(grep "the anthropic session now resolves to" <<<"$out" | sed 's/.*resolves to \([^ ]*\) .*/\1/')"
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_SESSION_MODEL="$current" 2>&1)"
 ! grep -q "launched on" <<<"$out" && ok "launched on what now resolves: no drift" || bad "false session drift" "$out"
+
+echo "fabric-status: effort — the intent is shown, the drift waits for a stamp"
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic CLAUDE_EFFORT=xhigh 2>&1)"
+grep -q "^session effort .* (asked; not pinned at launch) (running xhigh)" <<<"$out" && ok "unpinned: the asked-for level and the running one, side by side" || bad "effort intent not shown" "$out"
+! grep -q "DRIFT.*effort" <<<"$out" && ok "…and no DRIFT: nothing pinned it, so nothing drifted from it" || bad "drift without an effort stamp" "$out"
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=max CLAUDE_EFFORT=high 2>&1)"
+grep -q "^DRIFT        launched at effort max, the session is running at high" <<<"$out" && ok "pinned and clamped: one DRIFT line naming both levels" || bad "effort drift not said" "$out"
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=high CLAUDE_EFFORT=high 2>&1)"
+! grep -q "DRIFT.*effort" <<<"$out" && grep -q "(confirmed)" <<<"$out" && ok "pinned and honoured: confirmed, no drift" || bad "false effort drift" "$out"
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=max 2>&1)"
+! grep -q "DRIFT.*effort" <<<"$out" && ok "no read-back at all: nothing to compare, nothing said" || bad "drift invented without CLAUDE_EFFORT" "$out"
 
 echo "fabric-status: the account's placement"
 HOSTS="$SANDBOX/hosts.json"

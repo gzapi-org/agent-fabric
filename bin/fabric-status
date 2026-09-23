@@ -104,7 +104,8 @@ try:
     if _want in (_eff.get("classes") or {}):
         _want = routing.resolve(_want, provider, binding.get("role"), ctx["agent"], local, root=root)["effort"]["level"]
     _got = os.environ.get("CLAUDE_EFFORT")
-    session_effort = {"asked": _want, "reported": _got}
+    session_effort = {"asked": _want, "reported": _got,
+                      "launched": os.environ.get("AGENT_FABRIC_LAUNCH_EFFORT")}
 except (KeyError, ValueError):
     pass
 checks = routing.check(root)
@@ -162,12 +163,22 @@ if stamp and launch_provider in ("openrouter", "anthropic"):
             model_drift = f"launched on {stamp}, the {launch_provider} session now resolves to {current_session} — relaunch to apply"
     except (KeyError, ValueError):
         pass
+# Effort drift is gated on the launcher having actually DELIVERED a level,
+# exactly as model drift is gated on AGENT_FABRIC_LAUNCH_SESSION_MODEL.
+# Nothing sets this stamp yet: routing/effort.json records what each class
+# SHOULD get, and until the launcher pins it the asked-for level is an
+# intention, not something this session was started with — reporting the
+# gap as drift would accuse the fabric of a change it never made. It is
+# also not a one-way clamp: measured 2026-09-23, one session read `high`
+# and, untouched, `xhigh` an hour later, so the harness re-resolves effort
+# mid-session and a difference in either direction is ordinary.
 effort_drift = None
-if session_effort and session_effort["asked"] and session_effort["reported"] \
-        and session_effort["asked"] != session_effort["reported"]:
-    effort_drift = (f"session effort is {session_effort['reported']}; this session asked for "
-                    f"{session_effort['asked']} — a settings maxEffortLevel, an organisation cap, or a model "
-                    "without effort support clamped it (CLAUDE_EFFORT is the harness's own read-back)")
+effort_stamp = os.environ.get("AGENT_FABRIC_LAUNCH_EFFORT")
+if effort_stamp and session_effort and session_effort["reported"] \
+        and effort_stamp != session_effort["reported"]:
+    effort_drift = (f"launched at effort {effort_stamp}, the session is running at "
+                    f"{session_effort['reported']} — a settings maxEffortLevel, an organisation cap or a "
+                    "model that does not admit the level clamped it (CLAUDE_EFFORT is the harness's read-back)")
 prompt_drift = None
 digest = os.environ.get("AGENT_FABRIC_LAUNCH_PROMPT_DIGEST")
 if digest:
@@ -236,9 +247,12 @@ print(f"api          {path}")
 print(f"session model {report['api']['session_model']}")
 if report.get("session_effort") and report["session_effort"].get("asked"):
     _se = report["session_effort"]
-    _rep = _se.get("reported")
-    print("session effort %s%s" % (_se["asked"],
-          "" if not _rep else (" (running %s)" % _rep if _rep != _se["asked"] else " (confirmed)")))
+    _rep, _stamp = _se.get("reported"), _se.get("launched")
+    # "asks for" until the launcher pins one: routing/effort.json is the
+    # fabric's intent, and the running level is the harness's own, so the
+    # two are printed side by side without either claiming to cause the other.
+    _verb = "session effort %s" % _se["asked"] if _stamp else "session effort %s (asked; not pinned at launch)" % _se["asked"]
+    print("%s%s" % (_verb, "" if not _rep else (" (running %s)" % _rep if _rep != (_stamp or _se["asked"]) else " (confirmed)")))
 if report['api']['launch_profile']: print(f"launch profile {report['api']['launch_profile']}")
 print(f"pins         {report['api']['pins'] if isinstance(report['api']['pins'], str) else ', '.join(f'{k}={v}' for k, v in report['api']['pins'].items())}")
 print(f"credentials  {report['api']['credentials'] if isinstance(report['api']['credentials'], str) else ', '.join(f'{k}: set' for k in report['api']['credentials'])}")

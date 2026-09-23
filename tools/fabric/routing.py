@@ -192,8 +192,14 @@ class AnthropicAdapter(ProviderAdapter):
     # and per session on --effort; the Agent tool has no per-dispatch
     # effort, exactly as it takes no full model id (2.1.280, read back).
     effort_channel = "agent-file"
+    # Every row read out of 2.1.280's own bundled model registry, not from
+    # documentation: each entry carries a `capabilities` list, and a model
+    # without "effort" in it is gated out before any request is built, so
+    # no level is ever sent for it. "max_effort"/"xhigh_effort" are
+    # separate capabilities, which is why 4.6 stops at max and 4.7 does
+    # not (docs/live-checks/2026-09-23-effort-registry.md).
     effort_by_model = (
-        ("claude-haiku-*", (), {}),                   # Haiku 4.5 rejects effort outright
+        ("claude-haiku-*", (), {}),                   # no "effort" capability: none is sent
         ("claude-opus-4-6*", ("low", "medium", "high", "max"), {}),   # no xhigh before 4.7
         ("claude-sonnet-4-6*", ("low", "medium", "high", "max"), {}),
         ("claude-*", ("low", "medium", "high", "xhigh", "max"), {}),

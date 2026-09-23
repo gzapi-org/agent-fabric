@@ -132,7 +132,12 @@ done
 # so a rebind never serves another locale's worker. No per-provider pin:
 # the worker shares no alias with another class, so its model line rides
 # as authored (the reviewer's file pin exists only because fable is
-# code-plan's too).
+# code-plan's too). No routed EFFORT either, for the same reason — it is
+# not a capability class, so routing/effort.json has nothing to say about
+# it and it runs at whatever its model does by itself. Lint refuses a
+# hand-written `effort:` in its source (one writer, as for the classes),
+# so a level here would need a routed home first: the absence is a
+# decision, not an oversight (re-review of 2026-09-23).
 ROLE="$(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/runtime/identity.py" --role 2>/dev/null || true)"
 LOGIN_NAME="$(id -un)"; LOCALE_SUFFIX="${LOGIN_NAME##*-}"
 WORKER_SRC="$FABRIC_ROOT/identities/roles/language-culture/locale/$LOCALE_SUFFIX/worker.md"

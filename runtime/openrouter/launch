@@ -272,12 +272,22 @@ if isinstance(env, dict):
                   or k in ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
                            "CLAUDE_CODE_EFFORT_LEVEL"))
 if "modelOverrides" in d: bad.append("modelOverrides")
-# The effort keys: effortLevel pins the session's, modelSettings carries a
-# per-model one, and maxEffortLevel is a CAP whose LOWEST value across all
-# scopes wins — so a cap here cannot be raised back by anything the
-# launcher does. Same list as policies/check_repo_settings_carry_no_model_pins.sh,
-# which covers the committed scope; this covers the live ones.
-bad += [k for k in ("effortLevel", "maxEffortLevel", "modelSettings") if k in d]
+# Only `maxEffortLevel` here, and NOT effortLevel/modelSettings, which the
+# committed-scope guard still refuses. Two reasons, both measured:
+#   - precedence. `--effort` (turnEffort) is resolved BEFORE the configured
+#     level that effortLevel and modelSettings feed, so the launcher's own
+#     flag already outranks them. maxEffortLevel is different in kind: it
+#     is a CAP, and the LOWEST value across all scopes wins, so nothing the
+#     launcher passes can raise it back.
+#   - the harness writes modelSettings itself. `/effort` persists
+#     `modelSettings.<model>.effortLevel` into ~/.claude/settings.json
+#     ("saved as your default for new sessions"), so refusing it here would
+#     stop a launch on every account that has ever used the command — found
+#     when this fence refused its own author's account.
+# A COMMITTED scope is different: nothing should pin anything there and no
+# harness writes to it, so all four stay refused in
+# policies/check_repo_settings_carry_no_model_pins.sh.
+bad += [k for k in ("maxEffortLevel",) if k in d]
 print(" ".join(bad))
 PY
 )"
@@ -503,7 +513,13 @@ if (( PRINT_ONLY )); then
     if [[ -n "$SESSION_EFFORT" ]]; then
         echo "  effort  : $SESSION_EFFORT$( (( CALLER_EFFORT )) && echo "  (--effort on the command line)" || echo "  (routing/effort.json)")"
     else
-        echo "  effort  : -  (this session's model expresses none; no --effort is passed)"
+        # Never "the model expresses none" without knowing that: a caller's
+        # valueless --effort empties this too (re-review, N4).
+        if (( CALLER_EFFORT )); then
+            echo "  effort  : -  (--effort on the command line carries no value; none is added)"
+        else
+            echo "  effort  : -  (this session's model expresses none; no --effort is passed)"
+        fi
     fi
     # `|| exit 1`: the script runs without `set -e`, so this block can die
     # on its first class, print a traceback to stderr, and leave --print

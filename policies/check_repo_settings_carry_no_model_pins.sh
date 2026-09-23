@@ -69,6 +69,10 @@ if "modelOverrides" in d:
 # and maxEffortLevel is a CAP whose LOWEST value across scopes wins — so a
 # committed cap silently lowers every class on every clone, which is the
 # silent re-tuning the dimension exists to prevent.
+# All four stay refused HERE even though the launcher's live scan now
+# refuses only maxEffortLevel: a committed scope is read on every clone,
+# nothing should pin anything in it, and no harness writes to it — unlike
+# the user scope, where `/effort` persists modelSettings itself.
 for key, why in (("effortLevel", "pins the session's thinking for every session on this repo"),
                  ("maxEffortLevel", "caps it — the lowest value across all scopes wins, so this one "
                                     "cannot be raised back by a launch"),

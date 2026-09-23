@@ -220,6 +220,51 @@ def test_a_downgrade_is_refused_until_it_is_written_down(tmp: str) -> None:
     assert any("written for a different model" in f for f in routing.check(root)), routing.check(root)
 
 
+def test_an_agent_layer_outranks_a_committed_acknowledgement(tmp: str) -> None:
+    """The acknowledgement is the committed INTENT for a column, so it sits
+    UNDER the profile and agent layers exactly as a model id does. It sat
+    above them once, and an agent asking for a level its model admits was
+    served the acknowledgement's instead (review 2026-09-23, F3)."""
+    root = scratch_root(tmp)
+    ack = routing.load_effort(root)["providers"]["openrouter"]["classes"]["code-plan"]
+    assert routing.resolve("code-plan", "openrouter", root=root)["effort"]["intent"] == ack, \
+        "with no layer the acknowledgement decides"
+    local = {"providers": {"openrouter": {"effort": {"code-plan": "max"}}}}
+    got = routing.resolve("code-plan", "openrouter", None, "someone", local, root=root)["effort"]
+    assert got["intent"] == "max" and got["source"] == "local", got
+    assert got["level"] == "max", f"the model admits max; the agent asked for it and must get it: {got}"
+
+
+def test_a_level_below_the_models_floor_is_raised_not_dropped(tmp: str) -> None:
+    """Asking for LESS than a model's lowest level once resolved to "this
+    model has no effort", so nothing was sent and the vendor's own default
+    applied — a silent UPGRADE on a model defaulting high (F5)."""
+    root = scratch_root(tmp)
+    scale = list(routing.load_effort(root)["levels"])
+    adapter = routing.ADAPTERS["openrouter"]
+    assert "minimal" not in adapter.effort_levels("z-ai/glm-5.3-flash")
+    assert adapter.effort_for("z-ai/glm-5.3-flash", "minimal", scale) == ("low", "raised")
+    assert adapter.effort_for("z-ai/glm-5.3-flash", "none", scale) == ("low", "raised")
+    # …and check() says so in its own words, not as "expresses none".
+    path = os.path.join(root, "routing", "effort.json")
+    doc = json.load(open(path, encoding="utf-8"))
+    doc["classes"]["code-low"] = "minimal"
+    doc["providers"] = {}
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    assert any("admits nothing that low" in f for f in routing.check(root)), routing.check(root)
+
+
+def test_no_model_pinned_is_not_a_claim_about_a_model(tmp: str) -> None:
+    """`unexpressible` also meant "no model was given", and every printer
+    stated it as a fact about the model (F6)."""
+    root = scratch_root(tmp)
+    scale = list(routing.load_effort(root)["levels"])
+    assert routing.ADAPTERS["anthropic"].effort_for(None, "high", scale) == (None, "unknown-model")
+    phrase = routing.effort_phrase({"outcome": "unknown-model", "intent": "high"})
+    assert "no model pinned" in phrase and "expresses none" not in phrase, phrase
+    assert "expresses none" in routing.effort_phrase({"outcome": "unexpressible", "intent": "high"})
+
+
 def test_effort_names_every_class(tmp: str) -> None:
     root = scratch_root(tmp)
     path = os.path.join(root, "routing", "effort.json")
@@ -403,6 +448,9 @@ def main() -> int:
         test_effort_is_one_vocabulary_resolved_per_class,
         test_a_vendor_that_remaps_upward_is_not_clamped_down,
         test_a_downgrade_is_refused_until_it_is_written_down,
+        test_an_agent_layer_outranks_a_committed_acknowledgement,
+        test_a_level_below_the_models_floor_is_raised_not_dropped,
+        test_no_model_pinned_is_not_a_claim_about_a_model,
         test_effort_names_every_class,
         test_each_provider_validates_a_reference_through_its_adapter,
         test_composite_is_derived_not_stored,

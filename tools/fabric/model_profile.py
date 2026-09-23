@@ -190,7 +190,7 @@ def print_list(provider: str, rows: dict[str, Any]) -> None:
             e = row.get("effort") or {}
             # asked -> served whenever they differ, the same phrasing
             # --print and fabric-status use (routing.effort_phrase).
-            level = routing.effort_phrase(e).removeprefix("effort ") or "(none: this model expresses no effort)"
+            level = routing.effort_phrase(e).removeprefix("effort ") or "(no level configured for this class)"
             print(f"  {target:18} {level:38} {row['source'] or '-'}")
             continue
         if row["via"] == "harness":
@@ -308,7 +308,16 @@ def cmd_seed(args: argparse.Namespace, ctx: dict[str, Any], path: str) -> int:
                 # keeps applying after the model moves under it — seeding
                 # openrouter's code-medium wrote `high` where effort.json
                 # says `medium` (review of 2026-09-23, F2).
-                model = (row.get("effort") or {}).get("intent")
+                e = row.get("effort") or {}
+                # …and for an ACKNOWLEDGED class the intent IS the
+                # acknowledgement, which compensates for one (provider,
+                # model) pair and is not this agent's choice. Seeding it
+                # copies a compensation into a layer that now outranks the
+                # acknowledgement it came from, so it survives the model
+                # change the acknowledgement existed for (re-review, N1).
+                if str(e.get("source") or "").startswith("effort.json:providers."):
+                    continue
+                model = e.get("intent")
                 if not model:
                     continue
             if target == "session" and row.get("capability"):

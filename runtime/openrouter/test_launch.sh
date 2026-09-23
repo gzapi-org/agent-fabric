@@ -287,6 +287,12 @@ out="$(run --provider anthropic --version 2>&1)"; rc=$?
 printf '%s\n' '{"env":{"CLAUDE_CODE_EFFORT_LEVEL":"max"}}' > "$HOME/.claude/settings.json"
 out="$(run --provider anthropic --version 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && ok "…and one carrying the variable in its env block" || bad "settings env walked past the process-env refusal" "$out"
+# …but NOT the two the harness writes itself: `/effort` persists
+# modelSettings into the user scope, and --effort outranks both, so
+# refusing them would stop a launch on any account that used the command.
+printf '%s\n' '{"modelSettings":{"claude-opus-5":{"effortLevel":"high"}},"effortLevel":"high"}' > "$HOME/.claude/settings.json"
+out="$(run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "EXECCED" <<<"$out" && ok "a user scope carrying modelSettings/effortLevel still launches: --effort outranks them" || bad "refused what the harness writes itself" "$out"
 rm -f "$HOME/.claude/settings.json"
 out="$(CLAUDE_CODE_EFFORT_LEVEL= run --provider anthropic --version 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && ok "exported but EMPTY is still set, and still refused" || bad "an empty value was treated as unset" "$out"

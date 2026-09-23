@@ -175,10 +175,11 @@ class ProviderAdapter:
         # `high` is a silent UPGRADE — the mirror image of the drop this
         # dimension exists to prevent. Clamp UP to the floor and say so
         # (review of 2026-09-23, F5).
-        above = [l for l in levels if l in scale]
-        if above:
-            return above[0], "raised"
-        return None, "unexpressible"
+        # From the SCALE's order, not the row's: its sibling `below` above
+        # already derives from the scale, and a row written out of order
+        # would otherwise return the wrong floor silently (re-review).
+        floor = next((l for l in scale if l in levels), None)
+        return (floor, "raised") if floor else (None, "unexpressible")
 
 
 class OpenRouterAdapter(ProviderAdapter):

@@ -107,7 +107,25 @@ out="$(run_install)"; rc=$?
 [[ $rc -ne 0 ]] && ok "a local layer routing.py refuses fails the installer" || bad "exit 0 with no routing" "$out"
 grep -q "refusing to write agent files with no routing" <<<"$out" && ok "…and says so, naming the subcommand" || bad "failure not named" "$out"
 [[ ! -e "$HOME/.claude/agents/code-high.md" ]] && ok "…and wrote nothing" || bad "wrote a file with an empty routing map"
+# EACH call is guarded, not just the first. Every data-shaped break fails
+# `pins` before `efforts` is reached (resolve() loads effort.json too), so
+# the second guard is proved by failing that ONE subcommand: the fixture's
+# own copy of routing.py is made to exit non-zero for `efforts` alone.
 rm -f "$STATE/agents/$LOGIN/model-profile.local.json"
+cp "$FABRIC/tools/fabric/routing.py" "$SANDBOX/routing.py.bak"
+# A STUB in front of the real module, not an edit to it: routing.py opens
+# with `from __future__`, which must be the first statement, so there is
+# nowhere at the top to inject a check.
+cp "$SANDBOX/routing.py.bak" "$FABRIC/tools/fabric/routing.real.py"
+cat > "$FABRIC/tools/fabric/routing.py" <<'STUB'
+import os, runpy, sys
+if "efforts" in sys.argv:
+    sys.exit(3)
+runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "routing.real.py"), run_name="__main__")
+STUB
+out="$(run_install)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "routing.py efforts failed" <<<"$out" && ok "a failure of efforts alone is caught too, and named" || bad "the efforts guard is unreachable" "$out"
+cp "$SANDBOX/routing.py.bak" "$FABRIC/tools/fabric/routing.py"; rm -f "$FABRIC/tools/fabric/routing.real.py"
 
 echo "a worker file the fabric did not write is left alone"
 bind backend-dev

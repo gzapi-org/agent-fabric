@@ -71,6 +71,17 @@ out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=ant
 grep -q "^DRIFT        launched at effort max, the session is running at high" <<<"$out" && ok "pinned and clamped: one DRIFT line naming both levels" || bad "effort drift not said" "$out"
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=high CLAUDE_EFFORT=high 2>&1)"
 ! grep -q "DRIFT.*effort" <<<"$out" && grep -q "(confirmed)" <<<"$out" && ok "pinned and honoured: confirmed, no drift" || bad "false effort drift" "$out"
+# The STAMP is the headline once there is one: it is what this session was
+# started with. The resolved intent only says what a relaunch would do, and
+# printing it first described a different session.
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=low CLAUDE_EFFORT=low 2>&1)"
+grep -q "^session effort low (confirmed)" <<<"$out" && ok "launched at a level below the routed one: the stamp is the headline" || bad "the headline is not the stamp" "$out"
+# A session whose model expresses no effort has no level to report at all,
+# and must not be given the code-high class's by recomputation.
+printf '%s\n' '{"providers":{"anthropic":{"session":"claude-haiku-4-5-20251001"}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic 2>&1)"
+! grep -q "^session effort" <<<"$out" && ok "a session model with no effort control reports none, not the class's" || bad "invented a session level" "$out"
+rm -f "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(status AGENT_FABRIC_LAUNCH_ROLE=db-admin AGENT_FABRIC_LAUNCH_PROVIDER=anthropic AGENT_FABRIC_LAUNCH_EFFORT=max 2>&1)"
 ! grep -q "DRIFT.*effort" <<<"$out" && ok "no read-back at all: nothing to compare, nothing said" || bad "drift invented without CLAUDE_EFFORT" "$out"
 

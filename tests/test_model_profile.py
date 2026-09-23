@@ -152,14 +152,25 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     assert got["session"] == "deepseek/deepseek-v4-pro-0813" and "@preset" not in json.dumps(got), "the shim is derived, never seeded"
     assert got["capabilities"] == {"code-low": "z-ai/glm-5.3-flash", "code-medium": "z-ai/glm-5.2", "code-high": "deepseek/deepseek-v4-pro-0813",
                                    "code-plan": "deepseek/deepseek-v4-pro-0813", "code-review": "deepseek/deepseek-v4-pro-0813"}, got
+    # The INTENT, not the level today's model happens to admit: on this
+    # column code-medium asks `medium` and GLM 5.2 remaps it up to `high`,
+    # so the two differ and seeding the wrong one is visible here (it was
+    # not on anthropic, where intent == served for every class).
+    assert got["effort"]["code-medium"] == "medium", got["effort"]
+    # code-plan carries a committed acknowledgement for this column. That
+    # is a compensation for one (provider, model) pair, not this agent's
+    # choice, and freezing it into a layer that now outranks it would
+    # outlive the model it was written for.
+    assert "code-plan" not in got["effort"], got["effort"]
     assert "anthropic" not in f.read()["providers"], "only the provider asked for"
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr
     got = f.read()["providers"]["anthropic"]
     # Effort is seeded with the model, because it is the same kind of
-    # choice and `seed` means "freeze what I resolve to today". code-low
-    # is absent by design: haiku expresses no effort, and a seeded level
-    # there would be a decision the model cannot carry out.
+    # choice — but as the INTENT `seed` would freeze, never the level a
+    # model happens to serve. code-low is absent by design: haiku
+    # expresses no effort, and a seeded level there would be a decision
+    # the model cannot carry out.
     assert got == {"session": "claude-opus-5", "capabilities": {
         "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},

@@ -86,9 +86,13 @@
 #     ~/.claude/settings.local.json, $CLAUDE_CONFIG_DIR/settings.json, the
 #     launch working copy's and $PWD's .claude/settings{,.local}.json)
 #     carrying a model pin — env.ANTHROPIC_*, env.CLAUDE_CODE_SUBAGENT_MODEL,
-#     modelOverrides — or CLAUDE_CODE_SUBAGENT_MODEL in the caller's
-#     environment (a settings-scope pin outranks the profile's exports;
-#     the subagent variable overrides every dispatch's model)
+#     modelOverrides — or an EFFORT pin: effortLevel, maxEffortLevel,
+#     modelSettings, env.CLAUDE_CODE_EFFORT_LEVEL; or
+#     CLAUDE_CODE_SUBAGENT_MODEL or CLAUDE_CODE_EFFORT_LEVEL (set to
+#     anything, the empty string included) in the caller's environment
+#     (a settings-scope pin outranks the profile's exports; the subagent
+#     variable overrides every dispatch's model, and the effort variable
+#     outranks every agent file's effort: in every subagent at once)
 #   - a merged model that is not a model id (a local override of null, a
 #     number, "" or prose)
 #   - ori not authenticated, or authenticated from anything but the
@@ -259,8 +263,21 @@ except Exception:
 bad = []
 env = d.get("env") or {}
 if isinstance(env, dict):
-    bad += sorted("env." + k for k in env if k.startswith("ANTHROPIC_") or k == "CLAUDE_CODE_SUBAGENT_MODEL")
+    # env.CLAUDE_CODE_EFFORT_LEVEL is merged into the CHILD by the harness,
+    # so a settings scope carrying it walks straight past the process-env
+    # refusal below — the scan and that refusal have to name the same
+    # variables or neither is a fence (review of 2026-09-23, F1).
+    bad += sorted("env." + k for k in env
+                  if k.startswith("ANTHROPIC_")
+                  or k in ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+                           "CLAUDE_CODE_EFFORT_LEVEL"))
 if "modelOverrides" in d: bad.append("modelOverrides")
+# The effort keys: effortLevel pins the session's, modelSettings carries a
+# per-model one, and maxEffortLevel is a CAP whose LOWEST value across all
+# scopes wins — so a cap here cannot be raised back by anything the
+# launcher does. Same list as policies/check_repo_settings_carry_no_model_pins.sh,
+# which covers the committed scope; this covers the live ones.
+bad += [k for k in ("effortLevel", "maxEffortLevel", "modelSettings") if k in d]
 print(" ".join(bad))
 PY
 )"
@@ -277,7 +294,10 @@ done
 # `auto` are not neutral: both mean "ignore the configured level and use
 # the model's own default", which defeats the routing just as thoroughly
 # (docs/live-checks/2026-09-23-effort-registry.md).
-[[ -z "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]] ||
+# `+x`, not `:-`: an EXPORTED-but-empty value is still set, and the
+# harness reads the variable rather than testing it for emptiness. "For
+# any value" has to include the empty one (review of 2026-09-23).
+[[ -z "${CLAUDE_CODE_EFFORT_LEVEL+x}" ]] ||
     die "CLAUDE_CODE_EFFORT_LEVEL is set to '${CLAUDE_CODE_EFFORT_LEVEL}'; it outranks every per-class effort the fabric writes, in every subagent. Unset it (routing/effort.json is where a level is decided)."
 
 # ── resolve ─────────────────────────────────────────────────────────
@@ -383,6 +403,9 @@ for arg in "$@"; do
     if [[ "$arg" == --model=* ]]; then EFFECTIVE_SESSION="${arg#--model=}"; CALLER_MODEL=1; fi
     prev="$arg"
 done
+# The same trailing-flag hole --effort had, and older: `launch --model`
+# with no value appended the launcher's too.
+[[ "$prev" == "--model" ]] && CALLER_MODEL=1
 # The session's own effort, beside its model: routing/effort.json names a
 # level or a class whose level to take, and the adapter has already
 # clamped it to what this model admits. The caller's own --effort wins and
@@ -398,6 +421,12 @@ for arg in "$@"; do
     if [[ "$arg" == --effort=* ]]; then SESSION_EFFORT="${arg#--effort=}"; CALLER_EFFORT=1; fi
     prev="$arg"
 done
+# A TRAILING `--effort` with no value never entered the loop body as a
+# `prev`, so the launcher appended its own and the child saw
+# `--effort --effort <level>` — claude would read "--effort" as the level.
+# The caller meant to pass one; let their (malformed) flag stand and let
+# claude report it, rather than adding a second.
+[[ "$prev" == "--effort" ]] && CALLER_EFFORT=1 && SESSION_EFFORT=""
 [[ -z "$SESSION_EFFORT" ]] || export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
 export AGENT_FABRIC_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
 export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"

@@ -200,10 +200,24 @@ def test_a_downgrade_is_refused_until_it_is_written_down(tmp: str) -> None:
     assert any("code-plan" in f and "'high'" in f for f in findings), findings
     assert any("code-low" in f and "no effort at all" in f for f in findings), findings
 
+    # An acknowledgement with no note is still refused: "with a note" is
+    # the whole point, and a bare value is a downgrade nobody explained.
     doc["providers"] = {"anthropic": {"classes": {"code-low": None}},
                         "openrouter": {"classes": {"code-plan": "high"}}}
     json.dump(doc, open(path, "w", encoding="utf-8"))
+    bare = [f for f in routing.check(root) if "notes" in f]
+    assert len(bare) == 2, routing.check(root)
+
+    for prov, klass in (("anthropic", "code-low"), ("openrouter", "code-plan")):
+        doc["providers"][prov]["notes"] = {klass: "why, in one committed sentence"}
+    json.dump(doc, open(path, "w", encoding="utf-8"))
     assert not [f for f in routing.check(root) if "effort.json" in f], routing.check(root)
+
+    # And an acknowledgement written for a model that has since changed is
+    # re-judged, not trusted: it is keyed by class and outlives its model.
+    doc["providers"]["openrouter"]["classes"]["code-plan"] = "low"
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    assert any("written for a different model" in f for f in routing.check(root)), routing.check(root)
 
 
 def test_effort_names_every_class(tmp: str) -> None:

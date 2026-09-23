@@ -1085,13 +1085,25 @@ def agent_source_findings(root: str) -> list[str]:
     model or thinking is decided, and the one nobody updates — the source's
     `model:` is the tier alias the class rides, never a resolved id."""
     findings: list[str] = []
+    # Every committed source of an INSTALLED agent file, not only the
+    # class files: the locale worker is installed the same way and was
+    # outside this scan, so a hand-written level there had no second
+    # writer to refuse it (review of 2026-09-23).
+    sources: list[tuple[str, str]] = []
     agents = os.path.join(root, "runtime", "claude-code", "agents")
     for name in sorted(os.listdir(agents)) if os.path.isdir(agents) else []:
-        if not name.endswith(".md"):
-            continue
-        rel = os.path.join("runtime", "claude-code", "agents", name)
+        if name.endswith(".md"):
+            sources.append((os.path.join("runtime", "claude-code", "agents", name),
+                            os.path.join(agents, name)))
+    locales = os.path.join(root, "identities", "roles", "language-culture", "locale")
+    for suffix in sorted(os.listdir(locales)) if os.path.isdir(locales) else []:
+        worker = os.path.join(locales, suffix, "worker.md")
+        if os.path.isfile(worker):
+            sources.append((os.path.join("identities", "roles", "language-culture",
+                                         "locale", suffix, "worker.md"), worker))
+    for rel, path in sources:
         try:
-            text = open(os.path.join(agents, name), encoding="utf-8").read()
+            text = open(path, encoding="utf-8").read()
         except OSError:
             continue
         head = text.split("---", 2)[1] if text.startswith("---") and "---" in text[3:] else text

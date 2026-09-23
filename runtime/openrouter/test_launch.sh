@@ -277,6 +277,25 @@ out="$(CLAUDE_CODE_EFFORT_LEVEL=max run --provider anthropic --version 2>&1)"; r
 [[ $rc -ne 0 ]] && ! grep -q "EXECCED" <<<"$out" && ok "CLAUDE_CODE_EFFORT_LEVEL in the environment: REFUSED, never launched" || bad "launched with an environment effort that outranks every class" "$out"
 out="$(CLAUDE_CODE_EFFORT_LEVEL=auto run --provider anthropic --version 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && ok "…'auto' too: it is a value meaning 'use the model default', not an absence" || bad "auto admitted" "$out"
+# Every scope the launcher fences for models, it must fence for effort:
+# a settings key is merged into the CHILD, so it walks past the process
+# environment refusal above.
+mkfabric; mkdir -p "$HOME/.claude"
+printf '%s\n' '{"maxEffortLevel":"low"}' > "$HOME/.claude/settings.json"
+out="$(run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q "EXECCED" <<<"$out" && ok "a settings scope capping effort: REFUSED" || bad "launched under a settings maxEffortLevel" "$out"
+printf '%s\n' '{"env":{"CLAUDE_CODE_EFFORT_LEVEL":"max"}}' > "$HOME/.claude/settings.json"
+out="$(run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ok "…and one carrying the variable in its env block" || bad "settings env walked past the process-env refusal" "$out"
+rm -f "$HOME/.claude/settings.json"
+out="$(CLAUDE_CODE_EFFORT_LEVEL= run --provider anthropic --version 2>&1)"; rc=$?
+[[ $rc -ne 0 ]] && ok "exported but EMPTY is still set, and still refused" || bad "an empty value was treated as unset" "$out"
+# A trailing bare --effort is the caller's; adding ours makes the child
+# read "--effort" as the level.
+mkfabric
+out="$(run --provider anthropic --version --effort 2>&1)"
+[[ "$(grep -o -- "--effort" <<<"$(grep CLAUDE-EXECCED <<<"$out")" | wc -l)" == 1 ]] && ok "a trailing bare --effort is not doubled" || bad "two --effort tokens reached the child" "$out"
+
 # A session on a model with no effort control gets no flag at all — absent
 # is not the same as a default, and a stamp would invent a decision.
 mkfabric; profile defaults '{"providers":{"anthropic":{"session":"claude-haiku-4-5-20251001"}}}'

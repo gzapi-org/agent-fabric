@@ -89,7 +89,6 @@ the user own file.
 ' > "$A/code-high.md"
 run_install >/dev/null
 grep -q "the user own file" "$A/code-high.md.before-agent-fabric" && ok "a file the fabric did not write is kept aside" || bad "the original was not kept"
-run_install --force >/dev/null 2>&1 || true
 printf -- '---
 name: code-high
 model: opus
@@ -100,6 +99,15 @@ fabric.
 ' > "$A/code-high.md"
 run_install >/dev/null
 grep -q "the user own file" "$A/code-high.md.before-agent-fabric" && ok "…and a later run never overwrites it with the fabric's own previous file" || bad "the backup was clobbered by a second run" "$(cat "$A/code-high.md.before-agent-fabric")"
+
+echo "a routing failure refuses the whole run rather than writing files with no routing"
+bind backend-dev; rm -rf "$HOME/.claude/agents"
+printf '{"providers":{"anthropic":{"effort":{"code-high":"not-a-level"}}}}\n' > "$STATE/agents/$LOGIN/model-profile.local.json"
+out="$(run_install)"; rc=$?
+[[ $rc -ne 0 ]] && ok "a local layer routing.py refuses fails the installer" || bad "exit 0 with no routing" "$out"
+grep -q "refusing to write agent files with no routing" <<<"$out" && ok "…and says so, naming the subcommand" || bad "failure not named" "$out"
+[[ ! -e "$HOME/.claude/agents/code-high.md" ]] && ok "…and wrote nothing" || bad "wrote a file with an empty routing map"
+rm -f "$STATE/agents/$LOGIN/model-profile.local.json"
 
 echo "a worker file the fabric did not write is left alone"
 bind backend-dev

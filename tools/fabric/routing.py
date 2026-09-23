@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""tools/fabric/routing.py — capability -> model -> family shim.
+"""tools/fabric/routing.py — capability -> model + effort -> family shim.
 
-Two independent dimensions, one derived artifact:
+Three independent dimensions, one derived artifact:
 
     CAPABILITY CLASS -> CONCRETE MODEL       routing/capabilities.json (+ profile layers)
+    CAPABILITY CLASS -> REASONING EFFORT     routing/effort.json (+ profile layers)
     MODEL FAMILY     -> COMPATIBILITY SHIM   routing/shims.json
     model @ shim                             derived here, at runtime, never committed
+
+The effort a class ASKS for is one vocabulary; what a given model will
+actually be given is (intent, model) resolved through that provider's
+adapter, and is computed here every time, never stored.
 
     routing.py resolve code-high                      # openrouter by default
     routing.py resolve code-high --provider anthropic
@@ -14,6 +19,8 @@ Two independent dimensions, one derived artifact:
     routing.py shim <model>                           # the family shim a bare model id needs, if any
 
     routing.py pins [--provider P] [--me]             # the file-pinned classes (the review class): <class> <alias> <model>
+    routing.py efforts [--provider P] [--me]          # every class's level: <class> <level|-> <outcome>
+    routing.py session-effort [--provider P] [--me]   # the session's level, or nothing
 
 Profile layers (routing/profiles.json and the agent's local override) may
 override a class's model and name the session's; the shim is looked up on
@@ -148,7 +155,12 @@ class ProviderAdapter:
         level, GLM-5.3-Flash errors, DeepSeek remaps. One routing decision
         must not mean two things depending on who serves it."""
         row = self._effort_row(model)
-        if row is None or not row[1]:
+        if row is None:
+            # No row means no model was given (a class the harness's tier
+            # decides). Nothing is known about what it admits, which is
+            # not the same as knowing it admits nothing.
+            return None, "unknown-model"
+        if not row[1]:
             return None, "unexpressible"
         _, levels, remap = row
         if asked in levels:
@@ -156,7 +168,17 @@ class ProviderAdapter:
         if asked in remap:
             return remap[asked], "approximated"
         below = [l for l in scale[:scale.index(asked)] if l in levels] if asked in scale else []
-        return (below[-1], "approximated") if below else (None, "unexpressible")
+        if below:
+            return below[-1], "approximated"
+        # Asked for LESS than the model's own floor. Sending nothing would
+        # hand the vendor its default, which on a model defaulting to
+        # `high` is a silent UPGRADE — the mirror image of the drop this
+        # dimension exists to prevent. Clamp UP to the floor and say so
+        # (review of 2026-09-23, F5).
+        above = [l for l in levels if l in scale]
+        if above:
+            return above[0], "raised"
+        return None, "unexpressible"
 
 
 class OpenRouterAdapter(ProviderAdapter):
@@ -179,8 +201,12 @@ class OpenRouterAdapter(ProviderAdapter):
         # vendor remap, so the fabric clamps rather than let it 400.
         ("z-ai/glm-5.3*", ("low", "high", "max"), {}),
         # GLM-5.2 accepts seven and collapses them UPWARD to three.
+        # xhigh -> high, not -> max as Z.ai documents: measured through the
+        # broker, four of four xhigh runs sat in the same reasoning-token
+        # band as medium and high and none approached max
+        # (docs/live-checks/2026-09-23-effort-registry.md).
         ("z-ai/glm-5.2*", ("none", "minimal", "high", "max"),
-         {"low": "high", "medium": "high", "xhigh": "max"}),
+         {"low": "high", "medium": "high", "xhigh": "high"}),
     )
 
 
@@ -263,12 +289,19 @@ def effort_for(capability: str, provider: str, model: str | None, role: str | No
     scale = list(doc.get("levels") or [])
     intent = (doc.get("classes") or {}).get(capability)
     source = "effort.json"
-    over = merged_provider(provider, role, agent, local, root).get("effort", {}).get(capability)
-    if over:
-        intent, source = over["level"], over["source"]
+    # Order matters, and it is the order a MODEL id already follows:
+    # committed file first, then the profile and agent layers over it. A
+    # provider acknowledgement is the committed INTENT for that column,
+    # not the last word — placing it after the layers let a file in the
+    # repository outrank the agent's own choice, so an agent asking for
+    # `max` on a model that admits `max` was served `high` and told its
+    # intent WAS `high` (review of 2026-09-23, F3).
     committed = ((doc.get("providers") or {}).get(provider, {}).get("classes") or {}).get(capability)
     if committed:
         intent, source = committed, f"effort.json:providers.{provider}"
+    over = merged_provider(provider, role, agent, local, root).get("effort", {}).get(capability)
+    if over:
+        intent, source = over["level"], over["source"]
     if not intent:
         return {"level": None, "intent": None, "outcome": "unset", "how": "none", "source": source}
     served, outcome = adapter(provider).effort_for(model, intent, scale)
@@ -305,12 +338,18 @@ def effort_phrase(effort: dict[str, Any] | None) -> str:
     describe the same downgrade in two different words — the point of the
     dimension is that `asked -> served` is legible wherever it appears."""
     e = effort or {}
-    if e.get("outcome") == "applied":
+    outcome = e.get("outcome")
+    if outcome == "applied":
         return "effort %s" % e["level"]
-    if e.get("outcome") == "approximated":
+    if outcome in ("approximated", "raised"):
         return "effort %s (asked %s)" % (e["level"], e["intent"])
-    if e.get("outcome") == "unexpressible":
+    if outcome == "unexpressible":
         return "effort - (asked %s; this model expresses none)" % e.get("intent")
+    if outcome == "unknown-model":
+        # No model is pinned, so nothing is known about what it admits.
+        # Saying "expresses none" here would assert a fact about a model
+        # nobody has chosen (review of 2026-09-23, F6).
+        return "effort - (asked %s; no model pinned, the harness's tier decides)" % e.get("intent")
     return ""
 
 
@@ -698,12 +737,36 @@ def check(root: str | None = None) -> list[str]:
         if provider not in caps.get("providers", {}):
             continue
         ack = ((effort.get("providers") or {}).get(provider, {}).get("classes") or {})
+        notes = ((effort.get("providers") or {}).get(provider, {}).get("notes") or {})
+        base = (effort.get("classes") or {})
         for klass in classes:
-            if klass in ack:
-                continue                       # acknowledged: a committed value, or null for "none here"
             try:
                 res = resolve(klass, provider, root=root)
             except KeyError:
+                continue
+            if klass in ack:
+                # An acknowledgement is a committed statement about a
+                # (provider, MODEL) pair, but it is keyed only by class —
+                # so it outlives the model it was written for. Re-judge it
+                # rather than skipping: an ack that no longer matches what
+                # the adapter yields was written for a model that has since
+                # been replaced, and is as wrong as a missing one (review
+                # of 2026-09-23, F3).
+                if klass not in notes:
+                    findings.append(
+                        f"routing/effort.json: providers.{provider}.classes.{klass} has no matching entry in "
+                        f"providers.{provider}.notes — an acknowledged downgrade without its reason is the "
+                        "commit this file exists to require, with the reason left out.")
+                if res["via"] == "harness" or not res.get("model"):
+                    continue
+                want = base.get(klass)
+                if want:
+                    now, _ = adapter(provider).effort_for(res["model"], want, scale)
+                    if now != ack[klass]:
+                        findings.append(
+                            f"routing/effort.json: providers.{provider}.classes.{klass} is {ack[klass]!r}, but "
+                            f"{klass} asks for {want!r} and {res['model']} now yields {now!r}. The "
+                            "acknowledgement was written for a different model; re-decide it or delete it.")
                 continue
             if res["via"] == "harness":
                 # Nothing is pinned, so which model serves this class is
@@ -712,7 +775,13 @@ def check(root: str | None = None) -> list[str]:
                 # demand an acknowledgement of something nobody decided.
                 continue
             e = res.get("effort") or {}
-            if e.get("outcome") == "unexpressible" and e.get("intent"):
+            if e.get("outcome") == "raised" and e.get("intent"):
+                findings.append(
+                    f"routing/effort.json: {klass} asks for {e['intent']!r}; {res['model']} on {provider} "
+                    f"admits nothing that low and is given {e['level']!r} instead. Write "
+                    f"providers.{provider}.classes.{klass}: {e['level']!r} with a note, or raise the class — "
+                    "a class given MORE thinking than anyone asked for is the same defect upside down.")
+            elif e.get("outcome") == "unexpressible" and e.get("intent"):
                 findings.append(
                     f"routing/effort.json: {klass} asks for {e['intent']!r}; {res['model']} on {provider} "
                     f"expresses no effort at all. Write providers.{provider}.classes.{klass}: null with a "

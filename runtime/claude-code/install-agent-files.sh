@@ -62,10 +62,41 @@ put() {  # put <dest> <content-file>
 }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# Captured into a variable, NOT read from a process substitution: a
+# substitution's exit status is invisible even under `set -e`, so a
+# routing.py that raised left the map empty, every class lost its pin or
+# its level, and the script still printed "N written" and exited 0
+# (review of 2026-09-23, F8; the pins loop had the same hole since long
+# before effort existed). bootstrap.sh calls this without the launcher's
+# prior validation, so it is the first thing a bad local layer reaches.
+# The value is captured in THIS shell before the loop reads it. A
+# `while read < <(cmd)` cannot fail the script however cmd exits, and
+# neither can an `exit` inside the substitution — it ends that subshell
+# only. So each call is its own assignment, checked here.
+route() {  # route <subcommand> — stdout of one routing.py call; non-zero on failure
+    AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" "$@" --me --provider "$PROVIDER"
+}
+ROUTED_PINS="$(route pins)" ||
+    { echo "install-agent-files: routing.py pins failed; refusing to write agent files with no routing." >&2; exit 1; }
+ROUTED_EFFORTS="$(route efforts)" ||
+    { echo "install-agent-files: routing.py efforts failed; refusing to write agent files with no routing." >&2; exit 1; }
 declare -A PIN_BY_CLASS=()
 while read -r klass alias model; do
     [[ -n "$klass" ]] && PIN_BY_CLASS["$klass"]="$model"
-done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" pins --me --provider "$PROVIDER")
+done <<< "$ROUTED_PINS"
+# ONE LAUNCH OF AN ACCOUNT AT A TIME, now for every class. Before effort,
+# only code-review.md differed between providers, and agent-dispatch-guard.sh
+# catches that one by comparing its `model:` with the launch's resolution.
+# Effort is written into ALL five files per provider, so an openrouter
+# launch leaves GLM's clamp in code-medium.md and an anthropic session
+# dispatching afterwards runs at a level nothing chose for it — and no
+# guard compares that. Extending the guard per dispatched class is the
+# real fix and is deliberately NOT done here: it means buffering the hook's
+# stdin so the class's file can be read before jq sees the call, and a
+# half-made change to that fence is worse than a documented constraint
+# (review of 2026-09-23, F7). Until then: run one launch of an account at a
+# time, or re-run `bin/fabric-model apply` from the session you are in.
+#
 # The agent file is the ONLY per-class channel for effort: the Agent tool
 # takes no effort on a dispatch (2.1.280, read back), and the environment
 # variable would reach every subagent at once and flatten the per-class
@@ -76,7 +107,7 @@ done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/rou
 declare -A EFFORT_BY_CLASS=()
 while read -r klass level outcome; do
     [[ -n "$klass" && "$level" != "-" ]] && EFFORT_BY_CLASS["$klass"]="$level"
-done < <(AGENT_FABRIC_ROOT="$FABRIC_ROOT" python3 "$FABRIC_ROOT/tools/fabric/routing.py" efforts --me --provider "$PROVIDER")
+done <<< "$ROUTED_EFFORTS"
 for f in code-low.md code-medium.md code-high.md code-plan.md code-review.md; do
     klass="${f%.md}"
     pin="${PIN_BY_CLASS[$klass]:-}"; effort="${EFFORT_BY_CLASS[$klass]:-}"

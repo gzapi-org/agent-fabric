@@ -17,7 +17,12 @@
 #
 # WHAT IS CHECKED: .claude/settings.json (the committed scope) carries
 #   - no top-level "model" or "modelOverrides" key;
-#   - no env entry naming ANTHROPIC_* or CLAUDE_CODE_SUBAGENT_MODEL;
+#   - no "effortLevel", "maxEffortLevel" or "modelSettings" key: effort is
+#     the second routed dimension (routing/effort.json), and maxEffortLevel
+#     especially, because the LOWEST value across scopes wins and a
+#     committed cap cannot be raised back by a launch;
+#   - no env entry naming ANTHROPIC_*, CLAUDE_CODE_SUBAGENT_MODEL or
+#     CLAUDE_CODE_EFFORT_LEVEL;
 #   - .mcp.json carries no model field either (it is committed and feeds
 #     every clone).
 #

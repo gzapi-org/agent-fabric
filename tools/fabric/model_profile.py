@@ -301,6 +301,16 @@ def cmd_seed(args: argparse.Namespace, ctx: dict[str, Any], path: str) -> int:
             if not row.get("model") or row.get("source") in ("local", "harness"):
                 continue  # a harness default has nothing to seed; a local choice is already one
             model = row["model"]
+            if target.endswith(EFFORT_SUFFIX):
+                # The INTENT, never the served level. A level is a function
+                # of (intent, model): freezing what today's model happens
+                # to admit records a choice the fabric never made, and it
+                # keeps applying after the model moves under it — seeding
+                # openrouter's code-medium wrote `high` where effort.json
+                # says `medium` (review of 2026-09-23, F2).
+                model = (row.get("effort") or {}).get("intent")
+                if not model:
+                    continue
             if target == "session" and row.get("capability"):
                 model = row["capability"]  # a class-named session is seeded as the class
             if provider == "openrouter":

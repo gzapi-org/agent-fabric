@@ -138,6 +138,77 @@ agent's local layer — an independent confirmation that a subagent
 inherits the launcher's environment, and that a model change needs a
 relaunch (`bin/fabric-status` says so as DRIFT).
 
+## A second harness: the channel is the thing that differs
+
+`effort_channel` on the adapter exists because effort reaches a model
+differently on different harnesses, and that claim was worth testing
+against something that is not Claude Code. Codex CLI v0.156.1, installed
+into a scratch prefix and read:
+
+- **No `--effort` flag at all.** Its top-level options are `-m/--model`,
+  `-p/--profile`, `-c key=value` and sandbox/approval switches.
+- Effort is a **configuration key**, `model_reasoning_effort`, set with
+  `-c model_reasoning_effort=<level>`, in `~/.codex/config.toml`, or in a
+  named profile (`ConfigProfile` carries it, as it carries `model`).
+- There is a **second** key, `plan_mode_reasoning_effort` — a different
+  level for a different kind of work, which is the same idea as a
+  capability class, reached by an entirely different mechanism.
+- It has no per-agent-file equivalent, so a **per-class** effort is not
+  expressible on it at all; only a session-or-profile level is.
+- `-c model_reasoning_effort=bogus` was accepted and the session started.
+  The value is not validated by the CLI, which is one more reason the
+  clamp belongs to the fabric: on an OpenAI model an unsupported level is
+  an HTTP 400 at the far end of the run, not an error at launch.
+
+So a Codex adapter would be `effort_channel = "session"` and would emit
+`-c model_reasoning_effort=<level>` where the Claude Code adapter emits
+`--effort <level>` and an `effort:` line per class. Nothing else about
+the design changes: the vocabulary, the per-model tables, the clamp and
+the committed-downgrade rule are all above the channel. That is what the
+field is for, and it survives contact with a harness whose shape is
+different in exactly the way that matters.
+
+## The broker's effective level, measured rather than read
+
+Z.ai documents GLM-5.2 as collapsing `low`/`medium` to `high` and `xhigh`
+to `max`; OpenRouter's own model page claims it takes only `high` and
+`xhigh`; OpenRouter publishes no translation table for Z.ai. Three
+sources, three different claims — so it was measured.
+
+Four requests per level through `openrouter.ai/api/v1/chat/completions`
+with `reasoning: {effort}`, one reasoning-heavy prompt, `temperature: 0`,
+`max_tokens` high enough not to truncate, reading
+`native_tokens_reasoning` back from `GET /api/v1/generation`:
+
+```
+medium   118  252  647  730
+high      18  101  551  620
+xhigh    506  515  802  819
+max      900 1509 2604 4001
+```
+
+What this establishes:
+
+- **The broker forwards effort and GLM-5.2 honours it.** `max` is a
+  different population from everything else — its lowest sample (900) is
+  above every other sample taken (830 at most). The Anthropic-shaped
+  endpoint really does re-emit the field upstream.
+- **`xhigh` is NOT mapped to `max`.** Four of four `xhigh` samples sit in
+  the same band as `medium` and `high`, and none approaches `max`. That
+  contradicts Z.ai's documented `xhigh -> max`, and the adapter's GLM-5.2
+  row has been corrected to remap `xhigh` to `high` with the rest.
+- **`medium`, `high` and `xhigh` are not distinguishable at this sample
+  size.** Their ranges overlap almost completely (one `high` run spent 18
+  reasoning tokens, another 620). This is *consistent with* the
+  documented collapse of the lower levels into one, but four samples
+  against that variance do not prove it, and this note does not claim it.
+
+The first attempt measured nothing and is worth recording as the trap:
+with `max_tokens: 40` every level returned exactly 40 reasoning tokens,
+because the model was still thinking when the response was truncated. A
+saturated ceiling reads as "no difference between levels" and is
+indistinguishable from the effort being ignored.
+
 ## What is not established here
 
 - That an agent file's `effort:` changes the served level. The chain

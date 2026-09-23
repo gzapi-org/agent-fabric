@@ -246,6 +246,14 @@ echo "launch: --provider anthropic execs plain claude with only the pinned tiers
 cat > "$SANDBOX/bin/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo "CLAUDE-EXECCED:$*"
+# Credentials by SHAPE, never by value: the suite runs with the account's
+# real OPENROUTER_API_KEY in its environment, and a dump of a credential
+# variable would put a secret in the suite's log.
+for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_CUSTOM_HEADERS; do
+    if [[ -z "${!v+x}" ]]; then shape=unset; elif [[ -z "${!v}" ]]; then shape=empty
+    elif [[ "${!v}" == sk-or-* ]]; then shape=sk-or; elif [[ "${!v}" == sk-ant-* ]]; then shape=sk-ant; else shape=other; fi
+    echo "CLAUDE-CRED:$v=$shape"
+done
 for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_BASE_URL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_EFFORT AGENT_FABRIC_LAUNCH_PROVIDER AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "CLAUDE-ENV:$v=${!v:-}"
 done
@@ -385,6 +393,26 @@ out="$(ANTHROPIC_BASE_URL=https://gateway.example.com run --provider anthropic -
 grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=https://gateway.example.com$" <<<"$out" && ok "a base URL naming anything else is left alone" || bad "cleared a base URL that was not the broker's" "$(grep BASE_URL <<<"$out")"
 out="$(ANTHROPIC_BASE_URL=https://example.com/openrouter.ai run --provider anthropic --version 2>&1)"
 grep -q "CLAUDE-ENV:ANTHROPIC_BASE_URL=https://example.com/openrouter.ai$" <<<"$out" && ok "…including a look-alike with openrouter.ai in its path: the host decides" || bad "a look-alike path was read as the broker" "$(grep BASE_URL <<<"$out")"
+# The CREDENTIALS, which is what the base URL alone missed. The environment
+# `ori claude` gives its child, planted whole (read out of the ori binary):
+# the base URL, an EMPTY auth token, and the OpenRouter key in
+# ANTHROPIC_API_KEY. Clearing only the URL sent that key to Anthropic.
+FAKE_OR=sk-or-v1-fixture-not-a-real-key
+out="$(ANTHROPIC_BASE_URL=https://openrouter.ai/api ANTHROPIC_AUTH_TOKEN= ANTHROPIC_API_KEY=$FAKE_OR OPENROUTER_API_KEY=$FAKE_OR ANTHROPIC_CUSTOM_HEADERS='X-Session-Id: s1' run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-CRED:ANTHROPIC_API_KEY=unset" <<<"$out" && ok "the broker's key never reaches a plain-claude child" || bad "the OpenRouter key would go to Anthropic" "$(grep CLAUDE-CRED <<<"$out")"
+grep -q "CLAUDE-CRED:ANTHROPIC_CUSTOM_HEADERS=unset" <<<"$out" && grep -q "CLAUDE-CRED:ANTHROPIC_AUTH_TOKEN=unset" <<<"$out" && ok "…nor its headers, nor its (empty) token" || bad "broker headers or token passed on" "$(grep CLAUDE-CRED <<<"$out")"
+# The secret check stands on its own, without the base URL beside it.
+out="$(ANTHROPIC_API_KEY=$FAKE_OR OPENROUTER_API_KEY=$FAKE_OR run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-CRED:ANTHROPIC_API_KEY=unset" <<<"$out" && ok "an OpenRouter key in ANTHROPIC_API_KEY is dropped even with no broker base URL" || bad "the OR key survived without its base URL" "$(grep CLAUDE-CRED <<<"$out")"
+# OPENROUTER_API_KEY set to something ELSE, so equality cannot fire and
+# only the shape can clear it.
+out="$(OPENROUTER_API_KEY=a-different-value ANTHROPIC_API_KEY=$FAKE_OR run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-CRED:ANTHROPIC_API_KEY=unset" <<<"$out" && ok "…recognised by its shape alone, when it matches no known key" || bad "an sk-or key went through" "$(grep CLAUDE-CRED <<<"$out")"
+# And ONLY that: a real Anthropic key is the person's own and passes on.
+out="$(ANTHROPIC_API_KEY=sk-ant-fixture-not-a-real-key run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-CRED:ANTHROPIC_API_KEY=sk-ant" <<<"$out" && ok "an Anthropic key is left alone" || bad "dropped an Anthropic key" "$(grep CLAUDE-CRED <<<"$out")"
+out="$(ANTHROPIC_BASE_URL=https://gateway.example.com ANTHROPIC_API_KEY=sk-ant-fixture-not-a-real-key run --provider anthropic --version 2>&1)"
+grep -q "CLAUDE-CRED:ANTHROPIC_API_KEY=sk-ant" <<<"$out" && ok "…including beside a non-broker base URL" || bad "dropped a gateway user's key" "$(grep CLAUDE-CRED <<<"$out")"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROVIDER=anthropic" <<<"$out" && ok "provider stamped" || bad "no provider stamp" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_PROFILE=backend-dev/$LOGIN" <<<"$out" && ok "profile stamped on vanilla too" || bad "no profile stamp" "$out"
 mkfabric

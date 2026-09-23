@@ -369,22 +369,41 @@ VIOLATION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("review
 
 SESSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["composite"])' <<<"$RESOLVED")"
 
-# PLAIN CLAUDE MEANS ANTHROPIC DIRECT. A launch started from inside a
-# broker session inherits OpenRouter's ANTHROPIC_BASE_URL (and whatever
-# credential rides with it for that host), and the child then ran and
-# billed on the broker while every stamp, --print and fabric-status said
-# "anthropic" (review of #31, confirmed by planting the value). Cleared
-# only when it names OpenRouter — the same host test model-audit.sh
-# classifies a session by — because that value is the fabric's own, left
-# by its own broker launch. A base URL naming anything else is someone's
-# deliberate choice and is left exactly as it was: that question was not
-# reviewed, and silently dropping it would be a decision nobody made.
+# PLAIN CLAUDE MEANS ANTHROPIC DIRECT, and it carries no broker credential.
+# `ori claude` gives its child, unconditionally (read out of the ori
+# binary): ANTHROPIC_BASE_URL=https://openrouter.ai/api,
+# ANTHROPIC_AUTH_TOKEN="" (present, EMPTY), ANTHROPIC_API_KEY=<the account's
+# OpenRouter key>, OPENROUTER_API_KEY=<the same key>, and sometimes
+# ANTHROPIC_CUSTOM_HEADERS. A launch started from inside such a session
+# inherits all of it.
+#
+# Two defects, one fixed on top of the other (review of #31, both rounds).
+# Nothing cleared first, so the child ran and billed on the broker while
+# every stamp said "anthropic". Then the base URL alone was cleared — and
+# the key stayed, so the child sent the account's OpenRouter SECRET to
+# api.anthropic.com as its Anthropic credential: worse than the defect it
+# replaced. The empty AUTH_TOKEN that was cleared with it held nothing.
+#
+# So, when the base URL names OpenRouter (the host test model-audit.sh
+# classifies a session by), EVERY variable ori set for that host goes. Any
+# other base URL is someone's deliberate choice, unreviewed, and is left
+# exactly as it was.
 if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_BASE_URL:-}" ]] && python3 -c 'import sys
 from urllib.parse import urlsplit
 try: h = urlsplit(sys.argv[1]).hostname or ""
 except ValueError: h = ""
 sys.exit(0 if h == "openrouter.ai" or h.endswith(".openrouter.ai") else 1)' "$ANTHROPIC_BASE_URL"; then
-    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS
+fi
+# And the SECRET, independently of the base URL: an ANTHROPIC_API_KEY that
+# is the OpenRouter key — equal to OPENROUTER_API_KEY, or shaped like one
+# (sk-or-) — is never an Anthropic credential, whatever else the
+# environment says, so it never reaches a plain-claude child. Precise on
+# purpose: a real Anthropic key (sk-ant-) is not touched.
+if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_API_KEY:-}" ]] &&
+   { [[ "$ANTHROPIC_API_KEY" == sk-or-* ]] ||
+     [[ -n "${OPENROUTER_API_KEY:-}" && "$ANTHROPIC_API_KEY" == "$OPENROUTER_API_KEY" ]]; }; then
+    unset ANTHROPIC_API_KEY
 fi
 
 # ── the pins ─────────────────────────────────────────────────────────
@@ -467,8 +486,8 @@ done
 # Cleared, not just left unset, when there is no level: this stamp is
 # CONDITIONAL, so a launch started from inside another fabric session
 # would otherwise inherit it (so is AGENT_FABRIC_LAUNCH_CLAUDE_VERSION,
-# cleared the same way below; the alias pins and a broker base URL are the
-# unconditional cousins, cleared above) — a child given no --effort
+# cleared the same way below; the alias pins and the broker's own
+# environment are cleared above) — a child given no --effort
 # carrying its parent's `high`, which fabric-status then compares with a
 # level the child never had. Found when a relaunched session ran the suite.
 if [[ -n "$SESSION_EFFORT" ]]; then export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"

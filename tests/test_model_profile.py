@@ -156,11 +156,38 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     p = f.run("seed", "--provider", "anthropic")
     assert p.returncode == 0, p.stderr
     got = f.read()["providers"]["anthropic"]
+    # Effort is seeded with the model, because it is the same kind of
+    # choice and `seed` means "freeze what I resolve to today". code-low
+    # is absent by design: haiku expresses no effort, and a seeded level
+    # there would be a decision the model cannot carry out.
     assert got == {"session": "claude-opus-5", "capabilities": {
         "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
-        "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"}}, got
+        "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},
+        "effort": {"code-medium": "medium", "code-high": "high",
+                   "code-plan": "xhigh", "code-review": "high"}}, got
     j = json.loads(f.run("list", "--json").stdout)
     assert j["providers"]["openrouter"]["code-low"]["source"] == "local", "a seeded value is now the agent's own"
+
+
+def test_effort_is_a_target_that_layers_like_a_model(f: Fixture) -> None:
+    """The owner's decision: effort layers exactly as a model id does, so
+    `<class>-effort` is settable, unsettable and prunes the same way."""
+    p = f.run("set", "--provider", "anthropic", "code-high-effort", "max")
+    assert p.returncode == 0, p.stderr
+    assert f.read()["providers"]["anthropic"]["effort"] == {"code-high": "max"}, f.read()
+    j = json.loads(f.run("list", "--provider", "anthropic", "--json").stdout)
+    row = j["providers"]["anthropic"]["code-high-effort"]
+    assert row["model"] == "max" and row["source"] == "local", row
+    # A model whose class expresses no effort still has no level to set on.
+    out = f.run("list", "--provider", "anthropic").stdout
+    assert "code-low-effort" in out and "expresses none" in out, out
+    p = f.run("unset", "--provider", "anthropic", "code-high-effort")
+    assert p.returncode == 0, p.stderr
+    # It was the only choice in the file, so pruning takes the whole way
+    # back out: no effort map, no anthropic layer, no providers at all.
+    assert "providers" not in f.read(), f"nothing was pruned: {f.read()}"
+    p = f.run("set", "--provider", "anthropic", "code-high-effort", "not-a-level")
+    assert p.returncode != 0, "a value outside the vocabulary was accepted"
 
 
 def main() -> int:
@@ -173,6 +200,7 @@ def main() -> int:
         test_a_flat_local_file_is_migrated_on_first_write,
         test_a_malformed_local_file_is_refused_not_rewritten,
         test_seed_copies_the_merged_defaults_as_pins,
+        test_effort_is_a_target_that_layers_like_a_model,
     ]
     failures = 0
     for case in cases:

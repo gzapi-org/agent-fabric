@@ -446,9 +446,15 @@ if (( PRINT_ONLY )); then
     [[ -z "$SKIPPED" ]] || echo "  (the merged session $SKIPPED is not an Anthropic model; the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer's is used on plain claude)"
     echo "  (from the $(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["source"])' <<<"$RESOLVED") layer; bin/fabric-model list --provider $PROVIDER shows every choice with its source)"
     [[ "$EFFECTIVE_SESSION" == "$SESSION" ]] || echo "  (overridden by --model on the command line: $EFFECTIVE_SESSION)"
-    python3 - "$RESOLVED" <<'PY'
-import json, sys
+    # `|| exit 1`: the script runs without `set -e`, so this block can die
+    # on its first class, print a traceback to stderr, and leave --print
+    # exiting 0 with the bash-echoed lines around it intact — measured.
+    # A --print missing half its profile must fail, not look successful.
+    python3 - "$RESOLVED" "$ROUTING" <<'PY' || exit 1
+import importlib.util, json, sys
 d = json.loads(sys.argv[1])
+spec = importlib.util.spec_from_file_location("fabric_routing", sys.argv[2])
+routing = importlib.util.module_from_spec(spec); spec.loader.exec_module(routing)
 for klass, res in d["classes"].items():
     if res["via"] == "harness":
         how = "(harness default for its tier)"
@@ -456,10 +462,15 @@ for klass, res in d["classes"].items():
         how = "(pinned in the agent file; the dispatch guard applies it; from %s)" % res["source"]
     else:
         how = "(exported for its tier; from %s)" % res["source"]
+    # Effort is routed beside the model (routing/effort.json), so it is
+    # printed beside it: `asked -> served` whenever they differ, because
+    # a downgrade nobody can see is the defect the dimension exists for.
+    eff = routing.effort_phrase(res.get("effort"))
+    eff = "  " + eff if eff else ""
     if d.get("provider") == "anthropic":
-        print("  %-12s: %s  %s" % (klass, res["model"], how))
+        print("  %-12s: %s  %s%s" % (klass, res["model"], how, eff))
     else:
-        print("  %-12s: %s  shim %s  => %s  %s" % (klass, res["model"], res["shim"] or "-", res["composite"], how))
+        print("  %-12s: %s  shim %s  => %s  %s%s" % (klass, res["model"], res["shim"] or "-", res["composite"], how, eff))
 print()
 for k, v in sorted(d["exports"].items()):
     print("  export %s=%s" % (k, v))

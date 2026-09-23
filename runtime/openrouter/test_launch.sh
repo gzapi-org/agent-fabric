@@ -100,6 +100,18 @@ grep -q "export ANTHROPIC_DEFAULT_SONNET_MODEL=z-ai/glm-5.2@preset/glm2claude-sh
 grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim" <<<"$out" && ok "code-high -> deepseek v4 pro + its shim -> opus alias" || bad "code-high wrong" "$out"
 grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" <<<"$out" && ok "code-plan -> deepseek v4 pro + its shim -> fable alias, its own export" || bad "code-plan (fable) wrong" "$out"
 [[ "$(grep -c 'export ANTHROPIC_DEFAULT_' <<<"$out")" == 4 ]] && ok "four aliases, four exports: the review class never shares code-high's" || bad "export count" "$out"
+# The alias exports above come from the same python block as the class
+# lines, so a crash in it was already caught — but only by its exports.
+# The class lines themselves, and the effort beside them, had nothing:
+# the block could print every export and still get the per-class half
+# wrong. These assert the half that no case reached, and that nothing
+# reaches stderr (the launcher has no `set -e`, so a traceback there
+# costs the caller nothing but the output it came for).
+errf="$SANDBOX/print.err"; out="$(run --print 2>"$errf")"
+[[ "$(grep -c '^  code-[a-z]*  *:' <<<"$out")" == 5 ]] && ok "a line per capability class, from the python block" || bad "class lines missing" "$out"
+[[ ! -s "$errf" ]] && ok "…and --print writes nothing to stderr" || bad "--print wrote to stderr" "$(cat "$errf")"
+[[ "$(grep -c '^  code-[a-z]*  *:.* effort ' <<<"$out")" == 5 ]] && ok "each class line carries its routed effort (routing/effort.json)" || bad "effort not printed per class" "$out"
+grep -q "code-medium .* effort high (asked medium)" <<<"$out" && ok "a level the model does not admit prints asked -> served, never served alone" || bad "the broker downgrade is invisible" "$out"
 
 echo "launch: a non-GLM override receives no shim; a GLM override keeps it"
 mkfabric; profile roles backend-dev '{"capabilities":{"code-high":"anthropic/claude-sonnet-5"}}'

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "description": "CAPABILITY CLASS -> REASONING EFFORT. The third dimension, beside CLASS -> MODEL (routing/capabilities.json) and MODEL FAMILY -> SHIM (routing/shims.json), and kept here for the same reason they are kept apart: one file, one decision. How much thinking a class gets is a property of the WORK, so it is one vocabulary here and not a column per provider; how a provider SPELLS it is that provider's adapter (tools/fabric/routing.py), and whether a given model admits a level is the adapter's per-model table. Effort exists as a routed value because it was not one: every model the fabric had pinned happened to default to `high`, and Opus 5.5 was the first that did not — moving code-high to it would have dropped every session a level with no commit and nothing to review (docs/live-checks/2026-09-23-opus-5-5.md). A model's own default is never the fabric's decision.",
+  "levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+  "levels_note": "Ordered, least to most. The union of the vendors' scales, not any one vendor's: Anthropic admits low..max, OpenAI all seven, xAI none..xhigh, DeepSeek low/high/max, GLM-5.3-Flash low/high/max. A level is an ORDINAL, never a magnitude — no vendor asserts that its `high` means another's, and neither does this file. What a class asks for is clamped DOWN to the nearest level its model admits, by the fabric, before the request leaves: the vendors disagree on the failure mode (OpenAI returns 400, xAI and Claude Code clamp silently, GLM-5.3-Flash errors, DeepSeek remaps), and a routing decision must not mean two different things depending on who serves it.",
+  "classes": {
+    "code-low": "low",
+    "code-medium": "medium",
+    "code-high": "high",
+    "code-plan": "xhigh",
+    "code-review": "high"
+  },
+  "session": "code-high",
+  "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Naming the class keeps the session's thinking with the session's model: both are code-high on the anthropic path, and one edit moves both.",
+  "providers": {
+    "anthropic": {
+      "classes": {
+        "code-low": null
+      },
+      "notes": {
+        "code-low": "null, not a level: claude-haiku-4-5 rejects the effort parameter outright — it is not a reasoning model in the sense the rest of the Claude line is. So code-low's `low` is not a downgrade here, it is nothing at all, and the class runs on whatever the model does by itself. Acknowledged rather than silently dropped. If code-low ever moves to a model that takes effort, delete this line and check() will start judging it again."
+      }
+    },
+    "openrouter": {
+      "classes": {
+        "code-plan": "high"
+      },
+      "notes": {
+        "code-plan": "code-plan asks for xhigh; deepseek/deepseek-v4-pro distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve. Written down because the alternative is a level of thinking lost between the routing file and the wire. Note the consequence while this column stands: code-high, code-plan and code-review all resolve to the same model AND now the same effort, so on the broker those three classes differ in neither. That is a true statement about today's broker column, not a property of the design — on the anthropic path they are high/xhigh/high."
+      }
+    }
+  }
+}

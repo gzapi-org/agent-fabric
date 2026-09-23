@@ -157,7 +157,62 @@ def test_a_layer_is_validated_in_its_provider_vocabulary() -> None:
     refused({"providers": {"openrouter": {"capabilities": {"code-high": "opus"}}}}, "not an OpenRouter model id")
     refused({"providers": {"vertex": {}}}, "unknown provider")
     refused({"capabilities": {"code-low": "z-ai/glm-5.3@preset/glm2claude-shim"}}, "not an OpenRouter model id")
-    assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}}, "anthropic": {"capabilities": {}}}
+    # A layer carries effort beside capabilities now (the owner, 2026-09-23):
+    # effort is layered like a model id, in the fabric's own vocabulary.
+    assert routing.normalize_layer({}) == {"openrouter": {"capabilities": {}, "effort": {}},
+                                           "anthropic": {"capabilities": {}, "effort": {}}}
+    refused({"providers": {"anthropic": {"effort": {"code-high": "enormous"}}}}, "not an effort level")
+    refused({"providers": {"anthropic": {"effort": {"turbo": "high"}}}}, "not a capability class")
+
+
+def test_effort_is_one_vocabulary_resolved_per_class(tmp: str) -> None:
+    """Effort is routed beside the model: one vocabulary in
+    routing/effort.json, translated per provider by the adapter, and
+    every resolution says which of the three things happened to it."""
+    for provider in ("anthropic", "openrouter"):
+        for klass in routing.load_capabilities()["classes"]:
+            e = routing.resolve(klass, provider)["effort"]
+            assert e["intent"], f"{klass}/{provider} asks for nothing"
+            assert e["outcome"] in ("applied", "approximated", "unexpressible"), e
+    # The two real divergences today, both acknowledged in the file.
+    assert routing.resolve("code-low", "anthropic")["effort"]["outcome"] == "unexpressible"
+    assert routing.resolve("code-plan", "openrouter")["effort"]["source"].endswith("providers.openrouter")
+
+
+def test_a_vendor_that_remaps_upward_is_not_clamped_down(tmp: str) -> None:
+    """GLM-5.2 documents low/medium -> HIGH. A fabric that only ever
+    clamped downward would ask for less thinking than sending the level
+    untouched — the first cut of this did exactly that."""
+    served, outcome = routing.ADAPTERS["openrouter"].effort_for(
+        "z-ai/glm-5.2", "medium", list(routing.load_effort()["levels"]))
+    assert (served, outcome) == ("high", "approximated"), (served, outcome)
+
+
+def test_a_downgrade_is_refused_until_it_is_written_down(tmp: str) -> None:
+    """The rule the dimension exists for: a level the provider will not
+    give is a committed value with a note, or check() refuses."""
+    root = scratch_root(tmp)
+    path = os.path.join(root, "routing", "effort.json")
+    doc = json.load(open(path, encoding="utf-8"))
+    doc["providers"] = {}                      # drop both acknowledgements
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    findings = routing.check(root)
+    assert any("code-plan" in f and "'high'" in f for f in findings), findings
+    assert any("code-low" in f and "no effort at all" in f for f in findings), findings
+
+    doc["providers"] = {"anthropic": {"classes": {"code-low": None}},
+                        "openrouter": {"classes": {"code-plan": "high"}}}
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    assert not [f for f in routing.check(root) if "effort.json" in f], routing.check(root)
+
+
+def test_effort_names_every_class(tmp: str) -> None:
+    root = scratch_root(tmp)
+    path = os.path.join(root, "routing", "effort.json")
+    doc = json.load(open(path, encoding="utf-8"))
+    doc["classes"].pop("code-medium")
+    json.dump(doc, open(path, "w", encoding="utf-8"))
+    assert any("code-medium" in f and "effort.json" in f for f in routing.check(root)), routing.check(root)
 
 
 def test_each_provider_validates_a_reference_through_its_adapter(tmp: str) -> None:
@@ -331,6 +386,10 @@ def main() -> int:
         test_current_broker_policy,
         test_native_path_pins_the_top_of_each_class,
         test_a_null_in_the_harness_column_is_the_harness_tier,
+        test_effort_is_one_vocabulary_resolved_per_class,
+        test_a_vendor_that_remaps_upward_is_not_clamped_down,
+        test_a_downgrade_is_refused_until_it_is_written_down,
+        test_effort_names_every_class,
         test_each_provider_validates_a_reference_through_its_adapter,
         test_composite_is_derived_not_stored,
         test_a_non_glm_model_gets_no_shim,

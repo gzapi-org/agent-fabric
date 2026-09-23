@@ -226,9 +226,13 @@ indistinguishable from the effort being ignored.
 - That a level the model does not admit is recorded after the harness's
   own clamp or before it. Every measured dispatch asked a level its model
   admits, so the recorded value and the asked one could not differ. The
-  frontmatter schema does accept `xhigh` (`effort` is loosely typed,
-  despite the describe text listing only `low, medium, high, max, or an
-  integer`).
+  agent frontmatter field is a **strict enum**, not loosely typed:
+  `effort: Fe([V(["low","medium","high","xhigh","max"]), int])`, and the
+  loader rejects anything else ("has invalid effort '…'. Valid options:
+  low, medium, high, xhigh, max or an integer"). The looser text quoted
+  here at first — `low, medium, high, max, or an integer` — is the
+  skill/command `effort` field's, a different field. Corrected after the
+  blind review of #31 read it out of 2.1.280; verified the same way.
 - Anything about the broker path. OpenRouter's translation of
   `output_config.effort` for GLM and DeepSeek is still unmeasured;
   `routing/effort.json` carries the committed downgrade for `code-plan`

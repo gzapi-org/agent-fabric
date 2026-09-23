@@ -174,9 +174,10 @@ def test_effort_is_one_vocabulary_resolved_per_class(tmp: str) -> None:
             e = routing.resolve(klass, provider)["effort"]
             assert e["intent"], f"{klass}/{provider} asks for nothing"
             assert e["outcome"] in ("applied", "approximated", "unexpressible"), e
-    # The two real divergences today, both acknowledged in the file.
+    # The three real divergences today, each acknowledged in the file.
     assert routing.resolve("code-low", "anthropic")["effort"]["outcome"] == "unexpressible"
     assert routing.resolve("code-plan", "openrouter")["effort"]["source"].endswith("providers.openrouter")
+    assert routing.resolve("code-review", "openrouter")["effort"]["source"].endswith("providers.openrouter")
 
 
 def test_a_vendor_that_remaps_upward_is_not_clamped_down(tmp: str) -> None:

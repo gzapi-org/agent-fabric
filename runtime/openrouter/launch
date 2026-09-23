@@ -437,7 +437,13 @@ done
 # The caller meant to pass one; let their (malformed) flag stand and let
 # claude report it, rather than adding a second.
 [[ "$prev" == "--effort" ]] && CALLER_EFFORT=1 && SESSION_EFFORT=""
-[[ -z "$SESSION_EFFORT" ]] || export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
+# Cleared, not just left unset, when there is no level: this is the one
+# CONDITIONAL stamp, so it is the one a launch started from inside another
+# fabric session would otherwise inherit — a child given no --effort
+# carrying its parent's `high`, which fabric-status then compares with a
+# level the child never had. Found when a relaunched session ran the suite.
+if [[ -n "$SESSION_EFFORT" ]]; then export AGENT_FABRIC_LAUNCH_EFFORT="$SESSION_EFFORT"
+else unset AGENT_FABRIC_LAUNCH_EFFORT; fi
 export AGENT_FABRIC_LAUNCH_SESSION_MODEL="$EFFECTIVE_SESSION"
 export AGENT_FABRIC_LAUNCH_PROFILE="$LABEL"
 export AGENT_FABRIC_LAUNCH_AGENT="$AGENT"

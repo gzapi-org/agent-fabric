@@ -307,8 +307,11 @@ out="$(run --provider anthropic --version --effort 2>&1)"
 mkfabric; profile defaults '{"providers":{"anthropic":{"session":"claude-haiku-4-5-20251001"}}}'
 out="$(run --provider anthropic --print 2>&1)"
 grep -q "^  effort  : -  (this session's model expresses none" <<<"$out" && ok "a session model with no effort control says so" || bad "invented a level for a model without one" "$out"
-out="$(run --provider anthropic --version 2>&1)"
-! grep -q -- "--effort" <<<"$out" && ! grep -q "AGENT_FABRIC_LAUNCH_EFFORT=." <<<"$out" && ok "…and passes no --effort and stamps nothing" || bad "passed an effort to a model that takes none" "$out"
+# Planted, not inherited by accident: a launch from inside another fabric
+# session arrives carrying that session's stamp, and must clear it rather
+# than pass it on. CI has no stamp to inherit, so the case sets one.
+out="$(AGENT_FABRIC_LAUNCH_EFFORT=high run --provider anthropic --version 2>&1)"
+! grep -q -- "--effort" <<<"$out" && ! grep -q "AGENT_FABRIC_LAUNCH_EFFORT=." <<<"$out" && ok "…and passes no --effort and stamps nothing, even over an inherited stamp" || bad "passed an effort, or an inherited stamp, to a model that takes none" "$out"
 
 python3 - "$FABRIC/routing/capabilities.json" <<'PY2'
 import json, sys

@@ -369,31 +369,47 @@ VIOLATION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("review
 
 SESSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["composite"])' <<<"$RESOLVED")"
 
-# PLAIN CLAUDE MEANS ANTHROPIC DIRECT, and it carries no broker credential.
-# `ori claude` gives its child, unconditionally (read out of the ori
-# binary): ANTHROPIC_BASE_URL=https://openrouter.ai/api,
-# ANTHROPIC_AUTH_TOKEN="" (present, EMPTY), ANTHROPIC_API_KEY=<the account's
-# OpenRouter key>, OPENROUTER_API_KEY=<the same key>, and sometimes
-# ANTHROPIC_CUSTOM_HEADERS. A launch started from inside such a session
-# inherits all of it.
+# PLAIN CLAUDE MEANS ANTHROPIC DIRECT, and it carries nothing the broker
+# set for its own model. `ori claude` builds its child's environment in one
+# function (read out of the ori binary, `rIa`), and a launch started from
+# inside such a session inherits all of it:
+#   pointing and credentials, forced: ANTHROPIC_BASE_URL=https://openrouter.ai/api,
+#     ANTHROPIC_AUTH_TOKEN="" (present, EMPTY), ANTHROPIC_API_KEY=<the account's
+#     OpenRouter key>, OPENROUTER_API_KEY=<the same key>, ANTHROPIC_MODEL=<its
+#     model>, and sometimes ANTHROPIC_CUSTOM_HEADERS;
+#   tuning for the BROKER'S model: CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1,
+#     CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY,
+#     CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK, ENABLE_TOOL_SEARCH;
+#   privacy opt-outs: DISABLE_TELEMETRY=1, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1,
+#     DISABLE_GROWTHBOOK, CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF;
+#   and more this was NOT enumerated for: a helper (`tIa`) and two computed
+#     names. Nothing below claims to clear "everything ori set".
 #
-# Two defects, one fixed on top of the other (review of #31, both rounds).
-# Nothing cleared first, so the child ran and billed on the broker while
-# every stamp said "anthropic". Then the base URL alone was cleared — and
-# the key stayed, so the child sent the account's OpenRouter SECRET to
-# api.anthropic.com as its Anthropic credential: worse than the defect it
-# replaced. The empty AUTH_TOKEN that was cleared with it held nothing.
+# History, because the next change here must not repeat it (review of #31,
+# three rounds). Nothing cleared: the child ran and billed on the broker
+# while stamped "anthropic". Then the URL alone: the key stayed, and the
+# child would have sent the account's OpenRouter SECRET to
+# api.anthropic.com. Then the credentials: the broker's system-prompt and
+# context-cap tuning still followed onto an Anthropic session.
 #
 # So, when the base URL names OpenRouter (the host test model-audit.sh
-# classifies a session by), EVERY variable ori set for that host goes. Any
-# other base URL is someone's deliberate choice, unreviewed, and is left
-# exactly as it was.
+# classifies a session by), the pointing, the credentials and the model
+# tuning go. The privacy opt-outs STAY: clearing them could switch
+# telemetry back on against a person's own choice, and leaving them costs
+# nothing. OPENROUTER_API_KEY stays: it is the account's own (secrets.env)
+# and the broker path needs it. A base URL naming anything else is someone's
+# deliberate choice, unreviewed, and is left exactly as it was. What is
+# dropped is said once on stderr — names, never values.
+BROKER_ENV=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_MODEL
+            CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT CLAUDE_CODE_MAX_CONTEXT_TOKENS CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
+            CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK ENABLE_TOOL_SEARCH)
+dropped=()
 if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_BASE_URL:-}" ]] && python3 -c 'import sys
 from urllib.parse import urlsplit
 try: h = urlsplit(sys.argv[1]).hostname or ""
 except ValueError: h = ""
 sys.exit(0 if h == "openrouter.ai" or h.endswith(".openrouter.ai") else 1)' "$ANTHROPIC_BASE_URL"; then
-    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS
+    for v in "${BROKER_ENV[@]}"; do [[ -n "${!v+x}" ]] && { dropped+=("$v"); unset "$v"; }; done
 fi
 # And the SECRET, independently of the base URL: an ANTHROPIC_API_KEY that
 # is the OpenRouter key — equal to OPENROUTER_API_KEY, or shaped like one
@@ -403,8 +419,9 @@ fi
 if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_API_KEY:-}" ]] &&
    { [[ "$ANTHROPIC_API_KEY" == sk-or-* ]] ||
      [[ -n "${OPENROUTER_API_KEY:-}" && "$ANTHROPIC_API_KEY" == "$OPENROUTER_API_KEY" ]]; }; then
-    unset ANTHROPIC_API_KEY
+    dropped+=(ANTHROPIC_API_KEY); unset ANTHROPIC_API_KEY
 fi
+(( ${#dropped[@]} )) && echo "launch: plain claude goes to Anthropic direct — dropped what a broker session left in this environment: ${dropped[*]}" >&2
 
 # ── the pins ─────────────────────────────────────────────────────────
 # Every alias variable starts EMPTY, then only the resolved ones are set.

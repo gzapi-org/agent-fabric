@@ -134,6 +134,17 @@ directory, the repository, the branch or the session.
   A review is briefed with `bin/fabric-review brief` — the facts of the
   change under fixed headings, never the author's conclusions
   (`policies/subagent-dispatch/SKILL.md` §The review brief).
+- **How much a class thinks is routed too**, beside its model:
+  `routing/effort.json` maps each class to one level, the provider's
+  adapter clamps it to what that model admits, and
+  `install-agent-files.sh` writes the result into each class's agent
+  file (`--effort` carries the session's). You never set it per
+  dispatch — the Agent tool has no effort — and never through
+  `CLAUDE_CODE_EFFORT_LEVEL`, which the launcher refuses: it outranks
+  every agent file, in every subagent at once. `bin/fabric-model set
+  <class>-effort <level>` is the per-agent layer, and
+  `bin/fabric-status` prints the level beside the model
+  (`docs/effort-is-routed.md`).
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Two skills carry the procedure and are
   installed for every account: `gzcoord-send` (compose, mint the id,
@@ -184,8 +195,9 @@ avoid silent shell expansion.
 identities/     roles (charter, brief, recall, skills), the role catalogue, schemas,
                 prompt/ (the team and memory sections of every launch prompt)
 memory/         domains/ agents/<login>/ shared/ — field knowledge; project knowledge is in each project
-routing/        capability classes -> models; model families -> shims (shims/<slug>/ their
-                sources, tools/fabric/shim.py their tool); review-grade policy
+routing/        capability classes -> models; classes -> reasoning effort (effort.json);
+                model families -> shims (shims/<slug>/ their sources, tools/fabric/shim.py
+                their tool); review-grade policy
 communication/  gzcoord — the agent-to-agent protocol and its runtime
 runtime/        identity.py (the resolver), hosts/ (the registry: hosts and placement), hostexec/ (one
                 command on a host, local or ssh), claude-code/ openrouter/ github/ provisioning/ adapters

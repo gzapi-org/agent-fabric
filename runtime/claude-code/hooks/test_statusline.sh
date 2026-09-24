@@ -3,8 +3,10 @@
 # segment: a branch name inside a repository, the short SHA on a detached
 # HEAD (a link icon, not the branch one), and NO segment outside a repository (the parent projects/
 # workspace), which used to read "detached" and sent the owner looking for
-# a branch nobody had made (2026-09-15). Each case runs the real script
-# against a throwaway git repo.
+# a branch nobody had made (2026-09-15); and the leading bracket — Claude
+# Code's version, the model and the live effort level (owner, 2026-09-24),
+# each dropped when the session JSON does not carry it. Each case runs the
+# real script against a throwaway git repo.
 set -uo pipefail
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 UNDER_TEST="$SCRIPT_DIR/statusline.sh"
@@ -26,6 +28,10 @@ GH
 chmod +x "$SANDBOX/bin/gh"
 export MOCK_PR="$SANDBOX/pr" MOCK_GH_FAIL="$SANDBOX/ghfail" XDG_CACHE_HOME="$SANDBOX/cache" AGENT_FABRIC_STATUSLINE_PR_TTL=0
 line_of() { printf '{"workspace":{"current_dir":"%s"},"model":{"display_name":"M"}}' "$1" | PATH="$SANDBOX/bin:$PATH" bash "$UNDER_TEST" 2>/dev/null; }
+# The same, with what a current harness sends beside the model: its version
+# and the effort block (optional in the JSON — only a model that takes a level has one).
+line_full() { printf '{"workspace":{"current_dir":"%s"},"model":{"display_name":"M"},"version":"1.2.3","effort":{"level":"high"}}' "$1" | PATH="$SANDBOX/bin:$PATH" bash "$UNDER_TEST" 2>/dev/null; }
+line_versioned() { printf '{"workspace":{"current_dir":"%s"},"model":{"display_name":"M"},"version":"1.2.3"}' "$1" | PATH="$SANDBOX/bin:$PATH" bash "$UNDER_TEST" 2>/dev/null; }
 g() { git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
 
 repo="$SANDBOX/clone"; mkdir -p "$repo"; g init -q; g commit -q --allow-empty -m one; g branch -M main
@@ -63,6 +69,15 @@ unborn="$SANDBOX/fresh"; mkdir -p "$unborn"; git -C "$unborn" init -q -b main
 out="$(line_of "$unborn")"
 [[ "$out" == *"🔀 N/A 📁 fresh 🌿 main" ]] && pass "a repository with no commit yet: still its branch name, and N/A for the pull request" || fail "unborn" "$out"
 [[ "$out" != *detached* ]] && pass "…and the word 'detached' appears nowhere" || fail "detached word" "$out"
+
+# The leading bracket: version · model · effort, each present only when the
+# session JSON carries it — no invented level for a model that takes none.
+out="$(line_full "$repo")"
+[[ "$out" == "[1.2.3 · M · high] 👤 "* ]] && pass "the bracket reads the bare version · model · effort, in that order" || fail "bracket full" "$out"
+out="$(line_versioned "$repo")"
+[[ "$out" == "[1.2.3 · M] 👤 "* ]] && pass "no effort block in the JSON: version · model, and no level is invented" || fail "bracket no effort" "$out"
+out="$(line_of "$repo")"
+[[ "$out" == "[M] 👤 "* ]] && pass "neither version nor effort sent: the model alone, as before" || fail "bracket model only" "$out"
 
 if (( failures )); then echo "test_statusline: FAILED — $failures"; exit 1; fi
 echo "test_statusline: OK — all assertions passed."

@@ -106,7 +106,7 @@ export function takeReadLock(dir, pid = process.pid) {
       if (e.code !== 'EEXIST') throw e;
       let holder;
       try { holder = Number(String(fs.readFileSync(f, 'utf8')).trim()); }
-      catch { continue; }   // released between our attempt and this read: try again
+      catch (r) { if (r.code === 'ENOENT') continue; throw r; }   // released between our attempt and this read: try again; anything else is loud
       let alive = false;
       try { process.kill(holder, 0); alive = true; } catch (k) { alive = k.code === 'EPERM'; }
       if (alive && holder !== pid) return null;

@@ -93,14 +93,14 @@ export async function main(argv = process.argv.slice(2), { home = os.homedir(), 
     const target = path.join(dir, arg);
     fs.mkdirSync(target, { recursive: true, mode: 0o700 });
     fs.chmodSync(target, 0o700);
-    console.error(`fabric-accounts: ${arg} — in the harness that opens now: /login, approve in the browser SIGNED IN AS THAT ACCOUNT, then /exit`);
-    // The same clean environment the reads use: an inherited token would
-    // make the harness think it is already signed in, as someone else.
-    const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'].includes(k)));
     // The same lock the reads take: a keeper read overlapping a /login would
     // be two harnesses on one config directory.
     const release = takeReadLock(target);
     if (!release) { console.error(`fabric-accounts: ${arg} is being read right now (the daemon's keeper); try again in a minute`); return 1; }
+    console.error(`fabric-accounts: ${arg} — in the harness that opens now: /login, approve in the browser SIGNED IN AS THAT ACCOUNT, then /exit`);
+    // The same clean environment the reads use: an inherited token would
+    // make the harness think it is already signed in, as someone else.
+    const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'].includes(k)));
     let r;
     try { r = spawn(claudeBin(home), [], { cwd: target, env: { ...clean, CLAUDE_CONFIG_DIR: target }, stdio: 'inherit' }); }
     finally { release(); }

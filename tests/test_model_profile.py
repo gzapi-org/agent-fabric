@@ -32,7 +32,9 @@ class Fixture:
         # the cases assert what the defaults and the local layer resolve to.
         # runtime/claude-code is copied, not linked: the installer finds its
         # root by readlink -f on itself, so through a link it would resolve
-        # from the real routing. .git is left out so no case can reach the clone.
+        # from the real routing. .git is left out, so git at the fixture root
+        # finds no repository; the linked subtrees still resolve into the
+        # clone, so no case may run git inside them.
         root = os.path.join(tmp, "fabric")
         os.makedirs(os.path.join(root, "runtime"))
         for name in os.listdir(ROOT):

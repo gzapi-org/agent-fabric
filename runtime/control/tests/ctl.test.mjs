@@ -288,9 +288,12 @@ test('accounts: one row per observed Claude account, the observer named; logins 
       { slug: 'claude-b', email: null, status: 'not-signed-in', read_at: '2026-09-24T20:00:00Z' }] } } },
     { kind: 'reply', from: 'h/db-admin', op: 'accounts', data: { accounts: { status: 'none' } } }]);
   const t = table('accounts', rs).split('\n');
-  assert.equal(t.length, 3, t.join('\n'));
+  assert.equal(t.length, 4, t.join('\n'));
   assert.match(t[1], /^a@example\.org\s+ok\s+11% 2026-09-24T18:49\s+83% 2026-09-28T15:59\s+86% 2026-09-28T15:59 Opus\s+2026-09-24T20:00\s+user$/);
   assert.match(t[2], /^claude-b\s+not-signed-in\s/, 'an account with no email yet is named by its slug, its state said');
-  assert.match(table('accounts', rows(expected, [])), /no Claude account is observed/);
+  const silent = table('accounts', rows(expected, []));
+  assert.doesNotMatch(silent, /no Claude account is observed/, 'nobody answered is not "nothing is observed"');
+  assert.match(silent, /no answer\s+\(user\)/, 'a login that did not answer is a row saying so');
+  assert.match(table('accounts', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'accounts', data: { accounts: { status: 'none' } } }])), /no Claude account is observed/, 'said only when a daemon answered none');
   assert.equal(parseArgs(['user', 'accounts']).timeout, 300, 'a first read runs the harness per account');
 });

@@ -143,6 +143,8 @@ out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
 grep -q "^claude sign-in setup-token $FP (CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
   && ok "a template token outranks the own sign-in and is named by fingerprint, not by the old account" || bad "template sign-in line" "$(grep -i "sign-in" <<<"$out")"
 ! grep -q "$TPL" <<<"$out" && ok "the token itself is never printed" || bad "token printed"
+out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" ANTHROPIC_BASE_URL=https://openrouter.ai/api 2>&1)"
+grep -q "^claude sign-in setup-token $FP .*(plain claude's; this session goes to broker (ori) and uses neither)$" <<<"$out" && ok "on the broker the line says the sign-in is plain claude's, not this session's" || bad "broker sign-in line" "$(grep -i "sign-in" <<<"$out")"
 
 echo
 if [[ $FAIL -eq 0 ]]; then echo "test_fabric-status: OK — $PASS assertion(s) passed."; else echo "test_fabric-status: FAILED — $FAIL assertion(s) failed."; exit 1; fi

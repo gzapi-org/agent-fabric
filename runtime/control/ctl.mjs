@@ -115,9 +115,11 @@ export function table(op, rs) {
     // observer's daemon has any; the rest answer `none` and are not rows.
     const meter = (a, kind) => { const l = (a.limits ?? []).find(x => x.kind === kind); return l ? `${String(l.percent ?? '-').padStart(3)}% ${String(l.resets_at ?? '-').slice(0, 16)}` : '   -'; };
     lines.push(`${'claude account'.padEnd(34)} ${'status'.padEnd(14)} ${'session / resets'.padEnd(22)} ${'weekly / resets'.padEnd(22)} ${'per-model weekly / resets'.padEnd(34)} ${'read at'.padEnd(17)} observer`);
-    let n = 0;
+    let n = 0, answered = 0;
     for (const r of rs) {
-      if (r.status !== 'ok' || !r.accounts || r.accounts.status === 'none') continue;
+      if (r.status !== 'ok') { lines.push(`${'-'.padEnd(34)} ${r.status.padEnd(14)} (${r.account})`); continue; }
+      answered++;
+      if (!r.accounts || r.accounts.status === 'none') continue;
       if (r.accounts.status !== 'ok') { lines.push(`${'-'.padEnd(34)} ${String(r.accounts.status).padEnd(14)} ${r.accounts.error ?? ''}`.trimEnd() + `  (${r.account})`); n++; continue; }
       for (const a of r.accounts.accounts ?? []) {
         n++;
@@ -126,7 +128,8 @@ export function table(op, rs) {
         lines.push(`${(a.email ?? a.slug).padEnd(34)} ${String(a.status).padEnd(14)} ${meter(a, 'session').padEnd(22)} ${meter(a, 'weekly_all').padEnd(22)} ${sc.padEnd(34)} ${String(a.read_at ?? '-').slice(0, 16).padEnd(17)} ${r.account}${a.error ? `  ${a.error}` : ''}`);
       }
     }
-    if (!n) lines.push('no Claude account is observed — bin/fabric-accounts login <account> on the coordinator\'s login (docs/claude-accounts.md)');
+    // "Nothing observed" is a finding only when a daemon said so; silence is not.
+    if (!n && answered) lines.push('no Claude account is observed — bin/fabric-accounts login <account> on the coordinator\'s login (docs/claude-accounts.md)');
     return lines.join('\n');
   }
   if (op === 'ping') {

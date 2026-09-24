@@ -5,10 +5,14 @@ Claude Code user settings, written by bootstrap.sh on every account.
     user-settings.py <settings.json> [--dry-run]
     user-settings.py --help
 
+Any other argument that begins with "-" is refused (exit 2), never taken
+for the path.
+
 User scope reaches every session of the login whatever directory it is
 launched from, so this is where a setting the fabric wants on every
 agent goes. Every other key is kept as read. Prints one line in the
-installer's shape (+ = -) and exits 0.
+installer's shape (`+` written, `=` already current, `!` refused) and
+exits 0; 1 when the file is unreadable, 2 on a usage error.
 
 The keys, and why each is here:
 
@@ -38,6 +42,8 @@ import json
 import os
 import sys
 
+# python3 -OO strips docstrings; the usage must survive it.
+USAGE = (__doc__ or "user-settings.py <settings.json> [--dry-run]").strip()
 ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 TOP_LEVEL = {"showThinkingSummaries": True, "verbose": True}
 
@@ -78,14 +84,17 @@ def settled(doc: dict) -> bool:
 
 def main(argv: list[str]) -> int:
     if any(a in ("-h", "--help") for a in argv):
-        print(__doc__.strip())
+        print(USAGE)
         return 0
     args = [a for a in argv if a != "--dry-run"]
     dry = "--dry-run" in argv
     # An unknown flag is refused, never taken for the path: `--help` once
     # wrote the fabric's keys to a file of that name in the caller's cwd.
     if len(args) != 1 or args[0].startswith("-"):
-        print(__doc__.strip(), file=sys.stderr)
+        refused = [a for a in args if a.startswith("-")]
+        if refused:
+            print(f"  !  {refused[0]}: not an option and not a path", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
     path = args[0]
     try:

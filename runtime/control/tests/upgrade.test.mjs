@@ -106,5 +106,14 @@ test('sessionPids: this uid\'s claude processes, except the daemon\'s own childr
   const proc = scratch('upgrade-proc-');
   for (const [pid, ppid] of [[100, 50], [200, 999], [300, 60]]) { fs.mkdirSync(path.join(proc, String(pid))); fs.writeFileSync(path.join(proc, String(pid), 'stat'), `${pid} (claude) S ${ppid} 1 1 0 -1`); }
   assert.deepEqual(sessionPids({ self: 999, proc, exec: () => '100\n200\n300\n400\n' }), [100, 300], 'the daemon\'s child and a pid already gone are left out');
-  assert.deepEqual(sessionPids({ self: 999, proc, exec: () => { throw new Error('exit 1'); } }), [], 'pgrep finding nothing is no session');
+  assert.deepEqual(sessionPids({ self: 999, proc, exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; } }), [], 'pgrep finding nothing is no session');
+  assert.throws(() => sessionPids({ self: 999, proc, exec: () => { const e = new Error('spawn pgrep ENOENT'); e.code = 'ENOENT'; throw e; } }), /ENOENT/, 'pgrep missing is not "no session"');
+});
+
+test('a pgrep that fails: nothing installed, nothing signalled, the reason said', async () => {
+  const f = fixture();
+  const r = await upgradeOnce(req(), { home: f.home, root: f.root, dir: f.dir, exec: f.exec, me: 'h/db-admin', kill: () => assert.fail('no signal'),
+    pgrep: () => { const e = new Error('spawn pgrep EACCES'); e.code = 'EACCES'; throw e; } });
+  assert.equal(r.status, 'failed'); assert.match(r.reason, /could not tell whether a session is running .*EACCES.*nothing installed/);
+  assert.ok(!f.calls.some(c => c.startsWith('install')));
 });

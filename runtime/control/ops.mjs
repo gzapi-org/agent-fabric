@@ -149,7 +149,9 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
   const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
   const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
   if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
-  const release = takeReadLock(dir);
+  let release;
+  try { release = takeReadLock(dir); }
+  catch (e) { return { ...out, status: 'failed', error: `read lock: ${e.code ?? String(e.message).slice(0, 80)}` }; }   // this account's row, not the whole section's
   if (!release) return { ...out, status: 'busy', error: 'another reader holds this account (the daemon, or fabric-accounts read)' };
   // A fixed working directory: the harness records a project per cwd even
   // with --no-session-persistence (an empty one, measured), so a fresh

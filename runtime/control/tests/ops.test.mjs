@@ -559,6 +559,9 @@ test('the read lock: a lock that cannot be read is a loud failure, not a permane
   const acct = path.join(dir, 'claude-a');
   fs.mkdirSync(path.join(acct, '.fabric-read.lock'));
   assert.throws(() => takeReadLock(acct), /EISDIR/);
-  const r = await readAccount(acct, { home: h, exec: async () => assert.fail('no harness') }).catch(e => ({ status: 'threw', error: e.code }));
-  assert.deepEqual(r, { status: 'threw', error: 'EISDIR' }, 'the reason reaches the caller (collect names it), never "another reader holds it"');
+  const r = await readAccount(acct, { home: h, exec: async () => assert.fail('no harness') });
+  assert.deepEqual([r.status, r.error], ['failed', 'read lock: EISDIR'], 'the reason is named, never "another reader holds it"');
+  fs.mkdirSync(path.join(dir, 'claude-b')); fs.writeFileSync(path.join(dir, 'claude-b', '.credentials.json'), '{}');
+  const all = await accounts(h, { exec: async () => USAGE_EVENTS });
+  assert.deepEqual(all.accounts.map(a => [a.slug, a.status]), [['claude-a', 'failed'], ['claude-b', 'ok']], 'one broken lock does not blank the sibling accounts');
 });

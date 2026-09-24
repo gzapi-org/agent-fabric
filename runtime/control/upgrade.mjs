@@ -61,7 +61,10 @@ export function sessionPids({ uid = process.getuid(), self = process.pid, exec =
   try {
     const r = exec ? exec('pgrep', ['-u', String(uid), '-x', 'claude']) : null;
     pids = String(r ?? '').split('\n').map(s => s.trim()).filter(Boolean).map(Number);
-  } catch { return out; }   // pgrep exits 1 when nothing matches
+  } catch (e) {
+    if (e?.status === 1) return out;   // pgrep's "nothing matched"
+    throw e;                           // anything else must not read as "no session" (review of #34)
+  }
   for (const pid of pids) {
     let ppid = null;
     try { ppid = Number(fs.readFileSync(path.join(proc, String(pid), 'stat'), 'utf8').replace(/^.*\) /s, '').split(' ')[1]); } catch { continue; }   // gone already
@@ -103,7 +106,9 @@ export async function upgradeOnce(request, {
   const bin = claudeBin(home);
   let from;
   try { from = await version(bin, exec); } catch (e) { return { status: 'failed', piece: 'claude', to: target, reason: `claude --version: ${String(e.message).split('\n')[0].slice(0, 160)}` }; }
-  const pids = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) });
+  let pids;
+  try { pids = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) }); }
+  catch (e) { return { status: 'failed', piece: 'claude', from, to: target, reason: `could not tell whether a session is running (pgrep: ${String(e.message).split('\n')[0].slice(0, 120)}); nothing installed` }; }
   const own = me && request.from === me;
   if (from === target) return { status: 'current', piece: 'claude', version: from, session: pids.length ? 'running' : 'none' };
 

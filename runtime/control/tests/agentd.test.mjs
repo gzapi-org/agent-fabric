@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
-import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer } from '../agentd.mjs';
+import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer, accountsKeeper, ACCOUNTS_KEEPALIVE_MS } from '../agentd.mjs';
 import { memorySlug } from '../ops.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -283,4 +283,29 @@ test('agentd --once: a refused token is re-read from the synced file once, then 
     assert.match(out.stderr, /refused this token/);
     assert.ok(hits.includes('Bearer tok-fixture'), `the synced value was tried: ${hits}`);
   } finally { server.closeAllConnections(); server.close(); }
+});
+
+test('accountsKeeper: the timer and a request share one reading; the cache answers inside its window; a failed read does not jam the next', async () => {
+  let clock = 0, reads = 0, release;
+  const gate = () => new Promise(r => { release = r; });
+  let fail = false;
+  const k = accountsKeeper(async () => { reads++; if (fail) throw new Error('harness gone'); await gate(); return { status: 'ok', n: reads }; }, { now: () => clock, cacheMs: 1000 });
+  const a = k.refresh(), b = k.cached();
+  await new Promise(r => setImmediate(r));
+  release();
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(reads, 1, 'a timer tick and a request arriving together start one harness run');
+  assert.equal(ra, rb);
+  clock = 500;
+  assert.equal((await k.cached()).n, 1, 'inside the window: the last reading, no new run');
+  assert.equal(reads, 1);
+  clock = 1500;
+  const c = k.cached(); await new Promise(r => setImmediate(r)); release();
+  assert.equal((await c).n, 2, 'past the window: a new reading');
+  fail = true;
+  await assert.rejects(k.refresh(), /harness gone/);
+  fail = false;
+  const d = k.refresh(); await new Promise(r => setImmediate(r)); release();
+  assert.equal((await d).n, 4, 'the failed run released the slot');
+  assert.ok(ACCOUNTS_KEEPALIVE_MS < 8 * 3600 * 1000 / 1.5, 'the keeper reads well inside the 8-hour sign-in');
 });

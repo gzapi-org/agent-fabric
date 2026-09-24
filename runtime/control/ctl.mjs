@@ -2,7 +2,7 @@
 // post one request on the control channel, read the replies, print them.
 // Front door: bin/fabric-ctl.
 //
-//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]
+//   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]
 //   fabric-ctl <login|all> host                     the machine, one row per host: load, memory, balloon, disks, leases, largest processes
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
 //
@@ -47,7 +47,7 @@ export function parseArgs(argv) {
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : 20;
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
   if (out.op === 'memory' && !out.out) throw new Error('memory takes --out <dir>: where the drain bundles are written');
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
@@ -102,7 +102,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -110,6 +110,25 @@ const pct = w => (w && w.utilization != null) ? `${Number(w.utilization).toFixed
 const at = w => (w && w.resets_at) ? String(w.resets_at).slice(0, 16) : '-';
 export function table(op, rs) {
   const lines = [];
+  if (op === 'accounts') {
+    // One row per observed CLAUDE account, not per login: only the
+    // observer's daemon has any; the rest answer `none` and are not rows.
+    const meter = (a, kind) => { const l = (a.limits ?? []).find(x => x.kind === kind); return l ? `${String(l.percent ?? '-').padStart(3)}% ${String(l.resets_at ?? '-').slice(0, 16)}` : '   -'; };
+    lines.push(`${'claude account'.padEnd(34)} ${'status'.padEnd(14)} ${'session / resets'.padEnd(22)} ${'weekly / resets'.padEnd(22)} ${'per-model weekly / resets'.padEnd(34)} ${'read at'.padEnd(17)} observer`);
+    let n = 0;
+    for (const r of rs) {
+      if (r.status !== 'ok' || !r.accounts || r.accounts.status === 'none') continue;
+      if (r.accounts.status !== 'ok') { lines.push(`${'-'.padEnd(34)} ${String(r.accounts.status).padEnd(14)} ${r.accounts.error ?? ''}`.trimEnd() + `  (${r.account})`); n++; continue; }
+      for (const a of r.accounts.accounts ?? []) {
+        n++;
+        const scoped = (a.limits ?? []).find(x => x.kind === 'weekly_scoped');
+        const sc = scoped ? `${meter(a, 'weekly_scoped')}${scoped.model ? ` ${scoped.model}` : ''}` : '   -';
+        lines.push(`${(a.email ?? a.slug).padEnd(34)} ${String(a.status).padEnd(14)} ${meter(a, 'session').padEnd(22)} ${meter(a, 'weekly_all').padEnd(22)} ${sc.padEnd(34)} ${String(a.read_at ?? '-').slice(0, 16).padEnd(17)} ${r.account}${a.error ? `  ${a.error}` : ''}`);
+      }
+    }
+    if (!n) lines.push('no Claude account is observed — bin/fabric-accounts login <account> on the coordinator\'s login (docs/claude-accounts.md)');
+    return lines.join('\n');
+  }
   if (op === 'ping') {
     lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} latency`);
     for (const r of rs) lines.push(`${r.account.padEnd(22)} ${r.status.padEnd(10)} ${r.latency_ms != null ? r.latency_ms + ' ms' : ''}`.trimEnd());
@@ -234,7 +253,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
+  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;

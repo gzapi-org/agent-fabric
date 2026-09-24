@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,7 +26,20 @@ class Fixture:
         self.state = os.path.join(tmp, "state")
         self.claude = os.path.join(tmp, "claude")
         os.makedirs(self.claude)
-        self.env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": self.state,
+        # The real tree, except that its committed roles/agents layers are
+        # emptied: one of them may name the login running this suite, and
+        # the cases assert what the defaults and the local layer resolve to.
+        root = os.path.join(tmp, "fabric")
+        os.makedirs(root)
+        for name in os.listdir(ROOT):
+            if name != "routing":
+                os.symlink(os.path.join(ROOT, name), os.path.join(root, name))
+        shutil.copytree(os.path.join(ROOT, "routing"), os.path.join(root, "routing"))
+        profiles = os.path.join(root, "routing", "profiles.json")
+        doc = json.load(open(profiles, encoding="utf-8"))
+        doc["roles"], doc["agents"] = {}, {}
+        json.dump(doc, open(profiles, "w", encoding="utf-8"), indent=2)
+        self.env = {**os.environ, "AGENT_FABRIC_ROOT": root, "AGENT_FABRIC_STATE_DIR": self.state,
                     "CLAUDE_CONFIG_DIR": self.claude}
         self.env.pop("AGENT_FABRIC_LAUNCH_PROVIDER", None)  # an unlaunched session, whatever the runner is
         self.login = subprocess.run([sys.executable, os.path.join(ROOT, "runtime", "identity.py")],

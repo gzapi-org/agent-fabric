@@ -50,6 +50,14 @@ mkfabric() {
     rm -rf "$FABRIC" "$STATE" "$SANDBOX/repo"
     mkdir -p "$FABRIC/runtime/openrouter" "$FABRIC/runtime/claude-code" "$FABRIC/tools/fabric" "$FABRIC/projects"
     cp -r "$REAL_ROOT/routing" "$FABRIC/routing"
+    # The committed roles/agents layers are real routing, and one of them may
+    # name the login running this suite; every layer a case tests it builds
+    # with profile(), so the fixture starts from the defaults alone.
+    python3 - "$FABRIC/routing/profiles.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["roles"], d["agents"] = {}, {}
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
     cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
     cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
     mkdir -p "$FABRIC/runtime/mcp"; cp -r "$REAL_ROOT/runtime/mcp/websearch-locale" "$FABRIC/runtime/mcp/"   # the installer's MCP step reads its helper from the fabric

@@ -45,6 +45,8 @@ agent-fabric/bin/fabric-model list      # every model choice per provider, with 
 agent-fabric/bin/fabric-ctl all status  # (coordinator) the fleet in real time: each account's control
                                         # agent answers over the relay — Claude account, usage windows,
                                         # key fingerprints, fabric head, session (docs/control-plane.md)
+agent-fabric/bin/fabric-ctl all upgrade claude  # (coordinator) every account to the pinned Claude Code,
+                                        # a running session stopped gracefully and resumed on it (docs/fleet-upgrade.md)
 agent-fabric/bin/fabric-usage           # (coordinator) the usage windows through the host executor —
                                         # the sudo fallback when a host's control agents are down
 agent-fabric/bin/fabric-lease <name> -- <cmd>   # one holder per host resource across every account on

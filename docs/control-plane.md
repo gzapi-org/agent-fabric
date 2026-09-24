@@ -151,7 +151,7 @@ always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
 channel.
 
-## The fence, v1 — and the signing that follows
+## The fence, v1 — and the signature an action needs
 
 A daemon answers a request only when `from` is a host operator's address
 as `runtime/hosts/registry.json` places it (read again for every record,
@@ -166,13 +166,27 @@ account's name that `fabric-ctl` prints as that account's row. It stops
 the accident — another session's watch, a typo, a replay of history —
 and it bounds what a forged request can obtain to the same non-secret
 facts; the table is as honest as the least trusted holder of the relay
-token until replies are signed too. Signing is the next commit, as its
-own change: an Ed25519 key the coordinator alone holds (its Doppler
-config), the public key committed under `runtime/control/`, `sig` over
-the canonical request fields, and a daemon that finds the public key
-drops unsigned requests; replies get a per-account key the same way. Not
-HMAC: a shared secret in every account's config lets every account forge
-the coordinator.
+token until replies are signed too.
+
+**An ACTION needs a proof** (2026-09-24, `runtime/control/sign.mjs`). The
+first op that changes an account — `upgrade`, which stops a session and
+installs software (`docs/fleet-upgrade.md`) — is answered only when the
+request carries `sig`, an Ed25519 signature over its canonical form
+(every field but `sig`, keys sorted at every depth) by the key the
+operator's host commits as `operator_key` in the hosts registry. The
+private half is only in the operator's own Doppler config
+(`FABRIC_CONTROL_SIGNING_KEY`, one line), made by `fabric-ctl keygen`,
+which writes it there on stdin and the public half into the registry. A
+host with no key can order nothing; an action lives at most 10 minutes;
+the seen-id LRU refuses a replay inside that window. Read ops stay
+unsigned-compatible. Not HMAC: a shared secret in every account's config
+would let every account forge the operator. Still open: signed *replies*
+(a per-account key the same way), so a forged row cannot pass as an
+account's.
+
+An action runs beside the daemon's read loop and posts its reply when it
+is done, so a request that arrives meanwhile is still answered; one
+action at a time per account is the action's own rule.
 
 ## The coordinator's side
 

@@ -142,7 +142,7 @@ the harness's own headless `/usage`, which renews the observer's 8-hour
 sign-in and makes no model call, run every 4 hours by the daemon and on
 request, cached 5 minutes; one row per Claude account in `fabric-ctl`,
 only the observing login has any; `docs/claude-accounts.md`), `status`
-(all but `script`, `tokens`, `memory` and `accounts`). A login running on a
+(all but `script`, `tokens`, `memory` and `accounts`), and `upgrade` — the one ACTION (`docs/fleet-upgrade.md`): bring the harness to the version the request names, stopping and resuming a running session; answered only when signed (below), never part of `status`. A login running on a
 template's setup-token reports it by fingerprint in `identity`, and its
 `usage` points at the observer: its own `~/.claude.json` names the
 account it last signed into, not the one in use. A section that
@@ -193,7 +193,7 @@ action at a time per account is the action's own rule.
 
 ## The coordinator's side
 
-`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]`
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]`, `bin/fabric-ctl <login|all> upgrade claude [--version V]` (an action, signed), `bin/fabric-ctl keygen`
 (and `tokens [--days N]`, whose table groups the logins by Claude
 account and prints each one's share of the account's visible direct-path
 spend, the broker spend beside it; what the account spends off this host

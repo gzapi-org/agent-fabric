@@ -27,11 +27,14 @@
 // once, and the identity section asks whoami() per request, so a rebind
 // shows without a restart (review, 2026-09-17) — (a claim,
 // not a proof — the relay verifies no sender; it stops any other session
-// from asking, and signing comes next: an Ed25519 `sig` the coordinator
-// makes with a key only its Doppler config holds), its op is one of the
-// closed set, its `ts` plus `ttl_s` is not in the past, and its id was
-// not seen before (an LRU of 256). Ops take no arguments and no field of
-// a request ever reaches a shell; the answer carries no secret (ops.mjs).
+// from asking), its op is one of the closed set, its `ts` plus `ttl_s` is
+// not in the past, and its id was not seen before (an LRU of 256). An
+// ACTION op (sign.mjs ACTION_OPS) additionally needs `sig`, an Ed25519
+// signature by the operator's committed key, lives at most 10 minutes,
+// and must be newer than the last action accepted from that operator (a
+// ledger in the account's fabric state). Read ops take no arguments; an
+// action takes only its closed set (upgrade.mjs checkArgs). No field of a
+// request ever reaches a shell; the answer carries no secret (ops.mjs).
 //
 // Every reply arrives: a section that cannot be read says so inline.
 // Relay down: one line on stderr, retry every 30 s; a refused token is

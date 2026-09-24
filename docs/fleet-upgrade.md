@@ -72,6 +72,21 @@ tolerable while every op only reported, and is not for an op that stops a
 session and installs software. Hence the signature, required for actions
 only.
 
+## Assumptions, and what they cost
+
+- **One session per login.** The marker and the binding's session id are
+  per login: the fabric runs one agent per login (a second session is a
+  second login), so there is one session to stop and one to resume.
+- **The signing key lives in the operator's login.** `fabric-secrets sync`
+  exports it into that login's shells, so anything that can run a command
+  as the operator can sign an action — the same reach it already has
+  through the operator's sudo. The key protects the fleet from the relay
+  token's other holders, not from the operator's own sessions.
+- **Where the marker lives** is the fabric state root both the daemon and
+  the launcher resolve (`AGENT_FABRIC_STATE_DIR`, else `XDG_STATE_HOME`,
+  else `~/.local/state`); measured 2026-09-24: no account sets either
+  variable, in a login shell or under its systemd user manager.
+
 ## Not yet
 
 - Other pieces: `fabric` (pull + bootstrap) and `ori` were left for later
@@ -79,5 +94,7 @@ only.
   `PIECES`, not a new op.
 - Signed replies: a forged reply can still show a false row.
 - A live run on the fleet: the sequence is tested against fakes; the first
-  real upgrade should read back that the SessionEnd hook ran and the
-  session resumed.
+  real upgrade should read back that the SessionEnd hook ran, the session
+  resumed, and — on the broker path, where the launcher's child is `ori`,
+  which starts `claude` — that the launcher reached its GOODBYE after the
+  SIGTERM to `claude`.

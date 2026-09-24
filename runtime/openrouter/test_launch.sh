@@ -3,7 +3,8 @@
 #
 # Behavioural tests for runtime/openrouter/launch. The launcher execs a
 # session, so the tests run it in SANDBOXES: a fake agent-fabric root (the
-# real routing files, the real resolver), a fake state directory holding
+# real routing files minus the committed roles/agents layers, the real
+# resolver), a fake state directory holding
 # this agent's binding, a fake `ori` on PATH, and HOME pointed at a scratch
 # dir. Every refusal, the merge order, the shim derivation and the
 # review-grade gate are exercised without spawning a real claude.
@@ -42,7 +43,8 @@ chmod +x "$SANDBOX/bin/ori"
 }
 write_fake_ori
 
-# A fixture agent-fabric root: the real routing files and resolver, a
+# A fixture agent-fabric root: the real routing files (minus the committed
+# roles/agents layers) and resolver, a
 # state dir with this agent's binding (role backend-dev), and a launch
 # working copy with a real git toplevel.
 FABRIC="$SANDBOX/fabric"; STATE="$SANDBOX/state"

@@ -4,8 +4,9 @@
 The invariant under test: the command writes only the login's own layer
 ($STATE_DIR/model-profile.local.json) and the account's agent files, in
 each provider's vocabulary, gated like the launcher; the repository is
-never touched. Runs against the real routing files with a scratch state
-directory and a scratch CLAUDE_CONFIG_DIR.
+never touched. Runs against the real routing files, minus the committed
+roles/agents layers, with a scratch state directory and a scratch
+CLAUDE_CONFIG_DIR.
 """
 from __future__ import annotations
 
@@ -29,11 +30,19 @@ class Fixture:
         # The real tree, except that its committed roles/agents layers are
         # emptied: one of them may name the login running this suite, and
         # the cases assert what the defaults and the local layer resolve to.
+        # runtime/claude-code is copied, not linked: the installer finds its
+        # root by readlink -f on itself, so through a link it would resolve
+        # from the real routing. .git is left out so no case can reach the clone.
         root = os.path.join(tmp, "fabric")
-        os.makedirs(root)
+        os.makedirs(os.path.join(root, "runtime"))
         for name in os.listdir(ROOT):
-            if name != "routing":
+            if name not in ("routing", "runtime", ".git"):
                 os.symlink(os.path.join(ROOT, name), os.path.join(root, name))
+        for name in os.listdir(os.path.join(ROOT, "runtime")):
+            if name != "claude-code":
+                os.symlink(os.path.join(ROOT, "runtime", name), os.path.join(root, "runtime", name))
+        shutil.copytree(os.path.join(ROOT, "runtime", "claude-code"), os.path.join(root, "runtime", "claude-code"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(os.path.join(ROOT, "routing"), os.path.join(root, "routing"))
         profiles = os.path.join(root, "routing", "profiles.json")
         doc = json.load(open(profiles, encoding="utf-8"))

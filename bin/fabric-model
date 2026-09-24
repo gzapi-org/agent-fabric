@@ -6,9 +6,9 @@
 # account's agent files, for the review pin); never a committed file.
 #
 #   agent-fabric/bin/fabric-model list [--provider openrouter|anthropic]
-#   agent-fabric/bin/fabric-model set --provider anthropic opus claude-opus-5[1m]
+#   agent-fabric/bin/fabric-model set --provider anthropic code-high claude-opus-5[1m]
 #   agent-fabric/bin/fabric-model set --provider openrouter session z-ai/glm-5.3
-#   agent-fabric/bin/fabric-model unset --provider anthropic opus
+#   agent-fabric/bin/fabric-model unset --provider anthropic code-high
 #   agent-fabric/bin/fabric-model seed [--provider P]
 #
 # The full account is in tools/fabric/model_profile.py.

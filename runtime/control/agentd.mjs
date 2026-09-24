@@ -230,6 +230,17 @@ export async function main(argv = process.argv.slice(2)) {
         const a = accept(rec, { me, operators: operatorAddresses(), keys: operatorKeys(), ttl_s: cfg.ttl_s, seen });
         if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
+        // An action can take minutes (a session to stop, an install): run
+        // it beside the loop, so the daemon keeps answering — a request that
+        // waited behind it would expire unanswered. Its reply is posted when
+        // it is done; one action at a time is the action's own rule.
+        if (ACTION_OPS.includes(a.request.op)) {
+          const { op, from, id } = a.request;
+          console.error(`agentd: started ${op} for ${from} (${id.slice(0, 8)})`);
+          answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
+            .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`));
+          continue;
+        }
         const reply = await answer(a.request, ctx);
         const { _followups, ...firstReply } = reply;
         await post(firstReply);

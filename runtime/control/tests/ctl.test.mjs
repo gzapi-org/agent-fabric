@@ -9,17 +9,20 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
-import { parseArgs, rows, table, writeBundles, manifestAgent, partKey } from '../ctl.mjs';
+import { parseArgs, rows, table, writeBundles, manifestAgent, partKey, keygen } from '../ctl.mjs';
+import { publicKeyFrom, privateKeyFrom, generateOperatorKey, verifyRequest } from '../sign.mjs';
+import { pinnedVersion } from '../upgrade.mjs';
+import { FABRIC_ROOT } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { fileURLToPath } from 'node:url';
 
 const CTL = fileURLToPath(new URL('../ctl.mjs', import.meta.url));
 
 test('parseArgs: targets, op, flags, defaults', () => {
-  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null });
-  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null, days: null });
-  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d', days: null });
-  assert.deepEqual(parseArgs(['all', 'tokens', '--days', '3']), { targets: ['all'], op: 'tokens', json: false, timeout: 60, out: null, days: 3 });
+  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null, piece: null, version: null, force: false });
+  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null, days: null, piece: null, version: null, force: false });
+  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d', days: null, piece: null, version: null, force: false });
+  assert.deepEqual(parseArgs(['all', 'tokens', '--days', '3']), { targets: ['all'], op: 'tokens', json: false, timeout: 60, out: null, days: 3, piece: null, version: null, force: false });
   assert.equal(parseArgs(['all', 'tokens', '--days=14']).days, 14);
   assert.throws(() => parseArgs(['all', 'tokens', '--days', '0']), /--days/);
   assert.throws(() => parseArgs(['all', 'status', '--days', '3']), /--days/, 'a window belongs to tokens only');
@@ -296,4 +299,71 @@ test('accounts: one row per observed Claude account, the observer named; logins 
   assert.match(silent, /no answer\s+\(user\)/, 'a login that did not answer is a row saying so');
   assert.match(table('accounts', rows(expected, [{ kind: 'reply', from: 'h/db-admin', op: 'accounts', data: { accounts: { status: 'none' } } }])), /no Claude account is observed/, 'said only when a daemon answered none');
   assert.equal(parseArgs(['user', 'accounts']).timeout, 300, 'a first read runs the harness per account');
+});
+
+test('upgrade: the word after it is the piece, --version is digits, an action lives at most its cap; one row per account with from → to and the session', () => {
+  const a = parseArgs(['all', 'upgrade', 'claude']);
+  assert.deepEqual([a.targets, a.op, a.piece, a.version, a.timeout], [['all'], 'upgrade', 'claude', null, 600]);
+  assert.equal(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude', '--version=2.1.282']).version, '2.1.282');
+  assert.deepEqual(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude']).targets, ['db-admin', 'web-dev-01'], 'the piece is not a login');
+  assert.throws(() => parseArgs(['all', 'upgrade']), /upgrade takes a piece: claude/);
+  assert.throws(() => parseArgs(['all', 'upgrade', 'fabric']), /upgrade takes a piece/, 'only claude, for now');
+  assert.throws(() => parseArgs(['all', 'upgrade', 'claude', '--version', 'latest']), /digits/);
+  assert.throws(() => parseArgs(['all', 'status', '--version', '2.1.282']), /with upgrade only/);
+  assert.throws(() => parseArgs(['all', 'upgrade', 'claude', '--timeout', '3600']), /at most 600 s/);
+  const expected = [{ login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }, { login: 'user', host: 'h', address: 'h/user' }];
+  const t = table('upgrade', rows(expected, [
+    { kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { status: 'upgraded', from: '2.1.280', to: '2.1.281', session: 'restarting' } } },
+    { kind: 'reply', from: 'h/web-dev-01', op: 'upgrade', data: { upgrade: { status: 'failed', from: '2.1.280', to: '2.1.281', session: 'none', reason: 'claude install 2.1.281: network' } } }])).split('\n');
+  assert.match(t[1], /^db-admin\s+upgraded\s+2\.1\.280 → 2\.1\.281\s+restarting$/);
+  assert.match(t[2], /^web-dev-01\s+failed\s+2\.1\.280 → 2\.1\.281\s+none\s+claude install 2\.1\.281: network$/);
+  assert.match(t[3], /^user\s+no answer$/);
+});
+
+test('keygen: the private half goes to Doppler on stdin and nowhere else; the public half into this host\'s operator_key; an existing key is kept without --force', () => {
+  const dir = scratch('ctl-keygen-');
+  const reg = path.join(dir, 'registry.json');
+  fs.writeFileSync(reg, JSON.stringify({ hosts: { h: { operator: 'user' } }, placement: {} }));
+  const calls = [];
+  const exec = (bin, args, opts) => { calls.push({ args, input: opts?.input }); return args[0] === 'configure' ? 'agents2_user\n' : ''; };
+  const out = []; const log = console.log, err = console.error;
+  console.log = (...a) => out.push(a.join(' ')); console.error = (...a) => out.push(a.join(' '));
+  try {
+    assert.equal(keygen({ force: false }, { registry: reg, exec, who: { host: 'h', agent: 'web-dev-01' } }), 2, 'only the host operator makes the key');
+    assert.equal(keygen({ force: false }, { registry: reg, exec, who: { host: 'h', agent: 'user' } }), 0);
+  } finally { console.log = log; console.error = err; }
+  const set = calls.find(c => c.args[0] === 'secrets');
+  assert.deepEqual(set.args, ['secrets', 'set', 'FABRIC_CONTROL_SIGNING_KEY', '--project', 'agent-fabric', '--config', 'agents2_user', '--silent']);
+  assert.ok(privateKeyFrom(set.input), 'a usable private key went to doppler on stdin');
+  assert.ok(!set.args.some(a => a.includes('pkcs8')), 'never on the command line');
+  assert.ok(!out.join('\n').includes(set.input.slice(14, 40)), 'never printed');
+  const saved = JSON.parse(fs.readFileSync(reg, 'utf8')).hosts.h.operator_key;
+  assert.ok(publicKeyFrom(saved), 'the public half is in the registry');
+  console.error = () => {};
+  try { assert.equal(keygen({ force: false }, { registry: reg, exec, who: { host: 'h', agent: 'user' } }), 2, 'a registered key is kept'); }
+  finally { console.error = err; }
+  assert.equal(JSON.parse(fs.readFileSync(reg, 'utf8')).hosts.h.operator_key, saved);
+});
+
+test('fabric-ctl upgrade: the coordinator\'s pin travels in the signed request; no key, nothing is sent', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile();
+    const k = generateOperatorKey();
+    const runKey = (key, args) => new Promise(resolve => {
+      const child = spawn('node', [CTL, ...args], { env: { ...process.env, HOME: scratch('ctl-home-'), CLAUDE_BRIDGE_URL: r.url(), CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, ...(key ? { FABRIC_CONTROL_SIGNING_KEY: key } : { FABRIC_CONTROL_SIGNING_KEY: '' }) } });
+      let out = '', err = ''; child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
+      child.on('close', status => resolve({ status, out, err }));
+    });
+    const none = await runKey(null, ['db-admin', 'upgrade', 'claude', '--timeout', '1']);
+    assert.equal(none.status, 3, none.err); assert.match(none.err, /signed or not sent/); assert.equal(r.rows.length, 0, 'nothing was sent unsigned');
+    const sent = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--timeout', '1']);
+    const req = JSON.parse(r.rows[0].content);
+    assert.deepEqual(req.args, { piece: 'claude', version: pinnedVersion(FABRIC_ROOT) }, 'one command, one version: the pin is named, not left to each account');
+    assert.ok(/^\d+\.\d+\.\d+$/.test(req.args.version));
+    assert.ok(verifyRequest(req, publicKeyFrom(k.publicKeySpec)), 'signed, over the version too');
+    assert.ok(!sent.err.includes(k.privateKeySpec.slice(20, 50)) && !sent.out.includes(k.privateKeySpec.slice(20, 50)));
+    const over = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--version', '2.1.279', '--timeout', '1']);
+    assert.equal(JSON.parse(r.rows.at(-1).content).args.version, '2.1.279', '--version overrides the pin'); void over;
+  } finally { r.close(); }
 });

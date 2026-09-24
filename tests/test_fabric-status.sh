@@ -149,6 +149,15 @@ mkdir -p "$H/.config/agent-fabric"; printf "export CLAUDE_CODE_OAUTH_TOKEN='%s'\
 out="$(HOME="$H" status ANTHROPIC_BASE_URL=https://openrouter.ai/api 2>&1)"
 grep -q "^claude sign-in setup-token $FP .*(plain claude's; this session goes to broker (ori) and uses neither)$" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
   && ok "a broker session on a template login names the template from the synced record, not the old account" || bad "broker sign-in line" "$(grep -i "sign-in" <<<"$out")"
+! grep -q "$TPL" <<<"$out" && ! grep -q "^DRIFT.*setup-token" <<<"$out" && ok "…the token itself never printed, and no drift: the launcher removing it on the broker is the design" || bad "broker case" "$out"
+# A direct-path session launched before the sync that moved the login: its
+# environment has no token, the record has one. The line says which it
+# reports, and the disagreement is drift, not the template claimed as in use.
+out="$(HOME="$H" status 2>&1)"
+grep -q "^claude sign-in setup-token $FP (the login's synced record;" <<<"$out" && grep -q "^DRIFT .*this session runs on setup-token (own /login), the login's synced record names setup-token $FP" <<<"$out" \
+  && ok "direct path, record but no variable: named as the record, and said as drift" || bad "record without variable" "$(grep -iE "sign-in|DRIFT" <<<"$out")"
+out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
+grep -q "^claude sign-in setup-token $FP (CLAUDE_CODE_OAUTH_TOKEN in this session;" <<<"$out" && ! grep -q "^DRIFT.*setup-token" <<<"$out" && ok "variable and record agree: this session's, no drift" || bad "agreeing case" "$(grep -iE "sign-in|DRIFT" <<<"$out")"
 rm -f "$H/.config/agent-fabric/secrets.env"
 
 echo

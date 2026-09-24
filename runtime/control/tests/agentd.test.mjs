@@ -11,6 +11,8 @@ import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer, accountsKeeper, ACCOUNTS_KEEPALIVE_MS } from '../agentd.mjs';
 import { memorySlug } from '../ops.mjs';
+import { generateOperatorKey, signRequest } from '../sign.mjs';
+import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { fileURLToPath } from 'node:url';
 
 const AGENTD = fileURLToPath(new URL('../agentd.mjs', import.meta.url));
@@ -308,4 +310,30 @@ test('accountsKeeper: the timer and a request share one reading; the cache answe
   const d = k.refresh(); await new Promise(r => setImmediate(r)); release();
   assert.equal((await d).n, 4, 'the failed run released the slot');
   assert.ok(ACCOUNTS_KEEPALIVE_MS < 8 * 3600 * 1000 / 1.5, 'the keeper reads well inside the 8-hour sign-in');
+});
+
+test('agentd --once: a signed upgrade already started is waited for — its reply is posted before the process exits', async () => {
+  const me = whoami();
+  const k = generateOperatorKey();
+  const reg = path.join(scratch('agentd-reg-'), 'registry.json');
+  fs.writeFileSync(reg, JSON.stringify({ hosts: { [me.host]: { operator: me.agent, operator_key: k.publicKeySpec } }, placement: {} }));
+  const home = scratchHome();
+  fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  // A slow harness already at the target: the action takes seconds and installs nothing.
+  fs.writeFileSync(path.join(home, '.local', 'bin', 'claude'), '#!/bin/sh\nsleep 2\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 });
+  const r = relay([]);
+  await r.listen();
+  try {
+    r.waiting().then(() => r.add(`${me.host}/${me.agent}`, JSON.stringify(signRequest({ v: 1, kind: 'request', id: newId(), from: `${me.host}/${me.agent}`, to: '*', op: 'upgrade', args: { piece: 'claude', version: '9.9.9' }, ts: new Date().toISOString(), ttl_s: 60 }, k.privateKeySpec))));
+    const out = await new Promise(resolve => {
+      const child = spawn('node', [AGENTD, '--once'], { env: { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: r.url(), FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, AGENT_FABRIC_STATE_DIR: path.join(home, 'state') } });
+      let stderr = ''; child.stderr.on('data', d => { stderr += d; });
+      const t = setTimeout(() => child.kill('SIGKILL'), 20000);
+      child.on('close', status => { clearTimeout(t); resolve({ status, stderr }); });
+    });
+    assert.equal(out.status, 0, out.stderr);
+    const rs = replies(r).filter(x => x.op === 'upgrade');
+    assert.equal(rs.length, 1, `the action's reply was posted before exit\n${out.stderr}`);
+    assert.deepEqual([rs[0].data.upgrade.status, rs[0].data.upgrade.version], ['current', '9.9.9']);
+  } finally { r.close(); }
 });

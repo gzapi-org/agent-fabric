@@ -5,6 +5,9 @@
 //   fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]
 //   fabric-ctl <login|all> host                     the machine, one row per host: load, memory, balloon, disks, leases, largest processes
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
+//   fabric-ctl <login|all> upgrade claude [--version V]   an ACTION, signed with the operator's key: bring the harness
+//                                                   to the pinned version, restarting a running session (docs/fleet-upgrade.md)
+//   fabric-ctl keygen [--force]                     the operator's signing key: private half into Doppler, public into the registry
 //
 // A login becomes an address through the registry's placement
 // (<host>/<login>); `all` is every placement, addressed as "*". The
@@ -20,7 +23,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
-import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
+import { api, syncedToken, syncedVar, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
+import { execFileSync } from 'node:child_process';
+import { ACTION_OPS, ACTION_TTL_MAX_S, signRequest, generateOperatorKey, publicKeyFrom } from './sign.mjs';
+import { PIECES, VERSION_RE, pinnedVersion } from './upgrade.mjs';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS } from './ops.mjs';
@@ -32,7 +38,7 @@ export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ??
 }
 
 export function parseArgs(argv) {
-  const out = { targets: [], op: 'status', json: false, timeout: null, out: null, days: null };
+  const out = { targets: [], op: 'status', json: false, timeout: null, out: null, days: null, piece: null, version: null, force: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
@@ -42,12 +48,20 @@ export function parseArgs(argv) {
     else if (a.startsWith('--out=')) out.out = a.slice(6);
     else if (a === '--days') out.days = Number(argv[++i]);
     else if (a.startsWith('--days=')) out.days = Number(a.slice(7));
+    else if (a === '--version') out.version = argv[++i];
+    else if (a.startsWith('--version=')) out.version = a.slice(10);
+    else if (a === '--force') out.force = true;
     else if (a === '-h' || a === '--help') out.help = true;
     else if (a.startsWith('--')) throw new Error(`unknown option ${a}`);
+    else if (a === 'keygen' && !out.targets.length) out.op = 'keygen';
+    else if (out.op === 'upgrade' && out.piece === null) out.piece = a;   // the word after `upgrade` is the piece, never a login
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? ACTION_TTL_MAX_S : 20;
+  if (out.op === 'upgrade' && !PIECES.includes(out.piece)) throw new Error(`upgrade takes a piece: ${PIECES.join(', ')}`);
+  if (out.version !== null && (out.op !== 'upgrade' || !VERSION_RE.test(out.version))) throw new Error('--version takes digits.digits.digits, with upgrade only');
+  if (out.op === 'upgrade' && out.timeout > ACTION_TTL_MAX_S) throw new Error(`an action lives at most ${ACTION_TTL_MAX_S} s`);
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
   if (out.op === 'memory' && !out.out) throw new Error('memory takes --out <dir>: where the drain bundles are written');
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
@@ -102,7 +116,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? (d.identity?.claude_account?.via === 'setup-token' ? `setup-token ${d.identity.claude_account.token_sha256_12}` : null), role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, upgrade: d.upgrade ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -110,6 +124,16 @@ const pct = w => (w && w.utilization != null) ? `${Number(w.utilization).toFixed
 const at = w => (w && w.resets_at) ? String(w.resets_at).slice(0, 16) : '-';
 export function table(op, rs) {
   const lines = [];
+  if (op === 'upgrade') {
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'from → to'.padEnd(22)} ${'session'.padEnd(26)} reason`);
+    for (const r of rs) {
+      const u = r.upgrade;
+      if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      const ft = u.status === 'current' ? `${u.version} (pinned)` : `${u.from ?? '-'} → ${u.to ?? '-'}`;
+      lines.push(`${r.account.padEnd(22)} ${String(u.status).padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
+    }
+    return lines.join('\n');
+  }
   if (op === 'accounts') {
     // One row per observed CLAUDE account, not per login: only the
     // observer's daemon has any; the rest answer `none` and are not rows.
@@ -256,7 +280,8 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || !args.targets.length) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>'); return args.help ? 0 : 2; }
+  if (args.help || (!args.targets.length && args.op !== 'keygen')) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>\n       fabric-ctl <login|all> upgrade claude [--version V]\n       fabric-ctl keygen [--force]'); return args.help ? 0 : 2; }
+  if (args.op === 'keygen') return keygen(args, { registry });
   const all = placements(registry);
   let expected;
   if (args.targets.length === 1 && args.targets[0] === 'all') expected = all;
@@ -279,7 +304,19 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const call = (p, init) => api(tok, p, { relayUrl: cfg.relay_url, ...init });
 
   const id = newId();
-  const request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)), ...(args.days ? { days: args.days } : {}) };
+  let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)), ...(args.days ? { days: args.days } : {}),
+                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}) };
+  // One command, one version: the coordinator's pin travels in the signed
+  // request. Left to each account, an account that had not pulled the pin
+  // bump would read its own older pin and answer `current` (review of #34).
+  if (args.op === 'upgrade' && !request.args.version) { console.error(`fabric-ctl: no pinned version in ${path.join(FABRIC_ROOT, 'runtime', 'claude-code', 'harness.json')} and no --version; nothing sent`); return 2; }
+  if (ACTION_OPS.includes(args.op)) {
+    // An action is signed or not sent: an unsigned one is refused by every
+    // daemon, and a silent table would read as agents that did not answer.
+    const key = process.env.FABRIC_CONTROL_SIGNING_KEY ?? syncedVar('FABRIC_CONTROL_SIGNING_KEY');
+    if (!key) { console.error('fabric-ctl: no FABRIC_CONTROL_SIGNING_KEY (fabric-ctl keygen, then fabric-secrets sync) — an action is signed or not sent'); return 3; }
+    try { request = signRequest(request, key); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 3; }
+  }
   let sent;
   try { sent = await call('/api/send', { method: 'POST', body: JSON.stringify({ channel: cfg.channel, sender: me.address, content: JSON.stringify(request) }) }); }
   catch (e) { console.error(`fabric-ctl: relay ${e.status ? `refused (HTTP ${e.status})` : `unreachable at ${cfg.relay_url}`}`); return 3; }
@@ -316,6 +353,28 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   if (args.json) for (const r of rs) console.log(JSON.stringify(r));
   else console.log(table(args.op, rs));
   return want.size || short() || refused ? 1 : 0;
+}
+
+// The operator's signing key, made once (or rotated): the private half goes
+// from this process into the operator's own Doppler config on stdin — never
+// printed, never a file — and the public half into this host's
+// `operator_key` in the registry, to commit like any other change. A key
+// already registered is kept unless --force: a rotation invalidates every
+// daemon's trust until the registry change is pulled.
+export function keygen(args, { registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json'), exec = execFileSync, who = whoami() } = {}) {
+  const reg = JSON.parse(fs.readFileSync(registry, 'utf8'));
+  const host = reg.hosts?.[who.host];
+  if (!host || (host.operator ?? 'user') !== who.agent) { console.error(`fabric-ctl: ${who.host}/${who.agent} is not this host's operator in the registry; no key made`); return 2; }
+  if (publicKeyFrom(host.operator_key) && !args.force) { console.error('fabric-ctl: this host already has an operator_key; --force to rotate it'); return 2; }
+  const cfg = String(exec('doppler', ['configure', 'get', 'enclave.config', '--plain', '--scope', '/'], { encoding: 'utf8' })).trim();
+  if (!cfg) { console.error('fabric-ctl: no Doppler config recorded for this login (enclave.config at scope /)'); return 3; }
+  const k = generateOperatorKey();
+  exec('doppler', ['secrets', 'set', 'FABRIC_CONTROL_SIGNING_KEY', '--project', 'agent-fabric', '--config', cfg, '--silent'], { input: k.privateKeySpec, encoding: 'utf8', stdio: ['pipe', 'ignore', 'inherit'] });
+  host.operator_key = k.publicKeySpec;
+  fs.writeFileSync(registry, JSON.stringify(reg, null, 2) + '\n');
+  console.log(`fabric-ctl: signing key made — private half in Doppler ${cfg} (FABRIC_CONTROL_SIGNING_KEY), public half in ${path.relative(FABRIC_ROOT, registry)} (operator_key of ${who.host}).`);
+  console.log('  next: bin/fabric-secrets sync; commit the registry change; the fleet trusts it once it has pulled that commit.');
+  return 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(c => process.exit(c)).catch(e => { console.error(`fabric-ctl: ${e.message}`); process.exit(1); });

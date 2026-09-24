@@ -142,7 +142,7 @@ the harness's own headless `/usage`, which renews the observer's 8-hour
 sign-in and makes no model call, run every 4 hours by the daemon and on
 request, cached 5 minutes; one row per Claude account in `fabric-ctl`,
 only the observing login has any; `docs/claude-accounts.md`), `status`
-(all but `script`, `tokens`, `memory` and `accounts`). A login running on a
+(all but `script`, `tokens`, `memory` and `accounts`), and `upgrade` — the one ACTION (`docs/fleet-upgrade.md`): bring the harness to the version the request names, stopping and resuming a running session; answered only when signed (below), never part of `status`. A login running on a
 template's setup-token reports it by fingerprint in `identity`, and its
 `usage` points at the observer: its own `~/.claude.json` names the
 account it last signed into, not the one in use. A section that
@@ -151,7 +151,7 @@ always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
 channel.
 
-## The fence, v1 — and the signing that follows
+## The fence, v1 — and the signature an action needs
 
 A daemon answers a request only when `from` is a host operator's address
 as `runtime/hosts/registry.json` places it (read again for every record,
@@ -166,17 +166,34 @@ account's name that `fabric-ctl` prints as that account's row. It stops
 the accident — another session's watch, a typo, a replay of history —
 and it bounds what a forged request can obtain to the same non-secret
 facts; the table is as honest as the least trusted holder of the relay
-token until replies are signed too. Signing is the next commit, as its
-own change: an Ed25519 key the coordinator alone holds (its Doppler
-config), the public key committed under `runtime/control/`, `sig` over
-the canonical request fields, and a daemon that finds the public key
-drops unsigned requests; replies get a per-account key the same way. Not
-HMAC: a shared secret in every account's config lets every account forge
-the coordinator.
+token until replies are signed too.
+
+**An ACTION needs a proof** (2026-09-24, `runtime/control/sign.mjs`). The
+first op that changes an account — `upgrade`, which stops a session and
+installs software (`docs/fleet-upgrade.md`) — is answered only when the
+request carries `sig`, an Ed25519 signature over its canonical form
+(every field but `sig`, keys sorted at every depth) by the key the
+operator's host commits as `operator_key` in the hosts registry. The
+private half is only in the operator's own Doppler config
+(`FABRIC_CONTROL_SIGNING_KEY`, one line), made by `fabric-ctl keygen`,
+which writes it there on stdin and the public half into the registry. A
+host with no key can order nothing; an action lives at most 10 minutes,
+and is accepted only when strictly newer than the last action accepted
+from its sender — a ledger persisted in the account's fabric state
+(`actions-seen.json`), because the in-memory seen-id LRU forgets on a
+restart and can be flushed by unsigned read requests. Read ops stay
+unsigned-compatible. Not HMAC: a shared secret in every account's config
+would let every account forge the operator. Still open: signed *replies*
+(a per-account key the same way), so a forged row cannot pass as an
+account's.
+
+An action runs beside the daemon's read loop and posts its reply when it
+is done, so a request that arrives meanwhile is still answered; one
+action at a time per account is the action's own rule.
 
 ## The coordinator's side
 
-`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|ping] [--json] [--timeout S]`
+`bin/fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]`, `bin/fabric-ctl <login|all> upgrade claude [--version V]` (an action, signed), `bin/fabric-ctl keygen`
 (and `tokens [--days N]`, whose table groups the logins by Claude
 account and prints each one's share of the account's visible direct-path
 spend, the broker spend beside it; what the account spends off this host

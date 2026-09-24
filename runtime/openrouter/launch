@@ -137,6 +137,7 @@ PRINT_ONLY=0
 PROVIDER="openrouter"
 ARGS=()
 ORIG_ARGS=("$@")   # for the re-exec after a pull, below
+LAUNCH_STARTED="$(date +%s)"   # a restart marker older than this is not this session's
 prev_arg=""
 for arg in "$@"; do
     if [[ "$arg" == "--print" ]]; then PRINT_ONLY=1
@@ -726,4 +727,69 @@ if (( STATUS == 0 )); then note="session ended"
 elif (( STATUS > 128 )); then note="session ended by signal $((STATUS - 128))"
 else note="session ended with status $STATUS"; fi
 goodbye "$note"
+
+# ── back on the new version: the restart an upgrade asked for ────────
+# The control agent's `upgrade` (runtime/control/upgrade.mjs) writes
+# $STATE_DIR/restart.json, then stops this session with SIGTERM — the
+# harness's graceful shutdown. This shell is still in the session's
+# terminal, so it is the one that can bring the session back: it waits
+# while the upgrade runs, then re-executes itself — through the same pull
+# and checks as any launch — resuming the session it was running
+# (docs/fleet-upgrade.md). A marker older than this launch belongs to
+# another session and is removed, never obeyed; an upgrade that failed
+# still restarts, on what is installed, and says so.
+RESTART_MARKER="$STATE_DIR/restart.json"
+if [[ -f "$RESTART_MARKER" ]]; then
+    if RESUME="$(python3 - "$RESTART_MARKER" "$LAUNCH_STARTED" "$STATE_DIR/binding.json" "${AGENT_FABRIC_RESTART_WAIT_S:-600}" <<'PY'
+import datetime, json, sys, time
+marker, started, binding, wait_s = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+def load():
+    try:
+        return json.load(open(marker, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+m = load()
+try:
+    at = datetime.datetime.fromisoformat(str(m.get("requested_at", "")).replace("Z", "+00:00")).timestamp()
+except ValueError:
+    at = 0
+if at < started:
+    sys.exit(1)
+deadline = time.time() + wait_s
+if m.get("status") == "pending":
+    print(f"launch: the session was stopped for an upgrade of {m.get('piece')} to {m.get('to')}; waiting for it…", file=sys.stderr)
+while m.get("status") == "pending" and time.time() < deadline:
+    time.sleep(1)
+    m = load()
+st = m.get("status")
+if st == "done":
+    print(f"launch: {m.get('piece')} upgraded {m.get('from')} → {m.get('installed') or m.get('to')}; resuming the session on it.", file=sys.stderr)
+elif st == "failed":
+    print(f"launch: the upgrade of {m.get('piece')} to {m.get('to')} FAILED ({m.get('reason') or 'no reason given'}); resuming the session on what is installed.", file=sys.stderr)
+else:
+    print(f"launch: the upgrade of {m.get('piece')} did not finish within {wait_s} s; resuming the session on what is installed.", file=sys.stderr)
+try:
+    print(json.load(open(binding, encoding="utf-8")).get("session") or "")
+except (OSError, ValueError):
+    print("")
+PY
+)"; then
+        rm -f "$RESTART_MARKER"
+        # The caller's own resume flags are replaced by the one that names
+        # the session just stopped; everything else is passed on as given.
+        NEXT=(); skip=0
+        for a in "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"; do
+            if (( skip )); then skip=0; [[ "$a" == -* ]] || continue; fi
+            case "$a" in
+                --continue|-c) continue ;;
+                --resume|-r) skip=1; continue ;;
+                --resume=*) continue ;;
+            esac
+            NEXT+=("$a")
+        done
+        if [[ -n "$RESUME" ]]; then NEXT+=(--resume "$RESUME"); else NEXT+=(--continue); fi
+        exec env -u AGENT_FABRIC_PULLED bash "$0" "${NEXT[@]}"
+    fi
+    rm -f "$RESTART_MARKER"
+fi
 exit "$STATUS"

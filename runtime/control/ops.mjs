@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'upgrade', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -106,7 +106,7 @@ export function takeReadLock(dir, pid = process.pid) {
       if (e.code !== 'EEXIST') throw e;
       let holder;
       try { holder = Number(String(fs.readFileSync(f, 'utf8')).trim()); }
-      catch { continue; }   // released between our attempt and this read: try again
+      catch (r) { if (r.code === 'ENOENT') continue; throw r; }   // released between our attempt and this read: try again; anything else is loud
       let alive = false;
       try { process.kill(holder, 0); alive = true; } catch (k) { alive = k.code === 'EPERM'; }
       if (alive && holder !== pid) return null;
@@ -149,7 +149,9 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
   const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
   const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
   if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
-  const release = takeReadLock(dir);
+  let release;
+  try { release = takeReadLock(dir); }
+  catch (e) { return { ...out, status: 'failed', error: `read lock: ${e.code ?? String(e.message).slice(0, 80)}` }; }   // this account's row, not the whole section's
   if (!release) return { ...out, status: 'busy', error: 'another reader holds this account (the daemon, or fabric-accounts read)' };
   // A fixed working directory: the harness records a project per cwd even
   // with --no-session-persistence (an empty one, measured), so a fresh

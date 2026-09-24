@@ -79,13 +79,13 @@ credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BA
 # own sign-in — whose ~/.claude.json keeps naming its account either way,
 # so that file alone would report the wrong account for a switched login.
 def synced_template_token():
-    """The login's own record first — the `export CLAUDE_CODE_OAUTH_TOKEN=`
-    line fabric-secrets sync writes — because the launcher removes the
-    variable from a broker session's environment, and that session must
-    still report the account the login is on (re-review of #33)."""
-    path = os.path.join(os.path.expanduser("~"), ".config", "agent-fabric", "secrets.env")
+    """The login's own record — the `export CLAUDE_CODE_OAUTH_TOKEN=` line
+    fabric-secrets sync writes. The launcher removes the variable from a
+    broker session's environment, and that session must still report the
+    account the login is on (re-review of #33)."""
+    env_file = os.path.join(os.path.expanduser("~"), ".config", "agent-fabric", "secrets.env")
     try:
-        for line in open(path, encoding="utf-8"):
+        for line in open(env_file, encoding="utf-8"):
             if line.startswith("export CLAUDE_CODE_OAUTH_TOKEN="):
                 v = line.split("=", 1)[1].strip()
                 if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
@@ -96,12 +96,26 @@ def synced_template_token():
     return None
 
 
+def fp12(v):
+    import hashlib
+    return hashlib.sha256(v.encode()).hexdigest()[:12]
+
+
+# What THIS session's plain claude uses is its environment; the login's
+# synced record is what the next launch will use. Environment first, the
+# record when the environment has none (a broker session, where the
+# launcher removed it); the line names which, and the two disagreeing is
+# drift — a session launched before the sync that moved the login.
+_SIGNIN_ENV, _SIGNIN_FILE = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), synced_template_token()
+signin_drift = (f"this session runs on setup-token {fp12(_SIGNIN_ENV) if _SIGNIN_ENV else '(own /login)'}, the login's synced record "
+                f"names {'setup-token ' + fp12(_SIGNIN_FILE) if _SIGNIN_FILE else 'none'} — the next launch uses the record") \
+    if (_SIGNIN_ENV or None) != (_SIGNIN_FILE or None) and not (not _SIGNIN_ENV and base) else None
+
+
 def claude_sign_in():
-    tok = synced_template_token() or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    tok, source = (_SIGNIN_ENV, "CLAUDE_CODE_OAUTH_TOKEN in this session") if _SIGNIN_ENV else (_SIGNIN_FILE, "the login's synced record")
     if tok:
-        import hashlib
-        return (f"setup-token {hashlib.sha256(tok.encode()).hexdigest()[:12]} (CLAUDE_CODE_OAUTH_TOKEN; "
-                "bin/fabric-accounts templates names its account)")
+        return f"setup-token {fp12(tok)} ({source}; bin/fabric-accounts templates names its account)"
     cfg = os.environ.get("CLAUDE_CONFIG_DIR")
     prof = os.path.join(cfg, ".claude.json") if cfg else os.path.join(os.path.expanduser("~"), ".claude.json")
     try:
@@ -255,7 +269,7 @@ report = {
     "session": binding.get("session"), "binding_updated": binding.get("updated_at"),
     "launched_role": os.environ.get("AGENT_FABRIC_LAUNCH_ROLE"),
     "launch_prompt_digest": digest,
-    "drift": [d for d in (role_drift, model_drift, effort_drift, prompt_drift, placement_drift, fallback_drift) if d] or None,
+    "drift": [d for d in (role_drift, model_drift, effort_drift, prompt_drift, placement_drift, fallback_drift, signin_drift) if d] or None,
     "session_effort": session_effort,
     "undrained_memories": undrained,
     "api": {"provider": provider, "path": path, "base_url_host": host or None,

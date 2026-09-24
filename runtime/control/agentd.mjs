@@ -27,11 +27,14 @@
 // once, and the identity section asks whoami() per request, so a rebind
 // shows without a restart (review, 2026-09-17) — (a claim,
 // not a proof — the relay verifies no sender; it stops any other session
-// from asking, and signing comes next: an Ed25519 `sig` the coordinator
-// makes with a key only its Doppler config holds), its op is one of the
-// closed set, its `ts` plus `ttl_s` is not in the past, and its id was
-// not seen before (an LRU of 256). Ops take no arguments and no field of
-// a request ever reaches a shell; the answer carries no secret (ops.mjs).
+// from asking), its op is one of the closed set, its `ts` plus `ttl_s` is
+// not in the past, and its id was not seen before (an LRU of 256). An
+// ACTION op (sign.mjs ACTION_OPS) additionally needs `sig`, an Ed25519
+// signature by the operator's committed key, lives at most 10 minutes,
+// and must be newer than the last action accepted from that operator (a
+// ledger in the account's fabric state). Read ops take no arguments; an
+// action takes only its closed set (upgrade.mjs checkArgs). No field of a
+// request ever reaches a shell; the answer carries no secret (ops.mjs).
 //
 // Every reply arrives: a section that cannot be read says so inline.
 // Relay down: one line on stderr, retry every 30 s; a refused token is
@@ -45,6 +48,8 @@ import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { OPS, collect, usage, accounts, accountSlugs, accountsDir } from './ops.mjs';
+import { ACTION_OPS, ACTION_TTL_MAX_S, publicKeyFrom, verifyRequest } from './sign.mjs';
+import { upgrade, stateDir } from './upgrade.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SEEN_MAX = 256;
@@ -76,6 +81,19 @@ export function controlConfig(env = process.env, file = path.join(HERE, 'config.
   };
 }
 
+// Each operator's public key (`operator_key`), read like the addresses:
+// again for every record, so a rotation committed to the registry counts
+// at the next pull. A host with no key, or a malformed one, has none — its
+// operator can still ask what an account reports, and can order nothing.
+export function operatorKeys(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
+  const out = new Map();
+  try {
+    const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    for (const [h, v] of Object.entries(d.hosts ?? {})) { const k = publicKeyFrom(v.operator_key); if (k) out.set(`${h}/${v.operator ?? 'user'}`, k); }
+  } catch { /* no registry: no keys */ }
+  return out;
+}
+
 // The operators: <host>/<operator> for every host in the registry.
 export function operatorAddresses(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   try {
@@ -95,9 +113,30 @@ export function newId() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+// The replay defence for ACTIONS, persisted: the newest accepted action's
+// timestamp per operator, in the account's fabric state. The seen-id LRU is
+// in memory — a restart empties it, and 256 unsigned read requests evict
+// it — so a signed action copied off the channel could be posted again
+// inside its lifetime and stop a session again (review of #34). An action
+// is accepted only when strictly newer than the last one from its sender.
+export function actionLedger(file = path.join(stateDir(), 'actions-seen.json')) {
+  const read = () => { try { const d = JSON.parse(fs.readFileSync(file, 'utf8')); return d && typeof d === 'object' ? d : {}; } catch { return {}; } };
+  return {
+    floor: from => Number(read()[from]) || 0,
+    record(from, ts) {
+      const d = read(); if ((Number(d[from]) || 0) >= ts) return;
+      d[from] = ts;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(d) + '\n', { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    },
+  };
+}
+
 // Is this record a request this agent answers? The reason when not, for
 // the log; never an error, never a reply.
-export function accept(rec, { me, operators, ttl_s, seen, now = Date.now() }) {
+export function accept(rec, { me, operators, keys = new Map(), ttl_s, seen, now = Date.now(), actionFloor = () => 0 }) {
   let r;
   try { r = JSON.parse(rec.content); } catch { return { ok: false, why: 'not json' }; }
   if (!r || r.kind !== 'request') return { ok: false, why: 'not a request' };
@@ -108,10 +147,15 @@ export function accept(rec, { me, operators, ttl_s, seen, now = Date.now() }) {
   if (!to.includes('*') && !to.includes(me.address)) return { ok: false, why: 'not for me' };
   if (!OPS.includes(r.op)) return { ok: false, why: `op ${String(r.op).slice(0, 20)}` };
   if (typeof r.from !== 'string' || !operators.has(r.from)) return { ok: false, why: `from ${String(r.from).slice(0, 40)} is not an operator` };
+  const action = ACTION_OPS.includes(r.op);
+  // An action is ordered, not asked: only a signature by the operator's
+  // own key (runtime/control/sign.mjs) proves the operator sent it.
+  if (action && !verifyRequest(r, keys.get(r.from))) return { ok: false, why: `${r.op}: not signed by ${String(r.from).slice(0, 40)}'s key` };
   const ts = Date.parse(r.ts);
-  const ttl = Number(r.ttl_s) > 0 ? Math.min(Number(r.ttl_s), 3600) : ttl_s;
+  const ttl = Number(r.ttl_s) > 0 ? Math.min(Number(r.ttl_s), action ? ACTION_TTL_MAX_S : 3600) : ttl_s;
   if (!Number.isFinite(ts) || ts + ttl * 1000 < now) return { ok: false, why: 'expired' };
-  return { ok: true, request: r };
+  if (action && !(ts > actionFloor(r.from))) return { ok: false, why: `${r.op}: not newer than the last action accepted from ${String(r.from).slice(0, 40)} (a replay)` };
+  return { ok: true, request: r, ts };
 }
 
 // A pull that changes the daemon's own code must reach the daemon: a
@@ -137,7 +181,8 @@ export function remember(seen, id) {
 // verifies the sha256 the first record names.
 export async function answer(request, ctx) {
   const days = Number(request.days);
-  const data = request.op === 'ping' ? {} : await collect(request.op, Number.isFinite(days) && days > 0 ? { ...ctx, days: Math.min(days, 90) } : ctx);
+  const data = request.op === 'ping' ? {} : request.op === 'upgrade' ? { upgrade: await upgrade(request, { me: ctx.me.address, ...ctx.upgradeOpts }) }
+    : await collect(request.op, Number.isFinite(days) && days > 0 ? { ...ctx, days: Math.min(days, 90) } : ctx);
   const head = () => ({ v: 1, kind: 'reply', id: newId(), in_reply_to: request.id, from: ctx.me.address, op: request.op, ts: new Date().toISOString(), ok: true });
   const meta = { agentd: { pid: process.pid, started: ctx.started, uptime_s: Math.round((Date.now() - Date.parse(ctx.started)) / 1000) } };
   if (request.op !== 'memory' || !data.memory?.bundles) return { ...head(), data: { ...data, ...meta } };
@@ -166,6 +211,8 @@ export async function main(argv = process.argv.slice(2)) {
   if (!tok) { console.error('agentd: no CLAUDE_BRIDGE_AUTH_TOKEN (fabric-secrets sync) — nothing to read with'); return 3; }
   if (operatorAddresses().size === 0) { console.error('agentd: no host operator in runtime/hosts/registry.json — nothing could ever be answered; not starting'); return 3; }
   const seen = new Set();
+  const ledger = actionLedger();
+  const inflight = new Set();   // actions running beside the loop; --once waits for them before exiting
   // What is not logged: every reply on the channel (not a request), a
   // request for another account (not for me) and a duplicate (seen) —
   // fifteen daemons times fifteen replies per fabric-ctl would be noise.
@@ -207,16 +254,33 @@ export async function main(argv = process.argv.slice(2)) {
       const rows = page.messages ?? [];
       for (const rec of rows) {
         last = rec.id;
-        const a = accept(rec, { me, operators: operatorAddresses(), ttl_s: cfg.ttl_s, seen });
+        const a = accept(rec, { me, operators: operatorAddresses(), keys: operatorKeys(), ttl_s: cfg.ttl_s, seen, actionFloor: ledger.floor });
         if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
+        // An action can take minutes (a session to stop, an install): run
+        // it beside the loop, so the daemon keeps answering — a request that
+        // waited behind it would expire unanswered. Its reply is posted when
+        // it is done; one action at a time is the action's own rule.
+        if (ACTION_OPS.includes(a.request.op)) {
+          const { op, from, id } = a.request;
+          ledger.record(from, a.ts);   // before it runs: a replay posted while it runs is refused too
+          console.error(`agentd: started ${op} for ${from} (${id.slice(0, 8)})`);
+          const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
+            .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`))
+            .finally(() => inflight.delete(p));
+          inflight.add(p);
+          continue;
+        }
         const reply = await answer(a.request, ctx);
         const { _followups, ...firstReply } = reply;
         await post(firstReply);
         for (const f of _followups ?? []) await post(f);
         console.error(`agentd: answered ${a.request.op} for ${a.request.from} (${a.request.id.slice(0, 8)})`);
       }
-      if (once) return 0;
+      // An action already started has stopped a session and written a
+      // marker: exiting under it would leave the launcher waiting on a
+      // pending upgrade and no reply posted (review of #34).
+      if (once) { await Promise.allSettled([...inflight]); return 0; }
     } catch (e) {
       if (e.status === 401 || e.status === 403) { console.error(`agentd: the relay refused this token (HTTP ${e.status}); rotated? run bin/fabric-secrets sync`); if (once) return 4; }
       else if (!down) { console.error(`agentd: relay unreachable at ${cfg.relay_url} (${e.message}) — retrying every 30 s`); down = true; }

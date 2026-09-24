@@ -553,3 +553,15 @@ test('the read lock is released when the read fails before the harness starts (w
   assert.equal(r.status, 'failed');
   assert.ok(!fs.existsSync(path.join(acct, '.fabric-read.lock')), 'the lock did not outlive the failed read');
 });
+
+test('the read lock: a lock that cannot be read is a loud failure, not a permanent busy', async () => {
+  const { h, dir } = accountsHome({ 'claude-a': true });
+  const acct = path.join(dir, 'claude-a');
+  fs.mkdirSync(path.join(acct, '.fabric-read.lock'));
+  assert.throws(() => takeReadLock(acct), /EISDIR/);
+  const r = await readAccount(acct, { home: h, exec: async () => assert.fail('no harness') });
+  assert.deepEqual([r.status, r.error], ['failed', 'read lock: EISDIR'], 'the reason is named, never "another reader holds it"');
+  fs.mkdirSync(path.join(dir, 'claude-b')); fs.writeFileSync(path.join(dir, 'claude-b', '.credentials.json'), '{}');
+  const all = await accounts(h, { exec: async () => USAGE_EVENTS });
+  assert.deepEqual(all.accounts.map(a => [a.slug, a.status]), [['claude-a', 'failed'], ['claude-b', 'ok']], 'one broken lock does not blank the sibling accounts');
+});

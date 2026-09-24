@@ -422,6 +422,16 @@ if [[ "$PROVIDER" == anthropic && -n "${ANTHROPIC_API_KEY:-}" ]] &&
     dropped+=(ANTHROPIC_API_KEY); unset ANTHROPIC_API_KEY
 fi
 (( ${#dropped[@]} )) && echo "launch: plain claude goes to Anthropic direct — dropped what a broker session left in this environment: ${dropped[*]}" >&2
+# The other way round: a login moved to a Claude-account template carries
+# CLAUDE_CODE_OAUTH_TOKEN in every shell (fabric-secrets sync), and a broker
+# session must never hold it — whichever credential the harness prefers
+# with a base URL set, an Anthropic subscription token has no business in
+# a process whose requests go to a third party (review of #33). Dropped
+# unconditionally on the broker path, by name.
+if [[ "$PROVIDER" != anthropic && -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
+    unset CLAUDE_CODE_OAUTH_TOKEN
+    echo "launch: the broker path — dropped CLAUDE_CODE_OAUTH_TOKEN (a Claude-account template's token never reaches a broker session)" >&2
+fi
 
 # ── the pins ─────────────────────────────────────────────────────────
 # Every alias variable starts EMPTY, then only the resolved ones are set.

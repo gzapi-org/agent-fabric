@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
 import { canonical, signRequest, verifyRequest, publicKeyFrom, privateKeyFrom, generateOperatorKey, ACTION_TTL_MAX_S } from '../sign.mjs';
-import { accept, operatorKeys } from '../agentd.mjs';
+import { accept, operatorKeys, actionLedger, remember, SEEN_MAX } from '../agentd.mjs';
 
 const OP = 'h/user';
 const me = { address: 'h/db-admin' };
@@ -60,4 +60,29 @@ test('accept: an action lives at most ACTION_TTL_MAX_S whatever it asks, and is 
   assert.equal(accept(rec(once), ctx).ok, true);
   ctx.seen.add(once.id);
   assert.equal(accept(rec(once), ctx).why, 'seen', 'a replay inside the window is refused by the seen-id LRU');
+});
+
+test('the action replay ledger: persisted per operator, survives a restart and read-op floods; only a strictly newer action passes', () => {
+  const dir = scratch('sign-ledger-');
+  const k = generateOperatorKey();
+  const keys = operatorKeys(registry(dir, k.publicKeySpec));
+  const file = path.join(dir, 'state', 'actions-seen.json');
+  let ledger = actionLedger(file);
+  const seen = new Set();
+  const ctx = () => ({ me, operators: new Set([OP]), keys, ttl_s: 30, seen, actionFloor: ledger.floor });
+  const first = signRequest(base(), k.privateKeySpec);
+  const a = accept(rec(first), ctx());
+  assert.equal(a.ok, true);
+  ledger.record(first.from, a.ts); remember(seen, first.id);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  // 256 unsigned read requests from the operator's address evict the id from the in-memory LRU…
+  for (let i = 0; i <= SEEN_MAX; i++) remember(seen, `ping-${i}`);
+  assert.ok(!seen.has(first.id));
+  // …and a restart empties it altogether: a new ledger object reads the same file.
+  seen.clear(); ledger = actionLedger(file);
+  const replay = accept(rec(first), ctx());
+  assert.deepEqual([replay.ok, /not newer .* \(a replay\)/.test(replay.why)], [false, true], 'the replay is refused by the persisted ledger');
+  const later = signRequest(base({ ts: new Date(Date.parse(first.ts) + 1000).toISOString() }), k.privateKeySpec);
+  assert.equal(accept(rec(later), ctx()).ok, true, 'a genuinely newer action still passes');
+  assert.equal(accept(rec(base({ op: 'status', args: undefined, ts: first.ts })), ctx()).ok, true, 'read ops are not held to the ledger');
 });

@@ -177,8 +177,11 @@ operator's host commits as `operator_key` in the hosts registry. The
 private half is only in the operator's own Doppler config
 (`FABRIC_CONTROL_SIGNING_KEY`, one line), made by `fabric-ctl keygen`,
 which writes it there on stdin and the public half into the registry. A
-host with no key can order nothing; an action lives at most 10 minutes;
-the seen-id LRU refuses a replay inside that window. Read ops stay
+host with no key can order nothing; an action lives at most 10 minutes,
+and is accepted only when strictly newer than the last action accepted
+from its sender — a ledger persisted in the account's fabric state
+(`actions-seen.json`), because the in-memory seen-id LRU forgets on a
+restart and can be flushed by unsigned read requests. Read ops stay
 unsigned-compatible. Not HMAC: a shared secret in every account's config
 would let every account forge the operator. Still open: signed *replies*
 (a per-account key the same way), so a forged row cannot pass as an

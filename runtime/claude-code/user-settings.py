@@ -30,6 +30,17 @@ harness sends the opposite reminder — do not add attribution lines.
 Control session would add. The guard stays as the fence. The deprecated
 `includeCoAuthoredBy` said the same thing; the key replaces it.
 
+`env.DISABLE_AUTOUPDATER` "1": the fleet's Claude Code version is the one
+runtime/claude-code/harness.json pins, moved by `fabric-ctl … upgrade
+claude` and nothing else. `autoUpdates: false` in ~/.claude.json is NOT
+that switch on a native install: the harness honours it only when
+`autoUpdatesProtectedForNative` is not true (2.1.282, read from its
+binary), and the coordinator's account, native and protected, installed
+2.1.282 on its own on 2026-09-24. DISABLE_AUTOUPDATER is checked first,
+unconditionally; it stops background updates only — `claude install <v>`,
+which the upgrade uses, still works (DISABLE_UPDATES would stop that too).
+Every other `env` key is kept as read.
+
 `showThinkingSummaries` true and `verbose` true (the owner, 2026-09-20):
 an agent's session is read by the person operating the fleet, not only
 by the agent — the thinking summaries and the full tool output are what
@@ -46,6 +57,7 @@ import sys
 USAGE = (__doc__ or "user-settings.py <settings.json> [--dry-run]").strip()
 ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 TOP_LEVEL = {"showThinkingSummaries": True, "verbose": True}
+ENV = {"DISABLE_AUTOUPDATER": "1"}
 
 
 class Unreadable(Exception):
@@ -79,7 +91,8 @@ def settled(doc: dict) -> bool:
     current = doc.get("attribution") if isinstance(doc.get("attribution"), dict) else {}
     return (all(current.get(k) == v for k, v in ATTRIBUTION.items())
             and "includeCoAuthoredBy" not in doc
-            and all(doc.get(k) == v for k, v in TOP_LEVEL.items()))
+            and all(doc.get(k) == v for k, v in TOP_LEVEL.items())
+            and isinstance(doc.get("env"), dict) and all(doc["env"].get(k) == v for k, v in ENV.items()))
 
 
 def main(argv: list[str]) -> int:
@@ -115,6 +128,8 @@ def main(argv: list[str]) -> int:
     doc["attribution"] = {**current, **ATTRIBUTION}
     doc.pop("includeCoAuthoredBy", None)
     doc.update(TOP_LEVEL)
+    env = doc.get("env") if isinstance(doc.get("env"), dict) else {}
+    doc["env"] = {**env, **ENV}
     save(path, doc)
     print(f"  +  {path} fabric user settings")
     return 0

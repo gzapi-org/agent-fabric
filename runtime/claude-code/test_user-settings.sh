@@ -14,7 +14,7 @@ bad() { FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; [[ -n "${2:-}" ]] && printf 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 S="$SANDBOX/.claude/settings.json"
 run() { python3 "$HERE/user-settings.py" "$@" 2>&1; }
-check() { python3 -c "import json,sys; d=json.load(open('$S')); a=d['attribution']; assert (a['commit'],a['pr'],a['sessionUrl'])==('','',False), d; assert d['showThinkingSummaries'] is True and d['verbose'] is True, d; $1" 2>&1; }
+check() { python3 -c "import json,sys; d=json.load(open('$S')); a=d['attribution']; assert (a['commit'],a['pr'],a['sessionUrl'])==('','',False), d; assert d['showThinkingSummaries'] is True and d['verbose'] is True, d; assert d['env']['DISABLE_AUTOUPDATER'] == '1', d; $1" 2>&1; }
 
 echo "a login with no settings file"
 out="$(run "$S" --dry-run)"; [[ "$out" == "  +  $S fabric user settings (would write)" && ! -e "$S" ]] && ok "dry run names it and writes nothing" || bad "dry run" "$out"
@@ -22,9 +22,9 @@ out="$(run "$S")"; [[ "$out" == "  +  $S fabric user settings" ]] && check "" >/
 out="$(run "$S")"; [[ "$out" == "  =  $S fabric user settings" ]] && ok "a second run changes nothing" || bad "idempotence" "$out"
 
 echo "a login with settings of its own"
-printf '{"theme": "dark", "includeCoAuthoredBy": false, "attribution": {"commit": "Co-Authored-By: x", "extra": 1}, "permissions": {"deny": ["WebSearch"]}}\n' > "$S"
+printf '{"theme": "dark", "includeCoAuthoredBy": false, "attribution": {"commit": "Co-Authored-By: x", "extra": 1}, "permissions": {"deny": ["WebSearch"]}, "env": {"KEEP_ME": "yes"}}\n' > "$S"
 out="$(run "$S")"
-[[ "$out" == "  +  "* ]] && msg="$(check "assert d['theme']=='dark' and d['permissions']['deny']==['WebSearch'] and d['attribution']['extra']==1 and 'includeCoAuthoredBy' not in d, d")" && ok "the keys set, the deprecated switch removed, everything else kept" || bad "merge" "$out ${msg:-} $(cat "$S")"
+[[ "$out" == "  +  "* ]] && msg="$(check "assert d['theme']=='dark' and d['permissions']['deny']==['WebSearch'] and d['attribution']['extra']==1 and 'includeCoAuthoredBy' not in d and d['env']['KEEP_ME']=='yes', d")" && ok "the keys set, the deprecated switch removed, everything else kept" || bad "merge" "$out ${msg:-} $(cat "$S")"
 printf '{"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "includeCoAuthoredBy": true, "showThinkingSummaries": true, "verbose": true}\n' > "$S"
 out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "assert 'includeCoAuthoredBy' not in d" >/dev/null && ok "a deprecated switch beside the keys is still removed" || bad "deprecated switch" "$out"
 # The display keys are what an account bootstrapped before 2026-09-20

@@ -17,7 +17,12 @@ names the Claude Code version the fleet runs. Moving the fleet is a
 one-line PR, reviewed and revertable like any other change; `--version`
 overrides it for one account, for a trial. Provisioning installs the same
 pin, so a new account starts where the others are. Background auto-update
-is off on every account, so nothing else moves the version.
+is off on every account through `env.DISABLE_AUTOUPDATER` in each login's
+user settings (`runtime/claude-code/user-settings.py`, written by
+bootstrap), so nothing else moves the version. `autoUpdates: false` in
+`~/.claude.json` is not enough on a native install: the harness ignores it
+when `autoUpdatesProtectedForNative` is true, and the coordinator's account
+updated itself to 2.1.282 that way on 2026-09-24.
 
 ## What happens on each account
 

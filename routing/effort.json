@@ -19,7 +19,7 @@
     "code-review": "xhigh"
   },
   "session": "code-high",
-  "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Naming the class keeps the session's thinking with the session's model: both are code-high on the anthropic path, and one edit moves both.",
+  "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Naming the class keeps the session's thinking with the session's model: both are code-high on the anthropic path, and one edit moves both. A layer that gives one agent's session another model does not move its level: architect-cto-01's session is Fable 5.1 (routing/profiles.json) and still thinks at code-high's level, not code-plan's.",
   "providers": {
     "anthropic": {
       "classes": {

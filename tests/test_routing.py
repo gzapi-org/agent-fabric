@@ -62,12 +62,12 @@ def test_current_broker_policy() -> None:
 
 def test_native_path_pins_the_top_of_each_class() -> None:
     """On plain claude the column pins the top model of each class's tier
-    (the owner, 2026-09-15); a coding class's pin is the export of the
+    (the owner, 2026-09-15; Opus 5.5 on code-high from 2026-09-24); a coding class's pin is the export of the
     alias it rides, the review class's reaches its agent file. No shim.
     A class the column leaves null is the harness's own tier."""
     got = {k: routing.resolve(k, "anthropic") for k in routing.load_capabilities()["classes"]}
     assert {k: v["composite"] for k, v in got.items()} == {
-        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
+        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"}, got
     assert {k: v["via"] for k, v in got.items()} == {
         "code-low": "export", "code-medium": "export", "code-high": "export", "code-plan": "export", "code-review": "file"}, got
@@ -79,17 +79,21 @@ def test_native_path_pins_the_top_of_each_class() -> None:
     ex = routing.exports("anthropic")
     assert {k: v["model"] for k, v in ex.items()} == {
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001", "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5", "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5-1"}, ex
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5", "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5-1"}, ex
     assert "code-review" not in {v["class"] for v in ex.values()}, "the review class is never an export"
     s = routing.resolve_session(provider="anthropic")
     assert (s["model"], s["composite"], s["openrouter_id"], s["source"], s["skipped"]) == \
-        ("claude-opus-5", "claude-opus-5", "anthropic/claude-opus-5", "defaults", None), s
+        ("claude-opus-5-5", "claude-opus-5-5", "anthropic/claude-opus-5-5", "defaults", None), s
     # A broker-only local override (GLM) says nothing about plain claude: the
     # nearest layer naming an Anthropic model wins, and the skip is reported.
     s = routing.resolve_session(local={"session": "z-ai/glm-5.3"}, provider="anthropic")
-    assert (s["model"], s["source"], s["skipped"]) == ("claude-opus-5", "defaults", "z-ai/glm-5.3"), s
+    assert (s["model"], s["source"], s["skipped"]) == ("claude-opus-5-5", "defaults", "z-ai/glm-5.3"), s
     s = routing.resolve_session(local={"session": "anthropic/claude-opus-5[1m]"}, provider="anthropic")
     assert (s["model"], s["source"]) == ("claude-opus-5[1m]", "local"), s
+    # The architect's main conversation is on the top tier (the owner, 2026-09-24); nobody else's moves.
+    s = routing.resolve_session("architect-cto", "architect-cto-01", provider="anthropic")
+    assert (s["model"], s["source"]) == ("claude-fable-5-1", "agent"), s
+    assert routing.resolve_session("architect-cto", "architect-cto-02", provider="anthropic")["model"] == "claude-opus-5-5"
 
 
 def test_a_null_in_the_harness_column_is_the_harness_tier(tmp: str) -> None:
@@ -132,7 +136,7 @@ def test_a_layer_is_per_provider() -> None:
     s = routing.resolve_session(local={"session": "code-high"}, provider="openrouter")
     assert (s["composite"], s["capability"]) == ("deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim", "code-high"), s
     s = routing.resolve_session(local={"session": "code-high"}, provider="anthropic")
-    assert (s["model"], s["capability"]) == ("claude-opus-5", "code-high"), "a flat class-named session serves both providers"
+    assert (s["model"], s["capability"]) == ("claude-opus-5-5", "code-high"), "a flat class-named session serves both providers"
     # A flat layer over a per-provider one: the nearest layer wins per key.
     both = {"providers": {"anthropic": {"session": "claude-opus-5[1m]"}}, "session": "anthropic/claude-sonnet-5"}
     assert routing.resolve_session(local=both, provider="anthropic")["model"] == "claude-opus-5[1m]", \

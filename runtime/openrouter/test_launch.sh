@@ -3,7 +3,8 @@
 #
 # Behavioural tests for runtime/openrouter/launch. The launcher execs a
 # session, so the tests run it in SANDBOXES: a fake agent-fabric root (the
-# real routing files, the real resolver), a fake state directory holding
+# real routing files minus the committed roles/agents layers, the real
+# resolver), a fake state directory holding
 # this agent's binding, a fake `ori` on PATH, and HOME pointed at a scratch
 # dir. Every refusal, the merge order, the shim derivation and the
 # review-grade gate are exercised without spawning a real claude.
@@ -42,7 +43,8 @@ chmod +x "$SANDBOX/bin/ori"
 }
 write_fake_ori
 
-# A fixture agent-fabric root: the real routing files and resolver, a
+# A fixture agent-fabric root: the real routing files (minus the committed
+# roles/agents layers) and resolver, a
 # state dir with this agent's binding (role backend-dev), and a launch
 # working copy with a real git toplevel.
 FABRIC="$SANDBOX/fabric"; STATE="$SANDBOX/state"
@@ -50,6 +52,14 @@ mkfabric() {
     rm -rf "$FABRIC" "$STATE" "$SANDBOX/repo"
     mkdir -p "$FABRIC/runtime/openrouter" "$FABRIC/runtime/claude-code" "$FABRIC/tools/fabric" "$FABRIC/projects"
     cp -r "$REAL_ROOT/routing" "$FABRIC/routing"
+    # The committed roles/agents layers are real routing, and one of them may
+    # name the login running this suite; every layer a case tests it builds
+    # with profile(), so the fixture starts from the defaults alone.
+    python3 - "$FABRIC/routing/profiles.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["roles"], d["agents"] = {}, {}
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
     cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
     cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
     mkdir -p "$FABRIC/runtime/mcp"; cp -r "$REAL_ROOT/runtime/mcp/websearch-locale" "$FABRIC/runtime/mcp/"   # the installer's MCP step reads its helper from the fabric
@@ -279,9 +289,9 @@ mkfabric
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "--print exits 0" || bad "rc=$rc" "$out"
 grep -q "provider anthropic)" <<<"$out" && ok "the header names the provider" || bad "provider not in header" "$out"
-grep -q "session : claude-opus-5$" <<<"$out" && ok "the session is the anthropic default, Opus 5 (its own, not the broker's spelled natively)" || bad "session not the anthropic default" "$out"
+grep -q "session : claude-opus-5-5$" <<<"$out" && ok "the session is the anthropic default, Opus 5.5 (its own, not the broker's spelled natively)" || bad "session not the anthropic default" "$out"
 grep -q "code-review : claude-opus-5\[1m\]  (pinned in the agent file; the dispatch guard applies it; from capabilities.providers.anthropic)" <<<"$out" && ok "the review class is pinned to claude-opus-5[1m] (the column's native id), through the agent file" || bad "review not pinned" "$out"
-grep -q "code-high   : claude-opus-5  (exported for its tier; from capabilities.providers.anthropic)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "a coding class pinned by the column is exported for the tier it rides (the top of each class)" || bad "column pin not exported" "$out"
+grep -q "code-high   : claude-opus-5-5  (exported for its tier; from capabilities.providers.anthropic)" <<<"$out" && grep -q "export ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5$" <<<"$out" && ok "a coding class pinned by the column is exported for the tier it rides (the top of each class)" || bad "column pin not exported" "$out"
 grep -q "export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "the fable export is code-plan's pin; the reviewer never rides it" || bad "fable export wrong" "$out"
 
 echo "launch: the session's effort — resolved, stamped, overridable, and never from the environment"
@@ -352,7 +362,7 @@ out="$(ANTHROPIC_DEFAULT_OPUS_MODEL=claude-parent-leftover run --provider anthro
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=$" <<<"$out" && ok "…and an alias export inherited from a parent session is cleared, not passed on" || bad "the harness tier inherited the parent's pin" "$(grep OPUS <<<"$out")"
 mkfabric; out="$(run --provider anthropic --print 2>&1)"; rc=$?
 out="$(run --provider=anthropic --version 2>&1)"
-grep -q "CLAUDE-EXECCED:--model claude-opus-5 --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
+grep -q "CLAUDE-EXECCED:--model claude-opus-5-5 --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
 ! grep -q -- "--disallowedTools" <<<"$out" && ok "no tool removed from a login that is not language-culture" || bad "WebSearch removed from the wrong login" "$out"
 # A language-culture login whose locale has a search: the harness's WebSearch is removed at exec.
@@ -390,7 +400,7 @@ out2="$(KEEP_TMPDIR=1 TMPDIR="$SANDBOX/own-tmp" run --provider=anthropic --versi
 grep -q "CLAUDE-ENV:TMPDIR=$SANDBOX/own-tmp" <<<"$out2" && ok "a TMPDIR the account set wins" || bad "the launcher overrode a set TMPDIR" "$out2"
 ! grep -q "ORI-EXECCED" <<<"$out" && ok "…not ori" || bad "went through ori" "$out"
 grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$" <<<"$out" && ok "FABLE exported as code-plan's pin, the native id" || bad "fable pin not in the child's env" "$out"
-grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
+grep -q "CLAUDE-ENV:ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5$" <<<"$out" && ok "OPUS exported as code-high's pin" || bad "opus not in the child's env" "$out"
 grep -q "^model: claude-opus-5\[1m\]$" "$HOME/.claude/agents/code-review.md" && ok "the exec installed the reviewer file for plain claude: claude-opus-5[1m]" || bad "reviewer file not installed for anthropic" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
 out="$(run --version 2>&1)"
 grep -q "^model: deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim$" "$HOME/.claude/agents/code-review.md" && ok "…and a broker launch rewrites it with the composite: one file, one launch at a time" || bad "reviewer file not installed for the broker" "$(cat "$HOME/.claude/agents/code-review.md" 2>&1 | head -5)"
@@ -471,7 +481,7 @@ printf '%s\n' '{"session":"code-high"}' > "$STATE/agents/$LOGIN/model-profile.lo
 out="$(run --print 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q "session : deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim  (the code-high class)" <<<"$out" && ok "a flat class-named session is that class's composite on the broker" || bad "class session on the broker" "$out"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && grep -q "session : claude-opus-5  (the code-high class)" <<<"$out" && ok "…and that class's native pin on plain claude" || bad "class session on vanilla" "$out"
+[[ $rc -eq 0 ]] && grep -q "session : claude-opus-5-5  (the code-high class)" <<<"$out" && ok "…and that class's native pin on plain claude" || bad "class session on vanilla" "$out"
 printf '%s\n' '{"providers":{"anthropic":{"capabilities":{"code-review":"claude-haiku-4-5"}}}}' > "$STATE/agents/$LOGIN/model-profile.local.json"
 out="$(run --provider anthropic --print 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && grep -q "not in routing/policies/review-grade.json" <<<"$out" && ok "a local review pin outside the grade is refused on vanilla" || bad "ungraded local review pin admitted" "$out"

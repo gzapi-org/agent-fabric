@@ -4,13 +4,15 @@
 The invariant under test: the command writes only the login's own layer
 ($STATE_DIR/model-profile.local.json) and the account's agent files, in
 each provider's vocabulary, gated like the launcher; the repository is
-never touched. Runs against the real routing files with a scratch state
-directory and a scratch CLAUDE_CONFIG_DIR.
+never touched. Runs against the real routing files, minus the committed
+roles/agents layers, with a scratch state directory and a scratch
+CLAUDE_CONFIG_DIR.
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,7 +27,30 @@ class Fixture:
         self.state = os.path.join(tmp, "state")
         self.claude = os.path.join(tmp, "claude")
         os.makedirs(self.claude)
-        self.env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": self.state,
+        # The real tree, except that its committed roles/agents layers are
+        # emptied: one of them may name the login running this suite, and
+        # the cases assert what the defaults and the local layer resolve to.
+        # runtime/claude-code is copied, not linked: the installer finds its
+        # root by readlink -f on itself, so through a link it would resolve
+        # from the real routing. .git is left out, so git at the fixture root
+        # finds no repository; the linked subtrees still resolve into the
+        # clone, so no case may run git inside them.
+        root = os.path.join(tmp, "fabric")
+        os.makedirs(os.path.join(root, "runtime"))
+        for name in os.listdir(ROOT):
+            if name not in ("routing", "runtime", ".git"):
+                os.symlink(os.path.join(ROOT, name), os.path.join(root, name))
+        for name in os.listdir(os.path.join(ROOT, "runtime")):
+            if name != "claude-code":
+                os.symlink(os.path.join(ROOT, "runtime", name), os.path.join(root, "runtime", name))
+        shutil.copytree(os.path.join(ROOT, "runtime", "claude-code"), os.path.join(root, "runtime", "claude-code"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(os.path.join(ROOT, "routing"), os.path.join(root, "routing"))
+        profiles = os.path.join(root, "routing", "profiles.json")
+        doc = json.load(open(profiles, encoding="utf-8"))
+        doc["roles"], doc["agents"] = {}, {}
+        json.dump(doc, open(profiles, "w", encoding="utf-8"), indent=2)
+        self.env = {**os.environ, "AGENT_FABRIC_ROOT": root, "AGENT_FABRIC_STATE_DIR": self.state,
                     "CLAUDE_CONFIG_DIR": self.claude}
         self.env.pop("AGENT_FABRIC_LAUNCH_PROVIDER", None)  # an unlaunched session, whatever the runner is
         self.login = subprocess.run([sys.executable, os.path.join(ROOT, "runtime", "identity.py")],
@@ -86,7 +111,7 @@ def test_unset_removes_and_prunes(f: Fixture) -> None:
     p = f.run("unset", "--provider", "anthropic", "code-high")
     assert p.returncode == 0, p.stderr
     assert f.read() == {}, f.read()
-    assert "claude-opus-5 (from capabilities.providers.anthropic)" in p.stdout, p.stdout
+    assert "claude-opus-5-5 (from capabilities.providers.anthropic)" in p.stdout, p.stdout
 
 
 def test_vocabulary_is_the_class_and_the_providers_model(f: Fixture) -> None:
@@ -172,8 +197,8 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     # model happens to serve. code-low is absent by design: haiku
     # expresses no effort, and a seeded level there would be a decision
     # the model cannot carry out.
-    assert got == {"session": "claude-opus-5", "capabilities": {
-        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
+    assert got == {"session": "claude-opus-5-5", "capabilities": {
+        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},
         "effort": {"code-medium": "medium", "code-high": "high",
                    "code-plan": "xhigh", "code-review": "xhigh"}}, got

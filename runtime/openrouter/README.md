@@ -9,31 +9,12 @@ at launch applies to everything under the session, subagents included.
 | provider | Anthropic, by construction | Anthropic, plain `claude` | OpenRouter (`ori claude`) |
 | who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding | same |
 | session model | harness default | `providers.anthropic.session` from the profile layers — a native id, or a class (that class's model here); a flat `anthropic/<id>` session serves too, `anthropic/` dropped; another vendor's id is refused | `providers.openrouter.session` / flat `session` — an OpenRouter id, or a class (+ family shim) |
-| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`), whatever the harness binds them to this week | the `anthropic` column of `routing/capabilities.json`, overridden per class by the layers: the top model of each class's tier (Haiku 4.5, Sonnet 5, Opus 5, Fable 5.1), each exported as `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for the tier the class rides (`runtime/claude-code/aliases.json`, the adapter's); a null in the column leaves that tier to the harness | the `openrouter` column, overridden per class by the layers → model → `routing/shims.json` → the same exports |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`), whatever the harness binds them to this week | the `anthropic` column of `routing/capabilities.json`, overridden per class by the layers: the top model of each class's tier (Haiku 4.5, Sonnet 5, Opus 5.5, Fable 5.1), each exported as `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for the tier the class rides (`runtime/claude-code/aliases.json`, the adapter's); a null in the column leaves that tier to the harness | the `openrouter` column, overridden per class by the layers → model → `routing/shims.json` → the same exports |
 | review class (`code-review`) | the `fable` alias, the harness's | pinned: `claude-opus-5[1m]` (the column, or `providers.anthropic.capabilities.code-review`), written into `~/.claude/agents/code-review.md` at launch; the dispatch checks `model: fable` and then hands the model to the file (architect-cto, 2026-09-15); never the `fable` export, which is `code-plan`'s; gated by review-grade | the same route with the composite: `z-ai/glm-5.3@preset/…` in the file, gated by review-grade |
 | per-role / per-agent choice | none | `routing/profiles.json` layers + the agent's `model-profile.local.json`, the `providers.anthropic` part: the session and the five classes, as native ids — `bin/fabric-model set --provider anthropic …` | the same layers, the `providers.openrouter` part: the session and the five classes, as OpenRouter ids — `bin/fabric-model set --provider openrouter …` |
 | review-grade floor | none — the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch | same |
 | refusals | none | no bound role, model pins in any settings scope, an ungraded review pin, a non-Anthropic session | the same, plus `ori` not authenticated from the environment |
 | how to inspect | `bin/fabric-status` says "not launched by the fabric" | `bin/fabric-status` says "launched by the fabric" with the pins; `AGENT_FABRIC_LAUNCH_PROVIDER=anthropic` | same, plus `ori auth --json` |
-
-**Every layer is per provider.** The two paths speak different
-vocabularies — an OpenRouter id on the broker; a tier alias or a native
-`claude-…` id on plain claude — so a layer names each provider's choices
-under `providers.<provider>` and a choice made for one never reaches the
-other (a GLM session on the broker says nothing about plain claude). The
-repository holds the general default per provider (`routing/profiles.json`
-`defaults`, over the column in `routing/capabilities.json`); the agent's
-own layer is `$STATE_DIR/model-profile.local.json`, which `bin/fabric-model`
-lists, sets, unsets and seeds — `list` shows every choice with the layer it
-came from, `seed` copies the merged defaults in as explicit pins:
-
-```sh
-bin/fabric-model list --provider anthropic
-bin/fabric-model set --provider anthropic session opus
-bin/fabric-model set --provider anthropic opus claude-opus-5[1m]     # the alias, exported
-bin/fabric-model set --provider anthropic review claude-opus-5       # the reviewer's file, at once
-bin/fabric-model set --provider openrouter code-medium z-ai/glm-5.3
-```
 
 **The class is the vocabulary; the alias is the adapter's.** Five
 capability classes — `code-low`, `code-medium`, `code-high`, `code-plan`,

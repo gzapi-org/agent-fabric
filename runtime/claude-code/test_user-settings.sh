@@ -4,7 +4,8 @@
 # The fabric's keys in a login's user settings: user-settings.py writes
 # attribution {commit "", pr "", sessionUrl false}, showThinkingSummaries
 # true and verbose true, keeps every other key, replaces the deprecated
-# includeCoAuthoredBy, is idempotent, and bootstrap.sh runs it.
+# includeCoAuthoredBy, is idempotent, refuses a flag instead of writing it
+# as a path, and bootstrap.sh runs it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASS=0; FAIL=0
@@ -41,6 +42,24 @@ echo "bootstrap runs it"
 grep -q 'user-settings.py" "\$CLAUDE_HOME/settings.json"' "$HERE/bootstrap.sh" && ok "bootstrap.sh calls it on the login's user settings" || bad "bootstrap wiring"
 grep -q 'attribution-off' "$HERE/bootstrap.sh" && bad "bootstrap.sh still names the retired writer" || ok "the retired name is gone from bootstrap.sh"
 grep -q 'failed=\$((failed+1))' "$HERE/bootstrap.sh" && ok "a refused write is counted, not read as already current" || bad "bootstrap accounting"
+
+echo "a flag is never a path"
+cd "$SANDBOX" || exit 1
+for flag in --help -h; do
+    out="$(python3 "$HERE/user-settings.py" "$flag" 2>/dev/null)"; rc=$?
+    [[ $rc -eq 0 && "$out" == *"user-settings.py <settings.json> [--dry-run]"* && -z "$(ls -A "$SANDBOX" | grep -v '^\.claude$')" ]] \
+        && ok "$flag prints the usage on stdout and writes nothing" || bad "$flag" "rc=$rc $out $(ls -A "$SANDBOX")"
+done
+for flag in --verbose -x -; do
+    err="$(python3 "$HERE/user-settings.py" "$flag" 2>&1 1>/dev/null)"; rc=$?
+    [[ $rc -eq 2 && ! -e "$SANDBOX/$flag" && "$err" == *"$flag: not an option and not a path"* ]] \
+        && ok "$flag is refused by name on stderr, not written as a file" || bad "unknown flag $flag" "rc=$rc $err"
+done
+out="$(run --dry-run --bogus)"; rc=$?
+[[ $rc -eq 2 && ! -e "$SANDBOX/--bogus" ]] && ok "…beside --dry-run too" || bad "unknown flag with --dry-run" "rc=$rc $out"
+out="$(python3 -OO "$HERE/user-settings.py" --help 2>&1)"; rc=$?
+[[ $rc -eq 0 && "$out" == *"<settings.json>"* ]] && ok "the usage survives python3 -OO" || bad "-OO" "rc=$rc $out"
+cd "$HERE" || exit 1
 
 echo; echo "user-settings: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

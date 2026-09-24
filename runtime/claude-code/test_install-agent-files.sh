@@ -19,6 +19,9 @@ export HOME="$SANDBOX/home"; mkdir -p "$HOME"
 FABRIC="$SANDBOX/fabric"; STATE="$SANDBOX/state"
 mkdir -p "$FABRIC/runtime/claude-code" "$FABRIC/tools/fabric" "$FABRIC/runtime" "$STATE/agents/$LOGIN"
 cp -r "$REAL_ROOT/routing" "$FABRIC/routing"
+# The committed roles/agents layers may name the login running this suite;
+# the cases assert what the defaults and the layers they write resolve to.
+python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["roles"], d["agents"] = {}, {}; json.dump(d, open(sys.argv[1], "w"), indent=2)' "$FABRIC/routing/profiles.json"
 cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
 cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
 cp "$REAL_ROOT/runtime/identity.py" "$FABRIC/runtime/"

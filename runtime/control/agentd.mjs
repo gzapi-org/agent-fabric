@@ -45,6 +45,8 @@ import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { OPS, collect, usage, accounts, accountSlugs, accountsDir } from './ops.mjs';
+import { ACTION_OPS, ACTION_TTL_MAX_S, publicKeyFrom, verifyRequest } from './sign.mjs';
+import { upgrade } from './upgrade.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SEEN_MAX = 256;
@@ -76,6 +78,19 @@ export function controlConfig(env = process.env, file = path.join(HERE, 'config.
   };
 }
 
+// Each operator's public key (`operator_key`), read like the addresses:
+// again for every record, so a rotation committed to the registry counts
+// at the next pull. A host with no key, or a malformed one, has none — its
+// operator can still ask what an account reports, and can order nothing.
+export function operatorKeys(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
+  const out = new Map();
+  try {
+    const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    for (const [h, v] of Object.entries(d.hosts ?? {})) { const k = publicKeyFrom(v.operator_key); if (k) out.set(`${h}/${v.operator ?? 'user'}`, k); }
+  } catch { /* no registry: no keys */ }
+  return out;
+}
+
 // The operators: <host>/<operator> for every host in the registry.
 export function operatorAddresses(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   try {
@@ -97,7 +112,7 @@ export function newId() {
 
 // Is this record a request this agent answers? The reason when not, for
 // the log; never an error, never a reply.
-export function accept(rec, { me, operators, ttl_s, seen, now = Date.now() }) {
+export function accept(rec, { me, operators, keys = new Map(), ttl_s, seen, now = Date.now() }) {
   let r;
   try { r = JSON.parse(rec.content); } catch { return { ok: false, why: 'not json' }; }
   if (!r || r.kind !== 'request') return { ok: false, why: 'not a request' };
@@ -108,8 +123,12 @@ export function accept(rec, { me, operators, ttl_s, seen, now = Date.now() }) {
   if (!to.includes('*') && !to.includes(me.address)) return { ok: false, why: 'not for me' };
   if (!OPS.includes(r.op)) return { ok: false, why: `op ${String(r.op).slice(0, 20)}` };
   if (typeof r.from !== 'string' || !operators.has(r.from)) return { ok: false, why: `from ${String(r.from).slice(0, 40)} is not an operator` };
+  const action = ACTION_OPS.includes(r.op);
+  // An action is ordered, not asked: only a signature by the operator's
+  // own key (runtime/control/sign.mjs) proves the operator sent it.
+  if (action && !verifyRequest(r, keys.get(r.from))) return { ok: false, why: `${r.op}: not signed by ${String(r.from).slice(0, 40)}'s key` };
   const ts = Date.parse(r.ts);
-  const ttl = Number(r.ttl_s) > 0 ? Math.min(Number(r.ttl_s), 3600) : ttl_s;
+  const ttl = Number(r.ttl_s) > 0 ? Math.min(Number(r.ttl_s), action ? ACTION_TTL_MAX_S : 3600) : ttl_s;
   if (!Number.isFinite(ts) || ts + ttl * 1000 < now) return { ok: false, why: 'expired' };
   return { ok: true, request: r };
 }
@@ -137,7 +156,8 @@ export function remember(seen, id) {
 // verifies the sha256 the first record names.
 export async function answer(request, ctx) {
   const days = Number(request.days);
-  const data = request.op === 'ping' ? {} : await collect(request.op, Number.isFinite(days) && days > 0 ? { ...ctx, days: Math.min(days, 90) } : ctx);
+  const data = request.op === 'ping' ? {} : request.op === 'upgrade' ? { upgrade: await upgrade(request, { me: ctx.me.address, ...ctx.upgradeOpts }) }
+    : await collect(request.op, Number.isFinite(days) && days > 0 ? { ...ctx, days: Math.min(days, 90) } : ctx);
   const head = () => ({ v: 1, kind: 'reply', id: newId(), in_reply_to: request.id, from: ctx.me.address, op: request.op, ts: new Date().toISOString(), ok: true });
   const meta = { agentd: { pid: process.pid, started: ctx.started, uptime_s: Math.round((Date.now() - Date.parse(ctx.started)) / 1000) } };
   if (request.op !== 'memory' || !data.memory?.bundles) return { ...head(), data: { ...data, ...meta } };
@@ -207,7 +227,7 @@ export async function main(argv = process.argv.slice(2)) {
       const rows = page.messages ?? [];
       for (const rec of rows) {
         last = rec.id;
-        const a = accept(rec, { me, operators: operatorAddresses(), ttl_s: cfg.ttl_s, seen });
+        const a = accept(rec, { me, operators: operatorAddresses(), keys: operatorKeys(), ttl_s: cfg.ttl_s, seen });
         if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
         const reply = await answer(a.request, ctx);

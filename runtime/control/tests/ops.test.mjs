@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
-import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES, accounts, readAccount, parseUsageReport, accountsDir, accountSlugs } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -432,4 +432,80 @@ test('recall: the corpus reads in the account\'s session records — index, slic
   assert.equal(recallKind('Read', { file_path: '.agent-fabric/memory/db-admin/INDEX.md' }).kind, 'index', 'a repository-relative index');
   assert.equal(recallKind('Bash', { command: 'sed -n 1,20p memory/domains/db-admin/domain/x.md' }).kind, 'search', 'a relative path in a command');
   assert.equal(recallKind('Read', { file_path: '/x/some-memory/domains/a/b.md' }), null, 'a directory merely ending in memory is not the corpus');
+});
+
+// THE CLAUDE ACCOUNTS: the harness's own headless /usage per observed
+// config directory. The events below are the shape 2.1.281 printed live
+// (docs/live-checks/2026-09-24-claude-accounts.md), trimmed.
+const USAGE_EVENTS = JSON.stringify([
+  { type: 'system', subtype: 'init', model: 'claude-opus-5-5' },
+  { type: 'assistant', message: { content: [{ type: 'text', text: 'Current session: 11% used' }] },
+    usage_report: { rate_limits: { limits: [
+      { kind: 'session', group: 'session', percent: 11, resets_at: '2026-09-24T18:49:59Z', scope: null },
+      { kind: 'weekly_all', group: 'weekly', percent: 83, resets_at: '2026-09-28T15:59:59Z', scope: null },
+      { kind: 'weekly_scoped', group: 'weekly', percent: 86, resets_at: '2026-09-28T15:59:59Z', scope: { model: { display_name: 'Opus' } } }] } } },
+  { type: 'result', subtype: 'success', is_error: false, num_turns: 0, total_cost_usd: 0, result: 'Current session: 11% used' }]);
+function accountsHome(slugs = { 'claude-example-org': true }) {
+  const h = scratch('ctl-accounts-');
+  const dir = accountsDir(h, {});
+  for (const [slug, signedIn] of Object.entries(slugs)) {
+    fs.mkdirSync(path.join(dir, slug), { recursive: true });
+    fs.writeFileSync(path.join(dir, slug, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: `${slug}@example.org`, organizationUuid: 'org-1234' } }));
+    if (signedIn) fs.writeFileSync(path.join(dir, slug, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: ACCESS, refreshToken: 'refresh-XYZ' } }));
+  }
+  return { h, dir };
+}
+
+test('parseUsageReport: the meters in the server\'s order, fixed keys only; an error result is a failure, not an empty ok', () => {
+  const r = parseUsageReport(USAGE_EVENTS);
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.limits.map(l => [l.kind, l.percent, l.model]), [['session', 11, null], ['weekly_all', 83, null], ['weekly_scoped', 86, 'Opus']]);
+  const failed = JSON.stringify([{ type: 'result', is_error: true, result: 'Failed to refresh OAuth token: another Claude Code process is refreshing it' }]);
+  assert.deepEqual(parseUsageReport(failed), { status: 'failed', error: 'Failed to refresh OAuth token: another Claude Code process is refreshing it' });
+  assert.equal(parseUsageReport('not json').status, 'unreadable');
+  assert.equal(parseUsageReport(JSON.stringify([{ type: 'result', is_error: false }])).status, 'no-report', 'a success without the report is said, not read as zero usage');
+});
+
+test('readAccount: the child runs in the account\'s own config directory, with no inherited token that would outrank its sign-in', async () => {
+  const { h, dir } = accountsHome();
+  const seen = [];
+  const saved = process.env.CLAUDE_CODE_OAUTH_TOKEN; process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-inherited-template-token';
+  try {
+    const r = await readAccount(path.join(dir, 'claude-example-org'), { home: h, bin: '/fake/claude', now: () => new Date('2026-09-24T20:00:00Z'),
+      exec: async (bin, args, opts) => { seen.push({ bin, args, opts, cwdExisted: fs.existsSync(opts.cwd) }); return { stdout: USAGE_EVENTS }; } });
+    assert.equal(r.status, 'ok');
+    assert.equal(r.email, 'claude-example-org@example.org');
+    assert.equal(r.organization_uuid, 'org-1234');
+    assert.equal(r.read_at, '2026-09-24T20:00:00.000Z');
+    assert.deepEqual(seen[0].args, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence']);
+    assert.equal(seen[0].opts.env.CLAUDE_CONFIG_DIR, path.join(dir, 'claude-example-org'));
+    for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']) assert.ok(!(k in seen[0].opts.env), `${k} reached the child`);
+    assert.ok(seen[0].cwdExisted, 'the child had a working directory');
+    assert.ok(!fs.existsSync(seen[0].opts.cwd), 'and it is gone afterwards');
+    assertNoSecret(r);
+  } finally { if (saved === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN; else process.env.CLAUDE_CODE_OAUTH_TOKEN = saved; }
+});
+
+test('readAccount: never signed in, a timeout and a failed run each say so; none is a reading', async () => {
+  const { h, dir } = accountsHome({ 'not-yet': false, 'slow-one': true, 'broken-one': true });
+  let ran = 0;
+  const notYet = await readAccount(path.join(dir, 'not-yet'), { home: h, exec: async () => { ran++; return ''; } });
+  assert.equal(notYet.status, 'not-signed-in'); assert.equal(ran, 0, 'no harness is started for an account with no sign-in');
+  const slow = await readAccount(path.join(dir, 'slow-one'), { home: h, exec: async () => { const e = new Error('Command failed: claude -p /usage'); e.killed = true; throw e; } });
+  assert.equal(slow.status, 'timeout');
+  const broken = await readAccount(path.join(dir, 'broken-one'), { home: h, exec: async () => { throw new Error('spawn /fake/claude ENOENT\nsecond line'); } });
+  assert.deepEqual([broken.status, broken.error], ['failed', 'spawn /fake/claude ENOENT']);
+});
+
+test('accounts: every observed account, one at a time; slugs that are not an account name are ignored; none is said', async () => {
+  const { h, dir } = accountsHome({ 'claude-a': true, 'claude-b': true });
+  fs.mkdirSync(path.join(dir, 'Not A Slug'));
+  fs.writeFileSync(path.join(dir, 'stray-file'), '');
+  assert.deepEqual(accountSlugs(dir), ['claude-a', 'claude-b']);
+  let live = 0, peak = 0;
+  const r = await accounts(h, { exec: async () => { live++; peak = Math.max(peak, live); await new Promise(res => setTimeout(res, 5)); live--; return USAGE_EVENTS; } });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.accounts.map(a => [a.slug, a.status]), [['claude-a', 'ok'], ['claude-b', 'ok']]);
+  assert.equal(peak, 1, 'two harness runs never overlap');
+  assert.equal((await accounts(scratch('ctl-noaccounts-'))).status, 'none');
 });

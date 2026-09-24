@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'status'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -54,6 +54,81 @@ export async function usage(home = os.homedir(), fetchFn = globalThis.fetch, url
   try { u = await r.json(); } catch { return { status: 'unreadable' }; }
   const win = w => (w && typeof w === 'object') ? { utilization: w.utilization ?? null, resets_at: w.resets_at ?? null } : null;
   return { status: 'ok', five_hour: win(u.five_hour), seven_day: win(u.seven_day), subscription: creds?.claudeAiOauth?.subscriptionType ?? null };
+}
+
+// THE CLAUDE ACCOUNTS this login observes: one Claude Code config
+// directory per Claude account under accountsDir(), each signed in once
+// with /login and held by this observer alone — a refresh token has one
+// holder, or the first refresh signs the others out. The fleet's working
+// sessions run on each account's one-year setup-token, which is
+// `user:inference` only and so cannot read these windows
+// (docs/claude-accounts.md).
+//
+// The read is the harness's own `/usage`, run headless: no model call
+// (0 turns, $0), and it renews an expired 8-hour sign-in the official way
+// — measured 2026-09-24 on 2.1.281 (docs/live-checks/2026-09-24-claude-
+// accounts.md). Reimplementing the OAuth refresh here was the rejected
+// alternative: it would present Claude Code's client id without being
+// Claude Code. `claude auth status` is not a keep-alive: it starts a
+// refresh, exits, and leaves a lock every later run trips on.
+export const ACCOUNTS_TIMEOUT_MS = 120000;
+export const ACCOUNT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export function accountsDir(home = os.homedir(), env = process.env) {
+  return path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'agent-fabric', 'accounts');
+}
+export function accountSlugs(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory() && ACCOUNT_SLUG.test(d.name)).map(d => d.name).sort(); }
+  catch { return []; }
+}
+export function claudeBin(home = os.homedir()) {
+  const own = path.join(home, '.local', 'bin', 'claude');
+  return fs.existsSync(own) ? own : 'claude';
+}
+// The /usage events, reduced to fixed keys. `limits` are the server's
+// meters in its order: session, weekly_all, weekly_scoped (per model).
+export function parseUsageReport(stdout) {
+  let events;
+  try { events = JSON.parse(stdout); } catch { return { status: 'unreadable' }; }
+  if (!Array.isArray(events)) return { status: 'unreadable' };
+  const result = events.find(e => e?.type === 'result');
+  const report = events.find(e => e?.usage_report)?.usage_report;
+  if (result?.is_error) return { status: 'failed', error: String(result.result ?? '').slice(0, 200) };
+  const limits = report?.rate_limits?.limits;
+  if (!Array.isArray(limits)) return { status: 'no-report' };
+  return {
+    status: 'ok',
+    limits: limits.map(l => ({ kind: l?.kind ?? null, group: l?.group ?? null, percent: typeof l?.percent === 'number' ? l.percent : null,
+                               resets_at: l?.resets_at ?? null, model: l?.scope?.model?.display_name ?? null })),
+  };
+}
+// One account's reading. The child gets an environment built from
+// nothing: a token variable inherited from the observer's own session
+// (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, a base URL) would outrank
+// the account's sign-in and report another account's windows.
+export async function readAccount(dir, { home = os.homedir(), exec = execFileP, bin = claudeBin(home), now = () => new Date(), timeoutMs = ACCOUNTS_TIMEOUT_MS } = {}) {
+  const slug = path.basename(dir);
+  const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
+  const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
+  if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-accounts-'));
+  try {
+    const env = { HOME: home, PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir, LANG: 'C.UTF-8' };
+    const r = await exec(bin, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, env, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    return { ...out, ...parseUsageReport(typeof r === 'string' ? r : r.stdout) };
+  } catch (e) {
+    return { ...out, status: e?.killed ? 'timeout' : 'failed', error: String(e?.message ?? e).split('\n')[0].slice(0, 200) };
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+}
+// Every observed account, one at a time: two harness runs on one config
+// directory race for its refresh lock.
+export async function accounts(home = os.homedir(), { dir = accountsDir(home), ...opts } = {}) {
+  const slugs = accountSlugs(dir);
+  if (!slugs.length) return { status: 'none', dir };
+  const list = [];
+  for (const s of slugs) list.push(await readAccount(path.join(dir, s), { home, ...opts }));
+  return { status: 'ok', accounts: list };
 }
 
 // Which keys the account holds, by name and fingerprint; never a value.
@@ -647,6 +722,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));
     if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
     if (name === 'host') return guard(name, () => host(ctx.hostOpts));
+    if (name === 'accounts') return guard(name, () => ctx.accountsCached ? ctx.accountsCached() : accounts(ctx.home, ctx.accountsOpts));
     return Promise.resolve();
   }));
   return data;

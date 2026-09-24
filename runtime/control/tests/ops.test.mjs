@@ -544,3 +544,12 @@ test('the read lock: one reader per account across processes; a dead holder does
   assert.equal(accountsDir('/home/x', { AGENT_FABRIC_STATE_DIR: '/srv/state' }), '/srv/state/accounts');
   assert.equal(accountsDir('/home/x', { XDG_STATE_HOME: '/xdg' }), '/xdg/agent-fabric/accounts');
 });
+
+test('the read lock is released when the read fails before the harness starts (work/ cannot be made)', async () => {
+  const { h, dir } = accountsHome({ 'claude-a': true });
+  const acct = path.join(dir, 'claude-a');
+  fs.writeFileSync(path.join(acct, 'work'), 'not a directory');
+  const r = await readAccount(acct, { home: h, exec: async () => assert.fail('no harness without a working directory') });
+  assert.equal(r.status, 'failed');
+  assert.ok(!fs.existsSync(path.join(acct, '.fabric-read.lock')), 'the lock did not outlive the failed read');
+});

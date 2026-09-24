@@ -104,7 +104,9 @@ export function takeReadLock(dir, pid = process.pid) {
     try { fs.writeFileSync(f, `${pid}\n`, { flag: 'wx', mode: 0o600 }); return () => { try { fs.unlinkSync(f); } catch { /* gone */ } }; }
     catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      const holder = Number(String(fs.readFileSync(f, 'utf8')).trim());
+      let holder;
+      try { holder = Number(String(fs.readFileSync(f, 'utf8')).trim()); }
+      catch { continue; }   // released between our attempt and this read: try again
       let alive = false;
       try { process.kill(holder, 0); alive = true; } catch (k) { alive = k.code === 'EPERM'; }
       if (alive && holder !== pid) return null;
@@ -153,8 +155,8 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
   // with --no-session-persistence (an empty one, measured), so a fresh
   // temporary cwd per read would leave one more entry every 4 hours.
   const cwd = path.join(dir, 'work');
-  fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
   try {
+    fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });   // inside the try: a throw here must still release the lock
     const env = { HOME: home, PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir, LANG: 'C.UTF-8' };
     const r = await exec(bin, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, env, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     return { ...out, ...parseUsageReport(typeof r === 'string' ? r : r.stdout) };

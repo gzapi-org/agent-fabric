@@ -92,7 +92,7 @@ args=(); for a in "\$@"; do
   [[ "\$a" == PATH=* ]] && a="PATH=$BIN:\${a#PATH=}" && a="\${a//\/usr\/local\/bin:/}"
   [[ "\$a" == AGENT_FABRIC_PATH=* ]] && a="AGENT_FABRIC_PATH=$BIN:\${a#AGENT_FABRIC_PATH=}" && a="\${a//\/usr\/local\/bin:/}"
   args+=("\$a"); done
-echo "sudo \${args[*]}" | cut -c1-160 >> "$CALLS"
+echo "sudo \${args[*]}" | cut -c1-1000 >> "$CALLS"
 grep -qsxF "\${args[0]}" "$FAULT" && { echo "fake: \${args[0]} failed (injected)" >&2; exit 1; }
 [[ "\${args[0]}" == chown ]] && exit 0
 exec "\${args[@]}"

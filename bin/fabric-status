@@ -78,8 +78,26 @@ credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BA
 # CLAUDE_CODE_OAUTH_TOKEN is set (it outranks /login), otherwise the login's
 # own sign-in — whose ~/.claude.json keeps naming its account either way,
 # so that file alone would report the wrong account for a switched login.
+def synced_template_token():
+    """The login's own record first — the `export CLAUDE_CODE_OAUTH_TOKEN=`
+    line fabric-secrets sync writes — because the launcher removes the
+    variable from a broker session's environment, and that session must
+    still report the account the login is on (re-review of #33)."""
+    path = os.path.join(os.path.expanduser("~"), ".config", "agent-fabric", "secrets.env")
+    try:
+        for line in open(path, encoding="utf-8"):
+            if line.startswith("export CLAUDE_CODE_OAUTH_TOKEN="):
+                v = line.split("=", 1)[1].strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+                    v = v[1:-1]
+                return v or None
+    except OSError:
+        pass
+    return None
+
+
 def claude_sign_in():
-    tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    tok = synced_template_token() or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
     if tok:
         import hashlib
         return (f"setup-token {hashlib.sha256(tok.encode()).hexdigest()[:12]} (CLAUDE_CODE_OAUTH_TOKEN; "

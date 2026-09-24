@@ -61,6 +61,11 @@ test('login: refuses a bad name and a missing terminal; otherwise runs the harne
   assert.equal(seen.env.KEEP, 'yes', 'the rest of the environment is kept (a terminal needs it)');
   assert.equal(fs.statSync(target).mode & 0o777, 0o700);
   assert.match(r.err, /claude-a signed in as a@example\.org/);
+  fs.mkdirSync(path.join(accountsDir(h, env), 'claude-held'), { recursive: true });
+  fs.writeFileSync(path.join(accountsDir(h, env), 'claude-held', '.fabric-read.lock'), `${process.ppid}\n`);
+  r = await capture(() => main(['login', 'claude-held'], { home: h, env, stdinTTY: true, spawn: () => assert.fail('a /login over a running read') }));
+  assert.equal(r.code, 1); assert.match(r.err, /being read right now/);
+  assert.ok(!fs.existsSync(path.join(target, '.fabric-read.lock')), 'login released its lock');
   r = await capture(() => main(['login', 'claude-b'], { home: h, env, stdinTTY: true, spawn: () => ({ status: 0 }) }));
   assert.equal(r.code, 1, 'a harness closed without /login is not a success'); assert.match(r.err, /not signed in/);
 });

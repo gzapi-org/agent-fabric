@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { accountsDir, accountSlugs, accounts, claudeBin, ACCOUNT_SLUG } from './ops.mjs';
+import { accountsDir, accountSlugs, accounts, claudeBin, ACCOUNT_SLUG, takeReadLock } from './ops.mjs';
 
 const USAGE = `usage: fabric-accounts login <account> | list | read | templates
   <account>: lowercase letters, digits and hyphens — the account's email with @ and . as -,
@@ -97,7 +97,13 @@ export async function main(argv = process.argv.slice(2), { home = os.homedir(), 
     // The same clean environment the reads use: an inherited token would
     // make the harness think it is already signed in, as someone else.
     const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'].includes(k)));
-    const r = spawn(claudeBin(home), [], { cwd: target, env: { ...clean, CLAUDE_CONFIG_DIR: target }, stdio: 'inherit' });
+    // The same lock the reads take: a keeper read overlapping a /login would
+    // be two harnesses on one config directory.
+    const release = takeReadLock(target);
+    if (!release) { console.error(`fabric-accounts: ${arg} is being read right now (the daemon's keeper); try again in a minute`); return 1; }
+    let r;
+    try { r = spawn(claudeBin(home), [], { cwd: target, env: { ...clean, CLAUDE_CONFIG_DIR: target }, stdio: 'inherit' }); }
+    finally { release(); }
     const d = describe(target);
     console.error(d.signed_in ? `fabric-accounts: ${arg} signed in as ${d.email ?? '(email not yet recorded)'}${d.refresh_token ? '' : ' — but with no refresh token; it will lapse'}` : `fabric-accounts: ${arg} is not signed in (no /login completed)`);
     return d.signed_in && r.status === 0 ? 0 : 1;

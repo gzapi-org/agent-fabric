@@ -68,10 +68,11 @@ and left `~/.claude/.oauth_refresh.lock` — a directory. The next
 mid-refresh". `rmdir` of the lock (the owner, by hand), then `claude -p`:
 "ok", expiry moved to 01:51Z, and `fabric-ctl db-admin usage` read the
 windows again. The run that failed came within a minute of `auth status`:
-the harness declares its refresh lock (a lockfile under the config
-directory, `Kd(claudeDir, ".oauth_refresh.lock")`) stale after 60 s
-(`stale: 60000`, read from the binary after this check), so a lock left
-this way blocks for a minute, not for good. The fleet's `read-failed` usage rows that morning were
+the harness takes its refresh lock as a lock directory named
+`.oauth_refresh.lock` in the config directory it runs with, and declares
+it stale after 60 s (`stale: 60000`, read from the 2.1.281 and 2.1.282
+binaries after this check), so a lock left this way blocks for a
+minute, not for good. The fleet's `read-failed` usage rows that morning were
 expired sign-ins on logins with no session to renew them.
 
 ## What this decides

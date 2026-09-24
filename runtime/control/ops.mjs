@@ -21,20 +21,30 @@ import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
 export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'status'];
-export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
+export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-// Who this account is, and which Claude account it is signed into.
+const sha12 = v => crypto.createHash('sha256').update(v).digest('hex').slice(0, 12);
+
+// Who this account is, and which Claude account its sessions run on. A
+// template's setup-token (CLAUDE_CODE_OAUTH_TOKEN, synced from a Doppler
+// reference) outranks the login's own /login, whose ~/.claude.json keeps
+// naming its old account — so a switched login is reported by the
+// token's fingerprint (`fabric-accounts templates` maps it to an account),
+// and its own sign-in separately, never as the account in use.
 export function identity(home = os.homedir(), who = whoami()) {
   const claude = readJson(path.join(home, '.claude.json'))?.oauthAccount ?? null;
+  const own = claude ? { email: claude.emailAddress ?? null, organization: claude.organizationName ?? null } : null;
+  const template = syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home);
   return {
     agent: who.agent ?? null, host: who.host ?? null, role: who.role ?? null,
     project: who.project ?? null, working_copy: who.working_copy ?? null,
-    claude_account: claude ? { email: claude.emailAddress ?? null, organization: claude.organizationName ?? null } : null,
+    claude_account: template ? { via: 'setup-token', token_sha256_12: sha12(template), email: null, organization: null } : own,
+    ...(template && { own_sign_in: own }),
     credentials_present: fs.existsSync(path.join(home, '.claude', '.credentials.json')),
   };
 }
@@ -42,6 +52,9 @@ export function identity(home = os.homedir(), who = whoami()) {
 // The five-hour and seven-day windows, read with the account's own OAuth
 // token, which goes into one header and nowhere else.
 export async function usage(home = os.homedir(), fetchFn = globalThis.fetch, url = USAGE_URL) {
+  // A login on a template: its own sign-in's windows are another account's,
+  // and the setup-token cannot read any (HTTP 403, user:inference only).
+  if (syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home)) return { status: 'setup-token', see: 'fabric-ctl <observer> accounts' };
   const creds = readJson(path.join(home, '.claude', '.credentials.json'));
   const tok = creds?.claudeAiOauth?.accessToken;
   if (!tok) return { status: 'no-credentials' };

@@ -62,7 +62,7 @@ test('keys: names and twelve-digit fingerprints, never a value; an absent key sa
   assert.equal(or.sha256_12, crypto.createHash('sha256').update(SECRETS.OPENROUTER_API_KEY).digest('hex').slice(0, 12));
   assert.deepEqual(k.find(x => x.name === 'OPENAI_API_KEY'), { name: 'OPENAI_API_KEY', present: false });
   assertNoSecret(k);
-  assert.deepEqual(keys('/nonexistent').map(x => x.present), [false, false, false, false, false, false]);
+  assert.deepEqual(keys('/nonexistent').map(x => x.present), KEY_NAMES.map(() => false));
 });
 
 test('fabric: head, branch, behind, dirty, through a fake git; a fetch that fails is said', async () => {
@@ -508,4 +508,20 @@ test('accounts: every observed account, one at a time; slugs that are not an acc
   assert.deepEqual(r.accounts.map(a => [a.slug, a.status]), [['claude-a', 'ok'], ['claude-b', 'ok']]);
   assert.equal(peak, 1, 'two harness runs never overlap');
   assert.equal((await accounts(scratch('ctl-noaccounts-'))).status, 'none');
+});
+
+test('a login on a template: identity names the token by fingerprint, not the old account its ~/.claude.json keeps; usage points at the observer', async () => {
+  const h = home();
+  const TEMPLATE = 'sk-ant-oat01-TEMPLATE-TOKEN-VALUE';
+  fs.appendFileSync(path.join(h, '.config', 'agent-fabric', 'secrets.env'), `export CLAUDE_CODE_OAUTH_TOKEN='${TEMPLATE}'\n`);
+  const id = identity(h, who);
+  const fp = crypto.createHash('sha256').update(TEMPLATE).digest('hex').slice(0, 12);
+  assert.deepEqual(id.claude_account, { via: 'setup-token', token_sha256_12: fp, email: null, organization: null });
+  assert.deepEqual(id.own_sign_in, { email: 'someone@example.org', organization: 'Example Org' }, 'the own sign-in is still said, as what it is');
+  let fetched = false;
+  assert.deepEqual(await usage(h, async () => { fetched = true; return { ok: true, json: async () => ({}) }; }), { status: 'setup-token', see: 'fabric-ctl <observer> accounts' });
+  assert.equal(fetched, false, 'the old sign-in\'s windows are another account\'s: not read');
+  assert.deepEqual(keys(h).find(k => k.name === 'CLAUDE_CODE_OAUTH_TOKEN'), { name: 'CLAUDE_CODE_OAUTH_TOKEN', present: true, sha256_12: fp });
+  const s2 = JSON.stringify([id, keys(h)]);
+  assert.ok(!s2.includes(TEMPLATE), 'the template token leaked'); assertNoSecret(id);
 });

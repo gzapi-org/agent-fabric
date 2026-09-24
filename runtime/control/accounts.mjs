@@ -7,6 +7,8 @@
 //                                     browser AS THAT ACCOUNT, then /exit. A real terminal.
 //   fabric-accounts list              each observed account: signed in, email, sign-in expiry
 //   fabric-accounts read              read every account's windows now (the harness's /usage)
+//   fabric-accounts templates         each Doppler template's token fingerprint, to name the account
+//                                     behind a login's `setup-token <sha>` (fabric-ctl, fabric-status)
 //
 // Prints no token: a sign-in is described by its email, its expiry and
 // whether a refresh token is held — never by a value.
@@ -14,11 +16,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { accountsDir, accountSlugs, accounts, claudeBin, ACCOUNT_SLUG } from './ops.mjs';
 
-const USAGE = `usage: fabric-accounts login <account> | list | read
+const USAGE = `usage: fabric-accounts login <account> | list | read | templates
   <account>: lowercase letters, digits and hyphens — the account's email with @ and . as -,
              e.g. claude-pzhuy-8alias-com (the Doppler template's name without its prefix)`;
 
@@ -49,10 +52,32 @@ export function listLines(dir, now = Date.now()) {
   });
 }
 
-export async function main(argv = process.argv.slice(2), { home = os.homedir(), env = process.env, stdinTTY = process.stdin.isTTY, spawn = spawnSync, read = accounts } = {}) {
+// The Doppler templates (environment `claude-accounts`, one config per
+// Claude account) by fingerprint: the value goes from doppler into a hash
+// and nowhere else. Needs a Doppler token that can read that environment —
+// the coordinator's; a login's own read-only token cannot.
+export const TEMPLATE_ENV = 'claude-accounts';
+export function templates({ exec = execFileSync, project = 'agent-fabric' } = {}) {
+  const run = args => exec('doppler', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+  const configs = JSON.parse(run(['configs', '--project', project, '--environment', TEMPLATE_ENV, '--json']))
+    .map(c => c.name).filter(n => n.startsWith(`${TEMPLATE_ENV}_`)).sort();
+  return configs.map(name => {
+    let v = '';
+    try { v = run(['secrets', 'get', 'CLAUDE_CODE_OAUTH_TOKEN', '--plain', '--project', project, '--config', name]).replace(/\n$/, ''); } catch { v = ''; }
+    return { account: name.slice(TEMPLATE_ENV.length + 1), config: name, token_sha256_12: v ? crypto.createHash('sha256').update(v).digest('hex').slice(0, 12) : null };
+  });
+}
+
+export async function main(argv = process.argv.slice(2), { home = os.homedir(), env = process.env, stdinTTY = process.stdin.isTTY, spawn = spawnSync, read = accounts, exec = execFileSync } = {}) {
   const [cmd, arg] = argv;
   const dir = accountsDir(home, env);
   if (cmd === 'list' && argv.length === 1) { console.log(listLines(dir).join('\n')); return 0; }
+  if (cmd === 'templates' && argv.length === 1) {
+    const t = templates({ exec });
+    if (!t.length) { console.log(`no template in Doppler environment ${TEMPLATE_ENV}`); return 1; }
+    for (const x of t) console.log(`${x.account.padEnd(34)} ${x.token_sha256_12 ? `setup-token ${x.token_sha256_12}` : 'no CLAUDE_CODE_OAUTH_TOKEN'}  (${x.config})`);
+    return t.every(x => x.token_sha256_12) ? 0 : 1;
+  }
   if (cmd === 'read' && argv.length === 1) {
     const r = await read(home, { dir });
     if (r.status === 'none') { console.log(listLines(dir).join('\n')); return 1; }

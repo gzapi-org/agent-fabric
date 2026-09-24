@@ -100,7 +100,7 @@ export function rows(expected, replies) {
     if (!r) return { account: e.login, host: e.host, status: 'no answer' };
     const d = r.data ?? {};
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
-             email: d.identity?.claude_account?.email ?? null, role: d.identity?.role ?? null,
+             email: d.identity?.claude_account?.email ?? (d.identity?.claude_account?.via === 'setup-token' ? `setup-token ${d.identity.claude_account.token_sha256_12}` : null), role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
              keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, agentd: d.agentd ?? null };
   });

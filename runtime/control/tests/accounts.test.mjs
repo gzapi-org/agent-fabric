@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
-import { main, describe, listLines } from '../accounts.mjs';
+import { main, describe, listLines, templates } from '../accounts.mjs';
+import crypto from 'node:crypto';
 import { accountsDir } from '../ops.mjs';
 
 const ACCESS = 'sk-ant-oat01-ACCESS-VALUE', REFRESH = 'sk-ant-ort01-REFRESH-VALUE';
@@ -76,4 +77,25 @@ test('read: one line per account from the op; any account not ok is exit 1; none
   const none = await capture(() => main(['read'], { home: h, env: {}, read: async () => ({ status: 'none' }) }));
   assert.equal(none.code, 1); assert.match(none.out, /no Claude account observed/);
   assert.equal((await capture(() => main(['bogus'], { home: h, env: {} }))).code, 2);
+});
+
+test('templates: each Doppler template by fingerprint, read with the observer\'s token; the value goes into a hash and nowhere else', async () => {
+  const TOK = { 'claude-accounts_claude-a': 'sk-ant-oat01-AAAA', 'claude-accounts_claude-b': '' };
+  const calls = [];
+  const exec = (bin, args) => {
+    calls.push([bin, ...args]);
+    if (args[0] === 'configs') return JSON.stringify([{ name: 'claude-accounts' }, { name: 'claude-accounts_claude-b' }, { name: 'claude-accounts_claude-a' }]);
+    const cfg = args[args.indexOf('--config') + 1];
+    if (!TOK[cfg]) throw new Error('Doppler Error: Could not find requested secret');
+    return TOK[cfg] + '\n';   // doppler --plain ends with a newline; the fingerprint must not include it
+  };
+  const t = templates({ exec });
+  const fp = crypto.createHash('sha256').update('sk-ant-oat01-AAAA').digest('hex').slice(0, 12);
+  assert.deepEqual(t, [{ account: 'claude-a', config: 'claude-accounts_claude-a', token_sha256_12: fp }, { account: 'claude-b', config: 'claude-accounts_claude-b', token_sha256_12: null }]);
+  assert.ok(calls.every(c => c.includes('--project') && c.includes('agent-fabric')), 'every doppler call names the project');
+  const r = await capture(() => main(['templates'], { home: scratch('accounts-tpl-'), env: {}, exec }));
+  assert.equal(r.code, 1, 'a template without a token is not a clean answer');
+  assert.match(r.out, new RegExp(`claude-a\\s+setup-token ${fp}`));
+  assert.match(r.out, /claude-b\s+no CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.ok(!r.out.includes('sk-ant-oat01-AAAA'));
 });

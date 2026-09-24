@@ -26,7 +26,7 @@ import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.m
 import { api, syncedToken, syncedVar, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { execFileSync } from 'node:child_process';
 import { ACTION_OPS, ACTION_TTL_MAX_S, signRequest, generateOperatorKey, publicKeyFrom } from './sign.mjs';
-import { PIECES, VERSION_RE } from './upgrade.mjs';
+import { PIECES, VERSION_RE, pinnedVersion } from './upgrade.mjs';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS } from './ops.mjs';
@@ -305,7 +305,11 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
 
   const id = newId();
   let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)), ...(args.days ? { days: args.days } : {}),
-                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, ...(args.version ? { version: args.version } : {}) } } : {}) };
+                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}) };
+  // One command, one version: the coordinator's pin travels in the signed
+  // request. Left to each account, an account that had not pulled the pin
+  // bump would read its own older pin and answer `current` (review of #34).
+  if (args.op === 'upgrade' && !request.args.version) { console.error(`fabric-ctl: no pinned version in ${path.join(FABRIC_ROOT, 'runtime', 'claude-code', 'harness.json')} and no --version; nothing sent`); return 2; }
   if (ACTION_OPS.includes(args.op)) {
     // An action is signed or not sent: an unsigned one is refused by every
     // daemon, and a silent table would read as agents that did not answer.

@@ -10,7 +10,9 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { parseArgs, rows, table, writeBundles, manifestAgent, partKey, keygen } from '../ctl.mjs';
-import { publicKeyFrom, privateKeyFrom } from '../sign.mjs';
+import { publicKeyFrom, privateKeyFrom, generateOperatorKey, verifyRequest } from '../sign.mjs';
+import { pinnedVersion } from '../upgrade.mjs';
+import { FABRIC_ROOT } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -341,4 +343,27 @@ test('keygen: the private half goes to Doppler on stdin and nowhere else; the pu
   try { assert.equal(keygen({ force: false }, { registry: reg, exec, who: { host: 'h', agent: 'user' } }), 2, 'a registered key is kept'); }
   finally { console.error = err; }
   assert.equal(JSON.parse(fs.readFileSync(reg, 'utf8')).hosts.h.operator_key, saved);
+});
+
+test('fabric-ctl upgrade: the coordinator\'s pin travels in the signed request; no key, nothing is sent', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile();
+    const k = generateOperatorKey();
+    const runKey = (key, args) => new Promise(resolve => {
+      const child = spawn('node', [CTL, ...args], { env: { ...process.env, HOME: scratch('ctl-home-'), CLAUDE_BRIDGE_URL: r.url(), CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, ...(key ? { FABRIC_CONTROL_SIGNING_KEY: key } : { FABRIC_CONTROL_SIGNING_KEY: '' }) } });
+      let out = '', err = ''; child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
+      child.on('close', status => resolve({ status, out, err }));
+    });
+    const none = await runKey(null, ['db-admin', 'upgrade', 'claude', '--timeout', '1']);
+    assert.equal(none.status, 3, none.err); assert.match(none.err, /signed or not sent/); assert.equal(r.rows.length, 0, 'nothing was sent unsigned');
+    const sent = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--timeout', '1']);
+    const req = JSON.parse(r.rows[0].content);
+    assert.deepEqual(req.args, { piece: 'claude', version: pinnedVersion(FABRIC_ROOT) }, 'one command, one version: the pin is named, not left to each account');
+    assert.ok(/^\d+\.\d+\.\d+$/.test(req.args.version));
+    assert.ok(verifyRequest(req, publicKeyFrom(k.publicKeySpec)), 'signed, over the version too');
+    assert.ok(!sent.err.includes(k.privateKeySpec.slice(20, 50)) && !sent.out.includes(k.privateKeySpec.slice(20, 50)));
+    const over = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--version', '2.1.279', '--timeout', '1']);
+    assert.equal(JSON.parse(r.rows.at(-1).content).args.version, '2.1.279', '--version overrides the pin'); void over;
+  } finally { r.close(); }
 });

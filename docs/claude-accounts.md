@@ -66,6 +66,8 @@ harness's refresh request is visible in its binary — but it would present
 Claude Code's client id without being Claude Code, and break silently when
 that private request changes. `claude auth status` is not a keep-alive: it
 starts a renewal, exits, and leaves `~/.claude/.oauth_refresh.lock` (a
-directory) that every later run trips on.
+directory) that the next run trips on for up to a minute — the harness
+treats its refresh lock as stale after 60 s (`stale: 60000`, read from
+the 2.1.281 binary), so it clears itself, but only then.
 
 Measured: `docs/live-checks/2026-09-24-claude-accounts.md`.

@@ -83,11 +83,35 @@ export async function usage(home = os.homedir(), fetchFn = globalThis.fetch, url
 // accounts.md). Reimplementing the OAuth refresh here was the rejected
 // alternative: it would present Claude Code's client id without being
 // Claude Code. `claude auth status` is not a keep-alive: it starts a
-// refresh, exits, and leaves a lock every later run trips on.
+// refresh, exits, and leaves a lock the next run trips on until the
+// harness calls it stale (60 s).
 export const ACCOUNTS_TIMEOUT_MS = 120000;
 export const ACCOUNT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+// Under the login's fabric state root, the same one runtime/identity.py
+// resolves: AGENT_FABRIC_STATE_DIR when set, else the XDG default.
 export function accountsDir(home = os.homedir(), env = process.env) {
-  return path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'agent-fabric', 'accounts');
+  const root = env.AGENT_FABRIC_STATE_DIR ? path.resolve(env.AGENT_FABRIC_STATE_DIR) : path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'agent-fabric');
+  return path.join(root, 'accounts');
+}
+// One reader per account across PROCESSES, not only inside the daemon: a
+// person's `fabric-accounts read` beside the keeper would start a second
+// harness on the same config directory, and the loser fails on the
+// refresh lock. O_EXCL on a file naming the holder's pid; a holder that
+// is gone (a killed read) does not keep the account.
+export function takeReadLock(dir, pid = process.pid) {
+  const f = path.join(dir, '.fabric-read.lock');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { fs.writeFileSync(f, `${pid}\n`, { flag: 'wx', mode: 0o600 }); return () => { try { fs.unlinkSync(f); } catch { /* gone */ } }; }
+    catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const holder = Number(String(fs.readFileSync(f, 'utf8')).trim());
+      let alive = false;
+      try { process.kill(holder, 0); alive = true; } catch (k) { alive = k.code === 'EPERM'; }
+      if (alive && holder !== pid) return null;
+      try { fs.unlinkSync(f); } catch { /* raced */ }
+    }
+  }
+  return null;
 }
 export function accountSlugs(dir) {
   try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory() && ACCOUNT_SLUG.test(d.name)).map(d => d.name).sort(); }
@@ -123,6 +147,8 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
   const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
   const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
   if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
+  const release = takeReadLock(dir);
+  if (!release) return { ...out, status: 'busy', error: 'another reader holds this account (the daemon, or fabric-accounts read)' };
   // A fixed working directory: the harness records a project per cwd even
   // with --no-session-persistence (an empty one, measured), so a fresh
   // temporary cwd per read would leave one more entry every 4 hours.
@@ -134,6 +160,8 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
     return { ...out, ...parseUsageReport(typeof r === 'string' ? r : r.stdout) };
   } catch (e) {
     return { ...out, status: e?.killed ? 'timeout' : 'failed', error: String(e?.message ?? e).split('\n')[0].slice(0, 200) };
+  } finally {
+    release();
   }
 }
 // Every observed account, one at a time: two harness runs on one config

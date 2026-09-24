@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
-import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES, accounts, readAccount, parseUsageReport, accountsDir, accountSlugs } from '../ops.mjs';
+import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES, accounts, readAccount, parseUsageReport, accountsDir, accountSlugs, takeReadLock } from '../ops.mjs';
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -526,4 +526,21 @@ test('a login on a template: identity names the token by fingerprint, not the ol
   assert.deepEqual(keys(h).find(k => k.name === 'CLAUDE_CODE_OAUTH_TOKEN'), { name: 'CLAUDE_CODE_OAUTH_TOKEN', present: true, sha256_12: fp });
   const s2 = JSON.stringify([id, keys(h)]);
   assert.ok(!s2.includes(TEMPLATE), 'the template token leaked'); assertNoSecret(id);
+});
+
+test('the read lock: one reader per account across processes; a dead holder does not keep it; the fabric state root is honoured', async () => {
+  const { h, dir } = accountsHome({ 'claude-a': true });
+  const acct = path.join(dir, 'claude-a');
+  const release = takeReadLock(acct, process.pid);
+  assert.ok(release, 'the first reader takes it');
+  fs.writeFileSync(path.join(acct, '.fabric-read.lock'), `${process.ppid}\n`);   // a live process that is not us
+  let ran = 0;
+  const busy = await readAccount(acct, { home: h, exec: async () => { ran++; return USAGE_EVENTS; } });
+  assert.equal(busy.status, 'busy'); assert.equal(ran, 0, 'no second harness on a held account');
+  fs.writeFileSync(path.join(acct, '.fabric-read.lock'), '999999999\n');   // a pid that cannot exist
+  const r = await readAccount(acct, { home: h, exec: async () => { ran++; return USAGE_EVENTS; } });
+  assert.equal(r.status, 'ok', 'a killed reader\'s lock is taken over'); assert.equal(ran, 1);
+  assert.ok(!fs.existsSync(path.join(acct, '.fabric-read.lock')), 'released after the read');
+  assert.equal(accountsDir('/home/x', { AGENT_FABRIC_STATE_DIR: '/srv/state' }), '/srv/state/accounts');
+  assert.equal(accountsDir('/home/x', { XDG_STATE_HOME: '/xdg' }), '/xdg/agent-fabric/accounts');
 });

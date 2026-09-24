@@ -47,7 +47,7 @@ command -v jq >/dev/null 2>&1 || { echo "fabric-usage: jq is required" >&2; exit
 # email, five-hour %, five-hour reset, seven-day %, seven-day reset — or
 # a reason in the first field when there is nothing to read.
 read -r -d '' READ <<'EOF' || true
-grep -q '^export CLAUDE_CODE_OAUTH_TOKEN=' "$HOME/.config/agent-fabric/secrets.env" 2>/dev/null && { printf 'setup-token\n'; exit 0; }
+grep -Eq "^export CLAUDE_CODE_OAUTH_TOKEN=[^'\"[:space:]]|^export CLAUDE_CODE_OAUTH_TOKEN='[^']" "$HOME/.config/agent-fabric/secrets.env" 2>/dev/null && { printf 'setup-token\n'; exit 0; }
 f="$HOME/.claude/.credentials.json"
 [ -s "$f" ] || { printf 'no-credentials\n'; exit 0; }
 email="$(jq -r '.oauthAccount.emailAddress // "-"' "$HOME/.claude.json" 2>/dev/null || echo -)"

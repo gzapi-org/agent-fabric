@@ -39,6 +39,18 @@ out="$(run 2>&1)"; [[ $? -eq 2 ]] && ok "no path: usage, exit 2" || bad "usage" 
 
 echo "bootstrap runs it"
 grep -q 'user-settings.py" "\$CLAUDE_HOME/settings.json"' "$HERE/bootstrap.sh" && ok "bootstrap.sh calls it on the login's user settings" || bad "bootstrap wiring"
+echo "a flag is never a path"
+cd "$SANDBOX" || exit 1
+for flag in --help -h; do
+    out="$(run "$flag")"; rc=$?
+    [[ $rc -eq 0 && "$out" == *"user-settings.py <settings.json> [--dry-run]"* && -z "$(ls -A "$SANDBOX" | grep -v '^\.claude$')" ]] \
+        && ok "$flag prints the usage and writes nothing" || bad "$flag" "rc=$rc $out $(ls -A "$SANDBOX")"
+done
+out="$(run --verbose)"; rc=$?
+[[ $rc -eq 2 && ! -e "$SANDBOX/--verbose" ]] && ok "an unknown flag is refused, not written as a file" || bad "unknown flag" "rc=$rc $out"
+out="$(run --dry-run --bogus)"; rc=$?
+[[ $rc -eq 2 && ! -e "$SANDBOX/--bogus" ]] && ok "…beside --dry-run too" || bad "unknown flag with --dry-run" "rc=$rc $out"
+cd "$HERE" || exit 1
 grep -q 'attribution-off' "$HERE/bootstrap.sh" && bad "bootstrap.sh still names the retired writer" || ok "the retired name is gone from bootstrap.sh"
 grep -q 'failed=\$((failed+1))' "$HERE/bootstrap.sh" && ok "a refused write is counted, not read as already current" || bad "bootstrap accounting"
 

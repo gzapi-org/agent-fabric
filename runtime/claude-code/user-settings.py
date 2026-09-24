@@ -3,6 +3,7 @@
 Claude Code user settings, written by bootstrap.sh on every account.
 
     user-settings.py <settings.json> [--dry-run]
+    user-settings.py --help
 
 User scope reaches every session of the login whatever directory it is
 launched from, so this is where a setting the fabric wants on every
@@ -76,9 +77,14 @@ def settled(doc: dict) -> bool:
 
 
 def main(argv: list[str]) -> int:
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__.strip())
+        return 0
     args = [a for a in argv if a != "--dry-run"]
     dry = "--dry-run" in argv
-    if len(args) != 1:
+    # An unknown flag is refused, never taken for the path: `--help` once
+    # wrote the fabric's keys to a file of that name in the caller's cwd.
+    if len(args) != 1 or args[0].startswith("-"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     path = args[0]

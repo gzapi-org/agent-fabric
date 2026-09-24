@@ -60,6 +60,13 @@ out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok
 out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"
 PIN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["claude"])' "$ROOT/runtime/claude-code/harness.json")"
 out="$(run zz-fixture-login backend-dev --dry-run)"; grep -q "install.sh | bash -s -- $PIN\$" <<<"$out" && ok "no --claude: the fleet's pinned version ($PIN) reaches the installer" || bad "default is not the pin" "$(grep install.sh <<<"$out")"
+printf '{"claude": "2.1.282'"'"'; touch /tmp/pwned; '"'"'"}' > "$FAB/runtime/claude-code/harness.json"
+out="$(run zz-fixture-login backend-dev --dry-run)"; rc=$?
+[[ $rc -ne 0 ]] && grep -q "is not a version; nothing installed" <<<"$out" && ! grep -q "install.sh | bash" <<<"$out" && ok "a pin that is not a version is refused before it reaches the installer's command line" || bad "bad pin accepted (rc=$rc)" "$(grep -iE "pin|install" <<<"$out")"
+rm -f "$FAB/runtime/claude-code/harness.json"
+out="$(run zz-fixture-login backend-dev --dry-run)"
+grep -q "no readable pin .* the vendor's latest instead" <<<"$out" && grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "no pin: latest, and that is said" || bad "silent fallback" "$(grep -iE "pin|install" <<<"$out")"
+cp "$ROOT/runtime/claude-code/harness.json" "$FAB/runtime/claude-code/"
 
 # ---- the real sequence, against fakes, with a failure injected at each must ----
 # sudo drops `-n -u X -H` and runs the rest as this user; useradd makes a

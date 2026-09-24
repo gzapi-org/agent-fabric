@@ -51,9 +51,9 @@ for flag in --help -h; do
         && ok "$flag prints the usage on stdout and writes nothing" || bad "$flag" "rc=$rc $out $(ls -A "$SANDBOX")"
 done
 for flag in --verbose -x -; do
-    out="$(run "$flag")"; rc=$?
-    [[ $rc -eq 2 && ! -e "$SANDBOX/$flag" && "$out" == *"$flag: not an option and not a path"* ]] \
-        && ok "$flag is refused by name, not written as a file" || bad "unknown flag $flag" "rc=$rc $out"
+    err="$(python3 "$HERE/user-settings.py" "$flag" 2>&1 1>/dev/null)"; rc=$?
+    [[ $rc -eq 2 && ! -e "$SANDBOX/$flag" && "$err" == *"$flag: not an option and not a path"* ]] \
+        && ok "$flag is refused by name on stderr, not written as a file" || bad "unknown flag $flag" "rc=$rc $err"
 done
 out="$(run --dry-run --bogus)"; rc=$?
 [[ $rc -eq 2 && ! -e "$SANDBOX/--bogus" ]] && ok "…beside --dry-run too" || bad "unknown flag with --dry-run" "rc=$rc $out"

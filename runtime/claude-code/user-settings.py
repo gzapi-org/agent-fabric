@@ -3,7 +3,7 @@
 Claude Code user settings, written by bootstrap.sh on every account.
 
     user-settings.py <settings.json> [--dry-run]
-    user-settings.py --help
+    user-settings.py --help | -h
 
 Any other argument that begins with "-" is refused (exit 2), never taken
 for the path.

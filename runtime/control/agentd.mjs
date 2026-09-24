@@ -209,6 +209,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (operatorAddresses().size === 0) { console.error('agentd: no host operator in runtime/hosts/registry.json — nothing could ever be answered; not starting'); return 3; }
   const seen = new Set();
   const ledger = actionLedger();
+  const inflight = new Set();   // actions running beside the loop; --once waits for them before exiting
   // What is not logged: every reply on the channel (not a request), a
   // request for another account (not for me) and a duplicate (seen) —
   // fifteen daemons times fifteen replies per fabric-ctl would be noise.
@@ -261,8 +262,10 @@ export async function main(argv = process.argv.slice(2)) {
           const { op, from, id } = a.request;
           ledger.record(from, a.ts);   // before it runs: a replay posted while it runs is refused too
           console.error(`agentd: started ${op} for ${from} (${id.slice(0, 8)})`);
-          answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
-            .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`));
+          const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
+            .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`))
+            .finally(() => inflight.delete(p));
+          inflight.add(p);
           continue;
         }
         const reply = await answer(a.request, ctx);
@@ -271,7 +274,10 @@ export async function main(argv = process.argv.slice(2)) {
         for (const f of _followups ?? []) await post(f);
         console.error(`agentd: answered ${a.request.op} for ${a.request.from} (${a.request.id.slice(0, 8)})`);
       }
-      if (once) return 0;
+      // An action already started has stopped a session and written a
+      // marker: exiting under it would leave the launcher waiting on a
+      // pending upgrade and no reply posted (review of #34).
+      if (once) { await Promise.allSettled([...inflight]); return 0; }
     } catch (e) {
       if (e.status === 401 || e.status === 403) { console.error(`agentd: the relay refused this token (HTTP ${e.status}); rotated? run bin/fabric-secrets sync`); if (once) return 4; }
       else if (!down) { console.error(`agentd: relay unreachable at ${cfg.relay_url} (${e.message}) — retrying every 30 s`); down = true; }

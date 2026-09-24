@@ -481,7 +481,9 @@ test('readAccount: the child runs in the account\'s own config directory, with n
     assert.equal(seen[0].opts.env.CLAUDE_CONFIG_DIR, path.join(dir, 'claude-example-org'));
     for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']) assert.ok(!(k in seen[0].opts.env), `${k} reached the child`);
     assert.ok(seen[0].cwdExisted, 'the child had a working directory');
-    assert.ok(!fs.existsSync(seen[0].opts.cwd), 'and it is gone afterwards');
+    assert.equal(seen[0].opts.cwd, path.join(dir, 'claude-example-org', 'work'), 'one fixed cwd inside the account: the harness records a project per cwd');
+    await readAccount(path.join(dir, 'claude-example-org'), { home: h, bin: '/fake/claude', exec: async (b, a, o) => { seen.push({ opts: o }); return { stdout: USAGE_EVENTS }; } });
+    assert.equal(seen[1].opts.cwd, seen[0].opts.cwd, 'the same one on the next read');
     assertNoSecret(r);
   } finally { if (saved === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN; else process.env.CLAUDE_CODE_OAUTH_TOKEN = saved; }
 });

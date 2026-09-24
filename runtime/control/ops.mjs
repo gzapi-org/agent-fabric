@@ -123,15 +123,17 @@ export async function readAccount(dir, { home = os.homedir(), exec = execFileP, 
   const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
   const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
   if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-accounts-'));
+  // A fixed working directory: the harness records a project per cwd even
+  // with --no-session-persistence (an empty one, measured), so a fresh
+  // temporary cwd per read would leave one more entry every 4 hours.
+  const cwd = path.join(dir, 'work');
+  fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
   try {
     const env = { HOME: home, PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir, LANG: 'C.UTF-8' };
     const r = await exec(bin, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, env, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     return { ...out, ...parseUsageReport(typeof r === 'string' ? r : r.stdout) };
   } catch (e) {
     return { ...out, status: e?.killed ? 'timeout' : 'failed', error: String(e?.message ?? e).split('\n')[0].slice(0, 200) };
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
   }
 }
 // Every observed account, one at a time: two harness runs on one config

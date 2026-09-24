@@ -67,6 +67,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
+    run "fabric-usage" bash policies/run_suite.sh tests/test_fabric-usage.sh
     run "fabric-lease (one holder per host resource)" bash tests/test_fabric-lease.sh
     run "leak check (what a run left behind)" bash tests/test_leak-check.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh

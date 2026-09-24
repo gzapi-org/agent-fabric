@@ -186,7 +186,8 @@ second until every placed address has answered or the timeout is spent
 (20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:
 a run leaves its request and the replies on the channel, nothing
 anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
-whose daemons are down. A run by a login that is not a host operator is
+whose daemons are down; a login on a Claude-account template reads there
+as `setup-token`, for the same reason its `usage` op points at the observer. A run by a login that is not a host operator is
 refused before anything is posted: no daemon would answer it.
 
 `bin/fabric-ctl <login|all> memory --out <dir>` is the drain (timeout

@@ -17,7 +17,11 @@
 # table was made by hand, and only the coordinator's login can make it).
 #
 # An account with no credentials file, or whose read fails, gets one
-# line saying so; the table is never silently short.
+# line saying so; the table is never silently short. An account running
+# on a Claude-account template (CLAUDE_CODE_OAUTH_TOKEN in its synced
+# secrets.env) is `setup-token`: its own sign-in, if any, is another
+# account's, and the setup-token cannot read usage — the observer's
+# `fabric-ctl <observer> accounts` has those windows (docs/claude-accounts.md).
 #
 # Superseded for everyday use by `bin/fabric-ctl all usage`, which asks
 # each account's control agent over the relay (docs/control-plane.md):
@@ -43,6 +47,7 @@ command -v jq >/dev/null 2>&1 || { echo "fabric-usage: jq is required" >&2; exit
 # email, five-hour %, five-hour reset, seven-day %, seven-day reset — or
 # a reason in the first field when there is nothing to read.
 read -r -d '' READ <<'EOF' || true
+grep -q '^export CLAUDE_CODE_OAUTH_TOKEN=' "$HOME/.config/agent-fabric/secrets.env" 2>/dev/null && { printf 'setup-token\n'; exit 0; }
 f="$HOME/.claude/.credentials.json"
 [ -s "$f" ] || { printf 'no-credentials\n'; exit 0; }
 email="$(jq -r '.oauthAccount.emailAddress // "-"' "$HOME/.claude.json" 2>/dev/null || echo -)"
@@ -60,7 +65,7 @@ for entry in "${PLACED[@]}"; do
   line="$("$HX" "$host" --as "$login" -- sh -c "$READ" 2>/dev/null | tail -1)"
   IFS=$'\t' read -r a b c d e <<<"${line:-executor-failed}"
   case "$a" in
-    no-credentials|read-failed|unreadable|executor-failed)
+    no-credentials|read-failed|unreadable|executor-failed|setup-token)
       if (( JSON )); then jq -nc --arg l "$login" --arg h "$host" --arg s "$a" --arg e "${b:-}" '{account:$l, host:$h, status:$s, email:($e|select(.!="")//null)}'
       else printf '%-22s %-34s %s\n' "$login" "${b:--}" "$a"; fi ;;
     *)

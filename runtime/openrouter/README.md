@@ -16,25 +16,6 @@ at launch applies to everything under the session, subagents included.
 | refusals | none | no bound role, model pins in any settings scope, an ungraded review pin, a non-Anthropic session | the same, plus `ori` not authenticated from the environment |
 | how to inspect | `bin/fabric-status` says "not launched by the fabric" | `bin/fabric-status` says "launched by the fabric" with the pins; `AGENT_FABRIC_LAUNCH_PROVIDER=anthropic` | same, plus `ori auth --json` |
 
-**Every layer is per provider.** The two paths speak different
-vocabularies — an OpenRouter id on the broker; a tier alias or a native
-`claude-…` id on plain claude — so a layer names each provider's choices
-under `providers.<provider>` and a choice made for one never reaches the
-other (a GLM session on the broker says nothing about plain claude). The
-repository holds the general default per provider (`routing/profiles.json`
-`defaults`, over the column in `routing/capabilities.json`); the agent's
-own layer is `$STATE_DIR/model-profile.local.json`, which `bin/fabric-model`
-lists, sets, unsets and seeds — `list` shows every choice with the layer it
-came from, `seed` copies the merged defaults in as explicit pins:
-
-```sh
-bin/fabric-model list --provider anthropic
-bin/fabric-model set --provider anthropic session opus
-bin/fabric-model set --provider anthropic opus claude-opus-5[1m]     # the alias, exported
-bin/fabric-model set --provider anthropic review claude-opus-5       # the reviewer's file, at once
-bin/fabric-model set --provider openrouter code-medium z-ai/glm-5.3
-```
-
 **The class is the vocabulary; the alias is the adapter's.** Five
 capability classes — `code-low`, `code-medium`, `code-high`, `code-plan`,
 `code-review` — are what `routing/capabilities.json`, every profile layer

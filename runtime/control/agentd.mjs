@@ -44,11 +44,27 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
-import { OPS, collect, usage } from './ops.mjs';
+import { OPS, collect, usage, accounts, accountSlugs, accountsDir } from './ops.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SEEN_MAX = 256;
 export const USAGE_CACHE_MS = 10000;
+// An observed account's sign-in lives 8 hours and only a read renews it,
+// so the keeper reads every 4 h — twice inside the lifetime, so one failed
+// read (the relay down, a harness update mid-run) is not a lapse. A
+// request inside ACCOUNTS_CACHE_MS gets the last reading, not a new harness run.
+export const ACCOUNTS_KEEPALIVE_MS = 4 * 3600 * 1000;
+export const ACCOUNTS_CACHE_MS = 5 * 60 * 1000;
+
+// One reading at a time, shared: the keeper's timer and a request that
+// arrive together wait on the same run, because two harness runs on one
+// config directory race for its refresh lock.
+export function accountsKeeper(read = () => accounts(), { now = Date.now, cacheMs = ACCOUNTS_CACHE_MS } = {}) {
+  let at = 0, last = null, running = null;
+  const refresh = () => (running ??= Promise.resolve().then(read).then(r => { last = r; at = now(); return r; }).finally(() => { running = null; }));
+  const cached = () => (last && now() - at < cacheMs) ? Promise.resolve(last) : refresh();
+  return { refresh, cached };
+}
 
 export function controlConfig(env = process.env, file = path.join(HERE, 'config.json')) {
   let own = {};
@@ -140,7 +156,8 @@ export async function main(argv = process.argv.slice(2)) {
   const started = new Date().toISOString();
   let usageAt = 0, usageLast = null;
   const usageCached = async () => { if (Date.now() - usageAt > USAGE_CACHE_MS) { usageLast = await usage(); usageAt = Date.now(); } return usageLast; };
-  const ctx = { me, started, usageCached };   // no `who`: identity() resolves it per request
+  const keeper = accountsKeeper();
+  const ctx = { me, started, usageCached, accountsCached: keeper.cached };   // no `who`: identity() resolves it per request
   if (self) { const { _followups, ...r } = await answer({ id: 'self', op: 'status' }, ctx); console.log(JSON.stringify(r, null, 2)); return 0; }
 
   const root = inboxRoot(who);
@@ -175,6 +192,12 @@ export async function main(argv = process.argv.slice(2)) {
   };
   console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}; operators: ${[...operatorAddresses()].join(' ')}`);
   if (!once) watchSource(() => { console.error('agentd: source changed; exiting for systemd to restart on the new code'); process.exit(0); });
+  if (!once) {
+    // At start too: after a reboot every observed sign-in may have lapsed.
+    const keep = () => { if (!accountSlugs(accountsDir()).length) return; keeper.refresh().then(r => { for (const a of r.accounts ?? []) if (a.status !== 'ok') console.error(`agentd: account ${a.slug}: ${a.status}${a.error ? ` (${a.error})` : ''}`); }).catch(e => console.error(`agentd: accounts: ${e.message}`)); };
+    setTimeout(keep, 30000).unref();
+    setInterval(keep, ACCOUNTS_KEEPALIVE_MS).unref();
+  }
   for (;;) {
     try {
       if (!last) await prime();

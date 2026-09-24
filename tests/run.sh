@@ -55,7 +55,7 @@ fi
 if [[ "$what" == all || "$what" == gzcoord ]]; then
     run "gzcoord" bash -c 'cd communication/gzcoord && node --test tests/*.test.mjs 2>&1 | grep -E -A14 "^not ok|^# (tests|pass|fail)"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
     run "locale search MCP server" bash -c 'node --test runtime/mcp/websearch-locale/tests/*.test.mjs 2>&1 | grep -E -A14 "^not ok|^# (tests|pass|fail)"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
-    run "control plane (ops, agentd, ctl, unit)" bash -c 'node --test runtime/control/tests/*.test.mjs 2>&1 | grep -E -A14 "^not ok|^# (tests|pass|fail)"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
+    run "control plane (ops, agentd, ctl, accounts, unit)" bash -c 'node --test runtime/control/tests/*.test.mjs 2>&1 | grep -E -A14 "^not ok|^# (tests|pass|fail)"; [[ ${PIPESTATUS[0]} -eq 0 ]]'
 fi
 if [[ "$what" == all || "$what" == bash ]]; then
     run "launcher" bash policies/run_suite.sh runtime/openrouter/test_launch.sh
@@ -67,6 +67,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "attribution guard" bash policies/run_suite.sh policies/test_ban_generated_by_attribution.sh
     run "attribution (this branch)" env AGENT_FABRIC_ATTRIBUTION_BASE=origin/main bash policies/ban_generated_by_attribution.sh
     run "fabric-status" bash policies/run_suite.sh tests/test_fabric-status.sh
+    run "fabric-usage" bash policies/run_suite.sh tests/test_fabric-usage.sh
     run "fabric-lease (one holder per host resource)" bash tests/test_fabric-lease.sh
     run "leak check (what a run left behind)" bash tests/test_leak-check.sh
     run "status line" bash runtime/claude-code/hooks/test_statusline.sh

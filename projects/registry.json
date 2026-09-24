@@ -5,7 +5,8 @@
     "OPENAI_API_KEY": "OpenAI API key for scripts that call it directly (gzapp.decks image generation). One per login: a service account agent-fabric-<login> in the organisation's project (enroll.sh issue-openai-keys, with the coordinator's admin key), so the Usage API reports spend per agent",
     "OPENROUTER_API_KEY": "OpenRouter API key for the broker launch path (runtime/openrouter/launch). One per login, named after it (enroll.sh issue-openrouter-keys, with the coordinator's provisioning key), so the dashboard reports spend per agent; never inherited from another login's config",
     "SERPAPI_API_KEY": "SerpAPI (serpapi.com) key for the locale search tool's located engine (web_search: Google's results with gl, hl, google_domain and lr from the locale; runtime/mcp/websearch-locale), read at call time into the api_key query parameter — SerpAPI's only auth — of a URL that is never logged. Only a language-culture login's config carries it (the CEO's account, 2026-09-17); every other login has no such name, and sync exports it only where it is set. Google's own Custom Search JSON API is closed to new customers (2026-09-17), which is why a SERP proxy",
-    "BRAVE_SEARCH_API_KEY": "Brave Search API key for the locale search tool's second engine (web_search_global), read at call time into one request header; the same login as the Google pair (the CEO: keep both engines, 2026-09-17)"
+    "BRAVE_SEARCH_API_KEY": "Brave Search API key for the locale search tool's second engine (web_search_global), read at call time into one request header; the same login as the Google pair (the CEO: keep both engines, 2026-09-17)",
+    "CLAUDE_CODE_OAUTH_TOKEN": "Which Claude account this login's sessions run on: a Doppler reference into the `claude-accounts` environment, ${agent-fabric.claude-accounts_<account>.CLAUDE_CODE_OAUTH_TOKEN} — one config per Claude account, holding that account's one-year `claude setup-token` token (user:inference only). Set, it outranks the login's own /login sign-in (measured 2026-09-24); moving a login to the other account is this one line, then sync and a relaunch. Unset, the login runs on its own sign-in. The accounts' usage windows are read by the coordinator's observer, not through this token (docs/claude-accounts.md)"
   },
   "projects": {
     "gzapp": {
@@ -103,6 +104,19 @@
       "integration": "projects/interweave/integration",
       "license": "Apache-2.0",
       "note": "A Rust workspace on libp2p: one PeerId, many EndpointIds, signed GossipSub broadcast, a directed protocol, replaceable discovery, Kademlia, AutoNAT v2 / Circuit Relay v2 / DCUtR. Worked by the owner's own login until 2026-09-17, when the CEO made it a managed project with one new role, p2p-network-dev (the code), architect-cto holding its decision records and stage gates, devex-tooling its CI. Its merge queue stays on (the owner, 2026-09-17)."
+    },
+    "agent-fabric-gateway": {
+      "title": "agent-fabric-gateway — the Rust data plane the fabric's sessions reach their models through",
+      "remotes": [
+        "git@github.com:gzapi-org/agent-fabric-gateway.git",
+        "https://github.com/gzapi-org/agent-fabric-gateway"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": "projects/agent-fabric-gateway/integration",
+      "license": "Apache-2.0",
+      "note": "The fabric is the control plane (identity, roles, capability policy, model selection); the gateway accepts harness-native API traffic, executes the route it is given and adapts only where it must (its ADR-001, ADR-014). Designed by the owner's own sessions until 2026-09-24, when the owner put the whole repository under fabric-coordinator: one owner for the control/data boundary, its decision records, its code and its CI."
     }
   }
 }

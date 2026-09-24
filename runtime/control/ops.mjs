@@ -20,21 +20,31 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'status'];
-export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'status'];
+export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-// Who this account is, and which Claude account it is signed into.
+const sha12 = v => crypto.createHash('sha256').update(v).digest('hex').slice(0, 12);
+
+// Who this account is, and which Claude account its sessions run on. A
+// template's setup-token (CLAUDE_CODE_OAUTH_TOKEN, synced from a Doppler
+// reference) outranks the login's own /login, whose ~/.claude.json keeps
+// naming its old account — so a switched login is reported by the
+// token's fingerprint (`fabric-accounts templates` maps it to an account),
+// and its own sign-in separately, never as the account in use.
 export function identity(home = os.homedir(), who = whoami()) {
   const claude = readJson(path.join(home, '.claude.json'))?.oauthAccount ?? null;
+  const own = claude ? { email: claude.emailAddress ?? null, organization: claude.organizationName ?? null } : null;
+  const template = syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home);
   return {
     agent: who.agent ?? null, host: who.host ?? null, role: who.role ?? null,
     project: who.project ?? null, working_copy: who.working_copy ?? null,
-    claude_account: claude ? { email: claude.emailAddress ?? null, organization: claude.organizationName ?? null } : null,
+    claude_account: template ? { via: 'setup-token', token_sha256_12: sha12(template), email: null, organization: null } : own,
+    ...(template && { own_sign_in: own }),
     credentials_present: fs.existsSync(path.join(home, '.claude', '.credentials.json')),
   };
 }
@@ -42,6 +52,9 @@ export function identity(home = os.homedir(), who = whoami()) {
 // The five-hour and seven-day windows, read with the account's own OAuth
 // token, which goes into one header and nowhere else.
 export async function usage(home = os.homedir(), fetchFn = globalThis.fetch, url = USAGE_URL) {
+  // A login on a template: its own sign-in's windows are another account's,
+  // and the setup-token cannot read any (HTTP 403, user:inference only).
+  if (syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home)) return { status: 'setup-token', see: 'fabric-ctl <observer> accounts' };
   const creds = readJson(path.join(home, '.claude', '.credentials.json'));
   const tok = creds?.claudeAiOauth?.accessToken;
   if (!tok) return { status: 'no-credentials' };
@@ -54,6 +67,113 @@ export async function usage(home = os.homedir(), fetchFn = globalThis.fetch, url
   try { u = await r.json(); } catch { return { status: 'unreadable' }; }
   const win = w => (w && typeof w === 'object') ? { utilization: w.utilization ?? null, resets_at: w.resets_at ?? null } : null;
   return { status: 'ok', five_hour: win(u.five_hour), seven_day: win(u.seven_day), subscription: creds?.claudeAiOauth?.subscriptionType ?? null };
+}
+
+// THE CLAUDE ACCOUNTS this login observes: one Claude Code config
+// directory per Claude account under accountsDir(), each signed in once
+// with /login and held by this observer alone — a refresh token has one
+// holder, or the first refresh signs the others out. The fleet's working
+// sessions run on each account's one-year setup-token, which is
+// `user:inference` only and so cannot read these windows
+// (docs/claude-accounts.md).
+//
+// The read is the harness's own `/usage`, run headless: no model call
+// (0 turns, $0), and it renews an expired 8-hour sign-in the official way
+// — measured 2026-09-24 on 2.1.281 (docs/live-checks/2026-09-24-claude-
+// accounts.md). Reimplementing the OAuth refresh here was the rejected
+// alternative: it would present Claude Code's client id without being
+// Claude Code. `claude auth status` is not a keep-alive: it starts a
+// refresh, exits, and leaves a lock the next run trips on until the
+// harness calls it stale (60 s).
+export const ACCOUNTS_TIMEOUT_MS = 120000;
+export const ACCOUNT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+// Under the login's fabric state root, the same one runtime/identity.py
+// resolves: AGENT_FABRIC_STATE_DIR when set, else the XDG default.
+export function accountsDir(home = os.homedir(), env = process.env) {
+  const root = env.AGENT_FABRIC_STATE_DIR ? path.resolve(env.AGENT_FABRIC_STATE_DIR) : path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'agent-fabric');
+  return path.join(root, 'accounts');
+}
+// One reader per account across PROCESSES, not only inside the daemon: a
+// person's `fabric-accounts read` beside the keeper would start a second
+// harness on the same config directory, and the loser fails on the
+// refresh lock. O_EXCL on a file naming the holder's pid; a holder that
+// is gone (a killed read) does not keep the account.
+export function takeReadLock(dir, pid = process.pid) {
+  const f = path.join(dir, '.fabric-read.lock');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { fs.writeFileSync(f, `${pid}\n`, { flag: 'wx', mode: 0o600 }); return () => { try { fs.unlinkSync(f); } catch { /* gone */ } }; }
+    catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let holder;
+      try { holder = Number(String(fs.readFileSync(f, 'utf8')).trim()); }
+      catch { continue; }   // released between our attempt and this read: try again
+      let alive = false;
+      try { process.kill(holder, 0); alive = true; } catch (k) { alive = k.code === 'EPERM'; }
+      if (alive && holder !== pid) return null;
+      try { fs.unlinkSync(f); } catch { /* raced */ }
+    }
+  }
+  return null;
+}
+export function accountSlugs(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory() && ACCOUNT_SLUG.test(d.name)).map(d => d.name).sort(); }
+  catch { return []; }
+}
+export function claudeBin(home = os.homedir()) {
+  const own = path.join(home, '.local', 'bin', 'claude');
+  return fs.existsSync(own) ? own : 'claude';
+}
+// The /usage events, reduced to fixed keys. `limits` are the server's
+// meters in its order: session, weekly_all, weekly_scoped (per model).
+export function parseUsageReport(stdout) {
+  let events;
+  try { events = JSON.parse(stdout); } catch { return { status: 'unreadable' }; }
+  if (!Array.isArray(events)) return { status: 'unreadable' };
+  const result = events.find(e => e?.type === 'result');
+  const report = events.find(e => e?.usage_report)?.usage_report;
+  if (result?.is_error) return { status: 'failed', error: String(result.result ?? '').slice(0, 200) };
+  const limits = report?.rate_limits?.limits;
+  if (!Array.isArray(limits)) return { status: 'no-report' };
+  return {
+    status: 'ok',
+    limits: limits.map(l => ({ kind: l?.kind ?? null, group: l?.group ?? null, percent: typeof l?.percent === 'number' ? l.percent : null,
+                               resets_at: l?.resets_at ?? null, model: l?.scope?.model?.display_name ?? null })),
+  };
+}
+// One account's reading. The child gets an environment built from
+// nothing: a token variable inherited from the observer's own session
+// (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, a base URL) would outrank
+// the account's sign-in and report another account's windows.
+export async function readAccount(dir, { home = os.homedir(), exec = execFileP, bin = claudeBin(home), now = () => new Date(), timeoutMs = ACCOUNTS_TIMEOUT_MS } = {}) {
+  const slug = path.basename(dir);
+  const profile = readJson(path.join(dir, '.claude.json'))?.oauthAccount ?? null;
+  const out = { slug, email: profile?.emailAddress ?? null, organization_uuid: profile?.organizationUuid ?? null, read_at: now().toISOString() };
+  if (!fs.existsSync(path.join(dir, '.credentials.json'))) return { ...out, status: 'not-signed-in' };
+  const release = takeReadLock(dir);
+  if (!release) return { ...out, status: 'busy', error: 'another reader holds this account (the daemon, or fabric-accounts read)' };
+  // A fixed working directory: the harness records a project per cwd even
+  // with --no-session-persistence (an empty one, measured), so a fresh
+  // temporary cwd per read would leave one more entry every 4 hours.
+  const cwd = path.join(dir, 'work');
+  try {
+    fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });   // inside the try: a throw here must still release the lock
+    const env = { HOME: home, PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir, LANG: 'C.UTF-8' };
+    const r = await exec(bin, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, env, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    return { ...out, ...parseUsageReport(typeof r === 'string' ? r : r.stdout) };
+  } catch (e) {
+    return { ...out, status: e?.killed ? 'timeout' : 'failed', error: String(e?.message ?? e).split('\n')[0].slice(0, 200) };
+  } finally {
+    release();
+  }
+}
+// Every observed account, one at a time: two harness runs on one config
+// directory race for its refresh lock.
+export async function accounts(home = os.homedir(), { dir = accountsDir(home), ...opts } = {}) {
+  const slugs = accountSlugs(dir);
+  if (!slugs.length) return { status: 'none', dir };
+  const list = [];
+  for (const s of slugs) list.push(await readAccount(path.join(dir, s), { home, ...opts }));
+  return { status: 'ok', accounts: list };
 }
 
 // Which keys the account holds, by name and fingerprint; never a value.
@@ -647,6 +767,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));
     if (name === 'memory') return guard(name, () => memory(ctx.home, { exec: ctx.exec, all: true }));
     if (name === 'host') return guard(name, () => host(ctx.hostOpts));
+    if (name === 'accounts') return guard(name, () => ctx.accountsCached ? ctx.accountsCached() : accounts(ctx.home, ctx.accountsOpts));
     return Promise.resolve();
   }));
   return data;

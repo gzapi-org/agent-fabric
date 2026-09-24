@@ -38,6 +38,8 @@ echo "ORI-EXECCED:$*"
 for v in ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL AGENT_FABRIC_LAUNCH_SESSION_MODEL AGENT_FABRIC_LAUNCH_EFFORT AGENT_FABRIC_LAUNCH_PROFILE AGENT_FABRIC_LAUNCH_AGENT AGENT_FABRIC_LAUNCH_ROLE AGENT_FABRIC_LAUNCH_PROMPT_DIGEST AGENT_FABRIC_LAUNCH_CLAUDE_VERSION CLAUDE_CODE_DISABLE_TERMINAL_TITLE TMPDIR; do
     echo "ORI-ENV:$v=${!v:-}"
 done
+# Presence only, never a value: a template token must not reach the broker.
+echo "ORI-HAS-OAUTH-TOKEN:${CLAUDE_CODE_OAUTH_TOKEN+yes}"
 FAKE
 chmod +x "$SANDBOX/bin/ori"
 }
@@ -528,6 +530,14 @@ grep -q "overridden by --model on the command line: vendor/override2" <<<"$out" 
 mkfabric
 out="$(run -p hi 2>&1)"
 grep -q "ORI-EXECCED:claude --model deepseek/deepseek-v4-pro-0813@preset/deepseek2claude-shim --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md -p hi" <<<"$out" && ok "-p passes through to claude untouched, after the prompt file" || bad "-p swallowed by the launcher" "$out"
+
+echo "launch: a Claude-account template's token never reaches a broker session"
+mkfabric
+out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TEMPLATE-FIXTURE run --version 2>&1)"
+grep -q "^ORI-HAS-OAUTH-TOKEN:$" <<<"$out" && grep -q "dropped CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ok "broker path: the template token is dropped before the session, and that is said" || bad "template token reached the broker" "$(grep -i oauth <<<"$out")"
+! grep -q "sk-ant-oat01-TEMPLATE-FIXTURE" <<<"$out" && ok "…by name, never by value" || bad "token value printed"
+out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TEMPLATE-FIXTURE run --provider anthropic --version 2>&1)"
+! grep -q "dropped CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ok "plain claude keeps it: that is the session it is for" || bad "template token dropped on plain claude" "$out"
 
 echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project

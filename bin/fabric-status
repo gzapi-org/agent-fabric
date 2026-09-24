@@ -74,6 +74,41 @@ pins = {k: os.environ.get(k) for k in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROP
 present = sorted(k for k in os.environ if k.startswith("ANTHROPIC_")
                  or k in ("OPENROUTER_API_KEY", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"))
 credentials = {k: "set" for k in present if k not in pins and k != "ANTHROPIC_BASE_URL"}
+# Which Claude sign-in plain claude uses: a template's setup-token when
+# CLAUDE_CODE_OAUTH_TOKEN is set (it outranks /login), otherwise the login's
+# own sign-in — whose ~/.claude.json keeps naming its account either way,
+# so that file alone would report the wrong account for a switched login.
+def synced_template_token():
+    """The login's own record first — the `export CLAUDE_CODE_OAUTH_TOKEN=`
+    line fabric-secrets sync writes — because the launcher removes the
+    variable from a broker session's environment, and that session must
+    still report the account the login is on (re-review of #33)."""
+    path = os.path.join(os.path.expanduser("~"), ".config", "agent-fabric", "secrets.env")
+    try:
+        for line in open(path, encoding="utf-8"):
+            if line.startswith("export CLAUDE_CODE_OAUTH_TOKEN="):
+                v = line.split("=", 1)[1].strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+                    v = v[1:-1]
+                return v or None
+    except OSError:
+        pass
+    return None
+
+
+def claude_sign_in():
+    tok = synced_template_token() or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    if tok:
+        import hashlib
+        return (f"setup-token {hashlib.sha256(tok.encode()).hexdigest()[:12]} (CLAUDE_CODE_OAUTH_TOKEN; "
+                "bin/fabric-accounts templates names its account)")
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    prof = os.path.join(cfg, ".claude.json") if cfg else os.path.join(os.path.expanduser("~"), ".claude.json")
+    try:
+        email = (json.load(open(prof, encoding="utf-8")).get("oauthAccount") or {}).get("emailAddress")
+    except (OSError, ValueError):
+        email = None
+    return f"own /login ({email})" if email else "own /login (none recorded)"
 
 # --- how the classes resolve on that provider --------------------------
 # The merge includes this login's own layer (bin/fabric-model writes it);
@@ -227,7 +262,8 @@ report = {
             "session_model": stamp or "harness default (not visible from the environment; /status shows it)",
             "launch_profile": os.environ.get("AGENT_FABRIC_LAUNCH_PROFILE"),
             "pins": {k: v for k, v in pins.items() if v} or "none (harness defaults)",
-            "credentials": credentials or "none visible in the environment"},
+            "credentials": credentials or "none visible in the environment",
+            "claude_sign_in": claude_sign_in()},
     "capabilities": classes,
     "routing_check": "clean" if not checks else checks,
     "host_tools": {"moveto": moveto},
@@ -263,6 +299,7 @@ if report.get("session_effort") and (report["session_effort"].get("asked")
 if report['api']['launch_profile']: print(f"launch profile {report['api']['launch_profile']}")
 print(f"pins         {report['api']['pins'] if isinstance(report['api']['pins'], str) else ', '.join(f'{k}={v}' for k, v in report['api']['pins'].items())}")
 print(f"credentials  {report['api']['credentials'] if isinstance(report['api']['credentials'], str) else ', '.join(f'{k}: set' for k in report['api']['credentials'])}")
+print(f"claude sign-in {report['api']['claude_sign_in']}" + ("" if provider == "anthropic" and not base else f"  (plain claude's; this session goes to {path} and uses neither)"))
 print()
 print(f"capabilities on {provider} (bin/fabric-model list for every choice, per provider, with its source):")
 for k, v in classes.items(): print(f"  {k:12} {v}")

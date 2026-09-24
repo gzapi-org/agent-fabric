@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# bin/fabric-accounts — the Claude accounts this login observes for their
+# usage windows (docs/claude-accounts.md). Run on the coordinator's login.
+#
+#   fabric-accounts login <account>   sign one Claude account in, once — a real terminal
+#   fabric-accounts list              signed in, email, sign-in expiry; never a token
+#   fabric-accounts read              every account's windows now, through the harness's /usage
+#
+# The control daemon keeps these sign-ins alive and answers
+# `fabric-ctl <login> accounts`; this is the setup and the local look.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AGENT_FABRIC_ROOT="${AGENT_FABRIC_ROOT:-$ROOT}"
+exec node "$ROOT/runtime/control/accounts.mjs" "$@"

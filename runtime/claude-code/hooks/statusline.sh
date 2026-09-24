@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code status line: model · agent@host · pull request · working copy · git branch.
+# Claude Code status line: [harness version · model · effort] · agent@host · pull request · working copy · git branch.
 #
 # The AGENT is the Linux login, from agent-fabric's canonical resolver
 # (bin/fabric-whoami); the directory is shown as the working copy the
@@ -13,6 +13,22 @@ FABRIC_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && 
 dir=$(printf '%s' "$input" | jq -r '.workspace.current_dir // empty')
 [ -z "$dir" ] && dir="$PWD"
 model=$(printf '%s' "$input" | jq -r '.model.display_name // "Claude"')
+# THE HARNESS BRACKET (owner, 2026-09-24): the Claude Code version (the
+# bare number — the owner asked for no product name before it), the
+# model and the session's live effort level, in that order — the three
+# things that decide how this session thinks, readable at a glance and
+# comparable across sessions (a session that reads "high" beside another's
+# "medium" is a routing question; routing/effort.json says what each class
+# asks for). Both are read from the session JSON, never from the
+# environment: `version` is the harness's own; `effort` is optional in
+# that JSON — present only when the model takes an effort level — so a
+# model that expresses none shows NO level rather than an invented one,
+# and an older harness that sends no version shows the model alone.
+version=$(printf '%s' "$input" | jq -r '.version // empty')
+effort=$(printf '%s' "$input" | jq -r '.effort.level // empty')
+harness="$model"
+[ -z "$version" ] || harness="$version · $harness"
+[ -z "$effort" ] || harness="$harness · $effort"
 agent=$("$FABRIC_ROOT/bin/fabric-whoami" 2>/dev/null || id -un)
 host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "?")
 wc=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)
@@ -80,7 +96,7 @@ if [ -n "$wc" ] && [ -n "${branch:-}" ]; then
     esac
 fi
 
-printf '[%s] 👤 %s@%s' "$model" "$agent" "$host"
+printf '[%s] 👤 %s@%s' "$harness" "$agent" "$host"
 [ -z "$pr" ] || printf ' %s' "$pr"
 printf ' 📁 %s' "${wc:-$(basename "$dir")}"
 [ -z "$ref" ] || printf ' %s' "$ref"

@@ -27,9 +27,11 @@ printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operat
 # unscrubbed it reached the fixture and every case saw a spurious effort
 # line — green on CI, red on every holder, the same shape as the locale
 # leak this branch already fixed. A case that wants one sets it explicitly.
+# CLAUDE_CODE_OAUTH_TOKEN and CLAUDE_CONFIG_DIR likewise: a login moved to
+# an account template carries the first, and the sign-in line would differ.
 status() { env -u AGENT_FABRIC_LAUNCH_ROLE -u AGENT_FABRIC_LAUNCH_PROMPT_DIGEST -u AGENT_FABRIC_LAUNCH_SESSION_MODEL \
                -u AGENT_FABRIC_LAUNCH_PROVIDER -u AGENT_FABRIC_LAUNCH_PROFILE -u ANTHROPIC_BASE_URL \
-               -u CLAUDE_EFFORT -u AGENT_FABRIC_LAUNCH_EFFORT \
+               -u CLAUDE_EFFORT -u AGENT_FABRIC_LAUNCH_EFFORT -u CLAUDE_CODE_OAUTH_TOKEN -u CLAUDE_CONFIG_DIR \
                AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_HOSTS_REGISTRY="$PLACED" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
 MODE=()
 
@@ -129,6 +131,25 @@ out="$(cd "$WC" && HOME="$SANDBOX/home" status 2>&1)"
 grep -q "written since ever (no drain report)" <<<"$out" && ok "no report: counted since ever, said so" || bad "no-report case" "$out"
 out="$(cd "$SANDBOX" && status 2>&1)"
 ! grep -q "^memory " <<<"$out" && ok "outside a working copy: no memory line" || bad "memory line without a working copy" "$out"
+
+echo "fabric-status: which Claude sign-in plain claude uses"
+H="$SANDBOX/signin-home"; mkdir -p "$H"
+printf '{"oauthAccount":{"emailAddress":"someone@example.org"}}\n' > "$H/.claude.json"
+out="$(HOME="$H" status 2>&1)"
+grep -q "^claude sign-in own /login (someone@example.org)$" <<<"$out" && ok "no template token: the login's own sign-in, by its email" || bad "own sign-in line" "$(grep -i "sign-in" <<<"$out")"
+TPL='sk-ant-oat01-TEMPLATE-FIXTURE'
+FP="$(printf %s "$TPL" | sha256sum | cut -c1-12)"
+out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
+grep -q "^claude sign-in setup-token $FP (CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
+  && ok "a template token outranks the own sign-in and is named by fingerprint, not by the old account" || bad "template sign-in line" "$(grep -i "sign-in" <<<"$out")"
+! grep -q "$TPL" <<<"$out" && ok "the token itself is never printed" || bad "token printed"
+# The shape that occurs: the launcher removed the variable from a broker
+# session, so only the login's synced record says which account it is on.
+mkdir -p "$H/.config/agent-fabric"; printf "export CLAUDE_CODE_OAUTH_TOKEN='%s'\n" "$TPL" > "$H/.config/agent-fabric/secrets.env"
+out="$(HOME="$H" status ANTHROPIC_BASE_URL=https://openrouter.ai/api 2>&1)"
+grep -q "^claude sign-in setup-token $FP .*(plain claude's; this session goes to broker (ori) and uses neither)$" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
+  && ok "a broker session on a template login names the template from the synced record, not the old account" || bad "broker sign-in line" "$(grep -i "sign-in" <<<"$out")"
+rm -f "$H/.config/agent-fabric/secrets.env"
 
 echo
 if [[ $FAIL -eq 0 ]]; then echo "test_fabric-status: OK — $PASS assertion(s) passed."; else echo "test_fabric-status: FAILED — $FAIL assertion(s) failed."; exit 1; fi

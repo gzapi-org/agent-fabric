@@ -136,8 +136,16 @@ cache read 0.1×, output 5×, a proxy for what the meter weighs and not
 its figure; the usage windows give one number per Claude account and
 this is the only place a login's part of it can be read; rides with
 `identity` so the coordinator can group by account; counts only, no
-text; not part of `status`), `status` (all but `script`, `tokens` and
-`memory`). A section that
+text; not part of `status`), `accounts` (the Claude accounts this login
+observes, one Claude Code config directory each under its fabric state:
+the harness's own headless `/usage`, which renews the observer's 8-hour
+sign-in and makes no model call, run every 4 hours by the daemon and on
+request, cached 5 minutes; one row per Claude account in `fabric-ctl`,
+only the observing login has any; `docs/claude-accounts.md`), `status`
+(all but `script`, `tokens`, `memory` and `accounts`). A login running on a
+template's setup-token reports it by fingerprint in `identity`, and its
+`usage` points at the observer: its own `~/.claude.json` names the
+account it last signed into, not the one in use. A section that
 cannot be read says so inline (`{"status":"no-credentials"}`), so a reply
 always arrives and its gaps are named. The relay's `sender` field is
 client-supplied and carries the same address, for a human reading the
@@ -178,7 +186,8 @@ second until every placed address has answered or the timeout is spent
 (20 s; 5 s for ping); exit 1 when any address stayed silent. Stateless:
 a run leaves its request and the replies on the channel, nothing
 anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
-whose daemons are down. A run by a login that is not a host operator is
+whose daemons are down; a login on a Claude-account template reads there
+as `setup-token`, for the same reason its `usage` op points at the observer. A run by a login that is not a host operator is
 refused before anything is posted: no daemon would answer it.
 
 `bin/fabric-ctl <login|all> memory --out <dir>` is the drain (timeout

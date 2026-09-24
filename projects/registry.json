@@ -104,6 +104,19 @@
       "integration": "projects/interweave/integration",
       "license": "Apache-2.0",
       "note": "A Rust workspace on libp2p: one PeerId, many EndpointIds, signed GossipSub broadcast, a directed protocol, replaceable discovery, Kademlia, AutoNAT v2 / Circuit Relay v2 / DCUtR. Worked by the owner's own login until 2026-09-17, when the CEO made it a managed project with one new role, p2p-network-dev (the code), architect-cto holding its decision records and stage gates, devex-tooling its CI. Its merge queue stays on (the owner, 2026-09-17)."
+    },
+    "agent-fabric-gateway": {
+      "title": "agent-fabric-gateway — the Rust data plane the fabric's sessions reach their models through",
+      "remotes": [
+        "git@github.com:gzapi-org/agent-fabric-gateway.git",
+        "https://github.com/gzapi-org/agent-fabric-gateway"
+      ],
+      "default_branch": "main",
+      "taxonomy": ".agent-fabric/taxonomy.json",
+      "memory": ".agent-fabric/memory",
+      "integration": "projects/agent-fabric-gateway/integration",
+      "license": "Apache-2.0",
+      "note": "The fabric is the control plane (identity, roles, capability policy, model selection); the gateway accepts harness-native API traffic, executes the route it is given and adapts only where it must (its ADR-001, ADR-014). Designed by the owner's own sessions until 2026-09-24, when the owner put the whole repository under fabric-coordinator: one owner for the control/data boundary, its decision records, its code and its CI."
     }
   }
 }

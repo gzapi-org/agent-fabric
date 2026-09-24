@@ -139,12 +139,15 @@ if [[ "$PHASE" == prepare ]]; then
     must $SUDO -n -u "$LOGIN" mkdir -p "$HOME_DIR"/{projects,.ssh,.claude,.config/gh,.local/bin,.local/share/claude/versions}
     must $SUDO -n -u "$LOGIN" chmod 700 "$HOME_DIR/.ssh"
     must $SUDO -n chown "$LOGIN:$GROUP" "$HOME_DIR/.local" "$HOME_DIR/.local/bin" "$HOME_DIR/.local/share"
-    # claude: the vendor's installer, as the account, on the vendor's latest —
-    # resolved against the release pointer so a re-run upgrades an account
-    # that fell behind — unless --claude pins a version or stable. Its layout
-    # is the one this script and the runbook assume:
-    # ~/.local/bin/claude -> ~/.local/share/claude/versions/<v>.
-    want="${CLAUDE_TARGET:-latest}"
+    # claude: the vendor's installer, as the account, on the version the
+    # fleet pins (runtime/claude-code/harness.json — what `fabric-ctl …
+    # upgrade claude` brings every account to), so a new account starts
+    # where the others are; --claude overrides it (a version, stable or
+    # latest), and with no pin readable it is the vendor's latest, resolved
+    # against the release pointer. Its layout is the one this script and the
+    # runbook assume: ~/.local/bin/claude -> ~/.local/share/claude/versions/<v>.
+    pinned="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("claude") or "")' "$ROOT/runtime/claude-code/harness.json" 2>/dev/null || true)"
+    want="${CLAUDE_TARGET:-${pinned:-latest}}"
     resolved="$want"
     if [[ "$want" == latest ]]; then
         resolved="$(curl -fsSL -m 20 https://downloads.claude.ai/claude-code-releases/latest 2>/dev/null | tr -d '[:space:]')"

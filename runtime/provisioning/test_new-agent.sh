@@ -17,7 +17,7 @@ SANDBOX="$(mktemp -d)"; trap '[[ -n "${KEEP_SANDBOX:-}" ]] || rm -rf "$SANDBOX"'
 FAB="$SANDBOX/fabric"; mkdir -p "$FAB/runtime/provisioning/secrets" "$FAB/identities" "$FAB/projects" "$SANDBOX/home/.local/bin"
 cp -r "$ROOT/identities/roles" "$FAB/identities/"; cp "$ROOT/projects/registry.json" "$FAB/projects/"
 cp "$UNDER_TEST" "$HERE/new-agent-worker.sh" "$HERE/persist-accounts.sh" "$ROOT/runtime/provisioning/github-host-keys" "$FAB/runtime/provisioning/"
-cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"; cp -r "$ROOT/runtime/provisioning/platform" "$FAB/runtime/provisioning/"
+cp -r "$ROOT/runtime/hostexec" "$FAB/runtime/"; cp -r "$ROOT/runtime/provisioning/platform" "$FAB/runtime/provisioning/"; mkdir -p "$FAB/runtime/claude-code"; cp "$ROOT/runtime/claude-code/harness.json" "$FAB/runtime/claude-code/"
 printf '#!/bin/sh\necho fake\n' > "$SANDBOX/home/.local/bin/claude"; chmod +x "$SANDBOX/home/.local/bin/claude"
 # The host registry the orchestrator reads: this host (direct) and a far
 # one reached over a fake ssh that runs the same worker here.
@@ -58,6 +58,8 @@ grep -q "^new-agent: 0\. debian: this host lacks .*gh.*: sudo apt-get install" <
 grep -q "^new-agent: host $LOCAL (this host)" <<<"$out" && grep -q "placement: add \"zz-fixture-login\"" <<<"$out" && ok "the host is named, and a missing placement is asked for" || bad "host line" "$out"
 out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok "--claude takes stable, latest or a full version" || bad "bad --claude accepted" "$out"
 out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"
+PIN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["claude"])' "$ROOT/runtime/claude-code/harness.json")"
+out="$(run zz-fixture-login backend-dev --dry-run)"; grep -q "install.sh | bash -s -- $PIN\$" <<<"$out" && ok "no --claude: the fleet's pinned version ($PIN) reaches the installer" || bad "default is not the pin" "$(grep install.sh <<<"$out")"
 
 # ---- the real sequence, against fakes, with a failure injected at each must ----
 # sudo drops `-n -u X -H` and runs the rest as this user; useradd makes a
@@ -133,7 +135,7 @@ echo "curl \$*" >> "$CALLS"
 grep -qsxF curl "$FAULT" && exit 22
 case "\$*" in
   *claude-code-releases/latest*) echo "9.9.9" ;;
-  *claude.ai/install.sh*) printf 'mkdir -p ~/.local/share/claude/versions ~/.local/bin; printf "#!/bin/sh\\\\necho 9.9.9-fake\\\\n" > ~/.local/share/claude/versions/9.9.9; chmod +x ~/.local/share/claude/versions/9.9.9; ln -sf ~/.local/share/claude/versions/9.9.9 ~/.local/bin/claude\\n' ;;
+  *claude.ai/install.sh*) printf 'v="\${1:-9.9.9}"; mkdir -p ~/.local/share/claude/versions ~/.local/bin; printf "#!/bin/sh\\\\necho %%s-fake\\\\n" "\$v" > ~/.local/share/claude/versions/\$v; chmod +x ~/.local/share/claude/versions/\$v; ln -sf ~/.local/share/claude/versions/\$v ~/.local/bin/claude\\n' ;;
   *ori/install.sh*) printf 'mkdir -p ~/.local/bin; printf "#!/bin/sh\\\\necho ori-0.1-fake\\\\n" > ~/.local/bin/ori; chmod +x ~/.local/bin/ori\\n' ;;
   *) exit 22 ;;
 esac
@@ -213,7 +215,7 @@ else
   [[ ! -s "$SSHLOG" ]] && ok "local: ssh never called" || bad "ssh called on the local backend" "$(cat "$SSHLOG")"
 fi
 out="$(seq_run seq-login backend-dev --project demo)"
-grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude 9.9.9 present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" && ! grep -q "^usermod --add-subuids" "$CALLS" && grep -q "subuid/subgid: 524288:65536" <<<"$out" \
+grep -q "1. account seq-login exists" <<<"$out" && grep -q "2. claude $PIN present" <<<"$out" && grep -q "OpenRouter key: present" <<<"$out" && ! grep -q "^useradd" "$CALLS" && ! grep -q "^usermod --add-subuids" "$CALLS" && grep -q "subuid/subgid: 524288:65536" <<<"$out" \
   && ok "a second run skips every step already true" || bad "not idempotent" "$out"
 
 for fault in useradd "git" "enroll seq-login" "enroll fill-from" curl; do

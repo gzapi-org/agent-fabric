@@ -580,6 +580,44 @@ out="$(runa --version 2>&1)"; rc=$?
 grep -q "^goodbye .*--note session ended by signal 15" "$ALOG" && ok "…and the GOODBYE names the signal" || bad "goodbye note" "$(cat "$ALOG")"
 write_fake_ori
 
+echo "launch: a session stopped for an upgrade comes back, resumed, on the new version"
+# The fake session plays the control agent's part: on its first run it
+# writes the restart marker as upgrade.mjs does and ends as SIGTERM leaves
+# it (143); on the second it records its arguments. The binding names the
+# session id the restart must resume.
+printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","project":"gzapp","session":"sess-123","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
+upgrade_session() {  # upgrade_session <marker status> <requested_at>
+cat > "$SANDBOX/bin/ori" <<FAKE
+#!/usr/bin/env bash
+if [[ "\${1:-}" == auth ]]; then echo '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment","location":"OPENROUTER_API_KEY"}}}'; exit 0; fi
+n="\$(cat "$SANDBOX/runs" 2>/dev/null || echo 0)"; echo \$((n+1)) > "$SANDBOX/runs"
+if [[ "\$n" == 0 ]]; then
+  printf '{"request_id":"r1","requested_at":"%s","piece":"claude","from":"2.1.280","to":"2.1.281","installed":"2.1.281","status":"%s","reason":"network"}\\n' "$2" "$1" > "$STATE/agents/$LOGIN/restart.json"
+  echo "RUN1:\$*"; exit 143
+fi
+echo "RUN2:\$*"; exit 0
+FAKE
+chmod +x "$SANDBOX/bin/ori"; rm -f "$SANDBOX/runs" "$ALOG"
+}
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 1; NOW2="$(date -u -d '+1 second' +%Y-%m-%dT%H:%M:%SZ)"
+upgrade_session done "$NOW2"
+out="$(runa --resume old-id --model x 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "claude upgraded 2.1.280 → 2.1.281; resuming the session on it" <<<"$out" && ok "the upgrade is said, and the launcher does not exit with the stopped session" || bad "no restart (rc=$rc)" "$out"
+grep -q "^RUN2:.*--model x" <<<"$out" && grep -q "^RUN2:.*--resume sess-123" <<<"$out" && ! grep -q "^RUN2:.*old-id" <<<"$out" \
+  && ok "…resumed by the stopped session's id; the caller's own --resume replaced, the rest passed on" || bad "resume args" "$(grep RUN2 <<<"$out")"
+[[ ! -e "$STATE/agents/$LOGIN/restart.json" ]] && ok "…and the marker is consumed" || bad "marker left behind"
+[[ "$(grep -c '^hello' "$ALOG")" == 2 && "$(grep -c '^goodbye' "$ALOG")" == 2 ]] && ok "…a GOODBYE for the stopped session, a HELLO for the resumed one" || bad "announce" "$(cat "$ALOG")"
+upgrade_session failed "$(date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+out="$(runa 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q "FAILED (network); resuming the session on what is installed" <<<"$out" && grep -q "^RUN2:.*--resume sess-123" <<<"$out" && ok "a failed upgrade still brings the session back, and says why" || bad "failed upgrade" "$out"
+upgrade_session pending "$(date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+out="$(AGENT_FABRIC_RESTART_WAIT_S=1 runa 2>&1)"; rc=$?
+grep -q "waiting for it" <<<"$out" && grep -q "did not finish within 1 s; resuming" <<<"$out" && grep -q "^RUN2:" <<<"$out" && ok "an upgrade that never finishes: the wait is bounded, the session comes back" || bad "pending wait" "$out"
+upgrade_session done "2026-01-01T00:00:00Z"
+out="$(runa 2>&1)"; rc=$?
+[[ $rc -eq 143 ]] && ! grep -q "^RUN2:" <<<"$out" && [[ ! -e "$STATE/agents/$LOGIN/restart.json" ]] && ok "a marker older than the launch is another session's: removed, not obeyed" || bad "stale marker obeyed (rc=$rc)" "$out"
+write_fake_ori
+
 echo "launch: a fabric checkout behind origin/main is pulled and the launcher re-executes on it"
 # The fixture fabric becomes a git checkout with a bare origin one commit ahead.
 mkfabric

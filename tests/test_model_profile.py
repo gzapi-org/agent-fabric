@@ -86,7 +86,7 @@ def test_unset_removes_and_prunes(f: Fixture) -> None:
     p = f.run("unset", "--provider", "anthropic", "code-high")
     assert p.returncode == 0, p.stderr
     assert f.read() == {}, f.read()
-    assert "claude-opus-5 (from capabilities.providers.anthropic)" in p.stdout, p.stdout
+    assert "claude-opus-5-5 (from capabilities.providers.anthropic)" in p.stdout, p.stdout
 
 
 def test_vocabulary_is_the_class_and_the_providers_model(f: Fixture) -> None:
@@ -172,8 +172,8 @@ def test_seed_copies_the_merged_defaults_as_pins(f: Fixture) -> None:
     # model happens to serve. code-low is absent by design: haiku
     # expresses no effort, and a seeded level there would be a decision
     # the model cannot carry out.
-    assert got == {"session": "claude-opus-5", "capabilities": {
-        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5",
+    assert got == {"session": "claude-opus-5-5", "capabilities": {
+        "code-low": "claude-haiku-4-5-20251001", "code-medium": "claude-sonnet-5", "code-high": "claude-opus-5-5",
         "code-plan": "claude-fable-5-1", "code-review": "claude-opus-5[1m]"},
         "effort": {"code-medium": "medium", "code-high": "high",
                    "code-plan": "xhigh", "code-review": "xhigh"}}, got

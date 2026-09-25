@@ -22,7 +22,10 @@
 // A `since_id_not_found` (the relay's history was cleared) re-primes.
 //
 // THE FENCE, v1. A request is answered only when its `from` is a host
-// operator's address as runtime/hosts/registry.json places it — read
+// operator's address as runtime/hosts/registry.json places it — except a
+// PUBLIC op (ops.mjs PUBLIC_OPS: `presence`), answered for any placed
+// <host>/<login>, since every sender needs it and it names nothing a relay
+// reader could not infer — read
 // again for every record, so a pull that changes the registry counts at
 // once, and the identity section asks whoami() per request, so a rebind
 // shows without a restart (review, 2026-09-17) — (a claim,
@@ -49,7 +52,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { api, syncedToken, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
-import { OPS, collect, usage, accounts, accountSlugs, accountsDir } from './ops.mjs';
+import { OPS, PUBLIC_OPS, collect, usage, accounts, accountSlugs, accountsDir } from './ops.mjs';
 import { ACTION_OPS, ACTION_TTL_MAX_S, publicKeyFrom, verifyRequest } from './sign.mjs';
 import { upgrade, stateDir } from './upgrade.mjs';
 import { secretsSync } from './secrets.mjs';
@@ -106,6 +109,15 @@ export function operatorAddresses(registry = process.env.AGENT_FABRIC_HOSTS_REGI
   } catch { return new Set(); }
 }
 
+// Every placed account: <host>/<login> for each placement — who may ask a
+// public op (ops.mjs PUBLIC_OPS).
+export function accountAddresses(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
+  try {
+    const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    return new Set(Object.entries(d.placement ?? {}).map(([login, host]) => `${host}/${login}`));
+  } catch { return new Set(); }
+}
+
 export function newId() {
   // UUIDv7: time-ordered, unique by construction; the same shape gzmsg new-id mints.
   const t = BigInt(Date.now());
@@ -140,7 +152,7 @@ export function actionLedger(file = path.join(stateDir(), 'actions-seen.json')) 
 
 // Is this record a request this agent answers? The reason when not, for
 // the log; never an error, never a reply.
-export function accept(rec, { me, operators, keys = new Map(), ttl_s, seen, now = Date.now(), actionFloor = () => 0 }) {
+export function accept(rec, { me, operators, accounts = new Set(), keys = new Map(), ttl_s, seen, now = Date.now(), actionFloor = () => 0 }) {
   let r;
   try { r = JSON.parse(rec.content); } catch { return { ok: false, why: 'not json' }; }
   if (!r || r.kind !== 'request') return { ok: false, why: 'not a request' };
@@ -150,7 +162,8 @@ export function accept(rec, { me, operators, keys = new Map(), ttl_s, seen, now 
   const to = Array.isArray(r.to) ? r.to : [r.to];
   if (!to.includes('*') && !to.includes(me.address)) return { ok: false, why: 'not for me' };
   if (!OPS.includes(r.op)) return { ok: false, why: `op ${String(r.op).slice(0, 20)}` };
-  if (typeof r.from !== 'string' || !operators.has(r.from)) return { ok: false, why: `from ${String(r.from).slice(0, 40)} is not an operator` };
+  const asker = typeof r.from === 'string' && (operators.has(r.from) || (PUBLIC_OPS.includes(r.op) && accounts.has(r.from)));
+  if (!asker) return { ok: false, why: `from ${String(r.from).slice(0, 40)} is not an operator${PUBLIC_OPS.includes(r.op) ? ' or a placed account' : ''}` };
   const action = ACTION_OPS.includes(r.op);
   // An action is ordered, not asked: only a signature by the operator's
   // own key (runtime/control/sign.mjs) proves the operator sent it.
@@ -263,7 +276,7 @@ export async function main(argv = process.argv.slice(2)) {
       const rows = page.messages ?? [];
       for (const rec of rows) {
         last = rec.id;
-        const a = accept(rec, { me, operators: operatorAddresses(), keys: operatorKeys(), ttl_s: cfg.ttl_s, seen, actionFloor: ledger.floor });
+        const a = accept(rec, { me, operators: operatorAddresses(), accounts: accountAddresses(), keys: operatorKeys(), ttl_s: cfg.ttl_s, seen, actionFloor: ledger.floor });
         if (!a.ok) { if (!QUIET.has(a.why)) console.error(`agentd: ignored a record ${JSON.stringify(a.why)}`); continue; }
         remember(seen, a.request.id);
         // An action can take minutes (a session to stop, an install): run

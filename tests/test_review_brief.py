@@ -268,6 +268,10 @@ def test_the_parser_refuses_what_it_cannot_keep(tmp: str) -> None:
                 "requirements:\n  - No #pragma, [SuppressMessage] or .editorconfig change is introduced.\n  - kept # dropped\n")
     assert doc["objective"] == "onto PR #934 (which adds AnalysisMode=All and the rule that findings are never silenced)", doc
     assert doc["requirements"] == ["No #pragma, [SuppressMessage] or .editorconfig change is introduced.", "kept"], doc
+    # 8: a CRLF request: a CR after a free-standing # is the line's end (re-review of #37)
+    doc = parse("objective: keep PR #\r\nrange: a..b\r\nrequirements:\r\n  - PR #934\r\n")
+    assert doc["objective"] == "keep PR" and doc["range"] == "a..b", doc
+    assert doc["requirements"] == ["PR #934"], doc
     # 6: the front door: no argument is a usage error, --help is not
     r = subprocess.run([BIN], capture_output=True, text=True)
     assert r.returncode == 2 and "numeric argument" not in r.stderr and "fabric-review brief" in r.stderr, r.stderr

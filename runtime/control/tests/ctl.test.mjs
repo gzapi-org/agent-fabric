@@ -318,6 +318,8 @@ test('upgrade: the word after it is the piece, --version is digits, the wait is 
   assert.match(t[1], /^db-admin\s+upgraded\s+2\.1\.280 → 2\.1\.281\s+restarting$/);
   assert.match(t[2], /^web-dev-01\s+failed\s+2\.1\.280 → 2\.1\.281\s+none\s+claude install 2\.1\.281: network$/);
   assert.match(t[3], /^user\s+no answer$/);
+  const busy = table('upgrade', rows([expected[0]], [{ kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { status: 'busy', note: 'an upgrade is already running on this account' } } }])).split('\n');
+  assert.match(busy[1], /^db-admin\s+busy\s.*an upgrade is already running on this account$/, 'a busy row shows its note');
   const bare = table('upgrade', rows([expected[0]], [{ kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { from: '2.1.280', to: '2.1.281' } } }])).split('\n');
   assert.match(bare[1], /^db-admin\s+no status\s+2\.1\.280 → 2\.1\.281/, 'a reply with no status says so, never "undefined"');
 });
@@ -407,5 +409,32 @@ test('fabric-ctl upgrade exits 1 when any account failed, 0 when every answer is
     const long = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'current' }, ['--timeout', '3600']);
     assert.equal(long.status, 0, long.out);
     assert.equal(lastTtl, ACTION_TTL_MAX_S, 'a long wait for replies does not stretch the signed action\'s lifetime');
+  } finally { r.close(); }
+});
+
+test('presence: one row per account — running since when, as what; none; a failed read says unknown', () => {
+  const expected = [{ login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }, { login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'edge-hosting', host: 'h', address: 'h/edge-hosting' }, { login: 'user', host: 'h', address: 'h/user' }];
+  const reply = (from, presence) => ({ kind: 'reply', from, op: 'presence', data: { presence } });
+  const t = table('presence', rows(expected, [
+    reply('h/web-dev-01', { status: 'ok', online: true, sessions: 2, since: '2026-09-25T09:57:22.000Z', role: 'web-dev', project: 'gzapp' }),
+    reply('h/db-admin', { status: 'ok', online: false, sessions: 0, since: null, role: 'db-admin', project: 'gzapp' }),
+    reply('h/edge-hosting', { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' })])).split('\n');
+  assert.match(t[1], /^web-dev-01\s+running ×2\s+2026-09-25 09:57:22\s+web-dev\s+gzapp$/);
+  assert.match(t[2], /^db-admin\s+none\s+-\s+db-admin\s+gzapp$/);
+  assert.match(t[3], /^edge-hosting\s+unknown\s+pgrep: spawn pgrep ENOENT$/);
+  assert.match(t[4], /^user\s+no answer$/);
+});
+
+test('a non-operator may ask presence, and nothing else: presence is posted, status is refused before anything is sent', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile('someone-else');   // this login is not the host's operator
+    const asked = await run(r.url(), reg, ['db-admin', 'presence', '--timeout', '1']);
+    const reqs = r.rows.map(x => JSON.parse(x.content)).filter(x => x.kind === 'request');
+    assert.deepEqual(reqs.map(x => [x.op, x.to]), [['presence', [`${H}/db-admin`]]], asked.err);
+    const n = r.rows.length;
+    const refused = await run(r.url(), reg, ['db-admin', 'status', '--timeout', '1']);
+    assert.equal(refused.status, 2); assert.match(refused.err, /not a host operator/);
+    assert.equal(r.rows.length, n, 'nothing posted for an op only an operator may ask');
   } finally { r.close(); }
 });

@@ -4,6 +4,7 @@
 //   node communication/gzcoord/scripts/send.mjs <file>        the message, as written
 //   node communication/gzcoord/scripts/send.mjs -            …from stdin
 //   node communication/gzcoord/scripts/send.mjs <file> --dry-run   validate, resolve, send nothing
+//   node communication/gzcoord/scripts/send.mjs <file> --force     send even to an addressee with no session
 //
 // The other half of inbox.mjs, resolved the same way: who this session is
 // (runtime/identity.py — the login, never a directory), which project's
@@ -15,10 +16,14 @@
 // sent — and refused when its FROM is not this session's own address:
 // the sender is the login, and a message claiming another one would be
 // misattributed on every recipient's cursor. Prints the relay's sequence
-// number and the MESSAGE-ID; nothing else goes to stdout.
+// number and the MESSAGE-ID; nothing else goes to stdout. Before posting
+// a TO or TO-ROLE message it asks the control plane whether the addressee
+// has a session (runtime/control/presence.mjs) and names each one that
+// has none; --force sends anyway.
 //
 // Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
-// FROM is not this session; 3 no token or relay unreachable.
+// FROM is not this session; 3 no token or relay unreachable; 4 an
+// addressee has no session, did not answer, or is not placed (--force).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
+import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
+import { accountAddresses, operatorAddresses } from '../../../runtime/control/agentd.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -55,6 +62,7 @@ export async function main(argv = process.argv.slice(2)) {
   const who = whoami();
   const t = printer(dictionary(who));
   const dry = argv.includes('--dry-run');
+  const force = argv.includes('--force');
   const file = argv.find(a => !a.startsWith('--'));
   if (!file) { console.error(t('send.usage')); return 1; }
   let raw;
@@ -63,9 +71,9 @@ export async function main(argv = process.argv.slice(2)) {
   const text = normalize(raw);
 
   const root = inboxRoot(who);
-  const cfg = integrationConfig(who.project);
+  const cfg = integrationConfig(who.project, process.env, t);
   if (!cfg.configured) { console.error(t('send.not-configured', { reason: cfg.reason })); return 3; }
-  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(t('send.error-not-sent', { detail: e.message })); return 2; }
+  try { assertNotControlChannel(cfg.channel, t); } catch (e) { console.error(t('send.error-not-sent', { detail: e.message })); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   const taxPath = findTaxonomy(root);
@@ -118,9 +126,39 @@ export async function main(argv = process.argv.slice(2)) {
     at: fb.at || t('send.fallback-unknown-time'),
     topic: fb.topic || t('send.fallback-unknown-topic'),
     topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
+  // A dry run posts nothing, not even a presence request on the control
+  // channel (review of #38): it validates and resolves, and stops here.
   if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
-
   let tok = token(root, cfg);
+  // Is anyone there? A message to a login with no session waits in the
+  // relay until one starts, and a TO-ROLE with no running holder reaches
+  // nobody now. The control plane answers from the process table
+  // (runtime/control/presence.mjs); the sender decides — --force sends
+  // anyway (the owner, 2026-09-25). A broadcast is not checked.
+  if (tok) {
+    let pres;
+    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...new Set([...accountAddresses(), ...operatorAddresses()])] }); }
+    catch (e) {
+      // A refused token is the post's to handle: it re-reads the synced
+      // token and says "refused" if that fails too (review of #38). Here
+      // it would only have blocked the send with the wrong reason.
+      pres = (e?.status === 401 || e?.status === 403) ? { checked: false }
+        : { checked: true, problems: [{ kind: 'unavailable', detail: String(e?.message ?? e).split('\n')[0].slice(0, 160) }] };
+    }
+    for (const p of pres.problems ?? []) {
+      if (p.kind === 'offline') console.error(t('send.presence-offline', { address: p.address }));
+      else if (p.kind === 'silent') console.error(t('send.presence-silent', { address: p.address, seconds: PRESENCE_WAIT_MS / 1000 }));
+      else if (p.kind === 'not-placed') console.error(t('send.presence-not-placed', { address: p.address }));
+      else if (p.kind === 'no-holder') {
+        console.error(p.holders.length ? t('send.presence-no-holder', { role: p.role, holders: p.holders.join(', ') }) : t('send.presence-no-account', { role: p.role }));
+        if (p.silent.length) console.error(t('send.presence-some-silent', { addresses: p.silent.join(', ') }));
+      } else console.error(t('send.presence-unavailable', { detail: p.detail }));
+    }
+    if (pres.problems?.length) {
+      if (!force) { console.error(t('send.presence-not-sent')); return 4; }
+      console.error(t('send.presence-forced'));
+    }
+  }
   if (!tok) { console.error(t('send.no-token')); return 3; }
   let res;
   const post = authToken => api(authToken, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });

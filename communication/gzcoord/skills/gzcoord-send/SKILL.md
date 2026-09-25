@@ -125,6 +125,7 @@ node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs" new-id
 ```sh
 node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file>            # validate, then post
 node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file> --dry-run  # validate, resolve, post nothing
+node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file> --force    # post even if the addressee has no session
 ```
 
 `send.mjs` normalizes the text (a pasted message carries terminal
@@ -135,6 +136,17 @@ channel and the token exactly as the inbox does (your project's
 integration; the token from the environment `fabric-secrets sync`
 populated). It prints `sent seq <n> <TYPE> <id>` and nothing else. Keep
 the id: a reply names it in `IN-REPLY-TO`.
+
+**Before a `TO` or `TO-ROLE` message leaves, `send.mjs` asks whether the
+addressee has a session running** — the control plane answers from each
+account's process table (`fabric-ctl <login|all> presence` shows the
+same). An addressee with no session, a control agent that did not answer,
+or an address no host places is named, nothing is sent, and it exits 4.
+A `TO-ROLE` passes when any holder of the role is running; a broadcast is
+not checked. Then you decide: a message to a login with no session waits
+in the relay until one starts, which may be what you want — `--force`
+sends it anyway, and says so. A request that must be acted on now
+belongs to a running session, or to a later send.
 
 `AGENT_FABRIC_ROOT` is exported into your shell by the session-start
 hook. Working in a clone without it, the fabric is `../agent-fabric`

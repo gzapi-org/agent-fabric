@@ -142,7 +142,7 @@ the harness's own headless `/usage`, which renews the observer's 8-hour
 sign-in and makes no model call, run every 4 hours by the daemon and on
 request, cached 5 minutes; one row per Claude account in `fabric-ctl`,
 only the observing login has any; `docs/claude-accounts.md`), `status`
-(all but `script`, `tokens`, `memory` and `accounts`), and the two ACTIONS, answered only when signed (below) and never part of `status`: `upgrade` (`docs/fleet-upgrade.md`) — bring the harness to the version the request names, stopping and resuming a running session — and `secrets-sync` (`docs/claude-accounts.md`) — re-apply the login's own Doppler config through its own `fabric-secrets sync`, reporting the Claude sign-in by fingerprint, failing when it is not the fingerprint the request expects, and — asked to — resuming a running session on it through the launcher's restart marker. A login running on a
+(identity, usage, keys, fabric and session), `presence` (whether a session is running, from the process table: since when, and the role and project — the one op any placed account may ask, below), and the two ACTIONS, answered only when signed (below) and never part of `status`: `upgrade` (`docs/fleet-upgrade.md`) — bring the harness to the version the request names, stopping and resuming a running session — and `secrets-sync` (`docs/claude-accounts.md`) — re-apply the login's own Doppler config through its own `fabric-secrets sync`, reporting the Claude sign-in by fingerprint, failing when it is not the fingerprint the request expects, and — asked to — resuming a running session on it through the launcher's restart marker. A login running on a
 template's setup-token reports it by fingerprint in `identity`, and its
 `usage` points at the observer: its own `~/.claude.json` names the
 account it last signed into, not the one in use. A section that
@@ -155,7 +155,11 @@ channel.
 
 A daemon answers a request only when `from` is a host operator's address
 as `runtime/hosts/registry.json` places it (read again for every record,
-so a registry change counts at once), `op` is in the closed set,
+so a registry change counts at once) — or, for a PUBLIC op (`presence`
+alone, `runtime/control/ops.mjs` PUBLIC_OPS), any address the registry
+places: every sender needs to know whether an addressee has a session
+(`send.mjs` asks before it posts), and the answer names nothing a reader
+of the relay could not infer. `op` is in the closed set,
 `ts + ttl_s` is not in the past, and `id` was not seen (an LRU of 256).
 Every refusal but the routine ones (a reply, a request for another
 account, a duplicate) is one line in the daemon's journal, so a refused
@@ -207,7 +211,8 @@ a run leaves its request and the replies on the channel, nothing
 anywhere else. `bin/fabric-usage` stays as the sudo fallback for a host
 whose daemons are down; a login on a Claude-account template reads there
 as `setup-token`, for the same reason its `usage` op points at the observer. A run by a login that is not a host operator is
-refused before anything is posted: no daemon would answer it.
+refused before anything is posted — no daemon would answer it — except
+`fabric-ctl <login|all> presence`, which any placed account may run.
 
 `bin/fabric-ctl <login|all> memory --out <dir>` is the drain (timeout
 120 s): a reply counts as complete only when every part it announced has

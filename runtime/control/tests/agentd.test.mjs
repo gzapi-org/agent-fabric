@@ -30,6 +30,11 @@ test('accept: the fence, case by case', () => {
   assert.equal(accept(req({ to: 'develop-qzapp/other' }), { me, operators, ttl_s: 30, seen }).why, 'not for me');
   assert.match(accept(req({ op: 'shutdown' }), { me, operators, ttl_s: 30, seen }).why, /^op shutdown/);
   assert.match(accept(req({ from: 'develop-qzapp/backend-dev-01' }), { me, operators, ttl_s: 30, seen }).why, /not an operator/);
+  // presence is answered for any placed account; every other op still only for an operator
+  const accounts = new Set(['develop-qzapp/backend-dev-01', 'develop-qzapp/db-admin']);
+  assert.equal(accept(req({ from: 'develop-qzapp/backend-dev-01', op: 'presence' }), { me, operators, accounts, ttl_s: 30, seen }).ok, true, 'a placed account may ask presence');
+  assert.match(accept(req({ from: 'develop-qzapp/backend-dev-01', op: 'session' }), { me, operators, accounts, ttl_s: 30, seen }).why, /not an operator$/, 'but nothing else');
+  assert.match(accept(req({ from: 'elsewhere/stranger', op: 'presence' }), { me, operators, accounts, ttl_s: 30, seen }).why, /not an operator or a placed account/, 'an address no host places is refused');
   assert.equal(accept(req({ ts: new Date(Date.now() - 60000).toISOString(), ttl_s: 30 }), { me, operators, ttl_s: 30, seen }).why, 'expired');
   assert.equal(accept(req({ ts: 'garbage' }), { me, operators, ttl_s: 30, seen }).why, 'expired');
   assert.equal(accept({ content: 'not json' }, { me, operators, ttl_s: 30, seen }).why, 'not json');

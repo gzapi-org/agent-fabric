@@ -106,7 +106,11 @@ PY
 # alone" red — pointing at the very clear that must stay (review of #31).
 # OPENROUTER_API_KEY is not in the family: it is the account's own, and a
 # case that needs a different one still sets it inline.
-CRED_FAMILY=(ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_CUSTOM_HEADERS)
+# CLAUDE_CONFIG_DIR rides the same mechanism: an inherited one pointed the
+# launcher's install-agent-files and onboarding write at the runner's LIVE
+# Claude config, outside the sandbox (review of #37, P-1). A case that
+# needs one plants it.
+CRED_FAMILY=(ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_CUSTOM_HEADERS CLAUDE_CONFIG_DIR)
 run() {
     local strip=(-u TMPDIR); [[ -n "${KEEP_TMPDIR:-}" ]] && strip=()
     local plant=() v p
@@ -212,7 +216,7 @@ pin_in "$SANDBOX/repo/.claude/settings.local.json" '{"env":{"CLAUDE_CODE_SUBAGEN
 [[ $rc -eq 1 ]] && ok "project LOCAL scope subagent pin: refused" || bad "project local scope unfenced" "$out"
 grep -q "settings.local.json carries model pins (env.CLAUDE_CODE_SUBAGENT_MODEL)" <<<"$out" && ok "…naming the file and the key" || bad "refusal does not name the offender" "$out"
 mkdir -p "$SANDBOX/cfgdir"; mkfabric; printf '%s\n' '{"env":{"ANTHROPIC_MODEL":"vendor/sneaky"}}' > "$SANDBOX/cfgdir/settings.json"
-out="$(CLAUDE_CONFIG_DIR="$SANDBOX/cfgdir" run --print 2>&1)"; rc=$?
+out="$(PLANT_CLAUDE_CONFIG_DIR="$SANDBOX/cfgdir" run --print 2>&1)"; rc=$?
 [[ $rc -eq 1 ]] && ok "CLAUDE_CONFIG_DIR scope, ANTHROPIC_MODEL (not only _DEFAULT_): refused" || bad "config-dir scope unfenced" "$out"
 rm -rf "$SANDBOX/cfgdir"
 pin_in "$SANDBOX/repo/.claude/settings.local.json" '{"env":{"CLAUDE_BRIDGE_AUTH_TOKEN":"not-a-pin"},"model":"opus"}'
@@ -232,7 +236,7 @@ rm -rf "$SANDBOX/other"
 
 echo "launch: identity comes from the OS, not from the directory or the environment"
 mkfabric; rm -rf "$SANDBOX/repo"; mkdir -p "$SANDBOX/architect-cto-01"; git init -q "$SANDBOX/architect-cto-01"
-out="$(cd "$SANDBOX/architect-cto-01" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" USER=architect-cto-01 LOGNAME=architect-cto-01 bash "$LAUNCHER" --print 2>&1)"
+out="$(cd "$SANDBOX/architect-cto-01" && env -u CLAUDE_CONFIG_DIR HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" USER=architect-cto-01 LOGNAME=architect-cto-01 bash "$LAUNCHER" --print 2>&1)"
 grep -q "(agent $LOGIN, role backend-dev, provider openrouter)" <<<"$out" && ok "launched from a directory named for another agent, with USER forged: still agent $LOGIN" || bad "identity taken from directory or env" "$out"
 mkdir -p "$SANDBOX/repo"; git init -q "$SANDBOX/repo"
 
@@ -587,7 +591,7 @@ with open(os.environ["ANNOUNCE_LOG"], "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + f" @{time.time():.3f}\n")
 STUB
 ALOG="$SANDBOX/announce.log"; rm -f "$ALOG"
-runa() { (cd "$SANDBOX/repo" && HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" ANNOUNCE_LOG="$ALOG" bash "$LAUNCHER" "$@"); }
+runa() { (cd "$SANDBOX/repo" && env -u CLAUDE_CONFIG_DIR HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" ANNOUNCE_LOG="$ALOG" bash "$LAUNCHER" "$@"); }
 out="$(runa --version 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "the launcher's exit status is the session's (0)" || bad "rc=$rc" "$out"
 grep -q "^hello --role backend-dev --project gzapp" "$ALOG" && ok "HELLO sent, as the bound role and project" || bad "no hello" "$(cat "$ALOG")"

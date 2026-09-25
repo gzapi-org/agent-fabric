@@ -1682,10 +1682,13 @@ def set_claims(claims_dir: str, role: str, items: list[dict]) -> None:
 
 
 def tree(out: str) -> dict[str, str]:
-    """Every file under the fabric root and the working copy, by path."""
+    """Every file under the fabric root and the working copy, by path —
+    the corpus, not the drain report, which says what each run did."""
     found: dict[str, str] = {}
     for dirpath, _dirs, files in os.walk(out):
         for name in files:
+            if name == "last-drain-report.json":
+                continue
             path = os.path.join(dirpath, name)
             found[os.path.relpath(path, out)] = read(path)
     return found
@@ -1832,8 +1835,68 @@ def test_a_retitled_memory_is_asked_about_not_appended(tmp: str) -> None:
     assert all(h in joint for h in ("## First view", "## Second view", "## Third view")), joint
 
 
+def test_a_claim_in_the_carried_file_is_not_written_twice(tmp: str) -> None:
+    """A flat class file holding several topics moves whole into
+    `<class>/<class>-carried-<stamp>.md` when the class splits. That file
+    was no topic's candidate, so the same memory harvested again was
+    written a second time as `<class>/<topic>.md` beside its carried copy
+    (a drain's blind review, 2026-09-25). A claim whose heading sits in
+    the carried file lands there — same text a no-op, other text a
+    collision the owner decides there — and a copy an earlier drain left
+    in both places is dropped from the carried file, which goes when
+    empty, reported."""
+    one = {"class": "workflow", "topic": "alpha-one", "title": "One", "body": "First way.", "evidence": ["h1"]}
+    two = {"class": "workflow", "topic": "alpha-two", "title": "Two", "body": "Second way.", "evidence": ["h2"]}
+    three = {"class": "workflow", "topic": "three", "title": "Three", "body": "Third way.", "evidence": ["h3"]}
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [one])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [two])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert "## One" in read(proj(out, "alpha", "workflow.md")) and "## Two" in read(proj(out, "alpha", "workflow.md"))
+
+    set_claims(claims_dir, "alpha", [one, three])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    wf = proj(out, "alpha", "workflow")
+    carried = os.path.join(wf, "workflow-carried-2026-01-01.md")
+    assert sorted(os.listdir(wf)) == ["three.md", "workflow-carried-2026-01-01.md"], \
+        f"the carried claim was written again: {sorted(os.listdir(wf))}"
+    assert sum(read(os.path.join(wf, n)).count("## One") for n in os.listdir(wf)) == 1
+    before = tree(out)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert tree(out) == before, "the same drain again changed the tree"
+
+    # A different text under the carried heading is asked about, and the
+    # owner's supersede replaces it in the carried file.
+    set_claims(claims_dir, "alpha", [dict(one, body="First way, revised.", evidence=["h3"])])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/workflow:workflow-carried-2026-01-01#One" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions", decisions_file(
+        tmp, {"alpha/workflow:workflow-carried-2026-01-01#One": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    assert "First way, revised." in read(carried) and "First way.\n" not in read(carried), read(carried)
+    assert sorted(os.listdir(wf)) == ["three.md", "workflow-carried-2026-01-01.md"], sorted(os.listdir(wf))
+
+    # A tree an earlier drain left with each claim in both places: the
+    # carried copies go, and the emptied carried file with them.
+    front, _, _ = read(carried).partition("\n## ")
+    sections = {h: t for h, t in re.findall(r"^## (.+?)\n\n(.*?)(?=\n## |\Z)", read(carried), re.S | re.M)}
+    for topic, heading in (("alpha-one", "One"), ("alpha-two", "Two")):
+        with open(os.path.join(wf, f"{topic}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f"{front}\n## {heading}\n\n{sections[heading].strip()}\n")
+    set_claims(claims_dir, "alpha", [dict(one, body="First way, revised.", evidence=["h3"]), two])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert not os.path.exists(carried), read(carried)
+    assert sorted(os.listdir(wf)) == ["alpha-one.md", "alpha-two.md", "three.md"], sorted(os.listdir(wf))
+    migrated = json.loads(read(report_path(out)))["migrated"]
+    assert any("workflow-carried-2026-01-01.md removed" in m for m in migrated), migrated
+    assert "carried" not in read(proj(out, "alpha", "INDEX.md"))
+
+
 def main() -> int:
     cases = [
+        test_a_claim_in_the_carried_file_is_not_written_twice,
         test_a_retitled_memory_is_asked_about_not_appended,
         test_a_correction_naming_another_topic_s_section_replaces_it_there,
         test_places_claims_and_writes_provenance,

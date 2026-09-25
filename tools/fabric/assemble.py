@@ -363,35 +363,43 @@ def retire_in_siblings(directory: str, filename: str, target: str,
         path = os.path.join(directory, name)
         _meta, sections = read_existing_slice(path)
         victims = [h for h in sections if h == target or re.fullmatch(re.escape(target) + r" \(\d+\)", h)]
-        if not victims:
-            continue
-        for h in victims:
-            del sections[h]
-        if not sections:
-            os.remove(path)
-            touched.append((path, "removed"))
-            continue
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-        m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-        front = m.group(1) if m else ""
-        # collisions: drop the target's entry; drop the key when empty.
-        def prune(block: str) -> str:
-            lines = [ln for ln in block.split("\n")]
-            kept = [ln for ln in lines[1:] if decode_scalar(ln.strip()[2:]) != target]
-            return "\n".join([lines[0]] + kept) if kept else ""
-        # (?m) alone: with (?s) the item pattern ran to the end of the
-        # frontmatter, the list never read as empty, and a bare
-        # `collisions:` key was left behind.
-        front = re.sub(r"(?m)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
-        first = next(iter(sections))
-        # The cue is clipped as every description the assembler writes is.
-        front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first, path)), front, count=1)
-        body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
-        touched.append((path, "rewritten"))
+        if victims:
+            touched.append((path, remove_sections(path, victims, [target], clip)))
     return touched
+
+
+def remove_sections(path: str, victims: list[str], resolved: list[str],
+                    clip: Callable[[str, str], str] = lambda d, _where: d) -> str:
+    """Remove the sections `victims` from the slice at `path`; the titles
+    in `resolved` leave its `collisions:` record. Returns "removed" when
+    no section is left (the file goes), else "rewritten". The frontmatter
+    is edited textually — see retire_in_siblings for why."""
+    _meta, sections = read_existing_slice(path)
+    for h in victims:
+        sections.pop(h, None)
+    if not sections:
+        os.remove(path)
+        return "removed"
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    front = m.group(1) if m else ""
+    # collisions: drop the resolved entries; drop the key when empty.
+    def prune(block: str) -> str:
+        lines = [ln for ln in block.split("\n")]
+        kept = [ln for ln in lines[1:] if decode_scalar(ln.strip()[2:]) not in resolved]
+        return "\n".join([lines[0]] + kept) if kept else ""
+    # (?m) alone: with (?s) the item pattern ran to the end of the
+    # frontmatter, the list never read as empty, and a bare
+    # `collisions:` key was left behind.
+    front = re.sub(r"(?m)^collisions:\n((?:  - .*\n?)+)", lambda mm: (prune(mm.group(0).rstrip("\n")) + "\n") if prune(mm.group(0).rstrip("\n")) else "", front + "\n").rstrip("\n")
+    first = next(iter(sections))
+    # The cue is clipped as every description the assembler writes is.
+    front = re.sub(r"(?m)^description: .*$", "description: " + yaml_scalar(clip(first, path)), front, count=1)
+    body = "\n\n".join(f"## {h}\n\n{t}" for h, t in sections.items()) + "\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(("---\n" + front + "\n---\n\n" + body).rstrip() + "\n")
+    return "rewritten"
 
 
 def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
@@ -852,22 +860,42 @@ def main() -> int:
     ambiguous_targets: list[str] = []
     unresolved_targets: list[str] = []
 
+    def is_carried(klass: str, topic: str) -> bool:
+        return topic.startswith(f"{CLASS_FILES[klass]}-carried-")
+
     def resolve_targets(role: str | None, label: str,
                         buckets: dict[tuple[str, str], list[dict[str, Any]]]) -> None:
         on_disk_by_class: dict[str, dict[str, dict[str, str]]] = {}
         for (klass, topic), group in sorted(buckets.items()):
             for claim in list(group):
                 target = (claim.get("merge_target") or "").strip()
-                if not target:
-                    continue
+                if not target and role is None:
+                    continue   # shared/ has no carried file
                 own = existing_sections(slice_candidates(role, klass, topic))
-                if target in own:
+                if target and target in own:
                     continue
                 if klass not in on_disk_by_class:
                     on_disk_by_class[klass] = {t: existing_sections(p)
                                                for t, p in topics_on_disk(role, klass).items()}
                 on_disk = on_disk_by_class[klass]
                 heading = claim_heading(claim)
+                if not target:
+                    # A CLAIM ALREADY IN THE CARRIED FILE STAYS THERE. A flat
+                    # class file holding several topics moves whole into
+                    # `<class>/<class>-carried-<stamp>.md`, which no topic
+                    # names; the same memory harvested again was written a
+                    # second time as `<class>/<topic>.md` beside its carried
+                    # copy (a drain's blind review, 2026-09-25). Its heading
+                    # there makes it that file's claim: the same text is a
+                    # no-op, a different one a collision asked about there.
+                    if heading in own:
+                        continue
+                    holders = sorted(t for t, sections in on_disk.items()
+                                     if t != topic and is_carried(klass, t) and heading in sections)
+                    if len(holders) == 1:
+                        group.remove(claim)
+                        buckets[(klass, holders[0])].append(claim)
+                    continue
                 where = f"{label}/{klass}:{topic}#{heading}"
                 holders = sorted(t for t, sections in on_disk.items() if target in sections and t != topic)
                 if len(holders) > 1:
@@ -882,8 +910,9 @@ def main() -> int:
                         continue
                 if not holders:
                     continue
+                # claim["topic"] stays the memory's: an untitled claim's
+                # heading is derived from it.
                 group.remove(claim)
-                claim["topic"] = holders[0]
                 buckets[(klass, holders[0])].append(claim)
                 if role is None:
                     shared_owners[(klass, holders[0])] |= shared_owners[(klass, topic)]
@@ -1305,6 +1334,36 @@ def main() -> int:
                 description = description.strip('"')
         return description
 
+    def drop_carried_copies(role: str, klass: str, directory: str, topic: str) -> None:
+        """A section standing both in the topic's own file and, word for
+        word, in a carried file is one claim written twice — what a drain
+        before the carried file was visible to the pre-pass left behind.
+        The carried copy goes; a carried file left with no section goes
+        too, and both are reported in `migrated`."""
+        mine = existing_sections(slice_candidates(role, klass, topic))
+        if not mine or not os.path.isdir(directory):
+            return
+        for name in sorted(os.listdir(directory)):
+            if not name.endswith(".md") or not is_carried(klass, name[:-3]):
+                continue
+            path = os.path.join(directory, name)
+            _meta, sections = read_existing_slice(path)
+            copies = [h for h, t in sections.items() if h in mine and undated(mine[h]) == undated(t)]
+            if not copies:
+                continue
+            what = remove_sections(path, copies, copies, clip_description)
+            rel = f"{CLASS_FILES[klass]}/{name}"
+            for h in copies:
+                migrated.append(f"{role}/{klass}: {h!r} dropped from {rel}, it stands in {CLASS_FILES[klass]}/{topic}.md")
+            if what == "removed":
+                migrated.append(f"{role}/{klass}: {rel} removed, no section left")
+                if path in written:
+                    written.remove(path)
+                index_entries[role] = [e for e in index_entries[role]
+                                       if e["path"] != layout.link_rel(path, project)]
+            elif path not in written:
+                written.append(path)
+
     # Shared slices first, so role indexes can point at them. A shared slice
     # lives with its class: field knowledge under memory/shared/, project
     # knowledge under the project's shared/.
@@ -1406,11 +1465,17 @@ def main() -> int:
                         (group[0].get("title") if group else None)
                         or f"{topic.replace('-', ' ')} ({klass})",
                         os.path.join(directory, filename))
+                    if is_carried(klass, topic) and os.path.exists(os.path.join(directory, filename)):
+                        # The carried file's cue is the one it moved with:
+                        # it names several topics, never one claim's title.
+                        description = described(os.path.join(directory, filename), description)
                     write_slice(directory, filename, role, klass, group, description)
                     index_entries[role].append(
                         {"path": layout.link_rel(os.path.join(directory, filename), project),
                          "description": description, "class": klass}
                     )
+                if multi and not is_carried(klass, topic):
+                    drop_carried_copies(role, klass, os.path.join(base, CLASS_FILES[klass]), topic)
 
         for entry in shared_index.get(role, []):
             index_entries[role].append(

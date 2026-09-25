@@ -140,8 +140,9 @@ the id: a reply names it in `IN-REPLY-TO`.
 **Before a `TO` or `TO-ROLE` message leaves, `send.mjs` asks whether the
 addressee has a session running** — the control plane answers from each
 account's process table (`fabric-ctl <login|all> presence` shows the
-same). An addressee with no session, a control agent that did not answer,
-or an address no host places is named, nothing is sent, and it exits 4.
+same). An addressee with no session, a control agent that did not answer
+or could not tell, an address no host places, or presence that could not
+be asked at all is named, nothing is sent, and it exits 4.
 A `TO-ROLE` passes when any holder of the role is running; a broadcast is
 not checked. Then you decide: a message to a login with no session waits
 in the relay until one starts, which may be what you want — `--force`

@@ -425,10 +425,12 @@ test('presence: one row per account — running since when, as what; none; a fai
   assert.match(t[4], /^user\s+no answer$/);
 });
 
-test('a non-operator may ask presence, and nothing else: presence is posted, status is refused before anything is sent', async () => {
+test('a placed non-operator may ask presence, and nothing else; an unplaced one not even that', async () => {
   const r = relay(); await r.listen();
   try {
-    const reg = registryFile('someone-else');   // this login is not the host's operator
+    // this login is placed, and not the host's operator
+    const reg = path.join(scratch('reg-'), 'registry.json');
+    fs.writeFileSync(reg, JSON.stringify({ hosts: { [H]: { operator: 'someone-else' } }, placement: { 'db-admin': H, [ME.agent]: H } }));
     const asked = await run(r.url(), reg, ['db-admin', 'presence', '--timeout', '1']);
     const reqs = r.rows.map(x => JSON.parse(x.content)).filter(x => x.kind === 'request');
     assert.deepEqual(reqs.map(x => [x.op, x.to]), [['presence', [`${H}/db-admin`]]], asked.err);
@@ -436,5 +438,8 @@ test('a non-operator may ask presence, and nothing else: presence is posted, sta
     const refused = await run(r.url(), reg, ['db-admin', 'status', '--timeout', '1']);
     assert.equal(refused.status, 2); assert.match(refused.err, /not a host operator/);
     assert.equal(r.rows.length, n, 'nothing posted for an op only an operator may ask');
+    const stranger = await run(r.url(), registryFile('someone-else'), ['db-admin', 'presence', '--timeout', '1']);
+    assert.equal(stranger.status, 2, 'neither operator nor placed: no daemon would answer, nothing sent');
+    assert.equal(r.rows.length, n);
   } finally { r.close(); }
 });

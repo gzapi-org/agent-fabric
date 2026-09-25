@@ -34,7 +34,7 @@ import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.m
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS, PUBLIC_OPS } from './ops.mjs';
-import { controlConfig, newId, operatorAddresses } from './agentd.mjs';
+import { controlConfig, newId, operatorAddresses, accountAddresses } from './agentd.mjs';
 
 export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
@@ -327,7 +327,8 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   }
   const who = whoami();
   const me = gzIdentity(who);
-  if (!operatorAddresses().has(me.address) && !PUBLIC_OPS.includes(args.op)) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
+  // What the daemons will answer: an operator anything, a placed account a public op (agentd accept()).
+  if (!operatorAddresses().has(me.address) && !(PUBLIC_OPS.includes(args.op) && accountAddresses().has(me.address))) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
   const cfg = controlConfig();
   const gz = integrationConfig(who.project);
   const tok = gzToken(inboxRoot(who), gz.configured ? gz : undefined) ?? syncedToken();

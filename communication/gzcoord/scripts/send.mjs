@@ -23,7 +23,8 @@
 //
 // Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
 // FROM is not this session; 3 no token or relay unreachable; 4 an
-// addressee has no session, did not answer, or is not placed (--force).
+// addressee has no session, did not answer, could not tell, or is not
+// placed, or presence could not be asked (--force).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -137,7 +138,7 @@ export async function main(argv = process.argv.slice(2)) {
   // anyway (the owner, 2026-09-25). A broadcast is not checked.
   if (tok) {
     let pres;
-    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...new Set([...accountAddresses(), ...operatorAddresses()])] }); }
+    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...accountAddresses()], operators: [...operatorAddresses()] }); }
     catch (e) {
       // A refused token is the post's to handle: it re-reads the synced
       // token and says "refused" if that fails too (review of #38). Here

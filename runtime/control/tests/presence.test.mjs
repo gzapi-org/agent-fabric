@@ -56,9 +56,19 @@ test('askPresence: one presence request on the control channel; only replies to 
 });
 
 test('a reply that could not read its process table is unknown, never "no session" — for TO and for TO-ROLE', async () => {
-  const failed = { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' };
+  // A failed reply that still carries a role: without the status guard it would count as a holder.
+  const failed = { status: 'failed', error: 'pgrep: spawn pgrep ENOENT', role: 'web-dev' };
   const to = await checkAddressees({ TO: 'h/web-dev-01' }, { from: 'h/user', token: 't', placed, ask: asker({ 'h/web-dev-01': failed }) });
   assert.deepEqual(to.problems, [{ kind: 'unavailable', detail: 'h/web-dev-01: pgrep: spawn pgrep ENOENT' }]);
   const role = (await checkAddressees({ 'TO-ROLE': 'web-dev' }, { from: 'h/user', token: 't', placed, ask: asker({ 'h/web-dev-01': failed, 'h/web-dev-02': off(), 'h/db-admin': on('db-admin') }) })).problems[0];
   assert.deepEqual([role.kind, role.holders, role.silent], ['no-holder', ['h/web-dev-02'], ['h/web-dev-01']], 'the failed one is named among those that may hide a holder');
+});
+
+test('an operator address may be a TO without being placed; a TO-ROLE asks only the placements, never waits on an operator', async () => {
+  const seen = [];
+  const ask = async ({ to, expect }) => { seen.push({ to, expect }); return Object.fromEntries(expect.map(a => [a, on(a === 'h2/user' ? 'fabric-coordinator' : 'web-dev')])); };
+  assert.deepEqual(await checkAddressees({ TO: 'h2/user' }, { from: 'h/user', token: 't', placed, operators: ['h2/user'], ask }), { checked: true, problems: [] });
+  assert.deepEqual((await checkAddressees({ TO: 'h2/user' }, { from: 'h/user', token: 't', placed, ask })).problems.map(p => p.kind), ['not-placed'], 'without it, unplaced');
+  await checkAddressees({ 'TO-ROLE': 'web-dev' }, { from: 'h/user', token: 't', placed, operators: ['h2/user'], ask });
+  assert.deepEqual(seen.at(-1).expect, placed, 'a TO-ROLE waits only on the accounts that can hold a role');
 });

@@ -7,6 +7,9 @@
 //                                     browser AS THAT ACCOUNT, then /exit. A real terminal.
 //   fabric-accounts list              each observed account: signed in, email, sign-in expiry
 //   fabric-accounts read              read every account's windows now (the harness's /usage)
+//   fabric-accounts assign <login…|all> <account|own> [--no-sync]
+//                                     which Claude account those logins run on: the reference in each
+//                                     login's Doppler config, then `fabric-ctl <logins> secrets-sync`
 //   fabric-accounts templates         each Doppler template's token fingerprint, to name the account
 //                                     behind a login's `setup-token <sha>` (fabric-ctl, fabric-status)
 //
@@ -20,8 +23,10 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { accountsDir, accountSlugs, accounts, claudeBin, ACCOUNT_SLUG, takeReadLock } from './ops.mjs';
+import { placements } from './ctl.mjs';
+import { FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 
-const USAGE = `usage: fabric-accounts login <account> | list | read | templates
+const USAGE = `usage: fabric-accounts login <account> | list | read | templates | assign <login…|all> <account|own> [--no-sync]
   <account>: lowercase letters, digits and hyphens — the account's email with @ and . as -,
              e.g. claude-pzhuy-8alias-com (the Doppler template's name without its prefix)`;
 
@@ -68,10 +73,70 @@ export function templates({ exec = execFileSync, project = 'agent-fabric' } = {}
   });
 }
 
-export async function main(argv = process.argv.slice(2), { home = os.homedir(), env = process.env, stdinTTY = process.stdin.isTTY, spawn = spawnSync, read = accounts, exec = execFileSync } = {}) {
+// Which Claude account a login runs on is one line in its own Doppler
+// config: a reference to a template (docs/claude-accounts.md), or nothing
+// for its own /login. Written with the coordinator's Doppler token — a
+// login's own is read-only — and read back raw, so the account is named
+// by its template, not by a token.
+export const templateRef = slug => `\${agent-fabric.${TEMPLATE_ENV}_${slug}.CLAUDE_CODE_OAUTH_TOKEN}`;
+export function loginConfigs({ exec = execFileSync, project = 'agent-fabric' } = {}) {
+  const names = JSON.parse(exec('doppler', ['configs', '--project', project, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })).map(c => c.name);
+  const out = new Map();
+  for (const n of names) { const m = /^(agents\d*)_(.+)$/.exec(n); if (m) out.set(m[2], n); }
+  return out;
+}
+export function currentAccount(config, { exec = execFileSync, project = 'agent-fabric' } = {}) {
+  let raw = '';
+  try { raw = String(exec('doppler', ['secrets', 'get', 'CLAUDE_CODE_OAUTH_TOKEN', '--raw', '--plain', '--project', project, '--config', config], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })).trim(); }
+  catch { return 'own'; }   // no such secret: the login's own /login
+  const m = new RegExp(`^\\$\\{${project}\\.${TEMPLATE_ENV}_([a-z0-9-]+)\\.CLAUDE_CODE_OAUTH_TOKEN\\}$`).exec(raw);
+  return m ? m[1] : raw ? '(not a template reference)' : 'own';
+}
+export function assign(logins, account, { exec = execFileSync, project = 'agent-fabric' } = {}) {
+  const configs = loginConfigs({ exec, project });
+  const rows = [];
+  for (const login of logins) {
+    const config = configs.get(login);
+    if (!config) { rows.push({ login, status: 'no-config' }); continue; }
+    const from = currentAccount(config, { exec, project });
+    if (from === account) { rows.push({ login, config, from, to: account, status: 'unchanged' }); continue; }
+    try {
+      if (account === 'own') exec('doppler', ['secrets', 'delete', 'CLAUDE_CODE_OAUTH_TOKEN', '--project', project, '--config', config, '--yes', '--silent'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+      else exec('doppler', ['secrets', 'set', `CLAUDE_CODE_OAUTH_TOKEN=${templateRef(account)}`, '--project', project, '--config', config, '--silent'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+      const now = currentAccount(config, { exec, project });
+      rows.push({ login, config, from, to: now, status: now === account ? 'written' : 'not-written' });
+    } catch (e) { rows.push({ login, config, from, status: 'failed', reason: String(e.message).split('\n').pop().slice(0, 160) }); }
+  }
+  return rows;
+}
+
+export async function main(argv = process.argv.slice(2), { home = os.homedir(), env = process.env, stdinTTY = process.stdin.isTTY, spawn = spawnSync, read = accounts, exec = execFileSync, registry } = {}) {
   const [cmd, arg] = argv;
   const dir = accountsDir(home, env);
   if (cmd === 'list' && argv.length === 1) { console.log(listLines(dir).join('\n')); return 0; }
+  if (cmd === 'assign') {
+    const noSync = argv.includes('--no-sync');
+    const rest = argv.slice(1).filter(a => a !== '--no-sync');
+    if (rest.length < 2) { console.error(USAGE); return 2; }
+    const account = rest.at(-1); const who = rest.slice(0, -1);
+    const placed = placements(registry).map(p => p.login);
+    const logins = who.length === 1 && who[0] === 'all' ? placed : who;
+    const unknown = logins.filter(l => !placed.includes(l));
+    if (unknown.length) { console.error(`fabric-accounts: not a placed account (runtime/hosts/registry.json): ${unknown.join(', ')}`); return 2; }
+    if (account !== 'own') {
+      const t = templates({ exec }).find(x => x.account === account);
+      if (!t) { console.error(`fabric-accounts: ${JSON.stringify(account)} is not a template in Doppler environment ${TEMPLATE_ENV} (fabric-accounts templates)`); return 2; }
+      if (!t.token_sha256_12) { console.error(`fabric-accounts: template ${account} holds no CLAUDE_CODE_OAUTH_TOKEN yet; nothing written`); return 2; }
+    }
+    const rows = assign(logins, account, { exec });
+    for (const r of rows) console.log(`${r.login.padEnd(22)} ${String(r.from ?? '-').padEnd(30)} → ${String(r.to ?? '-').padEnd(30)} ${r.status}${r.reason ? `  ${r.reason}` : ''}`);
+    const bad = rows.some(r => !['written', 'unchanged'].includes(r.status));
+    const changed = rows.filter(r => r.status === 'written').map(r => r.login);
+    if (noSync || !changed.length) { if (changed.length) console.error('fabric-accounts: --no-sync — each changed login applies it at its next fabric-secrets sync'); return bad ? 1 : 0; }
+    // The accounts apply it now, each through its own daemon (a signed action).
+    const r = spawn(path.join(FABRIC_ROOT, 'bin', 'fabric-ctl'), [...changed, 'secrets-sync'], { stdio: 'inherit', env });
+    return bad || r.status !== 0 ? 1 : 0;
+  }
   if (cmd === 'templates' && argv.length === 1) {
     const t = templates({ exec });
     if (!t.length) { console.log(`no template in Doppler environment ${TEMPLATE_ENV}`); return 1; }

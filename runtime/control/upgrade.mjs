@@ -5,14 +5,16 @@
 //
 // The sequence, for one account (docs/fleet-upgrade.md):
 //   1. already at the pin: nothing happens, and nothing restarts;
-//   2. a session running: write the restart marker the launcher reads,
+//   2. wait for the host's install lease (one account at a time, below);
+//      no turn, or no queue, is a failure with nothing stopped;
+//   3. a session running: write the restart marker the launcher reads,
 //      then SIGTERM its `claude` — the harness's own graceful shutdown
 //      (SessionEnd hooks, the transcript saved; 2.1.281, read from the
 //      binary) — and wait for it to be gone; never SIGKILL: a session
 //      that does not stop is a failure to report, not to force;
-//   3. install the pinned version with the harness's own installer and
-//      verify `claude --version` says it;
-//   4. mark the marker done or failed; the launcher, still in the
+//   4. install the pinned version with the harness's own installer and
+//      verify `claude --version` says it; release the lease;
+//   5. mark the marker done or failed; the launcher, still in the
 //      session's terminal, relaunches with --resume on whatever is now
 //      installed, and says which.
 // Installing under a running session is safe (each version is its own

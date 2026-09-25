@@ -1358,6 +1358,16 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
             if approx > budget * 1.35:
                 findings.append(f"{rel}: ~{approx} tokens exceeds the {budget} budget; split the slice")
             findings += hygiene_findings(rel, body)
+            # The cue is English like the body: an index line and a heading
+            # are what every holder of the role reads before choosing a
+            # slice. The Italian check above missed a whole drain of Russian
+            # and Georgian cues (a drain's blind review, 2026-09-25).
+            cues = [("description", meta.get("description"))] + \
+                   [("heading", h) for h in re.findall(r"^## (.+)$", body, re.MULTILINE)]
+            for kind, cue in cues:
+                if isinstance(cue, str) and _is_mostly_non_latin(cue):
+                    findings.append(f"{rel}: {kind} is not English ({cue[:60]!r}); "
+                                    "the holder renders it — description_en in the memory")
     return slices
 
 

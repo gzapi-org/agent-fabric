@@ -283,6 +283,25 @@ def case_slices_are_still_linted() -> None:
         assert "good.md" not in out, f"the well-formed slice was flagged:\n{out}"
 
 
+def case_a_cue_in_another_script_is_refused() -> None:
+    """A slice's description and its headings are English like its body:
+    they are the index line and what a holder reads before choosing.
+    Kills: checking the body only, or only Italian."""
+    with tempfile.TemporaryDirectory() as root:
+        fabric = make_base(root)
+        ru_desc = SLICE.replace('description: "A well-formed slice, shaped like the real ones"',
+                                'description: "По-русски merge ветки — вливать"')
+        ka_head = SLICE.replace("A claim with provenance.", "## შერწყმულია ამ დღეს\n\nA claim with provenance.")
+        write(dom(fabric, "domain", "ru.md"), ru_desc)
+        write(dom(fabric, "domain", "ka.md"), ka_head)
+        write(dom(fabric, "domain", "good.md"), SLICE)
+        code, out = run_lint(fabric)
+        assert code == 1, out
+        assert "ru.md: description is not English" in out, out
+        assert "ka.md: heading is not English" in out, out
+        assert "good.md: description" not in out and "good.md: heading" not in out, out
+
+
 def case_exemption_is_anchored_at_the_role_root() -> None:
     """Only `identities/roles/<role>/skills/` is payload. Keying on the
     name alone would let anyone park unlinted files under `domain/skills/`."""
@@ -1254,6 +1273,7 @@ def main() -> int:
         case_secrets_are_refused_by_shape,
         case_a_persons_name_is_refused_everywhere,
         case_slices_are_still_linted,
+        case_a_cue_in_another_script_is_refused,
         case_exemption_is_anchored_at_the_role_root,
         case_payload_shape_is_asserted,
         case_index_need_not_list_payload,

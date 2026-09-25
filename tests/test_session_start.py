@@ -223,7 +223,7 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     assert settings["env"]["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] == "1", "the hook must be the only tab-title writer"
     assert not os.path.exists(os.path.join(home, ".claude", "commands", "role.md")), "/role is retired; nothing installs it"
     with open(os.path.join(home, ".claude", "agents", "code-review.md"), encoding="utf-8") as fh:
-        assert "\nmodel: claude-opus-5[1m]\n" in fh.read(), "the reviewer file carries the anthropic column's pin"
+        assert "\nmodel: claude-opus-5-5\n" in fh.read(), "the reviewer file carries the anthropic column's pin"
     with open(os.path.join(home, ".claude", "agents", "code-high.md"), encoding="utf-8") as fh:
         assert "\nmodel: opus\n" in fh.read(), "an unpinned class keeps its alias"
     for skill in ("subagent-dispatch", "gzcoord-send", "gzcoord-receive"):

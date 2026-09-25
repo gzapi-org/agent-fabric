@@ -119,3 +119,18 @@ dispatch on Haiku — the one model with no effort to record. The clamp and
 the refusal-until-written-down still matter, but as the first line of
 defence rather than the only one: a drift check comparing the asked level
 with the recorded one can now be built.
+
+## One model, one level (2026-09-25)
+
+The owner moved every class on plain claude to Opus 5.5 and every class
+and every session to `medium`. Two things change meaning with that. On
+plain claude a class no longer picks a model or a level of thinking,
+because all five resolve to the same pair. It still picks the alias
+the Agent tool accepts, the worktree rule and whether a dispatch asks.
+And the review class is no longer a stronger reader than the code it
+reviews: its independence is the blind brief and a fresh context, as it
+already was on the broker. The machinery stays whole, so a later split
+is one edit per file: the per-class columns, the clamp, the
+refusal-until-written-down and the reviewer's own pin. Tests of that
+machinery run on the column of 2026-09-24
+(`tests/fixtures/routing-distinct/`), where the classes still differ.

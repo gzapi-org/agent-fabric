@@ -46,6 +46,10 @@ class Fixture:
         shutil.copytree(os.path.join(ROOT, "runtime", "claude-code"), os.path.join(root, "runtime", "claude-code"),
                         ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(os.path.join(ROOT, "routing"), os.path.join(root, "routing"))
+        # Classes that differ, so a case can tell which one answered: the
+        # committed column has every class on one model at one level.
+        for name in ("capabilities.json", "effort.json"):
+            shutil.copy2(os.path.join(HERE, "fixtures", "routing-distinct", name), os.path.join(root, "routing", name))
         profiles = os.path.join(root, "routing", "profiles.json")
         doc = json.load(open(profiles, encoding="utf-8"))
         doc["roles"], doc["agents"] = {}, {}

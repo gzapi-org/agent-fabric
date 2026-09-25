@@ -144,12 +144,12 @@ FABRIC_ROOT="$(cd "$(dirname "$UNDER_TEST")/../../.." && pwd)"
 reviewer_file() { mkdir -p "$SCRATCH_HOME/agents"; printf -- '---\nname: code-review\nmodel: %s\n---\n' "$1" > "$SCRATCH_HOME/agents/code-review.md"; }
 launched() { local provider="$1"; shift; printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_STATE_DIR="$EMPTY_STATE" CLAUDE_CONFIG_DIR="$SCRATCH_HOME" AGENT_FABRIC_LAUNCH_PROVIDER="$provider" bash "$UNDER_TEST" 2>/dev/null; }
 vanilla() { launched anthropic "$1"; }
-reviewer_file "claude-opus-5[1m]"
+reviewer_file "claude-opus-5-5"
 out="$(vanilla "$R")"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == allow ]] && pass "review + fable + no isolation: an explicit allow" || fail "vanilla review not allowed" "$out"
-[[ "$(jq -r '.hookSpecificOutput.updatedInput | has("model")' <<<"$out")" == false ]] && pass "…with the dispatch's model removed, so the reviewer file's claude-opus-5[1m] decides" || fail "model still on the dispatch" "$out"
+[[ "$(jq -r '.hookSpecificOutput.updatedInput | has("model")' <<<"$out")" == false ]] && pass "…with the dispatch's model removed, so the reviewer file's claude-opus-5-5 decides" || fail "model still on the dispatch" "$out"
 [[ "$(jq -r '.hookSpecificOutput.updatedInput.subagent_type' <<<"$out")" == code-review && "$(jq -r '.hookSpecificOutput.updatedInput.prompt' <<<"$out")" == "..." ]] && pass "…and everything else on the dispatch intact" || fail "dispatch fields lost" "$out"
-grep -q "claude-opus-5\[1m\]" <<<"$out" && pass "the reason names the pinned model" || fail "reason silent on the pin" "$out"
+grep -q "claude-opus-5-5" <<<"$out" && pass "the reason names the pinned model" || fail "reason silent on the pin" "$out"
 out="$(vanilla '{"subagent_type":"code-review","model":"opus","description":"Review PR 626 diff"}')"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && pass "the fable rule still holds first: a review on opus is denied even here" || fail "opus review admitted on vanilla" "$out"
 out="$(vanilla '{"subagent_type":"code-review","description":"Review PR 626 diff"}')"
@@ -185,18 +185,18 @@ HIGH='{"subagent_type":"code-high","model":"opus","isolation":"worktree","descri
 class_file code-high opus
 out="$(vanilla "$HIGH")"
 ! grep -q "think at a level nothing chose" <<<"$out" && pass "no effort: line in the class file — an older install is not treated as another launch's value" || fail "denied on a missing effort line" "$out"
-class_file code-high opus high
+class_file code-high opus medium
 out="$(vanilla "$HIGH")"
 ! grep -q "think at a level nothing chose" <<<"$out" && pass "the file's level agrees with this launch: not denied for it" || fail "denied on an agreeing level" "$out"
 class_file code-high opus low
 out="$(vanilla "$HIGH")"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "think at a level nothing chose" <<<"$out" && pass "a class file another launch rewrote to a different level is denied, not run" || fail "stranded effort admitted" "$out"
 rm -f "$SCRATCH_HOME/agents/code-high.md"
-reviewer_file "claude-opus-5[1m]"
-printf -- '---\nname: code-review\nmodel: claude-opus-5[1m]\neffort: low\n---\n' > "$SCRATCH_HOME/agents/code-review.md"
+reviewer_file "claude-opus-5-5"
+printf -- '---\nname: code-review\nmodel: claude-opus-5-5\neffort: low\n---\n' > "$SCRATCH_HOME/agents/code-review.md"
 out="$(vanilla "$R")"
 [[ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")" == deny ]] && grep -q "effort" <<<"$out" && pass "…and the review class is checked the same way" || fail "reviewer effort not checked" "$out"
-reviewer_file "claude-opus-5[1m]"
+reviewer_file "claude-opus-5-5"
 
 # The runner may itself be a fabric-launched session; "unlaunched" is the variable absent, not inherited.
 [[ -z "$(printf '{"tool_name":"Agent","tool_input":%s}' "$R" | env -u AGENT_FABRIC_LAUNCH_PROVIDER bash "$UNDER_TEST" 2>/dev/null)" ]] && pass "unlaunched vanilla: plain allow, fable is the harness's" || fail "rewrite leaked to an unlaunched session"

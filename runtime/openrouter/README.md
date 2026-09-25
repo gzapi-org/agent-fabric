@@ -9,8 +9,8 @@ at launch applies to everything under the session, subagents included.
 | provider | Anthropic, by construction | Anthropic, plain `claude` | OpenRouter (`ori claude`) |
 | who launches | the Linux login (`runtime/identity.py`) | the same login; the role comes from its binding | same |
 | session model | harness default | `providers.anthropic.session` from the profile layers — a native id, or a class (that class's model here); a flat `anthropic/<id>` session serves too, `anthropic/` dropped; another vendor's id is refused | `providers.openrouter.session` / flat `session` — an OpenRouter id, or a class (+ family shim) |
-| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`), whatever the harness binds them to this week | the `anthropic` column of `routing/capabilities.json`, overridden per class by the layers: the top model of each class's tier (Haiku 4.5, Sonnet 5, Opus 5.5, Fable 5.1), each exported as `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for the tier the class rides (`runtime/claude-code/aliases.json`, the adapter's); a null in the column leaves that tier to the harness | the `openrouter` column, overridden per class by the layers → model → `routing/shims.json` → the same exports |
-| review class (`code-review`) | the `fable` alias, the harness's | pinned: `claude-opus-5[1m]` (the column, or `providers.anthropic.capabilities.code-review`), written into `~/.claude/agents/code-review.md` at launch; the dispatch checks `model: fable` and then hands the model to the file (architect-cto, 2026-09-15); never the `fable` export, which is `code-plan`'s; gated by review-grade | the same route with the composite: `z-ai/glm-5.3@preset/…` in the file, gated by review-grade |
+| capability classes | harness aliases (`haiku`/`sonnet`/`opus`/`fable`), whatever the harness binds them to this week | the `anthropic` column of `routing/capabilities.json`, overridden per class by the layers: Opus 5.5 for every class (the owner, 2026-09-25; until then the top model of each class's tier — Haiku 4.5, Sonnet 5, Opus 5.5, Fable 5.1), each exported as `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for the tier the class rides (`runtime/claude-code/aliases.json`, the adapter's); a null in the column leaves that tier to the harness | the `openrouter` column, overridden per class by the layers → model → `routing/shims.json` → the same exports |
+| review class (`code-review`) | the `fable` alias, the harness's | pinned: `claude-opus-5-5` (the column, or `providers.anthropic.capabilities.code-review`), written into `~/.claude/agents/code-review.md` at launch; the dispatch checks `model: fable` and then hands the model to the file (architect-cto, 2026-09-15; `claude-opus-5[1m]` until 2026-09-25); never the `fable` export, which is `code-plan`'s; gated by review-grade | the same route with the composite: `z-ai/glm-5.3@preset/…` in the file, gated by review-grade |
 | per-role / per-agent choice | none | `routing/profiles.json` layers + the agent's `model-profile.local.json`, the `providers.anthropic` part: the session and the five classes, as native ids — `bin/fabric-model set --provider anthropic …` | the same layers, the `providers.openrouter` part: the session and the five classes, as OpenRouter ids — `bin/fabric-model set --provider openrouter …` |
 | review-grade floor | none — the harness's Fable tier | `routing/policies/review-grade.json`, checked at launch | same |
 | refusals | none | no bound role, model pins in any settings scope, an ungraded review pin, a non-Anthropic session, no long-lived Claude sign-in (docs/claude-accounts.md), a `.claude.json` whose onboarding cannot be marked | the same, plus `ori` not authenticated from the environment |
@@ -95,12 +95,12 @@ same as a default. The session's level rides `--effort` and is stamped as
 `AGENT_FABRIC_LAUNCH_EFFORT`; `docs/effort-is-routed.md` is the concept.
 
 ```text
-code-low     low    -> ~/.claude/agents/code-low.md      (effort: low)
+code-low     low    -> ~/.claude/agents/code-low.md      (asked medium; GLM 5.3 Flash has none below high, so low — the committed acknowledgement)
 code-medium  high   -> ~/.claude/agents/code-medium.md   (asked medium; GLM 5.2 remaps it up)
-code-high    high   -> ~/.claude/agents/code-high.md
-code-plan    high   -> ~/.claude/agents/code-plan.md     (asked xhigh; the committed acknowledgement for this column)
-code-review  high   -> ~/.claude/agents/code-review.md   (asked xhigh; the committed acknowledgement for this column)
-session      high   -> --effort                          (routing/effort.json `session`)
+code-high    high   -> ~/.claude/agents/code-high.md     (asked medium; DeepSeek V4 Pro remaps it up)
+code-plan    high   -> ~/.claude/agents/code-plan.md     (asked medium; the same)
+code-review  high   -> ~/.claude/agents/code-review.md   (asked medium; the same)
+session      high   -> --effort                          (routing/effort.json `session`: medium; DeepSeek serves high)
 ```
 
 A shim is an OpenRouter preset whose text and routing config live in

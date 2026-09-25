@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { claudeBin } from './ops.mjs';
 
@@ -35,15 +35,28 @@ const execFileP = promisify(execFile);
 export const PIECES = ['claude'];
 export const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 export const STOP_WAIT_MS = 90000;       // the harness's failsafe is the hook budget + 5 s
+export const VERSION_TIMEOUT_MS = 30000;
 // One install per HOST at a time, across its accounts: `fabric-ctl all
 // upgrade claude` makes every daemon install at once, and on 2026-09-25
 // nine of thirteen concurrent installs on develop-qzapp failed where each
 // alone succeeded. The host lease (bin/fabric-lease, docs/resources.md)
-// queues them; the wait fits inside the action's 600 s lifetime.
+// queues them, and it is taken BEFORE the session is stopped and held until
+// the new version is read back: a session is stopped only when its install
+// can start, so the queue costs the operator's wait and never an account's
+// downtime. The wait is sixteen accounts (develop-qzapp's count) at up to
+// ~56 s an install; a larger host needs a longer one.
 export const INSTALL_LEASE = 'claude-install';
-export const LEASE_WAIT_S = 480;
+export const LEASE_WAIT_S = 900;
 export const LEASE_HELD = 75;   // fabric-lease's EX_TEMPFAIL: still held after the wait
-export const INSTALL_TIMEOUT_MS = (LEASE_WAIT_S + 90) * 1000;
+export const INSTALL_TIMEOUT_MS = 300000;
+// What the launcher waits out after the session stopped: the install and
+// its read-back. runtime/openrouter/launch's AGENT_FABRIC_RESTART_WAIT_S
+// default must exceed it (the suite checks), or the session resumes on
+// the old version while the install still runs.
+export const POST_STOP_BUDGET_S = (INSTALL_TIMEOUT_MS + VERSION_TIMEOUT_MS) / 1000;
+// The longest an upgrade can take to reply: read the version, queue,
+// stop the session, install, read it back. fabric-ctl waits this long.
+export const UPGRADE_BUDGET_S = VERSION_TIMEOUT_MS / 1000 + LEASE_WAIT_S + STOP_WAIT_MS / 1000 + POST_STOP_BUDGET_S;
 
 // The line that says what went wrong is the LAST one a failed command
 // wrote; execFile's message starts with "Command failed: <argv>", which
@@ -54,6 +67,30 @@ export function lastLine(e) {
     if (lines.length) return lines.at(-1);
   }
   return 'no output';
+}
+
+// The host lease, held by a child that waits its turn, says "held" and
+// keeps the lease until its stdin closes: release() closes it, and a
+// daemon that dies closes it too, so the lease never outlives its holder.
+// No bin/fabric-lease, or no lease directory (exit 2), is a queue that is
+// unavailable — refused, not bypassed, since installing unqueued is what
+// failed nine accounts.
+export function holdLease(root, { spawnFn = spawn, waitS = LEASE_WAIT_S } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnFn(path.join(root, 'bin', 'fabric-lease'),
+      [INSTALL_LEASE, '--wait', String(waitS), '--', 'sh', '-c', 'echo held; exec cat >/dev/null'],
+      { stdio: ['pipe', 'pipe', 'pipe'] });
+    let err = '', settled = false, exited = false;
+    const gone = new Promise(r => child.once('close', () => { exited = true; r(); }));
+    child.stderr.on('data', d => { err += d; });
+    child.stdout.on('data', d => {
+      if (settled || !String(d).includes('held')) return;
+      settled = true;
+      resolve({ release: () => { if (!exited) child.stdin.end(); return gone; } });
+    });
+    child.on('error', e => { if (!settled) { settled = true; reject({ code: -1, line: String(e.message) }); } });
+    child.on('close', code => { if (!settled) { settled = true; reject({ code, line: lastLine({ stderr: err, message: `fabric-lease exited ${code}` }) }); } });
+  });
 }
 
 export function pinFile(root) { return path.join(root, 'runtime', 'claude-code', 'harness.json'); }
@@ -100,7 +137,7 @@ export function checkArgs(args) {
 }
 
 async function version(bin, exec) {
-  const r = await exec(bin, ['--version'], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] });
+  const r = await exec(bin, ['--version'], { encoding: 'utf8', timeout: VERSION_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
   return String(typeof r === 'string' ? r : r.stdout).trim().split(/\s+/)[0] || null;
 }
 
@@ -116,6 +153,7 @@ export async function upgradeOnce(request, {
   dir = stateDir(home), me = null, exec = execFileP, pgrep = null, kill = process.kill.bind(process),
   alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } },
   sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => new Date(), stopWaitMs = STOP_WAIT_MS, sessions = null,
+  lease = () => holdLease(root),
 } = {}) {
   const args = request.args ?? {};
   const bad = checkArgs(args);
@@ -125,12 +163,27 @@ export async function upgradeOnce(request, {
   const bin = claudeBin(home);
   let from;
   try { from = await version(bin, exec); } catch (e) { return { status: 'failed', piece: 'claude', to: target, reason: `claude --version: ${String(e.message).split('\n')[0].slice(0, 160)}` }; }
+  const readPids = () => sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) });
   let pids;
-  try { pids = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) }); }
-  catch (e) { return { status: 'failed', piece: 'claude', from, to: target, reason: `could not tell whether a session is running (pgrep: ${String(e.message).split('\n')[0].slice(0, 120)}); nothing installed` }; }
+  try { pids = readPids(); } catch (e) { return { status: 'failed', piece: 'claude', from, to: target, reason: `could not tell whether a session is running (pgrep: ${String(e.message).split('\n')[0].slice(0, 120)}); nothing installed` }; }
   const own = me && request.from === me;
   if (from === target) return { status: 'current', piece: 'claude', version: from, session: pids.length ? 'running' : 'none' };
 
+  let held;
+  try { held = await lease(); } catch (e) {
+    return { status: 'failed', piece: 'claude', from, to: target, session: pids.length ? 'running' : 'none',
+      reason: e?.code === LEASE_HELD
+        ? `the host's install lease (${INSTALL_LEASE}) stayed held for ${LEASE_WAIT_S} s; not installed, no session stopped — run it again`
+        : `the host's install queue is unavailable (${String(e?.line ?? e).slice(0, 160)}); not installed, no session stopped` };
+  }
+  try {
+    // Sessions are read again under the lease: the wait can outlast one.
+    try { pids = readPids(); } catch (e) { return { status: 'failed', piece: 'claude', from, to: target, reason: `could not tell whether a session is running (pgrep: ${String(e.message).split('\n')[0].slice(0, 120)}); nothing installed` }; }
+    return await installHeld({ request, dir, bin, exec, kill, alive, sleep, now, stopWaitMs, from, target, pids, own });
+  } finally { await held.release(); }
+}
+
+async function installHeld({ request, dir, bin, exec, kill, alive, sleep, now, stopWaitMs, from, target, pids, own }) {
   const stop = pids.length > 0 && !own;
   const marker = { request_id: request.id, requested_at: now().toISOString(), piece: 'claude', from, to: target, pids, status: 'pending' };
   if (stop) {
@@ -145,16 +198,12 @@ export async function upgradeOnce(request, {
   }
   let installed = null, reason = null;
   try {
-    const lease = path.join(root, 'bin', 'fabric-lease');
-    const [cmd, argv] = fs.existsSync(lease)
-      ? [lease, [INSTALL_LEASE, '--wait', String(LEASE_WAIT_S), '--', bin, 'install', target]]
-      : [bin, ['install', target]];
-    await exec(cmd, argv, { encoding: 'utf8', timeout: INSTALL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+    await exec(bin, ['install', target], { encoding: 'utf8', timeout: INSTALL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
     installed = await version(bin, exec);
     if (installed !== target) reason = `after install, claude --version says ${installed}`;
   } catch (e) {
-    reason = e?.code === LEASE_HELD
-      ? `the host's install lease (${INSTALL_LEASE}) stayed held for ${LEASE_WAIT_S} s; not installed — run it again`
+    reason = e?.killed
+      ? `claude install ${target}: timed out after ${INSTALL_TIMEOUT_MS / 1000} s`
       : `claude install ${target}: ${lastLine(e).slice(0, 200)}`;
   }
   const ok = !reason;

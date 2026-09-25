@@ -36,18 +36,23 @@ running whether or not a session is open) receives the request and:
    restarts. The version is the coordinator's: `fabric-ctl` puts its own
    checkout's pin (or `--version`) into the signed request, so an account
    that has not pulled the pin bump is still brought to it;
-3. a session running: writes the restart marker
+3. waits its turn on the host lease `claude-install` (`bin/fabric-lease`,
+   up to 15 minutes) so the accounts of one host install one at a time —
+   thirteen at once failed nine times on 2026-09-25. The turn comes
+   **before** anything is stopped: a session waits in the queue running,
+   and a turn that never comes (or a host without its lease directory) is
+   a failure with nothing stopped. The lease is held until step 5;
+4. a session running: writes the restart marker
    (`<fabric state>/agents/<login>/restart.json`), then sends `claude` a
    **SIGTERM** — the harness's own graceful shutdown: SessionEnd hooks, the
    session saved, its failsafe bounding the wait. Never a SIGKILL: a session
    that does not stop within 90 s is a failure to report, not to force;
-4. installs the version with the harness's own installer (`claude install
-   <v>`), queued on the host lease `claude-install` (`bin/fabric-lease`,
-   up to 8 minutes) so the accounts of one host install one at a time —
-   thirteen at once failed nine times on 2026-09-25 — and verifies
-   `claude --version`. A failure is reported by the installer's last line;
-   any failed account makes `fabric-ctl` exit 1;
-5. marks the marker done or failed and replies: `from → to`, and whether a
+   then installs the version with the harness's own installer (`claude
+   install <v>`, at most 5 minutes) and verifies `claude --version`. A
+   failure is reported by the installer's last line; any failed account
+   makes `fabric-ctl` exit 1, which waits for replies as long as the
+   slowest account can take (`UPGRADE_BUDGET_S`, `runtime/control/upgrade.mjs`);
+5. marks the marker done or failed, releases the lease and replies: `from → to`, and whether a
    session is restarting.
 
 The **launcher** is still in the session's terminal (the session is its

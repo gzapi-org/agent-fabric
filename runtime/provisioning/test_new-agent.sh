@@ -57,6 +57,8 @@ out_deb="$(AGENT_FABRIC_PLATFORM=debian PATH="$SANDBOX/nogh" run zz-fixture-logi
 grep -q "^new-agent: 0\. debian: this host lacks .*gh.*: sudo apt-get install" <<<"$out_deb" && ok "the Debian profile names the missing tool's package and apt-get" || bad "debian profile" "$out_deb"
 grep -q "^new-agent: host $LOCAL (this host)" <<<"$out" && grep -q "placement: add \"zz-fixture-login\"" <<<"$out" && ok "the host is named, and a missing placement is asked for" || bad "host line" "$out"
 out="$(run some-login backend-dev --claude 9.9 --dry-run)"; [[ $? -eq 2 ]] && ok "--claude takes stable, latest or a full version" || bad "bad --claude accepted" "$out"
+out="$(run some-login backend-dev --claude "1.2.3-x';id;'" --dry-run)"; [[ $? -eq 2 ]] && ok "--claude with shell characters in its suffix is refused" || bad "--claude injection accepted" "$out"
+out="$(run zz-fixture-login backend-dev --claude 2.1.282-beta.1 --dry-run)"; grep -q "install.sh | bash -s -- 2.1.282-beta.1" <<<"$out" && ok "…while a real pre-release suffix still passes" || bad "pre-release refused" "$out"
 out="$(run zz-fixture-login backend-dev --claude latest --dry-run)"; grep -q "install.sh | bash -s -- latest" <<<"$out" && ok "--claude latest reaches the installer" || bad "--claude ignored" "$out"
 PIN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["claude"])' "$ROOT/runtime/claude-code/harness.json")"
 out="$(run zz-fixture-login backend-dev --dry-run)"; grep -q "install.sh | bash -s -- $PIN\$" <<<"$out" && ok "no --claude: the fleet's pinned version ($PIN) reaches the installer" || bad "default is not the pin" "$(grep install.sh <<<"$out")"

@@ -122,7 +122,10 @@ while (( $# )); do
     shift
 done
 [[ -n "$LOGIN" && -n "$ROLE" ]] || { echo "usage: new-agent.sh <login> <role> [--host <id>] [--project <id>]... [--claude VERSION|stable|latest] [--dry-run]" >&2; exit 2; }
-[[ -z "$CLAUDE_TARGET" || "$CLAUDE_TARGET" =~ ^(stable|latest|[0-9]+\.[0-9]+\.[0-9]+([-.][^[:space:]]+)?)$ ]] || { echo "new-agent: --claude takes stable, latest or a version" >&2; exit 2; }
+# The value reaches the worker's as_login eval inside single quotes, so a
+# suffix may carry no quote, semicolon or other shell character — only
+# what a real pre-release or build tag holds (review of #34).
+[[ -z "$CLAUDE_TARGET" || "$CLAUDE_TARGET" =~ ^(stable|latest|[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?)$ ]] || { echo "new-agent: --claude takes stable, latest or a version" >&2; exit 2; }
 
 say() { printf 'new-agent: %s\n' "$*" >&2; }
 die() { printf 'new-agent: %s\n' "$*" >&2; exit 1; }

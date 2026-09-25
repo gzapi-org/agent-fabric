@@ -1001,6 +1001,24 @@ test('send checks presence first: a running addressee is sent to; one with no se
   });
 });
 
+test('a dry run posts nothing, not even a presence request; a refused token is the post\'s to report', async () => {
+  await withPresenceRelay({ 'h/beta': down('web-dev') }, async (relay, posts, asked, env) => {
+    const dry = await sendWith(relay, addressed('TO: h/beta'), ['--dry-run'], env);
+    assert.equal(dry.code, 0, dry.err); assert.match(dry.err, /would post/);
+    assert.deepEqual([posts.length, asked.length], [0, 0], 'no record of any kind (review of #38)');
+  });
+  const hits = [];
+  const server = http.createServer((req, res) => { hits.push(`${req.method} ${req.url.split('?')[0]}`); res.statusCode = 401; res.end('{}'); });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const reg = path.join(scratch('presence-reg-'), 'hosts.json');
+    fs.writeFileSync(reg, JSON.stringify({ version: 1, hosts: { h: { operator: 'user' } }, placement: { alpha: 'h' } }));
+    const r = await sendWith(`http://127.0.0.1:${server.address().port}`, addressed('TO: h/alpha'), [], { AGENT_FABRIC_HOSTS_REGISTRY: reg, GZCOORD_PRESENCE_WAIT_MS: '800' });
+    assert.equal(r.code, 3, r.err); assert.match(r.err, /refused/); assert.doesNotMatch(r.err, /presence could not be asked/);
+    assert.equal(hits.filter(h => h === 'POST /api/send').length, 2, 'the presence request, then the post itself — which owns the token refusal');
+  } finally { server.closeAllConnections(); server.close(); }
+});
+
 test('send to a role: reached when any holder runs; a broadcast asks nothing', async () => {
   await withPresenceRelay({ 'h/alpha': down('web-dev'), 'h/beta': up('web-dev'), 'h/gamma': up('db-admin') }, async (relay, posts, asked, env) => {
     const r = await sendWith(relay, addressed('TO-ROLE: web-dev'), [], env);

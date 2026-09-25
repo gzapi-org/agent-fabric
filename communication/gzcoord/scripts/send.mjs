@@ -4,6 +4,7 @@
 //   node communication/gzcoord/scripts/send.mjs <file>        the message, as written
 //   node communication/gzcoord/scripts/send.mjs -            …from stdin
 //   node communication/gzcoord/scripts/send.mjs <file> --dry-run   validate, resolve, send nothing
+//   node communication/gzcoord/scripts/send.mjs <file> --force     send even to an addressee with no session
 //
 // The other half of inbox.mjs, resolved the same way: who this session is
 // (runtime/identity.py — the login, never a directory), which project's
@@ -15,10 +16,14 @@
 // sent — and refused when its FROM is not this session's own address:
 // the sender is the login, and a message claiming another one would be
 // misattributed on every recipient's cursor. Prints the relay's sequence
-// number and the MESSAGE-ID; nothing else goes to stdout.
+// number and the MESSAGE-ID; nothing else goes to stdout. Before posting
+// a TO or TO-ROLE message it asks the control plane whether the addressee
+// has a session (runtime/control/presence.mjs) and names each one that
+// has none; --force sends anyway.
 //
 // Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
-// FROM is not this session; 3 no token or relay unreachable.
+// FROM is not this session; 3 no token or relay unreachable; 4 an
+// addressee has no session, did not answer, or is not placed (--force).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +32,7 @@ import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idCompl
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
 import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
-import { accountAddresses } from '../../../runtime/control/agentd.mjs';
+import { accountAddresses, operatorAddresses } from '../../../runtime/control/agentd.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -121,6 +126,9 @@ export async function main(argv = process.argv.slice(2)) {
     at: fb.at || t('send.fallback-unknown-time'),
     topic: fb.topic || t('send.fallback-unknown-topic'),
     topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
+  // A dry run posts nothing, not even a presence request on the control
+  // channel (review of #38): it validates and resolves, and stops here.
+  if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
   let tok = token(root, cfg);
   // Is anyone there? A message to a login with no session waits in the
   // relay until one starts, and a TO-ROLE with no running holder reaches
@@ -129,8 +137,14 @@ export async function main(argv = process.argv.slice(2)) {
   // anyway (the owner, 2026-09-25). A broadcast is not checked.
   if (tok) {
     let pres;
-    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...accountAddresses()] }); }
-    catch (e) { pres = { checked: true, problems: [{ kind: 'unavailable', detail: String(e?.message ?? e).split('\n')[0].slice(0, 160) }] }; }
+    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...new Set([...accountAddresses(), ...operatorAddresses()])] }); }
+    catch (e) {
+      // A refused token is the post's to handle: it re-reads the synced
+      // token and says "refused" if that fails too (review of #38). Here
+      // it would only have blocked the send with the wrong reason.
+      pres = (e?.status === 401 || e?.status === 403) ? { checked: false }
+        : { checked: true, problems: [{ kind: 'unavailable', detail: String(e?.message ?? e).split('\n')[0].slice(0, 160) }] };
+    }
     for (const p of pres.problems ?? []) {
       if (p.kind === 'offline') console.error(t('send.presence-offline', { address: p.address }));
       else if (p.kind === 'silent') console.error(t('send.presence-silent', { address: p.address, seconds: PRESENCE_WAIT_MS / 1000 }));
@@ -145,7 +159,6 @@ export async function main(argv = process.argv.slice(2)) {
       console.error(t('send.presence-forced'));
     }
   }
-  if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
   if (!tok) { console.error(t('send.no-token')); return 3; }
   let res;
   const post = authToken => api(authToken, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });

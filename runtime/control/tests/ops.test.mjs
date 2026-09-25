@@ -573,11 +573,21 @@ test('presence: a session is a claude process that is not the daemon\'s own chil
   const stat = (pid, ppid, ticks) => { fs.mkdirSync(path.join(proc, String(pid))); fs.writeFileSync(path.join(proc, String(pid), 'stat'), `${pid} (claude) S ${ppid} 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${ticks} 0 0`); };
   stat(100, 50, 1000); stat(200, 999, 500); stat(300, 60, 3000);
   const binding = { role: 'web-dev', project: 'gzapp' };
-  const r = presence({ proc, self: 999, exec: () => '100\n200\n300\n', binding });
+  const who = { agent: 'web-dev-01', host: 'h', role: 'web-dev', binding: '/nonexistent' };
+  const r = presence({ proc, self: 999, exec: () => '100\n200\n300\n', who, binding });
   assert.deepEqual(r, { status: 'ok', online: true, sessions: 2, since: new Date((1790000000 + 10) * 1000).toISOString(), role: 'web-dev', project: 'gzapp' },
     'the daemon\'s child (200) is not a session; the earliest start is the since');
-  const none = presence({ proc, self: 999, exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; }, binding });
+  // A login with no role recorded is its name's slug, as the inbox's delivery reads it (review of #38).
+  const unbound = presence({ proc, self: 999, exec: () => '100\n', who: { agent: 'web-dev-02', host: 'h', role: undefined, binding: '/nonexistent' }, binding: {} });
+  assert.equal(unbound.role, 'web-dev', 'no binding role: the slug the login carries');
+  const none = presence({ proc, self: 999, exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; }, who, binding });
   assert.deepEqual([none.online, none.sessions, none.since], [false, 0, null], 'pgrep finding nothing is offline');
-  const broken = presence({ proc, self: 999, exec: () => { const e = new Error('spawn pgrep ENOENT'); e.code = 'ENOENT'; throw e; }, binding });
+  const broken = presence({ proc, self: 999, exec: () => { const e = new Error('spawn pgrep ENOENT'); e.code = 'ENOENT'; throw e; }, who, binding });
   assert.equal(broken.status, 'failed', 'a pgrep that cannot run is not "offline"');
+});
+
+test('collect(presence) answers under the presence key — the name fabric-ctl reads', async () => {
+  const data = await collect('presence', { presenceOpts: { exec: () => '', who: { agent: 'web-dev-01', host: 'h', role: 'web-dev', binding: '/nonexistent' }, binding: {} } });
+  assert.deepEqual(Object.keys(data), ['presence']);
+  assert.equal(data.presence.status, 'ok');
 });

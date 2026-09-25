@@ -17,8 +17,8 @@ import crypto from 'node:crypto';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
-import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
-import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
+import { whoami, findTaxonomy, loadTaxonomy } from '../../communication/gzcoord/scripts/gzmsg.mjs';
+import { syncedVar, holdStatus, identity as gzIdentity } from '../../communication/gzcoord/scripts/inbox.mjs';
 
 export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'upgrade', 'secrets-sync', 'status', 'presence'];
 // Answered for any placed account, not only an operator: whether a session
@@ -222,9 +222,12 @@ export function session(uid = process.getuid(), exec = execFileSync) {
 // so a crash or a launch that never reached the harness is never
 // "present" — the two cases a HELLO/GOODBYE pair got wrong on 2026-09-25.
 // The daemon's own children (the observer's /usage runs) are not a
-// session. Role and project are the binding's: what the last session here
-// was launched as and worked in.
-export function presence({ uid = process.getuid(), exec = execFileSync, proc = '/proc', self = process.pid, binding = null } = {}) {
+// session. The role is derived exactly as the inbox's delivery derives it
+// (inbox.mjs identity(): the binding's role, else the slug the login
+// carries), so a TO-ROLE the relay would deliver is never refused for a
+// holder with no role recorded (review of #38). The project is the
+// binding's: where the last session here worked.
+export function presence({ uid = process.getuid(), exec = execFileSync, proc = '/proc', self = process.pid, who = null, binding = null } = {}) {
   let pids = [];
   try { pids = String(exec('pgrep', ['-u', String(uid), '-x', 'claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim().split('\n').filter(Boolean).map(Number); }
   catch (e) { if (e?.status !== 1) return { status: 'failed', error: `pgrep: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}` }; }
@@ -233,8 +236,11 @@ export function presence({ uid = process.getuid(), exec = execFileSync, proc = '
   const live = pids.map(p => ({ p, f: stat(p) })).filter(x => x.f && Number(x.f[1]) !== self);
   // field 22 of stat, starttime, in clock ticks since boot (USER_HZ, 100 on Linux)
   const starts = live.map(x => btime == null ? null : new Date((btime + Number(x.f[19]) / 100) * 1000).toISOString()).filter(Boolean).sort();
-  const b = binding ?? (readJson(whoami().binding) ?? {});
-  return { status: 'ok', online: live.length > 0, sessions: live.length, since: starts[0] ?? null, role: b.role ?? null, project: b.project ?? null };
+  const me = who ?? whoami();
+  const b = binding ?? (readJson(me.binding) ?? {});
+  let role = null;
+  try { const tp = findTaxonomy(); role = gzIdentity(me, tp ? loadTaxonomy(tp) : undefined).slug ?? null; } catch { /* no catalogue: no role */ }
+  return { status: 'ok', online: live.length > 0, sessions: live.length, since: starts[0] ?? null, role, project: b.project ?? null };
 }
 
 // The MACHINE this account shares — what develop-qzapp's crash of

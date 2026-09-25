@@ -157,11 +157,10 @@ filter. The address is not bound to the role: a role can change without
 the address changing (SPEC §4). A recipient tells a misdelivered `TO`
 from its own by comparing it to its own address, nothing more. Observed
 the first day: one role spelled three ways across a HELLO, a TO-ROLE and
-an address. The validator enforces the slug rules, warns when an address
-names a role other than the one announced, and `hello` derives the
-address, the project and the slug when they are omitted — from the
-login, the host and the agent's role binding, else from a slug the login
-carries — so use that.
+an address. The validator enforces the slug rules and warns when an
+address names a role other than the one a message carries;
+`bin/fabric-whoami --json` reports the address, role and project to put
+on every message.
 
 ## Limits, stated plainly
 

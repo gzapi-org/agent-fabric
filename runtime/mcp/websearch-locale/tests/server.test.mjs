@@ -125,4 +125,6 @@ test('stripTags removes markup until none is left, and a stray angle bracket wit
   const crafted = '<b'.repeat(50000) + '>'.repeat(50000);
   const t0 = Date.now(); stripTags(crafted);
   assert.ok(Date.now() - t0 < 1000, 'a crafted nesting is bounded, not quadratic in its length');
+  assert.equal(stripTags('a'.repeat(5000)).length, 4096, 'the input is cut to 4096 characters');
+  assert.ok(stripTags('<b'.repeat(20) + '>'.repeat(20)).length > 0, 'at most 16 passes: a deeper nesting leaves residue rather than looping on');
 });

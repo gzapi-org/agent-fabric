@@ -64,7 +64,8 @@ fabric-lease <name> --who
   wait asked), `timeout` (the wait ran out), `memory` (under
   `--need-mem`), `memory-unknown` (`--need-mem` asked and
   `MemAvailable` unreadable, exit 2), `nodir` (no lease directory, exit
-  2). A usage error (exit 2, nothing touched) carries none. A caller that
+  2), `unopenable` (the lease file cannot be opened, exit 2). A usage
+  error (bad arguments, exit 2, no lease file touched) carries none. A caller that
   tells refusals apart matches that last line; the prose above it may
   be reworded at any time (tests/test_fabric-lease.sh pins the line).
 - **`--need-mem`** checks `MemAvailable` *under* the lease, so two

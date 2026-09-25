@@ -367,3 +367,30 @@ test('fabric-ctl upgrade: the coordinator\'s pin travels in the signed request; 
     assert.equal(JSON.parse(r.rows.at(-1).content).args.version, '2.1.279', '--version overrides the pin'); void over;
   } finally { r.close(); }
 });
+
+test('fabric-ctl upgrade exits 1 when any account failed, 0 when every answer is upgraded or current', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile();
+    const k = generateOperatorKey();
+    const go = statuses => new Promise(resolve => {
+      let done = false;
+      const answer = () => {
+        if (done) return;
+        const reqRec = [...r.rows].reverse().find(x => { try { const j = JSON.parse(x.content); return j.kind === 'request' && j.op === 'upgrade' && !x.answered; } catch { return false; } });
+        if (!reqRec) return setTimeout(answer, 30);
+        done = true; reqRec.answered = true;
+        const id = JSON.parse(reqRec.content).id;
+        for (const [login, st] of Object.entries(statuses)) r.add(`${H}/${login}`, JSON.stringify({ v: 1, kind: 'reply', id: 'r-' + login + Math.random(), in_reply_to: id, from: `${H}/${login}`, op: 'upgrade', ok: true, data: { upgrade: { status: st, from: '2.1.281', to: '2.1.282', session: 'none' } } }));
+      };
+      setTimeout(answer, 30);
+      const child = spawn('node', [CTL, 'db-admin', 'web-dev-01', 'upgrade', 'claude', '--timeout', '5'], { env: { ...process.env, HOME: scratch('ctl-home-'), CLAUDE_BRIDGE_URL: r.url(), CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, FABRIC_CONTROL_SIGNING_KEY: k.privateKeySpec } });
+      let out = ''; child.stdout.on('data', d => { out += d; });
+      child.on('close', status => resolve({ status, out }));
+    });
+    const bad = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'failed' });
+    assert.equal(bad.status, 1, bad.out); assert.match(bad.out, /web-dev-01\s+failed/);
+    const good = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'current' });
+    assert.equal(good.status, 0, good.out);
+  } finally { r.close(); }
+});

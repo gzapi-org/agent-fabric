@@ -352,7 +352,10 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const rs = rows(expected, replies);
   if (args.json) for (const r of rs) console.log(JSON.stringify(r));
   else console.log(table(args.op, rs));
-  return want.size || short() || refused ? 1 : 0;
+  // An action that failed on an account is a failed run, whatever else
+  // answered: the first fleet upgrade printed nine failed rows and exited 0.
+  const actionFailed = ACTION_OPS.includes(args.op) && replies.some(r => { const s = r.data?.[args.op]?.status; return s && !['current', 'upgraded'].includes(s); });
+  return want.size || short() || refused || actionFailed ? 1 : 0;
 }
 
 // The operator's signing key, made once (or rotated): the private half goes

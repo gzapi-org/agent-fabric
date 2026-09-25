@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The token every job gets: read the repository, nothing else. No job
+# writes to GitHub; left unset, it would be the repository's default.
+permissions:
+  contents: read
+
 jobs:
   static:
     # Every bash script parses, shellcheck at error severity, ruff on the

@@ -32,8 +32,10 @@
 // ACTION op (sign.mjs ACTION_OPS) additionally needs `sig`, an Ed25519
 // signature by the operator's committed key, lives at most 10 minutes,
 // and must be newer than the last action accepted from that operator (a
-// ledger in the account's fabric state). Read ops take no arguments; an
-// action takes only its closed set (upgrade.mjs checkArgs). No field of a
+// ledger in the account's fabric state), and no more than a minute in
+// its future. A read op takes no argument but `tokens`'s `days` (a number
+// capped at 90); an action takes only its closed set (upgrade.mjs
+// checkArgs). No field of a
 // request ever reaches a shell; the answer carries no secret (ops.mjs).
 //
 // Every reply arrives: a section that cannot be read says so inline.
@@ -59,6 +61,7 @@ export const USAGE_CACHE_MS = 10000;
 // read (the relay down, a harness update mid-run) is not a lapse. A
 // request inside ACCOUNTS_CACHE_MS gets the last reading, not a new harness run.
 export const ACCOUNTS_KEEPALIVE_MS = 4 * 3600 * 1000;
+export const ACTION_CLOCK_SKEW_MS = 60 * 1000;
 export const ACCOUNTS_CACHE_MS = 5 * 60 * 1000;
 
 // One reading at a time, shared: the keeper's timer and a request that
@@ -154,6 +157,10 @@ export function accept(rec, { me, operators, keys = new Map(), ttl_s, seen, now 
   const ts = Date.parse(r.ts);
   const ttl = Number(r.ttl_s) > 0 ? Math.min(Number(r.ttl_s), action ? ACTION_TTL_MAX_S : 3600) : ttl_s;
   if (!Number.isFinite(ts) || ts + ttl * 1000 < now) return { ok: false, why: 'expired' };
+  // An action dated in the future would raise the ledger's floor past
+  // every honest action that follows until the clock caught up — one
+  // request signed on a fast clock locks the operator out (review of #34).
+  if (action && ts - now > ACTION_CLOCK_SKEW_MS) return { ok: false, why: `${r.op}: dated ${Math.round((ts - now) / 1000)} s in the future (the operator's clock?)` };
   if (action && !(ts > actionFloor(r.from))) return { ok: false, why: `${r.op}: not newer than the last action accepted from ${String(r.from).slice(0, 40)} (a replay)` };
   return { ok: true, request: r, ts };
 }
@@ -263,7 +270,11 @@ export async function main(argv = process.argv.slice(2)) {
         // it is done; one action at a time is the action's own rule.
         if (ACTION_OPS.includes(a.request.op)) {
           const { op, from, id } = a.request;
-          ledger.record(from, a.ts);   // before it runs: a replay posted while it runs is refused too
+          // Recorded before it runs, so a replay posted while it runs is refused
+          // too; a ledger that cannot be written refuses the action BY NAME —
+          // thrown here it read as "relay unreachable" and the action vanished.
+          try { ledger.record(from, a.ts); }
+          catch (e) { console.error(`agentd: ${op} for ${from} refused: the action ledger could not be written (${e.code ?? e.message})`); continue; }
           console.error(`agentd: started ${op} for ${from} (${id.slice(0, 8)})`);
           const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
             .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`))
@@ -282,6 +293,7 @@ export async function main(argv = process.argv.slice(2)) {
       // pending upgrade and no reply posted (review of #34).
       if (once) { await Promise.allSettled([...inflight]); return 0; }
     } catch (e) {
+      if (once) await Promise.allSettled([...inflight]);   // every exit of --once, not only the clean one
       if (e.status === 401 || e.status === 403) { console.error(`agentd: the relay refused this token (HTTP ${e.status}); rotated? run bin/fabric-secrets sync`); if (once) return 4; }
       else if (!down) { console.error(`agentd: relay unreachable at ${cfg.relay_url} (${e.message}) — retrying every 30 s`); down = true; }
       if (once) return 1;

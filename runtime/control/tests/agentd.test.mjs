@@ -335,5 +335,48 @@ test('agentd --once: a signed upgrade already started is waited for — its repl
     const rs = replies(r).filter(x => x.op === 'upgrade');
     assert.equal(rs.length, 1, `the action's reply was posted before exit\n${out.stderr}`);
     assert.deepEqual([rs[0].data.upgrade.status, rs[0].data.upgrade.version], ['current', '9.9.9']);
+    // The ledger the daemon wrote, read back: the action's own timestamp.
+    const ledgerFile = path.join(home, 'state', 'agents', me.agent, 'actions-seen.json');
+    const signedRec = r.rows.find(x => { try { return JSON.parse(x.content).op === 'upgrade' && JSON.parse(x.content).kind === 'request'; } catch { return false; } });
+    const sent = JSON.parse(signedRec.content);
+    assert.equal(JSON.parse(fs.readFileSync(ledgerFile, 'utf8'))[sent.from], Date.parse(sent.ts), 'the daemon recorded the action in its ledger');
+    // A new daemon (a restart: its in-memory LRU is empty) is shown the same signed record again: refused, no second reply.
+    // After the NEW daemon's first wait (r.waiting() already resolved on the first run's).
+    const waitsBefore = r.hits.filter(h => h.startsWith('/api/wait?')).length;
+    const newWait = () => new Promise(res => { const t = () => r.hits.filter(h => h.startsWith('/api/wait?')).length > waitsBefore ? res() : setTimeout(t, 20); t(); });
+    newWait().then(() => r.add(sent.from, signedRec.content));
+    const again = await new Promise(resolve => {
+      const child = spawn('node', [AGENTD, '--once'], { env: { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: r.url(), FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, AGENT_FABRIC_STATE_DIR: path.join(home, 'state') } });
+      let stderr = ''; child.stderr.on('data', d => { stderr += d; });
+      const t = setTimeout(() => child.kill('SIGKILL'), 20000);
+      child.on('close', status => { clearTimeout(t); resolve({ status, stderr }); });
+    });
+    assert.equal(replies(r).filter(x => x.op === 'upgrade').length, 1, `a replay after a restart got a reply\n${again.stderr}`);
+    assert.match(again.stderr, /not newer than the last action accepted .* \(a replay\)/);
+  } finally { r.close(); }
+});
+
+test('agentd --once: an action whose ledger cannot be written is refused by name, not blamed on the relay', async () => {
+  const me = whoami();
+  const k = generateOperatorKey();
+  const reg = path.join(scratch('agentd-reg-'), 'registry.json');
+  fs.writeFileSync(reg, JSON.stringify({ hosts: { [me.host]: { operator: me.agent, operator_key: k.publicKeySpec } }, placement: {} }));
+  const home = scratchHome();
+  const state = path.join(home, 'state');
+  fs.mkdirSync(state, { recursive: true });
+  fs.writeFileSync(path.join(state, 'agents'), 'not a directory');   // the ledger's directory cannot be made
+  const r = relay([]);
+  await r.listen();
+  try {
+    r.waiting().then(() => r.add(`${me.host}/${me.agent}`, JSON.stringify(signRequest({ v: 1, kind: 'request', id: newId(), from: `${me.host}/${me.agent}`, to: '*', op: 'upgrade', args: { piece: 'claude', version: '9.9.9' }, ts: new Date().toISOString(), ttl_s: 60 }, k.privateKeySpec))));
+    const out = await new Promise(resolve => {
+      const child = spawn('node', [AGENTD, '--once'], { env: { ...process.env, HOME: home, CLAUDE_BRIDGE_URL: r.url(), FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, AGENT_FABRIC_STATE_DIR: state } });
+      let stderr = ''; child.stderr.on('data', d => { stderr += d; });
+      const t = setTimeout(() => child.kill('SIGKILL'), 20000);
+      child.on('close', status => { clearTimeout(t); resolve({ status, stderr }); });
+    });
+    assert.match(out.stderr, /upgrade for .* refused: the action ledger could not be written \(ENOTDIR\)/);
+    assert.doesNotMatch(out.stderr, /relay unreachable/);
+    assert.equal(replies(r).filter(x => x.op === 'upgrade').length, 0, 'nothing ran');
   } finally { r.close(); }
 });

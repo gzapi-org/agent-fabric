@@ -536,8 +536,25 @@ mkfabric
 out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TEMPLATE-FIXTURE run --version 2>&1)"
 grep -q "^ORI-HAS-OAUTH-TOKEN:$" <<<"$out" && grep -q "dropped CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ok "broker path: the template token is dropped before the session, and that is said" || bad "template token reached the broker" "$(grep -i oauth <<<"$out")"
 ! grep -q "sk-ant-oat01-TEMPLATE-FIXTURE" <<<"$out" && ok "…by name, never by value" || bad "token value printed"
-out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TEMPLATE-FIXTURE run --provider anthropic --version 2>&1)"
-! grep -q "dropped CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ok "plain claude keeps it: that is the session it is for" || bad "template token dropped on plain claude" "$out"
+# On plain claude the login's synced record decides, not the inherited shell.
+# A fake claude of its own (the plain-claude block above removed its fake):
+# it reports the token it was given by fingerprint only.
+cat > "$SANDBOX/bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+v="${CLAUDE_CODE_OAUTH_TOKEN:-}"; if [ -n "$v" ]; then echo "CLAUDE-OAUTH-SHA:$(printf %s "$v" | sha256sum | cut -c1-12)"; else echo "CLAUDE-OAUTH-SHA:none"; fi
+FAKE
+chmod +x "$SANDBOX/bin/claude"
+SEC="$HOME/.config/agent-fabric/secrets.env"; mkdir -p "$(dirname "$SEC")"
+fp() { printf %s "$1" | sha256sum | cut -c1-12; }
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-NEW-TEMPLATE'\n" > "$SEC"
+out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)"
+grep -q "^CLAUDE-OAUTH-SHA:$(fp sk-ant-oat01-NEW-TEMPLATE)$" <<<"$out" && grep -q "taken from the login's synced record" <<<"$out" \
+  && ok "plain claude: the synced record's token, not the older one the shell inherited, and that is said" || bad "stale inherited token used" "$(grep -iE "oauth|synced" <<<"$out")"
+! grep -q "sk-ant-oat01-" <<<"$out" && ok "…by name, never by value" || bad "token value printed"
+: > "$SEC"
+out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)"
+grep -q "^CLAUDE-OAUTH-SHA:none$" <<<"$out" && grep -q "the login's synced record has none" <<<"$out" && ok "no template in the record: an inherited one is dropped (own /login)" || bad "inherited token kept" "$(grep -iE "oauth|synced" <<<"$out")"
+rm -f "$SEC" "$SANDBOX/bin/claude"
 
 echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project

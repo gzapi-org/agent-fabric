@@ -429,6 +429,34 @@ fi
 # with a base URL set, an Anthropic subscription token has no business in
 # a process whose requests go to a third party (review of #33). Dropped
 # unconditionally on the broker path, by name.
+# Which Claude account a plain-claude session runs on is the login's synced
+# record, not the shell this launcher inherited: a shell opened before
+# `fabric-accounts assign` moved the login still holds the old token (or
+# none), and a relaunch from it — including the upgrade's automatic resume
+# — would start on the old account (2026-09-25, devex-tooling). Read from
+# ~/.config/agent-fabric/secrets.env at every launch; absent there, an
+# inherited one is dropped. Said by name when it replaces or drops one.
+if [[ "$PROVIDER" == anthropic ]]; then
+    SYNCED_TOKEN="$(python3 - "$HOME/.config/agent-fabric/secrets.env" <<'PY' 2>/dev/null
+import shlex, sys
+try:
+    for line in open(sys.argv[1], encoding="utf-8"):
+        if line.startswith("export CLAUDE_CODE_OAUTH_TOKEN="):
+            print(shlex.split(line[len("export "):])[0].split("=", 1)[1], end="")
+            break
+except (OSError, ValueError, IndexError):
+    pass
+PY
+)"
+    if [[ -n "$SYNCED_TOKEN" ]]; then
+        [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && "$CLAUDE_CODE_OAUTH_TOKEN" != "$SYNCED_TOKEN" ]] && echo "launch: CLAUDE_CODE_OAUTH_TOKEN taken from the login's synced record, not the older one this shell inherited" >&2
+        export CLAUDE_CODE_OAUTH_TOKEN="$SYNCED_TOKEN"
+    elif [[ -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
+        unset CLAUDE_CODE_OAUTH_TOKEN
+        echo "launch: dropped the CLAUDE_CODE_OAUTH_TOKEN this shell inherited — the login's synced record has none (its own /login)" >&2
+    fi
+    unset SYNCED_TOKEN
+fi
 if [[ "$PROVIDER" != anthropic && -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
     unset CLAUDE_CODE_OAUTH_TOKEN
     echo "launch: the broker path — dropped CLAUDE_CODE_OAUTH_TOKEN (a Claude-account template's token never reaches a broker session)" >&2

@@ -18,11 +18,11 @@ The runtime owns protocol parsing and peer semantics. The adapter owns native de
 
 ### Native sender identity
 
-Inbound delivery MUST expose a stable transport-native sender identity when the transport provides one. The runtime associates it with a logical GZCoord address only after parsing a valid HELLO.
+Inbound delivery MUST expose a stable transport-native sender identity when the transport provides one. The runtime associates it with the logical GZCoord address in the `FROM` of any valid message (SPEC §5); presence, not an announcement, says whether that address is live.
 
 ### Broadcast
 
-The adapter SHOULD provide a way for HELLO to reach all participating peers. If the transport cannot broadcast to all agent participants, the adapter must define a bootstrap mechanism without altering core protocol fields.
+The adapter SHOULD provide a way for a `BROADCAST` to reach all participating peers (`HELLO`, which once relied on it, is deprecated — SPEC §5). If the transport cannot broadcast to all agent participants, the adapter must define a bootstrap mechanism without altering core protocol fields.
 
 ### Direct delivery
 

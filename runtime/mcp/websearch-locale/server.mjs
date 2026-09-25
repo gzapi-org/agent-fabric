@@ -96,9 +96,21 @@ export async function search(engine, query, locale, { secrets = secretsOf(engine
   }
   let j; try { j = await r.json(); } catch { return { isError: true, text: 'search answered something that is not JSON' }; }
   if (engine === 'serpapi' && j?.error) return { isError: true, text: `search refused: ${String(j.error).slice(0, 200)}` };
-  const items = engine === 'serpapi' ? (j?.organic_results ?? []).map(x => [x.title, x.link, x.snippet]) : (j?.web?.results ?? []).map(x => [x.title, x.url, (x.description ?? '').replace(/<[^>]+>/g, '')]);
+  const items = engine === 'serpapi' ? (j?.organic_results ?? []).map(x => [x.title, x.link, x.snippet]) : (j?.web?.results ?? []).map(x => [x.title, x.url, stripTags(x.description ?? '')]);
   if (!items.length) return { isError: false, text: `no results (${engine})` };
   return { isError: false, text: items.map(([t, l, d], i) => `${i + 1}. ${t ?? ''}\n   ${l ?? ''}\n   ${(d ?? '').replace(/\s+/g, ' ')}`).join('\n\n') };
+}
+
+// A description's markup (tag-shaped spans only, so "a < b" prose stays),
+// removed until none is left: one pass over
+// "<<b>b>" leaves "<b>", and a stray angle bracket is dropped too. The
+// text reaches a model, not a browser; this keeps it plain.
+export function stripTags(text) {
+  // Bounded: a description is a few hundred bytes, and each pass is
+  // linear, so 16 passes and 4 kB cap a crafted "<b<b<b…>>>" (review of #39).
+  let s = String(text).slice(0, 4096), prev, i = 0;
+  do { prev = s; s = s.replace(/<\/?[A-Za-z][^<>]*>/g, ''); } while (s !== prev && ++i < 16);
+  return s.replace(/[<>]/g, '');
 }
 
 // The tools. `web_search` is the located search with Brave behind it:

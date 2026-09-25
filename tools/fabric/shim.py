@@ -269,7 +269,7 @@ def cmd_check(model: str, shim: str | None, quick: bool, out: str | None) -> int
     os.makedirs(out, exist_ok=True)
     task = QUICK_TASK if quick else CHECK_TASK
     started = time.time()
-    env = {**os.environ, "AGENT_FABRIC_NO_ANNOUNCE": "1", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}
+    env = {**os.environ, "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}
     cmd = ["ori", "claude", "--model", composite, "-p", task, "--output-format", "stream-json", "--verbose",
            "--max-turns", "12"]
     print(f"check: {composite}\n  cwd {ROOT}\n  transcript {out}/stream.jsonl", file=sys.stderr)

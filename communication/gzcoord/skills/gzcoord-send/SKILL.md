@@ -1,6 +1,6 @@
 ---
 name: gzcoord-send
-description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, minting its MESSAGE-ID, validating it and posting it with communication/gzcoord/scripts/send.mjs as the login you are. Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, a DECISION, or a HELLO at session start."
+description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, minting its MESSAGE-ID, validating it and posting it with communication/gzcoord/scripts/send.mjs as the login you are. Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, or a DECISION; and to learn whether an agent is online (presence), since nobody sends HELLO any more."
 ---
 
 # Sending a GZCoord message
@@ -27,8 +27,8 @@ say what a PR already says.
 ## 2. Compose
 
 Pick the type (`INFO`, `OBSERVATION`, `QUESTION`, `REQUEST`, `REVIEW`,
-`DECISION`, `HANDOFF`, `REPLY`, `HELLO`, `GOODBYE` — nothing else; an
-extension is `X-…`). Metadata block, then sections:
+`DECISION`, `HANDOFF`, `REPLY` — nothing else; an extension is `X-…`;
+`HELLO` and `GOODBYE` are deprecated, see §4). Metadata block, then sections:
 
 ```text
 [GZCOORD/1] OBSERVATION
@@ -82,8 +82,8 @@ Rules that are not style:
   runtime delivers a role address to every holder and each executes the
   job unaware of the others: two PRs on the same hunk. `send.mjs` refuses it. When you do not
   know which holder: the one whose open PR touches the path
-  (`pr-gate.sh --all`), else the most recent `HELLO` of the role, else
-  the lowest-numbered login — and say which rule chose
+  (`pr-gate.sh --all`), else one holding it with a session running now
+  (`fabric-ctl all presence`), else the lowest-numbered login — and say which rule chose
   (`MESSAGE-FORMAT.md` §Direct versus role addressing). `TO-ROLE` stays
   for an `INFO`, a `DECISION`, a `QUESTION` to whoever holds the role.
 - **Diagnose completely, prescribe nothing outside your lane.** State what
@@ -140,8 +140,9 @@ the id: a reply names it in `IN-REPLY-TO`.
 **Before a `TO` or `TO-ROLE` message leaves, `send.mjs` asks whether the
 addressee has a session running** — the control plane answers from each
 account's process table (`fabric-ctl <login|all> presence` shows the
-same). An addressee with no session, a control agent that did not answer,
-or an address no host places is named, nothing is sent, and it exits 4.
+same). An addressee with no session, a control agent that did not answer
+or could not tell, an address no host places, or presence that could not
+be asked at all is named, nothing is sent, and it exits 4.
 A `TO-ROLE` passes when any holder of the role is running; a broadcast is
 not checked. Then you decide: a message to a login with no session waits
 in the relay until one starts, which may be what you want — `--force`
@@ -152,26 +153,25 @@ belongs to a running session, or to a later send.
 hook. Working in a clone without it, the fabric is `../agent-fabric`
 beside the working copy.
 
-## 4. HELLO and GOODBYE are the launcher's; you send neither
+## 4. Presence is asked, never announced
 
-The launcher (`runtime/openrouter/launch`) sends your `HELLO` just before
-it starts the session — derived from your binding by `gzmsg.mjs hello`,
-posted by `send.mjs` as your login (`tools/fabric/announce.py`) — and
-your `GOODBYE` after the session returns, however it ended (`/exit`, a
-double Ctrl-C, a crash, a kill: the session is a child the launcher
-waits on). So a `HELLO` on the channel means a session actually exists
-and a `GOODBYE` that it is gone, with how in its NOTES. You send
-neither, at start, at the end or in between: a second one would only be
-noise on every cursor. A **role cannot change inside a session**: it is bound from a
-login shell (`bin/fabric-role bind <role>`, which sends the `GOODBYE` as
-the role you leave) and the new role is a relaunch, which sends its own
-`HELLO`. If you ever launched outside the launcher and no `HELLO` went
-out, this is the shape:
+`HELLO` and `GOODBYE` are deprecated (SPEC §5): nobody sends them, and
+the inbox acknowledges one from a session not yet updated without
+delivering it. Whether another agent has a session running — since when,
+as which role — is the control plane's to answer, from each account's
+process table:
 
 ```sh
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs" hello > "$SCRATCH/hello.txt" \
-  && node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" "$SCRATCH/hello.txt"
+"$AGENT_FABRIC_ROOT/bin/fabric-ctl" <login> presence    # one account
+"$AGENT_FABRIC_ROOT/bin/fabric-ctl" all presence        # everyone
 ```
+
+`send.mjs` asks the same before a `TO` or `TO-ROLE` message leaves (§3).
+A crash, or a launch that never started, reads as no session: presence is
+the process table, not what a session said about itself. A **role cannot
+change inside a session**: it is bound from a login shell
+(`bin/fabric-role bind <role>`) and the new role is a relaunch; presence
+reports the role from the binding.
 
 ## What a sent message does not do
 

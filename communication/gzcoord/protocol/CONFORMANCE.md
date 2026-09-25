@@ -34,7 +34,7 @@ A conforming sender:
 A conforming runtime:
 
 - has one logical `host/instance` identity;
-- emits HELLO when joining;
+- sends no HELLO or GOODBYE (deprecated, SPEC §5), and reads presence from its deployment;
 - treats peer discovery as reconstructable cache;
 - keeps model and subagent policy local;
 - follows repository-local instructions before acting;

@@ -129,7 +129,7 @@ export async function secretsSyncOnce(request, {
   if (upgrading()) return fail('an upgrade is running on this account (it owns the restart marker); synced, nothing stopped — run it again after');
   restartInFlight(true);
   try {
-    // The launcher reads the marker after the session's GOODBYE: written
+    // The launcher reads the marker when the session returns: written
     // first, and done already, so it resumes at once on what was synced.
     const before = envs.get(stale[0])?.token ?? null;
     writeMarker(dir, { request_id: request.id, requested_at: now().toISOString(), piece: 'the Claude account', from: before ? `setup-token ${sha12(before)}` : 'no token', to: `setup-token ${sign.token_sha256_12}`, installed: `setup-token ${sign.token_sha256_12}`, pids: stale, status: 'done' });

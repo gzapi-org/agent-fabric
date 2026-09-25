@@ -141,11 +141,11 @@ test('holdLease: the real fabric-lease holds until release; no lease directory a
   try {
     process.env.AGENT_FABRIC_LEASES = scratch('upgrade-hold-');
     const h = await holdLease(ROOT);
-    await assert.rejects(holdLease(ROOT, { waitS: 1 }), e => e.code === LEASE_HELD && /still held/.test(e.line), 'a second holder waits its time, then is refused');
+    await assert.rejects(holdLease(ROOT, { waitS: 1 }), e => e.code === LEASE_HELD && e.reason === 'timeout' && /still held/.test(e.line), 'a second holder waits its time, then is refused — the reason as data, the prose as the line');
     await h.release();
     const again = await holdLease(ROOT); await again.release();
     process.env.AGENT_FABRIC_LEASES = path.join(scratch('upgrade-nolease-'), 'absent');
-    await assert.rejects(holdLease(ROOT), e => e.code === 2 && /no lease directory/.test(e.line));
+    await assert.rejects(holdLease(ROOT), e => e.code === 2 && e.reason === 'nodir' && /no lease directory/.test(e.line));
     await assert.rejects(holdLease(scratch('upgrade-noscript-')), e => e.code === -1 && /ENOENT/.test(e.line));
   } finally { if (saved === undefined) delete process.env.AGENT_FABRIC_LEASES; else process.env.AGENT_FABRIC_LEASES = saved; }
 });

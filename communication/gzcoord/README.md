@@ -37,23 +37,15 @@ develop-gzapp/architect-cto
 
 The address is logical, but it is not arbitrary: `host` is the machine's short hostname and `instance` is the login of the operating-system account the session runs under — the agent, as agent-fabric's `runtime/identity.py` resolves it (`protocol/SPEC.md` §3.1). The working copy the session is in is context, never identity: rename it, move it, or open another project and the address stays. The derivation runs one way. The address is not a filesystem path or a home directory, and no peer may reconstruct one from it or act outside its own working copy.
 
-## Discovery
+## Discovery and presence
 
-An agent self-defines its role by announcing `HELLO`:
-
-```text
-[GZCOORD/1] HELLO
-FROM: develop-gzapp/architect-cto
-ROLE: architect-cto
-PROJECT: gzapp
-SPECIALTIES: architecture, ADR, contracts, system design
-CAPABILITIES: github, code-review, repository-analysis
-
-ABOUT:
-I review architectural consistency, cross-component contracts and design decisions.
-```
-
-There is no authoritative role registry. Peers may keep an ephemeral routing cache learned from `HELLO` traffic.
+Every message carries its sender's `ROLE`, so any message says who holds
+what. Whether an agent is online is presence, and presence is the
+deployment's to answer, never an announcement (`protocol/SPEC.md` §5):
+`HELLO` and `GOODBYE` are deprecated. In agent-fabric the control plane
+answers it from each account's process table —
+`bin/fabric-ctl <login|all> presence` — and `scripts/send.mjs` asks it
+before a `TO` or `TO-ROLE` message leaves (`docs/presence.md`).
 
 ## Normal message
 

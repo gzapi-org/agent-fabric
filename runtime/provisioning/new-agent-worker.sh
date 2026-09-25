@@ -274,7 +274,7 @@ as_login "printf 'git: %s <%s> signingkey=%s gpgsign=%s\n' \"\$(git config --glo
 gpgkeys="$(as_login "gpg --list-secret-keys 2>/dev/null | grep -c ^sec; true" 2>/dev/null | tr -dc 0-9 | head -c 4)"; gpgkeys="${gpgkeys:-0}"
 first="${PROJECTS[0]:-}"; where="~/projects${first:+/$first}"
 for prov in anthropic openrouter; do
-    as_login "cd $where && AGENT_FABRIC_NO_ANNOUNCE=1 ~/projects/agent-fabric/runtime/openrouter/launch --provider $prov --print 2>&1 | grep -E '^launch:|resolved profile' | head -1" | sed "s/^/   launch ($prov): /" >&2
+    as_login "cd $where && ~/projects/agent-fabric/runtime/openrouter/launch --provider $prov --print 2>&1 | grep -E '^launch:|resolved profile' | head -1" | sed "s/^/   launch ($prov): /" >&2
 done
 # The control agent bootstrap enabled in the account's user manager answers
 # the coordinator from here on: one ping, from this checkout, as the operator.

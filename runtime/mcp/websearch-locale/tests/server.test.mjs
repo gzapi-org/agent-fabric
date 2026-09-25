@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { scratch } from '../../../../tests/scratch.mjs';
-import { readLocale, request, search, handle, tools } from '../server.mjs';
+import { readLocale, request, search, handle, tools , stripTags } from '../server.mjs';
 import { fileURLToPath } from 'node:url';
 
 const SERVER = fileURLToPath(new URL('../server.mjs', import.meta.url));
@@ -115,4 +115,16 @@ test('stdio: newline-delimited JSON-RPC end to end; a missing secret is a tool e
   assert.equal(lines[2].result.isError, true); assert.match(lines[2].result.content[0].text, /ძირითადი ძრავა: no SERPAPI_API_KEY.*; brave: no BRAVE_SEARCH_API_KEY/);
   assert.equal(lines[3].error.code, -32700);
   assert.ok(!out.includes(B.BRAVE_SEARCH_API_KEY) && !err.includes(B.BRAVE_SEARCH_API_KEY));
+});
+
+test('stripTags removes markup until none is left, and a stray angle bracket with it', () => {
+  assert.equal(stripTags('the <b>Rustaveli</b> avenue'), 'the Rustaveli avenue');
+  assert.equal(stripTags('<<b>b>script'), 'script', 'one pass would leave "<b>"');
+  assert.equal(stripTags('<scr<script>ipt>x'), 'x');
+  assert.equal(stripTags('a < b and c > d'), 'a  b and c  d', 'a stray bracket is dropped, the words kept');
+  const crafted = '<b'.repeat(50000) + '>'.repeat(50000);
+  const t0 = Date.now(); stripTags(crafted);
+  assert.ok(Date.now() - t0 < 1000, 'a crafted nesting is bounded, not quadratic in its length');
+  assert.equal(stripTags('a'.repeat(5000)).length, 4096, 'the input is cut to 4096 characters');
+  assert.ok(stripTags('<b'.repeat(20) + '>'.repeat(20)).length > 0, 'at most 16 passes: a deeper nesting leaves residue rather than looping on');
 });

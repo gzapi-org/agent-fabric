@@ -806,11 +806,14 @@ test('waitLoop exits only on an addressed message; others pass acknowledged', as
     ack: async () => {}, waitTotal: 0, forMeFn: msg => forMe(msg, me) });
   assert.equal(r3.delivered, false, 'drain does not exit early — it lists');
   assert.equal(r3.classified.length, 1);
-  // A HELLO is a broadcast by definition: it wakes the waiter.
+  // HELLO and GOODBYE are acknowledged and never delivered, not even listed:
+  // presence is the control plane's (docs/presence.md).
+  const acked4 = [];
   const r4 = await waitLoop({
-    fetchPage: async () => ({ messages: [rec('h', 'HELLO', '')] }),
-    ack: async () => {}, waitTotal: 1800, forMeFn: msg => forMe(msg, me) });
-  assert.equal(r4.delivered, true, 'HELLO is a broadcast by definition');
+    fetchPage: async () => ({ messages: [rec('h', 'HELLO', ''), rec('g', 'GOODBYE', 'NOTES:\nsession ended\n')] }),
+    ack: async id => { acked4.push(id); }, waitTotal: 4, forMeFn: msg => forMe(msg, me) });
+  assert.deepEqual([r4.delivered, r4.classified.length, r4.othersPassed], [false, 0, 0], 'a HELLO wakes nobody and is not listed');
+  assert.deepEqual(acked4, ['h', 'g'], 'but the cursor moves past it');
 });
 
 // --keyword: reasons to stop waiting on a message NOT addressed to this
@@ -979,6 +982,7 @@ function withPresenceRelay(answers, fn) {
   }));
 }
 const addressed = field => valid.replace('BROADCAST: true', field).replace('[GZCOORD/1] INFO', '[GZCOORD/1] OBSERVATION');
+const failedRead = { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' };
 const up = role => ({ status: 'ok', online: true, sessions: 1, since: '2026-09-25T09:00:00.000Z', role, project: 'gzapp' });
 const down = role => ({ status: 'ok', online: false, sessions: 0, since: null, role, project: 'gzapp' });
 
@@ -1014,9 +1018,18 @@ test('a dry run posts nothing, not even a presence request; a refused token is t
     const reg = path.join(scratch('presence-reg-'), 'hosts.json');
     fs.writeFileSync(reg, JSON.stringify({ version: 1, hosts: { h: { operator: 'user' } }, placement: { alpha: 'h' } }));
     const r = await sendWith(`http://127.0.0.1:${server.address().port}`, addressed('TO: h/alpha'), [], { AGENT_FABRIC_HOSTS_REGISTRY: reg, GZCOORD_PRESENCE_WAIT_MS: '800' });
-    assert.equal(r.code, 3, r.err); assert.match(r.err, /refused/); assert.doesNotMatch(r.err, /presence could not be asked/);
+    assert.equal(r.code, 3, r.err); assert.match(r.err, /refused/); assert.doesNotMatch(r.err, /presence is unknown/);
+    assert.match(r.err, /presence not asked — the relay refused the token in hand/, 'the skipped check is said, never silent');
     assert.equal(hits.filter(h => h === 'POST /api/send').length, 2, 'the presence request, then the post itself — which owns the token refusal');
   } finally { server.closeAllConnections(); server.close(); }
+});
+
+test('an addressee whose control agent could not tell is named as unknown, never as having no session', async () => {
+  await withPresenceRelay({ 'h/alpha': failedRead }, async (relay, posts, asked, env) => {
+    const r = await sendWith(relay, addressed('TO: h/alpha'), [], env);
+    assert.equal(r.code, 4, r.err); assert.match(r.err, /presence is unknown \(h\/alpha: pgrep: spawn pgrep ENOENT\)/);
+    assert.doesNotMatch(r.err, /has no session running/); assert.equal(posts.length, 0);
+  });
 });
 
 test('send to a role: reached when any holder runs; a broadcast asks nothing', async () => {

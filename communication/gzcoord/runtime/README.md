@@ -29,7 +29,7 @@ role is never an input either.
 
 GZCoord keeps no role catalog of its own (`protocol/SPEC.md` §4) — the
 deployment's is agent-fabric's `identities/roles/catalog.json`. The
-`ROLE` announced in `HELLO` MUST be the `id` (slug) of the role the agent
+`ROLE` a message carries MUST be the `id` (slug) of the role the agent
 holds — `backend-dev`, `flutter-dev`, `architect-cto` — never its title;
 a `TO-ROLE` MUST be a slug from the same file. The title stays in the
 catalogue for reading. The address is not bound to the role: a

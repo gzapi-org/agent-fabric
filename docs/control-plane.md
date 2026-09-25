@@ -158,8 +158,10 @@ as `runtime/hosts/registry.json` places it (read again for every record,
 so a registry change counts at once) — or, for a PUBLIC op (`presence`
 alone, `runtime/control/ops.mjs` PUBLIC_OPS), any address the registry
 places: every sender needs to know whether an addressee has a session
-(`send.mjs` asks before it posts), and the answer names nothing a reader
-of the relay could not infer. `op` is in the closed set,
+(`send.mjs` asks before it posts), and the answer is nothing a holder of
+the relay token could not already get, by writing an operator's address
+as the `from` of an unsigned read op (the relay verifies no sender,
+below). A second op is public only if the same holds for it. `op` is in the closed set,
 `ts + ttl_s` is not in the past, and `id` was not seen (an LRU of 256).
 Every refusal but the routine ones (a reply, a request for another
 account, a duplicate) is one line in the daemon's journal, so a refused

@@ -34,7 +34,7 @@ import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.m
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS, PUBLIC_OPS } from './ops.mjs';
-import { controlConfig, newId, operatorAddresses } from './agentd.mjs';
+import { controlConfig, newId, operatorAddresses, accountAddresses } from './agentd.mjs';
 
 export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
@@ -268,7 +268,7 @@ export function table(op, rs) {
       const bal = m.balloon_mb ? `${G(m.balloon_mb.current)}/${G(m.balloon_mb.static_max)}` : 'none';
       const disks = (m.disk ?? []).map(d => `${d.mount} ${d.avail_gb}G free (${d.use_pct}%)`).join(', ') || '-';
       lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${load.padEnd(17)} ${G(m.cpus).padStart(4)}  ${mem.padEnd(19)} ${swap.padStart(9)}  ${bal.padEnd(19)} ${disks}`);
-      const leases = (m.leases ?? []).map(l => `${l.name}: ${l.holder ?? '?'}${l.pid ? ` pid ${l.pid}` : ''}${l.since ? ` since ${l.since.slice(11, 16)}Z` : ''}`).join('; ') || 'none';
+      const leases = (m.leases ?? []).map(l => `${l.name}${l.label ? ` (${l.label})` : ''}: ${l.holder ?? '?'}${l.pid ? ` pid ${l.pid}` : ''}${l.since ? ` since ${l.since.slice(11, 16)}Z` : ''}`).join('; ') || 'none';
       const top = (m.top_rss ?? []).slice(0, 5).map(p => `${p.comm} ${p.user} ${p.rss_mb} MB`).join(', ') || '-';
       lines.push(`${''.padEnd(16)} ${''.padEnd(9)} leases: ${leases}`);
       lines.push(`${''.padEnd(16)} ${''.padEnd(9)} largest: ${top}`);
@@ -327,7 +327,8 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   }
   const who = whoami();
   const me = gzIdentity(who);
-  if (!operatorAddresses().has(me.address) && !PUBLIC_OPS.includes(args.op)) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
+  // What the daemons will answer: an operator anything, a placed account a public op (agentd accept()).
+  if (!operatorAddresses().has(me.address) && !(PUBLIC_OPS.includes(args.op) && accountAddresses().has(me.address))) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
   const cfg = controlConfig();
   const gz = integrationConfig(who.project);
   const tok = gzToken(inboxRoot(who), gz.configured ? gz : undefined) ?? syncedToken();

@@ -310,7 +310,7 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   fs.writeFileSync(path.join(proc, 'mounts'), '/dev/mapper/dmroot / ext4 rw 0 0\nnone /usr/lib/modules ext4 ro 0 0\n/dev/mapper/dmroot /usr/lib/modules ext4 ro 0 0\n/dev/xvdb /rw ext4 rw 0 0\ntmpfs /run tmpfs rw 0 0\n');
   const xm = path.join(sys, 'devices', 'system', 'xen_memory', 'xen_memory0'); fs.mkdirSync(path.join(xm, 'info'), { recursive: true });
   fs.writeFileSync(path.join(xm, 'target_kb'), '31900000\n'); fs.writeFileSync(path.join(xm, 'info', 'current_kb'), '31899000\n');
-  fs.writeFileSync(path.join(leases, 'backend-test'), 'db-admin 4242 2026-09-19T08:26:43Z backend-test\n');
+  fs.writeFileSync(path.join(leases, 'backend-test'), 'db-admin 4242 2026-09-19T08:26:43Z backend-test (suite)\n');
   fs.writeFileSync(path.join(leases, 'free-one'), 'user 1 2026-09-19T00:00:00Z free-one\n');
   fs.writeFileSync(path.join(leases, '.lock'), '');
   fs.writeFileSync(path.join(leases, 'not a lease; $(id)'), 'x 1 t n\n');   // outside fabric-lease's name grammar: never probed
@@ -338,7 +338,7 @@ test('host: the machine from a scratch /proc and /sys — load, memory, the ball
   assert.deepEqual(h.balloon_mb, { current: 31151, target: 31152, static_max: 31168 });
   assert.deepEqual(h.disk.map(d => d.mount), ['/', '/rw'], 'one row per block device, tmpfs and none excluded');
   assert.deepEqual(h.disk[1], { mount: '/rw', size_gb: 295, avail_gb: 84, use_pct: 72 });
-  assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z' }, { name: 'big-one', holder: 'db-admin', pid: 7, since: '2026-09-19T00:00:00Z' }], 'the held leases only; the free one, the dotfile, the fifo, the symlink and the name outside the grammar are not rows; the grown record is read bounded');
+  assert.deepEqual(h.leases, [{ name: 'backend-test', holder: 'db-admin', pid: 4242, since: '2026-09-19T08:26:43Z', label: 'suite' }, { name: 'big-one', holder: 'db-admin', pid: 7, since: '2026-09-19T00:00:00Z', label: null }], 'the held leases only; the free one, the dotfile, the fifo, the symlink and the name outside the grammar are not rows; the grown record is read bounded');
   assert.ok(!calls.some(c => c[0] === 'flock' && (String(c[4]).endsWith('/a-fifo') || String(c[4]).endsWith('/a-link'))), 'a fifo or a symlink never reaches flock');
   assert.ok(!calls.some(c => c[0] === 'flock' && String(c[4]).includes('not a lease')), 'a name outside the grammar never reaches the probe');
   assert.ok(calls.some(c => c[0] === 'flock' && c[1] === '-s' && c[2] === '-n' && c[3] === '3' && String(c[4]).endsWith('/backend-test')), 'the probe hands flock an already-open read-only descriptor as fd 3 and asks for a SHARED lock — no shell, no O_CREAT, never the exclusive lock a caller needs');

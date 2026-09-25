@@ -48,11 +48,14 @@ export async function askPresence({ from, to, expect, token, waitMs = PRESENCE_W
 // — reached if ANY of them is running, since the role is addressed, not
 // an instance. BROADCAST (and HELLO/GOODBYE): no check; everyone is not
 // a set that can be offline.
-export async function checkAddressees(metadata, { from, token, placed, ask = askPresence, waitMs = PRESENCE_WAIT_MS }) {
+// `placed` is every <host>/<login> placement, the only accounts that hold
+// roles; `operators` may be addressed by TO as well (a second host's
+// operator need not be placed), and a TO-ROLE never waits on them.
+export async function checkAddressees(metadata, { from, token, placed, operators = [], ask = askPresence, waitMs = PRESENCE_WAIT_MS }) {
   if (metadata.BROADCAST || (!metadata.TO && !metadata['TO-ROLE'])) return { checked: false };
   if (metadata.TO) {
     const a = metadata.TO.trim();
-    if (!placed.includes(a)) return { checked: true, problems: [{ kind: 'not-placed', address: a }] };
+    if (!placed.includes(a) && !operators.includes(a)) return { checked: true, problems: [{ kind: 'not-placed', address: a }] };
     const p = (await ask({ from, to: [a], expect: [a], token, waitMs }))[a];
     // A reply that could not read the process table is unknown, never
     // "no session" (review of #38).

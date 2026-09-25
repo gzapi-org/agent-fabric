@@ -57,10 +57,10 @@ running whether or not a session is open) receives the request and:
    session is restarting.
 
 The **launcher** is still in the session's terminal (the session is its
-child, not an exec). After the GOODBYE it finds the marker, waits while the
+child, not an exec). When the session returns it finds the marker, waits while the
 upgrade runs, says how it went, and re-executes itself — through the same
 pull and checks as any launch — with `--resume <session id>`, so the agent
-continues the same conversation on the new version, with a fresh HELLO. A
+continues the same conversation on the new version. A
 failed upgrade still brings the session back, on what is installed. A
 marker older than the launch belongs to another session and is removed,
 never obeyed.
@@ -121,5 +121,5 @@ only.
   `docs/live-checks/2026-09-25-first-fleet-upgrade.md`) met no running
   session where it installed. The first that does should read back that
   the SessionEnd hook ran, the session resumed, and — on the broker path, where the launcher's child is `ori`,
-  which starts `claude` — that the launcher reached its GOODBYE after the
+  which starts `claude` — that the launcher's wait returned after the
   SIGTERM to `claude`.

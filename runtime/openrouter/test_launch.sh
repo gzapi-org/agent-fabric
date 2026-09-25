@@ -73,7 +73,7 @@ PY
     cp "$REAL_ROOT/tools/fabric/routing.py" "$REAL_ROOT/tools/fabric/workingcopy.py" "$FABRIC/tools/fabric/"
     # The role's system prompt: the assembler, the shared sections, and a
     # fixture charter for the bound role (no brief — the placeholder path).
-    cp "$REAL_ROOT/tools/fabric/layout.py" "$REAL_ROOT/tools/fabric/launch_prompt.py" "$REAL_ROOT/tools/fabric/announce.py" "$FABRIC/tools/fabric/"
+    cp "$REAL_ROOT/tools/fabric/layout.py" "$REAL_ROOT/tools/fabric/launch_prompt.py" "$FABRIC/tools/fabric/"
     mkdir -p "$FABRIC/identities/roles/backend-dev"; cp -r "$REAL_ROOT/identities/prompt" "$FABRIC/identities/prompt"
     printf -- '---\nrole: backend-dev\nclass: charter\ndescription: "x"\ntier: 1\ndistilled_at: 2026-09-15\n---\n\n# backend-dev — charter\n\nFIXTURE-CHARTER-LINE: the backend that owns meaning.\n' > "$FABRIC/identities/roles/backend-dev/charter.md"
     cp "$REAL_ROOT/projects/registry.json" "$FABRIC/projects/"
@@ -118,7 +118,7 @@ run() {
         strip+=(-u "$v"); p="PLANT_$v"
         [[ -n "${!p+x}" ]] && plant+=("$v=${!p}")
     done
-    (cd "$SANDBOX/repo" && env "${strip[@]}" "${plant[@]}" HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_NO_ANNOUNCE=1 bash "$LAUNCHER" "$@")
+    (cd "$SANDBOX/repo" && env "${strip[@]}" "${plant[@]}" HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" bash "$LAUNCHER" "$@")
 }
 run_err() { run "$@" >/dev/null 2>&1; }
 
@@ -580,9 +580,10 @@ rc=0; out="$(run --provider anthropic --print 2>&1)" || rc=$?
 printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"
 rm -f "$SANDBOX/bin/claude"
 
-echo "launch: HELLO before the session, GOODBYE after it, however it ended"
-# A stub announce.py that records every call; the binding names a project
-# (announce sends nothing without one); NO_ANNOUNCE lifted for these cases.
+echo "launch: announces nothing — presence is the control plane's; the session's exit status is still the launcher's"
+# A tripwire: a stub announce.py that records any call, in the place the
+# launcher used to call it from; the binding names a project, which is what
+# once made it announce. Nothing may be sent.
 mkfabric
 printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"backend-dev","project":"gzapp","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 cat > "$FABRIC/tools/fabric/announce.py" <<'STUB'
@@ -594,11 +595,7 @@ ALOG="$SANDBOX/announce.log"; rm -f "$ALOG"
 runa() { (cd "$SANDBOX/repo" && env -u CLAUDE_CONFIG_DIR HOME="$HOME" PATH="$PATH_EXPORT" AGENT_FABRIC_ROOT="$FABRIC" AGENT_FABRIC_STATE_DIR="$STATE" ANNOUNCE_LOG="$ALOG" bash "$LAUNCHER" "$@"); }
 out="$(runa --version 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && ok "the launcher's exit status is the session's (0)" || bad "rc=$rc" "$out"
-grep -q "^hello --role backend-dev --project gzapp" "$ALOG" && ok "HELLO sent, as the bound role and project" || bad "no hello" "$(cat "$ALOG")"
-grep -q "^goodbye --role backend-dev --project gzapp --note session ended" "$ALOG" && ok "GOODBYE sent after the session returned" || bad "no goodbye" "$(cat "$ALOG")"
-[[ "$(grep -c . "$ALOG")" == 2 ]] && ok "exactly one of each" || bad "announce count" "$(cat "$ALOG")"
-h="$(grep '^hello' "$ALOG" | sed 's/.*@//')"; g="$(grep '^goodbye' "$ALOG" | sed 's/.*@//')"
-python3 -c "import sys; sys.exit(0 if float('$h') < float('$g') else 1)" && ok "…in that order" || bad "goodbye before hello" "$(cat "$ALOG")"
+[[ ! -s "$ALOG" ]] && ok "no HELLO before the session, no GOODBYE after it" || bad "the launcher announced" "$(cat "$ALOG")"
 # A plain-claude launch refused for want of a long-lived sign-in announces
 # nothing. Its own fake claude: the one above is gone, and a runner has no
 # real harness on PATH for the launcher's earlier checks to find (CI, #37).
@@ -606,9 +603,9 @@ printf '#!/usr/bin/env bash\necho "CLAUDE-RAN"\n' > "$SANDBOX/bin/claude"; chmod
 : > "$SEC"; rm -f "$ALOG"
 rc=0; out="$(runa --provider anthropic --version 2>&1)" || rc=$?
 [[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ! grep -q "CLAUDE-RAN" <<<"$out" && [[ ! -s "$ALOG" ]] \
-  && ok "a launch refused for want of a long-lived sign-in sends no HELLO, so owes no GOODBYE" || bad "a refused launch announced itself" "rc=$rc $(tail -3 <<<"$out") $(cat "$ALOG" 2>/dev/null)"
+  && ok "a launch refused for want of a long-lived sign-in starts nothing and announces nothing" || bad "a refused launch announced itself" "rc=$rc $(tail -3 <<<"$out") $(cat "$ALOG" 2>/dev/null)"
 printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"; rm -f "$ALOG" "$SANDBOX/bin/claude"
-# The session's failure is the launcher's failure, and still a GOODBYE.
+# The session's failure is the launcher's failure.
 cat > "$SANDBOX/bin/ori" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == auth ]]; then echo '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment","location":"OPENROUTER_API_KEY"}}}'; exit 0; fi
@@ -617,8 +614,8 @@ FAKE
 chmod +x "$SANDBOX/bin/ori"; rm -f "$ALOG"
 out="$(runa --version 2>&1)"; rc=$?
 [[ $rc -eq 3 ]] && ok "a session exiting 3 makes the launcher exit 3" || bad "rc=$rc" "$out"
-grep -q "^goodbye .*--note session ended with status 3" "$ALOG" && ok "…and the GOODBYE names the status" || bad "goodbye note" "$(cat "$ALOG")"
-# A session killed by a signal — what a double Ctrl-C or a kill leaves — still ends in a GOODBYE.
+[[ ! -s "$ALOG" ]] && ok "…and announces nothing" || bad "announced after status 3" "$(cat "$ALOG")"
+# A session killed by a signal — what a double Ctrl-C or a kill leaves — is the launcher's status too.
 cat > "$SANDBOX/bin/ori" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == auth ]]; then echo '{"ok":true,"data":{"authenticated":true,"source":{"kind":"environment","location":"OPENROUTER_API_KEY"}}}'; exit 0; fi
@@ -627,7 +624,7 @@ FAKE
 chmod +x "$SANDBOX/bin/ori"; rm -f "$ALOG"
 out="$(runa --version 2>&1)"; rc=$?
 [[ $rc -eq 143 ]] && ok "a session ended by SIGTERM: the launcher reports 143" || bad "rc=$rc" "$out"
-grep -q "^goodbye .*--note session ended by signal 15" "$ALOG" && ok "…and the GOODBYE names the signal" || bad "goodbye note" "$(cat "$ALOG")"
+[[ ! -s "$ALOG" ]] && ok "…and announces nothing" || bad "announced after SIGTERM" "$(cat "$ALOG")"
 write_fake_ori
 
 echo "launch: a session stopped for an upgrade comes back, resumed, on the new version"
@@ -656,7 +653,7 @@ out="$(runa --resume old-id --model x 2>&1)"; rc=$?
 grep -q "^RUN2:.*--model x" <<<"$out" && grep -q "^RUN2:.*--resume sess-123" <<<"$out" && ! grep -q "^RUN2:.*old-id" <<<"$out" \
   && ok "…resumed by the stopped session's id; the caller's own --resume replaced, the rest passed on" || bad "resume args" "$(grep RUN2 <<<"$out")"
 [[ ! -e "$STATE/agents/$LOGIN/restart.json" ]] && ok "…and the marker is consumed" || bad "marker left behind"
-[[ "$(grep -c '^hello' "$ALOG")" == 2 && "$(grep -c '^goodbye' "$ALOG")" == 2 ]] && ok "…a GOODBYE for the stopped session, a HELLO for the resumed one" || bad "announce" "$(cat "$ALOG")"
+[[ ! -s "$ALOG" ]] && ok "…and a stop and resume announce nothing either" || bad "announced across a restart" "$(cat "$ALOG")"
 upgrade_session failed "$(date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
 out="$(runa 2>&1)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q "FAILED (network); resuming the session on what is installed" <<<"$out" && grep -q "^RUN2:.*--resume sess-123" <<<"$out" && ok "a failed upgrade still brings the session back, and says why" || bad "failed upgrade" "$out"

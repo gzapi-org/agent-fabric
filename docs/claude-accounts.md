@@ -35,7 +35,7 @@ sync` exports it (it is a fabric-wide `agent_env` name in
 `projects/registry.json`), and set, it outranks the login's own `/login`.
 **A plain-claude session needs it**: the launcher refuses one whose
 login's synced record holds no token of a setup-token's shape, before
-the HELLO (the owner, 2026-09-25). A login's own `/login` is an 8-hour
+the session starts (the owner, 2026-09-25). A login's own `/login` is an 8-hour
 token with a single refresh holder, and a fleet that fell back to it ran
 on whichever account last signed in there. The broker path is untouched.
 Moving logins is one command on the coordinator's login:

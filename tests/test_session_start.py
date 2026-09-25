@@ -170,6 +170,29 @@ def test_hook_exports_the_control_plane_into_the_session_shell(tmp: str) -> None
     assert run_hook({"cwd": "/"}, env).returncode == 0
 
 
+def test_hook_says_when_the_session_has_no_inbox_watch(tmp: str) -> None:
+    """Under a process named claude with no `inbox.mjs --follow` beneath it,
+    the context says to arm the watch; with one beneath it, it does not."""
+    state = os.path.join(tmp, "state")
+    env = {**os.environ, "AGENT_FABRIC_ROOT": ROOT, "AGENT_FABRIC_STATE_DIR": state}
+    fake = os.path.join(tmp, "bin", "claude")
+    os.makedirs(os.path.dirname(fake))
+    payload = os.path.join(tmp, "payload.json")
+    with open(payload, "w", encoding="utf-8") as fh:
+        json.dump({"cwd": tmp, "session_id": "sess-w", "source": "resume"}, fh)
+    with open(fake, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/bash\n"  # not env: env re-execs bash and the process is no longer named claude
+                 
+                 "if [ \"$1\" = watch ]; then (exec -a 'node inbox.mjs --follow' sleep 20) & w=$!; sleep 0.3; fi\n"
+                 f"bash {HOOK} < {payload}\n"
+                 "[ -n \"${w:-}\" ] && kill $w\n")
+    os.chmod(fake, 0o755)
+    bare = subprocess.run([fake], capture_output=True, text=True, env=env)
+    assert "NO INBOX WATCH is running for this session (resume)" in context_of(bare), bare.stdout
+    armed = subprocess.run([fake, "watch"], capture_output=True, text=True, env=env)
+    assert "NO INBOX WATCH" not in context_of(armed), armed.stdout
+
+
 def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     projects = os.path.join(tmp, "projects")
     home = os.path.join(tmp, "home")
@@ -274,6 +297,7 @@ def main() -> int:
              test_hook_from_the_parent_directory_has_no_project,
              test_hook_reports_a_bad_marker_and_still_starts,
              test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
+             test_hook_says_when_the_session_has_no_inbox_watch,
              test_bootstrap_writes_only_the_workspace_and_home_files]
     failures = 0
     for case in cases:

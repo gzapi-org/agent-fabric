@@ -1,0 +1,44 @@
+{
+  "clipped_descriptions": [
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/threads/assemble-hygiene-inconsistent.md: description clipped from 279 to 237 characters",
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/threads/suite-scratch-leak.md: description clipped from 247 to 237 characters",
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/workflow/blind-review-loop.md: description clipped from 294 to 235 characters",
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/workflow/prompt-change-readback.md: description clipped from 271 to 231 characters",
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/workflow/skills-no-prs-no-dates.md: description clipped from 245 to 237 characters",
+    "/home/user/projects/agent-fabric/.agent-fabric/memory/fabric-coordinator/workflow/smoke-container-before-ci.md: description clipped from 262 to 239 characters"
+  ],
+  "collision_decisions": [],
+  "files_written": 29,
+  "harvest": {
+    "host": "develop-qzapp",
+    "in_scope": 30,
+    "next_watermark": 1790347048334,
+    "provisional_agent": 0,
+    "since_watermark": 0
+  },
+  "hygiene_problems": [],
+  "migrated": [],
+  "oversized_claims": [],
+  "project": "agent-fabric",
+  "redactions": [],
+  "rejected_hygiene": [],
+  "retired_in_siblings": [],
+  "roles": [
+    "fabric-coordinator"
+  ],
+  "shared_slices": 0,
+  "stamp": "2026-09-25",
+  "telemetry": {
+    "fabric-coordinator": {
+      "admitted": 28,
+      "candidates": 30,
+      "merged_into_existing": 0,
+      "observations_in": 30,
+      "rejected": 2
+    }
+  },
+  "title_collisions": [],
+  "watermarks": {
+    "develop-qzapp": 1790347048334
+  }
+}

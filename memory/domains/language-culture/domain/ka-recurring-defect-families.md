@@ -4,7 +4,7 @@ class: domain
 description: The Georgian defect families that recur across every gzapi surface — check these first before reading a new text line by line
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-21"
+distilled_at: "2026-09-25"
 origin:
   - agent: "language-culture-ge"
     host: "develop-qzapp"

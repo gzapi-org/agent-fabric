@@ -4,7 +4,7 @@ class: domain
 description: A personal name that is read aloud goes in Georgian script; one that is copied (a contact line beside an email and a domain) stays Latin — and an institution is called by the name it uses for itself, which is worth checking on its own site.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-21"
+distilled_at: "2026-09-25"
 origin:
   - agent: "language-culture-ge"
     host: "develop-qzapp"

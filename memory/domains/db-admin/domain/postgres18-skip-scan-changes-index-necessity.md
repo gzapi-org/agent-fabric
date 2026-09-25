@@ -4,7 +4,7 @@ class: domain
 description: "PostgreSQL 18 skip-scans a non-leading index column, so a predicate that needs an index on 16 may already be served on 18"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "db-admin"
     host: "develop-qzapp"
@@ -51,3 +51,5 @@ Landed as migration 0040 with a plan test in
 `MembershipDriverIndexPlanTests`. See [[ddl-probe-container-version]].
 
 *References: ddl-probe-container-version*
+
+*Observed 2026-09-10 (db-admin)*

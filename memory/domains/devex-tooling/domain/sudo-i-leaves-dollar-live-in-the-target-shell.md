@@ -4,7 +4,7 @@ class: domain
 description: "sudo -i with a command re-escapes the argv for the target login shell but leaves $ unescaped, so any \"$1\"/\"$VAR\" in the command expands in that shell (empty) — never pass a $-bearing argument under -i."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"
@@ -37,3 +37,5 @@ positionals verbatim if a login shell is not needed. Related:
 [[role-is-bound-with-fabric-role-not-slash-role]].
 
 *References: role-is-bound-with-fabric-role-not-slash-role*
+
+*Observed 2026-09-15 (devex-tooling)*

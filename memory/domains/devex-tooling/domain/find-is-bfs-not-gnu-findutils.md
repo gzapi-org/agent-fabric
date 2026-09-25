@@ -4,7 +4,7 @@ class: domain
 description: "`find` on develop-qzapp is bfs, which rejects relative timestamps — and the error reads as \"zero results\" whenever stderr is discarded."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"
@@ -34,3 +34,5 @@ Rule: when a `find` count looks surprisingly like zero, re-run it without
 that looks like a valid answer.
 
 *References: gpg-signing-needs-a-tty-this-shell-lacks*
+
+*Observed 2026-09-15 (devex-tooling)*

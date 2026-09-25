@@ -4,7 +4,7 @@ class: domain
 description: "A byte-find on a Flutter release snapshot (libapp.so) passes on an --obfuscate build because the names are gone; require a control string that only an unobfuscated snapshot carries."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"
@@ -35,3 +35,5 @@ be absent AND a control that must be present, or it is
 [[a-passing-run-without-the-trigger-measures-nothing]].
 
 *References: a-passing-run-without-the-trigger-measures-nothing*
+
+*Observed 2026-09-16 (devex-tooling)*

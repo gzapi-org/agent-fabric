@@ -125,10 +125,15 @@ def _inline_list(v: str) -> list[str]:
 
 
 def _strip_comment(line: str, value_at: int = 0) -> str:
-    """A `#` outside quotes, at the start or after whitespace, begins a
-    comment; a `#` inside a quoted string (a PR number) is text. A quote
-    opens a string only where a value starts (`value_at`, or after a
-    `- `): an apostrophe inside a plain value is text."""
+    """A `#` outside quotes that stands alone — at the start or after
+    whitespace, and followed by whitespace or the end — begins a comment;
+    a `#` inside a quoted string is text. So is a `#` glued to what
+    follows it, quoted or not: `PR #934`, `#pragma`, `#12`. YAML would
+    cut those lines there, and the brief silently rendered "No #pragma …
+    is introduced" as "No" and lost the rest of a folded objective at
+    "PR #934" (backend-dev-01, 2026-09-25); the subset keeps them as text.
+    A quote opens a string only where a value starts (`value_at`, or after
+    a `- `): an apostrophe inside a plain value is text."""
     quote = None
     since = value_at                      # where the current value or item began
     inline_list = line[value_at:].lstrip().startswith("[")
@@ -140,7 +145,7 @@ def _strip_comment(line: str, value_at: int = 0) -> str:
             quote = ch
         elif inline_list and ch in "[,":
             since = i + 1                 # an item of an inline list starts after `[` or `,`
-        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t") and (i + 1 == len(line) or line[i + 1] in " \t"):
             return line[:i].rstrip()
     return line.rstrip()
 

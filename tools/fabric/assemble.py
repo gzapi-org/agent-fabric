@@ -1281,13 +1281,57 @@ def main() -> int:
         same claims as new sections — the `-2` copies of 2026-09-17. Text
         alone is not identity: two claims with the same body under
         different titles are two sections, and both are carried.
+
+        A section a claim REPLACES — its merge_target (the owner's
+        supersede included), or a retitle's old heading — is not carried
+        either. Counted, it pushed its own replacement into part two,
+        whose supersede then retired part one's only section and removed
+        `<topic>.md` (a drain of 2026-09-25).
         """
         incoming = {(claim_heading(c), undated(claim_block(c).split("\n", 1)[1])) for c in claims}
+        replaced = {(c.get("merge_target") or "").strip() for c in claims} | \
+            {h for c in claims for h in c.get("_retire") or []}
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
-                return sum(len(h) + len(t) + 8 for h, t in sections.items() if (h, undated(t)) not in incoming)
+                return sum(len(h) + len(t) + 8 for h, t in sections.items()
+                           if (h, undated(t)) not in incoming and h not in replaced)
         return 0
+
+    def holds_one_of(claims: list[dict[str, Any]]) -> Callable[[str], bool]:
+        """Before writing, a numbered part is this topic's when it holds
+        a section one of the topic's incoming claims names — its heading,
+        its merge_target or a retitle's old heading."""
+        names = {claim_heading(c) for c in claims} | {(c.get("merge_target") or "").strip() for c in claims} \
+            | {h for c in claims for h in c.get("_retire") or []}
+        return lambda path: bool(names & set(read_existing_slice(path)[1]))
+
+    def restore_part_one(directory: str, stem: str, role: str, eligible: Callable[[str], bool]) -> None:
+        """PART ONE IS ALWAYS `<stem>.md` while the topic has any section:
+        it is the name every `[[topic]]` link and cue points at. A part
+        one removed by a retire (or lost by an earlier drain) is restored
+        by moving the lowest remaining part into its place, reported.
+        Only a part `eligible` says is this topic's moves: `<stem>-<n>.md`
+        may as well be another memory whose name ends in a number, and
+        renaming it would take that topic's file away."""
+        first = os.path.join(directory, f"{stem}.md")
+        if os.path.exists(first) or not os.path.isdir(directory):
+            return
+        parts = sorted((int(m.group(1)), n) for n in os.listdir(directory)
+                       if (m := re.fullmatch(re.escape(stem) + r"-(\d+)\.md", n))
+                       and eligible(os.path.join(directory, n)))
+        if not parts:
+            return
+        lowest = os.path.join(directory, parts[0][1])
+        os.replace(lowest, first)
+        migrated.append(f"{role}: {parts[0][1]} -> {stem}.md (part one restored)")
+        if lowest in written:
+            written[written.index(lowest)] = first
+        old, new = layout.link_rel(lowest, project), layout.link_rel(first, project)
+        for entries in list(index_entries.values()) + list(shared_index.values()):
+            for entry in entries:
+                if entry["path"] == old:
+                    entry["path"] = new
 
     def split_by_budget(
         claims: list[dict[str, Any]], carried: int = 0
@@ -1373,6 +1417,7 @@ def main() -> int:
             continue   # every claim dropped by the owner: the slice stays as it was
         owners = sorted(shared_owners[(klass, topic)])
         shared_dir = layout.shared_home(klass, project)
+        restore_part_one(shared_dir, f"{klass}-{topic}", "shared", holds_one_of(claims))
         prior = carried_chars(claims, os.path.join(shared_dir, f"{klass}-{topic}.md"))
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
@@ -1387,6 +1432,7 @@ def main() -> int:
                     {"path": layout.link_rel(os.path.join(shared_dir, filename), project),
                      "description": description, "class": klass}
                 )
+        restore_part_one(shared_dir, f"{klass}-{topic}", "shared", lambda p: p in written)
 
     # Every role that owns anything gets a project directory and an index —
     # including one whose claims all live in shared slices, which would
@@ -1430,6 +1476,8 @@ def main() -> int:
             for topic, claims in topics:
                 if not claims:
                     continue   # every claim dropped by the owner: the slice stays as it was
+                if multi:
+                    restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, role, holds_one_of(claims))
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(
@@ -1474,6 +1522,7 @@ def main() -> int:
                         {"path": layout.link_rel(os.path.join(directory, filename), project),
                          "description": description, "class": klass}
                     )
+                restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, role, lambda p: p in written)
                 if multi and not is_carried(klass, topic):
                     drop_carried_copies(role, klass, os.path.join(base, CLASS_FILES[klass]), topic)
 

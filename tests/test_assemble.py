@@ -1289,11 +1289,11 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     """The other ordering: the target lives in part ONE, which is full of
     carried text, so the superseding claim is grouped into part two — and
     part one was written and indexed before the retire touched it. Its
-    index line must follow: gone when the part is removed, re-described
-    when a section remains; lint accepts the tree; a part counts once in
-    files_written (re-review of 2026-09-20, finding 1)."""
+    index line must follow: re-described when a section remains; lint
+    accepts the tree; a part counts once in files_written (re-review of
+    2026-09-20, finding 1)."""
     big = "y " * 900
-    # Removed shape: part one holds First alone.
+    # Part one holds First alone: its replacement goes to part one.
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
         {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
@@ -1314,9 +1314,12 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     lint = _lint(out)
     assert lint.returncode == 0, lint.stderr
     report = json.loads(read(report_path(out)))
-    # On disk: grow-2.md and INDEX.md; grow.md was written, then removed by
-    # the retire, and leaves the count with it.
+    # grow.md and INDEX.md. The section being replaced is not carried text,
+    # so the superseding claim lands in part one beside nothing and
+    # grow-2.md is untouched; part one used to be written, emptied by the
+    # retire and removed, taking the topic's name with it (2026-09-25).
     assert report["files_written"] == 2, report["files_written"]
+    assert os.path.exists(dom(out, "alpha", "domain", "grow.md"))
 
     # Rewritten shape: part one keeps Second after First is retired from it.
     with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
@@ -1894,8 +1897,64 @@ def test_a_claim_in_the_carried_file_is_not_written_twice(tmp: str) -> None:
     assert "carried" not in read(proj(out, "alpha", "INDEX.md"))
 
 
+def test_part_one_of_a_split_topic_is_always_the_topic_file(tmp: str) -> None:
+    """A topic near its budget whose one section is superseded: the old
+    section was counted as carried text, the new one pushed to part two,
+    and the supersede then retired part one's only section and removed
+    the file — `grow.md` became `grow-2.md` and every `[[grow]]` link
+    dangled (a drain of 2026-09-25). The text being replaced is not
+    carried, and part one is `<topic>.md` whenever the topic has any
+    section; the index lists every part."""
+    big = "y " * 850
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    d = dom(out, "alpha", "domain")
+    assert sorted(n for n in os.listdir(d) if n.startswith("grow")) == ["grow.md"]
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "merge_target": "Big",
+         "body": "z " * 850, "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert parts == ["grow.md"], f"part one lost its name: {parts}"
+    assert ("z " * 850).strip() in read(os.path.join(d, "grow.md"))
+
+    # Carried text plus a new claim over the budget: two parts, the first
+    # still grow.md, and the index lists both.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert parts == ["grow-2.md", "grow.md"], parts
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert all(f"domain/{p}" in index for p in parts), index
+
+    # A part one gone from an earlier drain's tree is restored from the
+    # lowest part when the topic is next written.
+    os.replace(os.path.join(d, "grow.md"), os.path.join(d, "grow-3.md"))
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert "grow.md" in parts, parts
+    texts = "".join(read(os.path.join(d, p)) for p in parts)
+    assert texts.count("## More") == 1 and texts.count("## Big") == 1, parts
+    assert any("part one restored" in m for m in json.loads(read(report_path(out)))["migrated"])
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert all(f"domain/{p}" in index for p in parts), index
+
+
 def main() -> int:
     cases = [
+        test_part_one_of_a_split_topic_is_always_the_topic_file,
         test_a_claim_in_the_carried_file_is_not_written_twice,
         test_a_retitled_memory_is_asked_about_not_appended,
         test_a_correction_naming_another_topic_s_section_replaces_it_there,

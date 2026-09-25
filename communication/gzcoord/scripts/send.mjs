@@ -143,9 +143,11 @@ export async function main(argv = process.argv.slice(2)) {
       // A refused token is the post's to handle: it re-reads the synced
       // token and says "refused" if that fails too (review of #38). Here
       // it would only have blocked the send with the wrong reason.
-      pres = (e?.status === 401 || e?.status === 403) ? { checked: false }
+      pres = (e?.status === 401 || e?.status === 403) ? { checked: false, skipped: true }
         : { checked: true, problems: [{ kind: 'unavailable', detail: String(e?.message ?? e).split('\n')[0].slice(0, 160) }] };
     }
+    // Said, never silent: the contract is that a TO is checked (review of #38).
+    if (pres.skipped) console.error(t('send.presence-skipped'));
     for (const p of pres.problems ?? []) {
       if (p.kind === 'offline') console.error(t('send.presence-offline', { address: p.address }));
       else if (p.kind === 'silent') console.error(t('send.presence-silent', { address: p.address, seconds: PRESENCE_WAIT_MS / 1000 }));

@@ -748,15 +748,46 @@ def main() -> int:
             found.update(sections)
         return found
 
+    # THE LAYOUT OF EACH CLASS IS DECIDED ONCE, from the drain as it
+    # arrived, before any claim moves between topics (a correction whose
+    # merge_target lives in another topic, below). Both the pre-pass and
+    # the write phase read this plan: deciding it again after the moves
+    # could turn a two-topic drain into a one-topic one, and the flat
+    # file would then be written in place by one phase and moved into the
+    # directory by the other.
+    #   split      — the class is written in the `<class>/` directory shape
+    #   flat_topic — whose sections the flat `<class>.md` holds this run:
+    #                the drain's one topic when the flat file stays, else
+    #                the stem it is moved to (the one topic the crossref
+    #                names, or `<class>-carried-<stamp>` for several)
+    class_plan: dict[tuple[str, str], dict[str, Any]] = {}
+    for role, topics in per_role.items():
+        for klass in sorted({k for (k, _t) in topics}):
+            base = layout.class_home(klass, role, project)
+            here = sorted(t for (k, t) in topics if k == klass)
+            split = os.path.isdir(os.path.join(base, CLASS_FILES[klass])) or len(here) > 1
+            flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
+            flat_topic = None
+            if os.path.exists(flat_file):
+                prior = sorted({sid.split(":", 1)[1] for sid in crossref_slice_ids(role)
+                                if sid.startswith(f"{klass}:")})
+                if not split:
+                    flat_topic = here[0]
+                elif len(prior) == 1:
+                    flat_topic = prior[0]
+                else:
+                    stamp = read_existing_slice(flat_file)[0].get("distilled_at") or "earlier"
+                    flat_topic = f"{CLASS_FILES[klass]}-carried-{stamp}"
+            class_plan[(role, klass)] = {"split": split, "flat_topic": flat_topic}
+
     def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
         """Every file the topic's sections may sit in — the pre-pass reads
         exactly what the write phase will write into. The topic file and
         its budget parts (`<topic>-<n>.md`, digits only — a sibling topic
         named `<topic>-2026-09-17` is another topic); and the flat class
-        file when the write phase writes into it (no `<class>/` directory
-        yet and this drain brings one topic of the class) or migrates it
-        to this topic's file (the crossref names this topic alone). Read
-        as this topic's regardless, another topic's section under a
+        file when the plan gives its sections to this topic (it stays and
+        this is the drain's one topic, or it moves to this topic's file).
+        Read as this topic's regardless, another topic's section under a
         coinciding heading was refused as a collision the write phase
         never has; excluded whenever the crossref named two topics, a
         real collision inside a two-topic flat file went unstopped."""
@@ -768,12 +799,107 @@ def main() -> int:
             base = layout.class_home(klass, role, project)
             stem = os.path.join(base, CLASS_FILES[klass], topic)
             flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
-            prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
-            topics_here = sum(1 for (k, _t) in per_role.get(role, {}) if k == klass)
-            writes_flat = not os.path.isdir(os.path.join(base, CLASS_FILES[klass])) and topics_here == 1
-            flat = [flat_file] if os.path.exists(flat_file) and (writes_flat or prior == {topic}) else []
+            plan = class_plan.get((role, klass)) or {}
+            flat = [flat_file] if plan.get("flat_topic") == topic else []
         parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if re.fullmatch(r".*-\d+\.md", p))
         return [p for p in flat + parts if os.path.exists(p)]
+
+    def topics_on_disk(role: str | None, klass: str) -> dict[str, list[str]]:
+        """Every topic of the role's class (or of the shared class) on
+        disk, with the files its sections sit in. A `<stem>-<n>.md` is a
+        budget part of `<stem>` only when `<stem>.md` exists: a topic
+        named for a date ends in digits too."""
+        if role is None:
+            base = layout.shared_home(klass, project)
+            prefix = f"{klass}-"
+            names = sorted(n for n in os.listdir(base) if n.startswith(prefix) and n.endswith(".md")) \
+                if os.path.isdir(base) else []
+            directory = base
+        else:
+            base = layout.class_home(klass, role, project)
+            prefix = ""
+            directory = os.path.join(base, CLASS_FILES[klass])
+            names = sorted(n for n in os.listdir(directory) if n.endswith(".md")) \
+                if os.path.isdir(directory) else []
+        found: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            stem = name[len(prefix):-3]
+            m = re.fullmatch(r"(.+)-\d+", stem)
+            if m and f"{prefix}{m.group(1)}.md" in names:
+                stem = m.group(1)
+            found[stem].append(os.path.join(directory, name))
+        if role is not None:
+            plan = class_plan.get((role, klass)) or {}
+            flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
+            if plan.get("flat_topic") and os.path.exists(flat_file):
+                found[plan["flat_topic"]].insert(0, flat_file)
+        return dict(found)
+
+    # A CORRECTION NAMES A SECTION, NOT A TOPIC. memory/README.md tells an
+    # agent to correct a wrong slice by writing a memory that names the
+    # slice's section in merge_target; that memory is its own file, so its
+    # topic is its own, and the target was looked for in that topic alone
+    # — the correction landed as a new slice beside the stale one and
+    # nothing said so (a drain's blind review, 2026-09-25). A target
+    # absent from the claim's topic is looked for in every topic of the
+    # same role and class (or of the shared class): one holder takes the
+    # claim, and the supersede path below replaces the section there; two
+    # holders are a question only the author can answer, refused before
+    # anything is written; none is written as its own topic and reported.
+    # A claim already standing in another topic under its own heading is
+    # a correction an earlier drain applied, harvested again: it goes back
+    # there to be recognised as itself rather than written twice.
+    ambiguous_targets: list[str] = []
+    unresolved_targets: list[str] = []
+
+    def resolve_targets(role: str | None, label: str,
+                        buckets: dict[tuple[str, str], list[dict[str, Any]]]) -> None:
+        on_disk_by_class: dict[str, dict[str, dict[str, str]]] = {}
+        for (klass, topic), group in sorted(buckets.items()):
+            for claim in list(group):
+                target = (claim.get("merge_target") or "").strip()
+                if not target:
+                    continue
+                own = existing_sections(slice_candidates(role, klass, topic))
+                if target in own:
+                    continue
+                if klass not in on_disk_by_class:
+                    on_disk_by_class[klass] = {t: existing_sections(p)
+                                               for t, p in topics_on_disk(role, klass).items()}
+                on_disk = on_disk_by_class[klass]
+                heading = claim_heading(claim)
+                where = f"{label}/{klass}:{topic}#{heading}"
+                holders = sorted(t for t, sections in on_disk.items() if target in sections and t != topic)
+                if len(holders) > 1:
+                    ambiguous_targets.append(f"{where}: merge_target {target!r} is a section of "
+                                             + ", ".join(f"{klass}:{t}" for t in holders))
+                    continue
+                if not holders and heading not in own:
+                    holders = sorted(t for t, sections in on_disk.items() if heading in sections and t != topic)
+                    if len(holders) != 1:
+                        unresolved_targets.append(f"{where}: merge_target {target!r} names no section "
+                                                  f"of {label}/{klass}; written as its own topic")
+                        continue
+                if not holders:
+                    continue
+                group.remove(claim)
+                claim["topic"] = holders[0]
+                buckets[(klass, holders[0])].append(claim)
+                if role is None:
+                    shared_owners[(klass, holders[0])] |= shared_owners[(klass, topic)]
+        for key in [k for k, g in buckets.items() if not g]:
+            del buckets[key]
+
+    for role in sorted(per_role):
+        resolve_targets(role, role, per_role[role])
+    resolve_targets(None, "shared", shared)
+    if ambiguous_targets:
+        print("MERGE TARGET AMBIGUOUS — a correction names a heading more than one topic holds; "
+              "the author names the section unambiguously (retitle one of them, or the memory). "
+              "This run wrote NOTHING and exits 1.", file=sys.stderr)
+        for note in ambiguous_targets:
+            print(f"  {note}", file=sys.stderr)
+        return 1
 
     def observed_of(text: str) -> str:
         m = OBSERVED_RE.search(text)
@@ -1159,8 +1285,8 @@ def main() -> int:
             # slice written that way is never loaded at activation. That is the
             # defect 08dd4164 fixed in code and this reintroduced through
             # content: two roles shipped workflow.md files no session would read.
-            already_split = os.path.isdir(os.path.join(base, CLASS_FILES[klass]))
-            multi = already_split or len(topics) > 1
+            plan = class_plan[(role, klass)]
+            multi = plan["split"]
             # SWITCHING TO THE DIRECTORY SHAPE MOVES THE FLAT FILE IN. The
             # activator loads only the directory once it exists, so a flat
             # `<class>.md` left beside `<class>/` is unreachable knowledge,
@@ -1172,13 +1298,7 @@ def main() -> int:
             # file of its class, and its description keeps it findable.
             flat = os.path.join(base, f"{CLASS_FILES[klass]}.md")
             if multi and os.path.exists(flat):
-                prior_topics = sorted({sid.split(":", 1)[1] for sid in crossref_slice_ids(role)
-                                       if sid.startswith(f"{klass}:")})
-                if len(prior_topics) == 1:
-                    name = f"{prior_topics[0]}.md"
-                else:
-                    stamp = (read_existing_slice(flat)[0].get("distilled_at") or "earlier")
-                    name = f"{CLASS_FILES[klass]}-carried-{stamp}.md"
+                name = f"{plan['flat_topic']}.md"
                 os.makedirs(os.path.join(base, CLASS_FILES[klass]), exist_ok=True)
                 os.replace(flat, os.path.join(base, CLASS_FILES[klass], name))
                 migrated.append(f"{role}/{klass}: {CLASS_FILES[klass]}.md -> {CLASS_FILES[klass]}/{name}")
@@ -1480,6 +1600,7 @@ def main() -> int:
         "migrated": migrated,
         "title_collisions": collisions,
         "collision_decisions": applied_decisions,
+        "merge_target_unresolved": unresolved_targets,
         "harvest": harvest_meta,
         "watermarks": watermarks,
     }
@@ -1520,6 +1641,14 @@ def main() -> int:
     if migrated:
         print("\nLAYOUT: flat class file moved into its directory:", file=sys.stderr)
         for note in migrated:
+            print(f"  {note}", file=sys.stderr)
+    if unresolved_targets:
+        # Loud because the author meant to replace something: the stale
+        # section it named, if it exists under another heading, still
+        # stands beside the correction until someone retargets the memory.
+        print("\nMERGE TARGET UNRESOLVED (the correction names no section; it was written as its own topic "
+              "and whatever it meant to replace still stands — fix the memory's merge_target):", file=sys.stderr)
+        for note in unresolved_targets:
             print(f"  {note}", file=sys.stderr)
     if collisions:
         print("\nTITLE COLLISIONS (both claims kept):", file=sys.stderr)

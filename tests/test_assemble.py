@@ -1676,8 +1676,103 @@ def test_an_oversized_single_claim_is_written_whole_and_reported(tmp: str) -> No
     assert "OVER BUDGET" in proc.stderr and "split the memory" in proc.stderr, proc.stderr
 
 
+def set_claims(claims_dir: str, role: str, items: list[dict]) -> None:
+    with open(os.path.join(claims_dir, f"{role}.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims(role, items), fh)
+
+
+def tree(out: str) -> dict[str, str]:
+    """Every file under the fabric root and the working copy, by path."""
+    found: dict[str, str] = {}
+    for dirpath, _dirs, files in os.walk(out):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            found[os.path.relpath(path, out)] = read(path)
+    return found
+
+
+def test_a_correction_naming_another_topic_s_section_replaces_it_there(tmp: str) -> None:
+    """memory/README.md tells an agent to correct a wrong slice with a
+    memory naming the slice's section in merge_target. That memory has
+    its own topic (its file name), and the target was looked for in that
+    topic alone: the correction landed as a new slice beside the stale
+    one, silently (a drain's blind review, 2026-09-25). The target is
+    resolved across the role's class; the section is replaced where it
+    lives, and a second run of the same drain changes nothing."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "deploy", "title": "How we deploy",
+         "body": "By hand, from the operator's laptop.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Something else",
+         "body": "Unrelated.", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "deploy-correction", "title": "Deploys go through the pipeline",
+         "merge_target": "How we deploy", "body": "Through the pipeline, never by hand.", "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    names = sorted(os.listdir(dom(out, "alpha", "domain")))
+    assert names == ["deploy.md", "other.md"], f"the correction was written beside the stale slice: {names}"
+    text = read(dom(out, "alpha", "domain", "deploy.md"))
+    assert "Through the pipeline, never by hand." in text and "operator's laptop" not in text, text
+    assert text.count("## ") == 1, text
+    assert "MERGE TARGET" not in proc.stderr, proc.stderr
+    before = tree(out)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert tree(out) == before, "the same correction harvested again changed the tree"
+
+    # A target that names no section anywhere is written as its own topic
+    # and said aloud — in stderr and in the report.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "orphan", "title": "An orphan correction",
+         "merge_target": "No such heading", "body": "Text.", "evidence": ["h4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "MERGE TARGET UNRESOLVED" in proc.stderr and "No such heading" in proc.stderr, proc.stderr
+    assert os.path.exists(dom(out, "alpha", "domain", "orphan.md"))
+    unresolved = json.loads(read(report_path(out))).get("merge_target_unresolved") or []
+    assert any("No such heading" in u for u in unresolved), unresolved
+
+    # A heading two topics hold is refused before anything is written.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "twin-a", "title": "Twin", "body": "A.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "twin-b", "title": "Twin", "body": "B.", "evidence": ["h2"]},
+    ])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "fix", "title": "Fixed twin", "merge_target": "Twin",
+         "body": "C.", "evidence": ["h3"]},
+    ])
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, proc.stderr
+    assert "MERGE TARGET AMBIGUOUS" in proc.stderr and "domain:twin-a" in proc.stderr \
+        and "domain:twin-b" in proc.stderr, proc.stderr
+    assert tree(out) == before, "an ambiguous target must leave the tree untouched"
+
+    # The same holds for a shared slice: the owners' correction replaces
+    # the section in the shared topic that holds it.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint", "title": "Joint finding", "shared_with": ["beta"],
+         "body": "Old joint text.", "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint-fix", "title": "Joint finding, corrected", "shared_with": ["beta"],
+         "merge_target": "Joint finding", "body": "New joint text.", "evidence": ["h2"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert not os.path.exists(shared_path(out, "domain-joint-fix.md")), os.listdir(shared_path(out, ""))
+    joint = read(shared_path(out, "domain-joint.md"))
+    assert "New joint text." in joint and "Old joint text." not in joint, joint
+
+
 def main() -> int:
     cases = [
+        test_a_correction_naming_another_topic_s_section_replaces_it_there,
         test_places_claims_and_writes_provenance,
         test_unresolved_origin_is_stated_not_invented,
         test_index_lists_every_slice,

@@ -272,7 +272,14 @@ one drain under one heading collide the same way. An author who knows
 the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no
 question is asked: the harvest carries the field to the claim and the
-assembler replaces the section and retires its siblings.
+assembler replaces the section and retires its siblings. The heading is
+found wherever it lives in the role's class (or the shared class), not
+only in the correcting memory's own topic — a correction is a memory of
+its own, so its file name is never the stale slice's. A heading held by
+two topics refuses the run (`MERGE TARGET AMBIGUOUS`, nothing written);
+a heading held by none is written as its own topic and named on stderr
+and under `merge_target_unresolved` in the report, because whatever it
+meant to replace still stands.
 
 **Every section is dated.** A claim carries `observed_at` — the
 memory's own `modified` stamp, else the file's mtime — and the section

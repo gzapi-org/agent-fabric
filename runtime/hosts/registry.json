@@ -6,7 +6,8 @@
       "platform": "fedora-qubes",
       "ssh": null,
       "operator": "user",
-      "fabric": "~/projects/agent-fabric"
+      "fabric": "~/projects/agent-fabric",
+      "operator_key": "ed25519:MCowBQYDK2VwAyEA67lJxl454XdS98B1IWY9qG/iGZUQHnSbH2cmKw9CmwY="
     }
   },
   "placement": {

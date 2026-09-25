@@ -41,7 +41,7 @@ the talking.
 ## Sending
 
 1. Compose the message in a file under your session scratchpad and
-   validate it: `node tools/gzcoord/scripts/gzmsg.mjs validate <file>`.
+   validate it: `node communication/gzcoord/scripts/gzmsg.mjs validate <file>`.
    A message that fails validation is not sent.
 2. Print it in a fenced `text` block so the terminal shows it verbatim.
    Put nothing inside the block that is not part of the message.
@@ -50,7 +50,7 @@ the talking.
    copy, and a re-broken metadata line is no longer metadata. The
    validator warns, naming the line.
 4. Give every message a `MESSAGE-ID` minted by
-   `node tools/gzcoord/scripts/gzmsg.mjs new-id` — a UUIDv7, unique by
+   `node communication/gzcoord/scripts/gzmsg.mjs new-id` — a UUIDv7, unique by
    construction. This transport's original scheme was sequential
    `<instance>-NNNN`, adopted when the relay's lossiness made gap
    detection the point: one message in three failed on its first day,

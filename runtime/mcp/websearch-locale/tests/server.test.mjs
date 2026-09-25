@@ -122,4 +122,7 @@ test('stripTags removes markup until none is left, and a stray angle bracket wit
   assert.equal(stripTags('<<b>b>script'), 'script', 'one pass would leave "<b>"');
   assert.equal(stripTags('<scr<script>ipt>x'), 'x');
   assert.equal(stripTags('a < b and c > d'), 'a  b and c  d', 'a stray bracket is dropped, the words kept');
+  const crafted = '<b'.repeat(50000) + '>'.repeat(50000);
+  const t0 = Date.now(); stripTags(crafted);
+  assert.ok(Date.now() - t0 < 1000, 'a crafted nesting is bounded, not quadratic in its length');
 });

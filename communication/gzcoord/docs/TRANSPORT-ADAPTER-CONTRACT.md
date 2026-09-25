@@ -22,7 +22,7 @@ Inbound delivery MUST expose a stable transport-native sender identity when the 
 
 ### Broadcast
 
-The adapter SHOULD provide a way for HELLO to reach all participating peers. If the transport cannot broadcast to all agent participants, the adapter must define a bootstrap mechanism without altering core protocol fields.
+The adapter SHOULD provide a way for a `BROADCAST` to reach all participating peers (`HELLO`, which once relied on it, is deprecated — SPEC §5). If the transport cannot broadcast to all agent participants, the adapter must define a bootstrap mechanism without altering core protocol fields.
 
 ### Direct delivery
 

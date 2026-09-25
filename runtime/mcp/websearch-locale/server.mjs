@@ -106,8 +106,10 @@ export async function search(engine, query, locale, { secrets = secretsOf(engine
 // "<<b>b>" leaves "<b>", and a stray angle bracket is dropped too. The
 // text reaches a model, not a browser; this keeps it plain.
 export function stripTags(text) {
-  let s = String(text), prev;
-  do { prev = s; s = s.replace(/<\/?[A-Za-z][^<>]*>/g, ''); } while (s !== prev);
+  // Bounded: a description is a few hundred bytes, and each pass is
+  // linear, so 16 passes and 4 kB cap a crafted "<b<b<b…>>>" (review of #39).
+  let s = String(text).slice(0, 4096), prev, i = 0;
+  do { prev = s; s = s.replace(/<\/?[A-Za-z][^<>]*>/g, ''); } while (s !== prev && ++i < 16);
   return s.replace(/[<>]/g, '');
 }
 

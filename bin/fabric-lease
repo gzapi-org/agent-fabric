@@ -36,7 +36,8 @@
 #
 # Every refusal ends with ONE stable line on stderr, the contract a caller
 # matches instead of the prose above it (docs/resources.md):
-#   fabric-lease: reason=memory|timeout|held|nodir
+#   fabric-lease: reason=memory|memory-unknown|timeout|held|nodir
+# (usage errors, exit 2 before any lease is touched, carry none.)
 # --label names the JOB under the lease (the lease names the resource):
 # it rides in the holder's record, so "heavy" held by a suite says so.
 set -uo pipefail
@@ -90,7 +91,7 @@ L="$LEASES/$NAME"
 # of the first one's lease file (docs/live-checks/2026-09-19-develop-qzapp-crash.md).
 [[ -e "$L" ]] || ( umask 000; : >> "$L" ) 2>/dev/null
 exec 9<"$L" || { echo "fabric-lease: cannot open $L" >&2; exit 2; }
-holder() { local h; h="$(head -c 512 "$L" 2>/dev/null | head -1)"; [[ -n "$h" ]] && echo "$h" || echo "(holder unrecorded)"; }
+holder() { local h; h="$(head -c 512 "$L" 2>/dev/null | head -1 | LC_ALL=C tr -d '\000-\037\177')"; [[ -n "$h" ]] && echo "$h" || echo "(holder unrecorded)"; }
 record() { [[ -w "$L" ]] && printf '%s %s %s %s%s\n' "$(id -un)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "${LABEL:+ ($LABEL)}" | dd of="$L" conv=nocreat status=none 2>/dev/null; return 0; }
 # A probe is a SHARED lock, never the exclusive one: `flock -n` on a free
 # lease would take it for the probe's lifetime, and sixteen daemons
@@ -122,7 +123,7 @@ record
 if (( NEED > 0 )); then
     avail_kb="$(awk '/^MemAvailable:/{print $2}' "$MEMINFO" 2>/dev/null)"
     # A floor that cannot be evaluated is refused, never skipped.
-    [[ "$avail_kb" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --need-mem asked, and MemAvailable cannot be read from $MEMINFO" >&2; exit 2; }
+    [[ "$avail_kb" =~ ^[0-9]+$ ]] || refuse 2 memory-unknown "--need-mem asked, and MemAvailable cannot be read from $MEMINFO"
     if (( avail_kb / 1024 < NEED )); then
         total_kb="$(awk '/^MemTotal:/{print $2}' "$MEMINFO" 2>/dev/null)"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
         echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $((total_kb / 1024)) MB) — the largest processes:" >&2

@@ -18,7 +18,7 @@ The procedures are two skills every account has: `gzcoord-send` and
 `gzcoord-receive`. When coordinating with another agent:
 
 - your address is `<host>/<login>` — the Linux account this session runs under, as `../agent-fabric/bin/fabric-whoami` from the working copy reports it (SPEC §3.1); the working copy you are in is context, never identity;
-- as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `fabric-coordinator`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
+- as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `fabric-coordinator`, never a title; `../agent-fabric/bin/fabric-whoami --json` reports your address, role and project;
 - send no `HELLO` or `GOODBYE` (deprecated, SPEC §5): whether an agent is online is `../agent-fabric/bin/fabric-ctl <login|all> presence`, answered from each account's process table, and `send.mjs` asks it before a `TO` or `TO-ROLE` message leaves (`--force` to send anyway); a role change is a rebind from a login shell (`bin/fabric-role`) and a relaunch;
 - watch your inbox for the whole session, not only while waiting on a reply: one watch, `inbox.mjs --follow` under Monitor, started first, never a second one — the cursor is per address and a second consumer swallows deliveries;
 - send with `communication/gzcoord/scripts/send.mjs`, which validates as the last step before posting; for the human relay print the message in a fenced text block;

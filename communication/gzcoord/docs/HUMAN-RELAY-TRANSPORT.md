@@ -26,7 +26,7 @@ for code. Mapped onto a person:
 | `send(peer, text)` | paste into one session; the native peer is the terminal window |
 | `onMessage(sender, text)` | the pasted text arrives as a user turn in the recipient |
 | native sender identity | the person's knowledge of which window it was copied from — stable, and stronger than any bot identity, because every message is vouched for by the human carrying it |
-| broadcast reach | satisfied; `HELLO` reaches whoever the person pastes it to |
+| broadcast reach | satisfied; a `BROADCAST` reaches whoever the person pastes it to |
 | direct delivery | satisfied |
 | reply context | none native; `MESSAGE-ID` / `IN-REPLY-TO` carry correlation |
 | security, allowlist | the person. A self-declared `FROM` or `ROLE` still authenticates nothing (SPEC §17); the carrier does |
@@ -69,16 +69,12 @@ the talking.
    say where by reference (`../protocol/MESSAGE-FORMAT.md`, "Acknowledging
    by reference").
 
-Emit one `HELLO` when the session starts — `gzmsg.mjs hello --from
-<host>/<instance> --role ... --project gzapp` — so the person knows what
-this session declares; the id is minted for you. Do not re-announce on seeing a peer's
-`HELLO`; there is no peer cache to refresh and no storm to guard against.
-Do re-announce
-when your role changes (SPEC §4) — a role is bound from a login shell
-(`bin/fabric-role`) and takes effect at the next launch, which sends the
-`HELLO`; the switch changes what `ROLE` this address answers for, and the person routing `TO-ROLE` is
-the cache that needs to hear it. `GOODBYE` is not needed: the person
-knows which sessions are running.
+Send no `HELLO` and no `GOODBYE`: both are deprecated (SPEC §5). Every
+message you send carries your `ROLE`, which is what the person routing
+`TO-ROLE` reads; whether a session is running is presence, which the
+deployment answers — in agent-fabric, `bin/fabric-ctl <login|all>
+presence`. A role is bound from a login shell (`bin/fabric-role`) and
+takes effect at the next launch.
 
 ## Receiving
 
@@ -155,8 +151,8 @@ working copy the session is in is not part of the address.
 `architect-cto`, `backend-dev` — never a title such as `Architect / CTO`
 or a free description such as `Application Architect`
 (`runtime/README.md`, "Role sourcing"). The person resolves `TO-ROLE` by
-equality against the last `HELLO` they saw, so any other spelling
-matches nothing; a slug is one token, safe in a metadata line and in a
+equality against the `ROLE` a session's messages carry, so any other
+spelling matches nothing; a slug is one token, safe in a metadata line and in a
 filter. The address is not bound to the role: a role can change without
 the address changing (SPEC §4). A recipient tells a misdelivered `TO`
 from its own by comparing it to its own address, nothing more. Observed

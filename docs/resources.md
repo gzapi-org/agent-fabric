@@ -43,10 +43,12 @@ fabric-lease <name> --who
   two leases never queue against each other.
 - **`heavy` is the host's memory, and every memory-heavy job takes it**
   — a backend suite, a stack bring-up, an app build, a large cargo
-  build — in any project, with `--label <job>` saying which. The
-  2026-09-25 crash was one account's standing stack plus a build
-  started beside it (`docs/live-checks/2026-09-25-develop-qzapp-crash.md`),
-  and the shape recurs with any two heavy jobs under different names:
+  build — in any project, with `--label <job>` saying which. At the
+  2026-09-25 crash one account's standing stack and a build started
+  beside it were running; memory is the likely cause there, not the
+  measured one (`docs/live-checks/2026-09-25-develop-qzapp-crash.md`,
+  conclusion 3). The shape the lease guards against holds either way,
+  for any two heavy jobs under different names:
   each checks `--need-mem` against the same free memory, both pass, and
   both grow after the check. Only one lease held across that growth
   prevents it; a shared lock around the check alone would not. The cost,
@@ -60,7 +62,9 @@ fabric-lease <name> --who
 - **Why it was refused is a contract, not prose.** Every refusal ends
   with one line on stderr, `fabric-lease: reason=<r>`: `held` (no
   wait asked), `timeout` (the wait ran out), `memory` (under
-  `--need-mem`), `nodir` (no lease directory, exit 2). A caller that
+  `--need-mem`), `memory-unknown` (`--need-mem` asked and
+  `MemAvailable` unreadable, exit 2), `nodir` (no lease directory, exit
+  2). A usage error (exit 2, nothing touched) carries none. A caller that
   tells refusals apart matches that last line; the prose above it may
   be reworded at any time (tests/test_fabric-lease.sh pins the line).
 - **`--need-mem`** checks `MemAvailable` *under* the lease, so two

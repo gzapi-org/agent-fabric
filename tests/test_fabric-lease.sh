@@ -149,6 +149,13 @@ kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null; HOLDER=""
 lease heavy --label 'two words' -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a label with a space is refused (it is written into a shared file)" || bad "bad label accepted"
 lease heavy --label "$(printf 'x\033]0;y')" -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a label with a control character is refused" || bad "control label accepted"
 out="$(lease heavy -- sh -c 'echo ran' 2>&1)"; [[ "$out" == "ran" ]] && ok "a run that is not refused prints no reason line" || bad "reason on success" "$out"
+out="$(AGENT_FABRIC_MEMINFO=/dev/null lease heavy --need-mem 1024 -- true 2>&1)"; rc=$?
+[[ $rc -eq 2 && "$(last "$out")" == "fabric-lease: reason=memory-unknown" ]] && ok "MemAvailable unreadable: exit 2, reason=memory-unknown, last" || bad "memory-unknown reason" "rc=$rc $out"
+# A holder record another login wrote by hand reaches a refused caller's terminal: control characters never do.
+printf 'x 1 T heavy \033]0;PWNED\007(bad)\n' > "$D/rogue"; chmod 666 "$D/rogue"
+exec 8<"$D/rogue"; flock 8
+out="$(lease rogue -- true 2>&1)"; flock -u 8; exec 8<&-
+! grep -q $'\033' <<<"$out" && ! grep -q $'\007' <<<"$out" && grep -q "held by x 1 T heavy" <<<"$out" && ok "the holder record is printed without control characters" || bad "control characters reached the caller" "$(cat -v <<<"$out")"
 
 echo
 if (( FAIL )); then echo "fabric-lease: $FAIL failure(s), $PASS passed"; exit 1; fi

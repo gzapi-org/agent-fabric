@@ -1770,8 +1770,71 @@ def test_a_correction_naming_another_topic_s_section_replaces_it_there(tmp: str)
     assert "New joint text." in joint and "Old joint text." not in joint, joint
 
 
+def with_agents(drain: str, rows: dict[str, str]) -> None:
+    """Observations that name the agent, as harvest_memory.py writes them."""
+    with open(os.path.join(drain, "observations.jsonl"), "w", encoding="utf-8") as fh:
+        for h, agent in sorted(rows.items()):
+            fh.write(json.dumps({"content_hash": h, "agent": agent, "host": "hostA"}) + "\n")
+
+
+def test_a_retitled_memory_is_asked_about_not_appended(tmp: str) -> None:
+    """A memory's topic is its file name and its heading its description.
+    An agent that rewrites a tracker with a new description brings a new
+    heading into a topic whose every section it wrote; appending it left
+    the stale "open" section standing beside the "merged" one (a drain's
+    blind review, 2026-09-25). It is a collision the owner decides; a
+    topic several agents wrote keeps appending, and a merge_target naming
+    the old section is the author's own supersede."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is open",
+         "body": "Waiting on review.", "evidence": ["a1"], "observed_at": "2026-09-20"},
+        {"class": "domain", "topic": "joint", "title": "First view", "body": "One.", "evidence": ["a2"]},
+        {"class": "domain", "topic": "joint", "title": "Second view", "body": "Two.", "evidence": ["b1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "b1": "dev-02"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    retitle = {"class": "domain", "topic": "tracker", "title": "Issue 851 is merged",
+               "body": "Merged on 2026-09-24.", "evidence": ["a3"], "observed_at": "2026-09-24"}
+    set_claims(claims_dir, "alpha", [retitle])
+    tracker = dom(out, "alpha", "domain", "tracker.md")
+    before = read(tracker)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, "a retitled memory was appended beside its old section:\n" + read(tracker)
+    assert "alpha/domain:tracker#Issue 851 is merged" in proc.stderr and "retitled?" in proc.stderr, proc.stderr
+    assert "'Issue 851 is open'" in proc.stderr and "Waiting on review." in proc.stderr, proc.stderr
+    assert read(tracker) == before, "a refused drain must not touch the slice"
+
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:tracker#Issue 851 is merged": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    text = read(tracker)
+    assert "## Issue 851 is merged" in text and "Issue 851 is open" not in text and "Waiting" not in text, text
+    assert "description: Issue 851 is merged" in text, text
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert "Issue 851 is open" not in index and "Issue 851 is merged" in index, index
+
+    # The author's own merge_target naming the old section is no question.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is released",
+         "merge_target": "Issue 851 is merged", "body": "Released.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "Released." in read(tracker) and read(tracker).count("## ") == 1, read(tracker)
+
+    # A topic two agents wrote is two memories: a new heading appends.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint", "title": "Third view", "body": "Three.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    joint = read(dom(out, "alpha", "domain", "joint.md"))
+    assert all(h in joint for h in ("## First view", "## Second view", "## Third view")), joint
+
+
 def main() -> int:
     cases = [
+        test_a_retitled_memory_is_asked_about_not_appended,
         test_a_correction_naming_another_topic_s_section_replaces_it_there,
         test_places_claims_and_writes_provenance,
         test_unresolved_origin_is_stated_not_invented,

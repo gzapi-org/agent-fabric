@@ -917,8 +917,32 @@ def main() -> int:
             groups_to_check.append((role, role, key, group))
     for key, group in shared.items():
         groups_to_check.append((None, "shared", key, group))
+    def sole_author(role: str | None, klass: str, topic: str, paths: list[str]) -> str | None:
+        """The one agent every section of the topic came from, or None.
+        A flat class file holding other topics' sections says nothing
+        about this topic, and an origin with no agent (a clone record,
+        an unresolved row) cannot be the same author as anyone."""
+        if not paths:
+            return None
+        if role is not None:
+            flat_file = os.path.join(layout.class_home(klass, role, project), f"{CLASS_FILES[klass]}.md")
+            prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
+            if flat_file in paths and not prior <= {topic}:
+                return None
+        agents: set[str] = set()
+        for path in paths:
+            meta, _sections = read_existing_slice(path)
+            for item in meta.get("origin") or []:
+                agent = item.get("agent") if isinstance(item, dict) else None
+                if not agent or agent == "unresolved":
+                    return None
+                agents.add(agent)
+        return agents.pop() if len(agents) == 1 else None
+
     for role, label, (klass, topic), group in groups_to_check:
-        present = existing_sections(slice_candidates(role, klass, topic))
+        candidates = slice_candidates(role, klass, topic)
+        present = existing_sections(candidates)
+        author = sole_author(role, klass, topic, candidates) if present else None
         seen_incoming: dict[str, dict[str, Any]] = {}
         for claim in list(group):
             heading = claim_heading(claim)
@@ -940,7 +964,19 @@ def main() -> int:
                 rival = undated(claim_block(seen_incoming[heading]).split("\n", 1)[1])
                 rival_date = seen_incoming[heading].get("observed_at") or "undated"
             seen_incoming.setdefault(heading, claim)
-            if rival is None:
+            agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
+            # A RETITLED MEMORY IS THE SAME MEMORY. A topic is a memory's
+            # file name and its heading the memory's description; an agent
+            # that rewrites a tracker ("#851 OPEN" -> "#851 MERGED") brings
+            # a new heading into a topic whose every section it wrote
+            # itself, and appending left the stale section standing with
+            # both cues in the index (a drain's blind review, 2026-09-25).
+            # Which one is true is the owner's call, asked like any other
+            # collision; a claim whose merge_target named a section was
+            # authorised above, and a topic several agents wrote is several
+            # memories, where a new heading is simply new.
+            retitled = rival is None and heading not in present and author is not None and agent == author
+            if rival is None and not retitled:
                 continue
             key_id = f"{label}/{klass}:{topic}#{heading}"
             # A key per incoming claim as well as per heading: with three
@@ -950,13 +986,25 @@ def main() -> int:
             # is the default for every pair under it.
             claim_key = f"{key_id}@{(claim.get('evidence') or ['?'])[0][:12]}"
             decision = decisions.get(claim_key) or decisions.get(key_id)
-            agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
-            if decision == "supersede":
+            if decision == "supersede" and retitled:
+                # The new title wins: every section of the topic is retired
+                # and the claim takes the first one's place.
+                claim["_retire"] = list(present)
+            elif decision == "supersede":
                 claim["merge_target"] = heading
             elif decision == "drop":
                 group.remove(claim)
             elif decision == "keep-both":
                 pass
+            elif retitled:
+                refused_collisions.append(
+                    f"{claim_key}   (retitled? every section of the topic is {agent}'s)\n"
+                    + "".join(f"    in the corpus (observed {observed_of(present[h])}) as {h!r}: {excerpt(present[h])}\n"
+                              for h in present)
+                    + f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}) "
+                      f"as {heading!r}: {excerpt(rendered)}"
+                )
+                continue
             else:
                 refused_collisions.append(
                     f"{claim_key}   (or {key_id} for every pair under the heading)\n"
@@ -1036,39 +1084,57 @@ def main() -> int:
         resolved: list[str] = []
         blocks: dict[str, str] = dict(previous_sections)
         order: list[str] = list(previous_sections)
+        def retire_elsewhere(target: str) -> bool:
+            """THE SECTION LIVES IN ANOTHER PART of this topic (a slice
+            split by budget): the owner's supersede retires it there and
+            the superseding text lands here. Authorising only a target in
+            the part being written exited 0 with both texts standing in
+            two files (connected reviewer, 2026-09-20). Every sibling
+            touched is written and reported."""
+            touched = retire_in_siblings(directory, filename, target, clip=clip_description)
+            for tpath, what in touched:
+                retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
+                # `written` counts files on disk once: a rewritten
+                # sibling joins it, a removed one leaves it.
+                if what == "rewritten" and tpath not in written:
+                    written.append(tpath)
+                if what == "removed" and tpath in written:
+                    written.remove(tpath)
+                # A sibling this run already indexed keeps a stale
+                # line otherwise — a link to a removed file, or the
+                # old cue: drop it, and the on-disk sweep re-lists a
+                # rewritten part by its frontmatter.
+                rel = layout.link_rel(tpath, project)
+                if role == "shared":
+                    for owner in list(shared_index):
+                        shared_index[owner] = [e for e in shared_index[owner] if e["path"] != rel]
+                else:
+                    index_entries[role] = [e for e in index_entries[role] if e["path"] != rel]
+            return bool(touched)
+
         for claim in claims:
             heading = claim_heading(claim)
+            retire = claim.get("_retire") or []
+            if retire:
+                # A retitle the owner superseded: the old sections go
+                # wherever they sit, and the new heading takes the place of
+                # the first one this part holds, so the slice keeps its order.
+                slot = next((h for h in retire if h in blocks), None)
+                for old in retire:
+                    if old in blocks:
+                        del blocks[old]
+                        if old != slot:
+                            order.remove(old)
+                    else:
+                        retire_elsewhere(old)
+                if slot is not None:
+                    order[order.index(slot)] = heading
+                resolved.extend(retire)
             target = (claim.get("merge_target") or "").strip()
             authorised = bool(target and target in blocks)
-            if target and not authorised:
-                # THE SECTION LIVES IN ANOTHER PART of this topic (a slice
-                # split by budget): the owner's supersede retires it there
-                # and the superseding text lands here. Authorising only a
-                # target in the part being written exited 0 with both texts
-                # standing in two files (connected reviewer, 2026-09-20).
-                # Every sibling touched is written and reported.
-                touched = retire_in_siblings(directory, filename, target, clip=clip_description)
-                if touched:
-                    authorised = True
-                    resolved.append(target)
-                    for tpath, what in touched:
-                        retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
-                        # `written` counts files on disk once: a rewritten
-                        # sibling joins it, a removed one leaves it.
-                        if what == "rewritten" and tpath not in written:
-                            written.append(tpath)
-                        if what == "removed" and tpath in written:
-                            written.remove(tpath)
-                        # A sibling this run already indexed keeps a stale
-                        # line otherwise — a link to a removed file, or the
-                        # old cue: drop it, and the on-disk sweep re-lists a
-                        # rewritten part by its frontmatter.
-                        rel = layout.link_rel(tpath, project)
-                        if role == "shared":
-                            for owner in list(shared_index):
-                                shared_index[owner] = [e for e in shared_index[owner] if e["path"] != rel]
-                        else:
-                            index_entries[role] = [e for e in index_entries[role] if e["path"] != rel]
+            if target and not authorised and retire_elsewhere(target):
+                authorised = True
+                resolved.append(target)
             if authorised:
                 # Replacement is opt-in, and this is the opt-in.
                 heading = target
@@ -1107,7 +1173,7 @@ def main() -> int:
                     suffix += 1
                 collided.append(base_heading)
                 heading = f"{heading} ({suffix})"
-            if heading not in blocks:
+            if heading not in order:   # a retitle already put it in its predecessor's place
                 order.append(heading)
             # Equal text arriving WITHOUT a date (a bundle from before sections
             # were dated) keeps the date the corpus already recorded; a

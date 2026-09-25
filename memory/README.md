@@ -268,7 +268,15 @@ siblings: `merge_target`, the author's instrument, applied on the
 owner's decision), `keep-both` (both stand, side by side, dated), or
 `drop` (the incoming claim is wrong). Every applied decision is
 recorded in the drain report under `collision_decisions`. Two claims of
-one drain under one heading collide the same way. An author who knows
+one drain under one heading collide the same way. So does a **retitled
+memory**: a memory's topic is its file name and its heading its
+description, so a claim bringing a new heading into a topic whose every
+section one agent wrote — that agent's own — is the same memory
+rewritten (a tracker's "OPEN" become "MERGED"), not a second fact. The
+run stops on it like any collision, keyed by the new heading;
+`supersede` retires the topic's old sections and puts the new one in
+their place. A topic several agents wrote appends as before, and a
+memory whose `merge_target` names the old section is not asked about. An author who knows
 the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no
 question is asked: the harvest carries the field to the claim and the

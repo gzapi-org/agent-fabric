@@ -49,10 +49,23 @@ def test_a_host_without_a_key_is_admitted() -> None:
 
 
 def test_a_malformed_key_is_refused() -> None:
-    for bad in ("ed25519:####", "rsa:AAAA", "MCowBQYDK2VwAyEA"):
+    good = generated_key()
+    truncated = good[:len("ed25519:") + 47] + "="   # the shape a hand-pasted, cut-short key takes: base64, but not an SPKI
+    for bad in ("ed25519:####", "rsa:AAAA", "MCowBQYDK2VwAyEA", truncated, good[:-1]):
         with tempfile.TemporaryDirectory() as tmp:
             f = findings_for(tmp, {"operator_key": bad})
             assert f and "operator_key" in " ".join(f), (bad, f)
+
+
+def test_the_committed_key_parses_as_a_daemon_reads_it() -> None:
+    """The registry's own key, through the same parser the daemons use:
+    a key the schema admitted but publicKeyFrom refused would disable every
+    action with a refusal that blames the signature, not the registry."""
+    js = ("import('./runtime/control/agentd.mjs').then(m => console.log(JSON.stringify([...m.operatorKeys('runtime/hosts/registry.json').keys()])))")
+    out = subprocess.run(["node", "-e", js], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    reg = json.load(open(os.path.join(ROOT, "runtime", "hosts", "registry.json"), encoding="utf-8"))
+    keyed = sorted(f"{h}/{e.get('operator', 'user')}" for h, e in reg["hosts"].items() if e.get("operator_key"))
+    assert sorted(json.loads(out)) == keyed, (out, keyed)
 
 
 def main() -> int:

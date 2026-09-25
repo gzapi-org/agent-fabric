@@ -60,8 +60,8 @@
           },
           "operator_key": {
             "type": "string",
-            "pattern": "^ed25519:[A-Za-z0-9+/]{40,64}={0,2}$",
-            "description": "The public half of the operator's control-plane signing key (SPKI DER, base64), written by `fabric-ctl keygen`. Every control daemon answers an ACTION (runtime/control/sign.mjs) only when it is signed with this key; a host without one can order no action. Optional: read ops need no key."
+            "pattern": "^ed25519:[A-Za-z0-9+/]{59}=$",
+            "description": "The public half of the operator's control-plane signing key (SPKI DER, base64), written by `fabric-ctl keygen`. Every control daemon answers an ACTION (runtime/control/sign.mjs) only when it is signed with this key; a host without one can order no action. Optional: read ops need no key. The width is exact: an Ed25519 SPKI is always 44 bytes, 59 base64 characters and one `=`, so a truncated or mangled key fails lint instead of passing it and being treated as no key by every daemon."
           }
         }
       }

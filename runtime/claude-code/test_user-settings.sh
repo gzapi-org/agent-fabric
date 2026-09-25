@@ -32,6 +32,10 @@ out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "assert 'includeCoAuthoredB
 # rewritten, not reported settled.
 printf '{"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "verbose": false}\n' > "$S"
 out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "" >/dev/null && ok "attribution already off, the display keys still written (verbose false overridden)" || bad "display keys" "$out $(cat "$S")"
+# What every account had before DISABLE_AUTOUPDATER was a fabric key:
+# attribution off, the display keys set, no env. Rewritten, not settled.
+printf '{"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "showThinkingSummaries": true, "verbose": true}\n' > "$S"
+out="$(run "$S")"; [[ "$out" == "  +  "* ]] && check "" >/dev/null && ok "a settings file from before the auto-update key gets it (not reported settled)" || bad "auto-update key not written" "$out $(cat "$S")"
 printf 'not json\n' > "$S"; out="$(run "$S" 2>&1)"; rc=$?
 [[ $rc -eq 1 && "$out" == "  !  "*"NOT written"* && "$(cat "$S")" == "not json" ]] && ok "an unreadable file is refused with one line, not a traceback, and not overwritten" || bad "unreadable file" "$out"
 printf '[1]\n' > "$S"; out="$(run "$S" 2>&1)"; rc=$?

@@ -10,8 +10,8 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
 import { parseArgs, rows, table, writeBundles, manifestAgent, partKey, keygen } from '../ctl.mjs';
-import { publicKeyFrom, privateKeyFrom, generateOperatorKey, verifyRequest } from '../sign.mjs';
-import { pinnedVersion } from '../upgrade.mjs';
+import { publicKeyFrom, privateKeyFrom, generateOperatorKey, verifyRequest, ACTION_TTL_MAX_S } from '../sign.mjs';
+import { pinnedVersion, UPGRADE_BUDGET_S } from '../upgrade.mjs';
 import { FABRIC_ROOT } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { fileURLToPath } from 'node:url';
@@ -301,16 +301,16 @@ test('accounts: one row per observed Claude account, the observer named; logins 
   assert.equal(parseArgs(['user', 'accounts']).timeout, 300, 'a first read runs the harness per account');
 });
 
-test('upgrade: the word after it is the piece, --version is digits, an action lives at most its cap; one row per account with from → to and the session', () => {
+test('upgrade: the word after it is the piece, --version is digits, the wait is the slowest account\'s; one row per account with from → to and the session', () => {
   const a = parseArgs(['all', 'upgrade', 'claude']);
-  assert.deepEqual([a.targets, a.op, a.piece, a.version, a.timeout], [['all'], 'upgrade', 'claude', null, 600]);
+  assert.deepEqual([a.targets, a.op, a.piece, a.version, a.timeout], [['all'], 'upgrade', 'claude', null, UPGRADE_BUDGET_S]);
+  assert.ok(UPGRADE_BUDGET_S > ACTION_TTL_MAX_S, 'a queued fleet upgrade outlasts the action\'s acceptance window; the wait is for replies, not the TTL');
   assert.equal(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude', '--version=2.1.282']).version, '2.1.282');
   assert.deepEqual(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude']).targets, ['db-admin', 'web-dev-01'], 'the piece is not a login');
   assert.throws(() => parseArgs(['all', 'upgrade']), /upgrade takes a piece: claude/);
   assert.throws(() => parseArgs(['all', 'upgrade', 'fabric']), /upgrade takes a piece/, 'only claude, for now');
   assert.throws(() => parseArgs(['all', 'upgrade', 'claude', '--version', 'latest']), /digits/);
   assert.throws(() => parseArgs(['all', 'status', '--version', '2.1.282']), /with upgrade only/);
-  assert.throws(() => parseArgs(['all', 'upgrade', 'claude', '--timeout', '3600']), /at most 600 s/);
   const expected = [{ login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }, { login: 'user', host: 'h', address: 'h/user' }];
   const t = table('upgrade', rows(expected, [
     { kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { status: 'upgraded', from: '2.1.280', to: '2.1.281', session: 'restarting' } } },
@@ -365,5 +365,38 @@ test('fabric-ctl upgrade: the coordinator\'s pin travels in the signed request; 
     assert.ok(!sent.err.includes(k.privateKeySpec.slice(20, 50)) && !sent.out.includes(k.privateKeySpec.slice(20, 50)));
     const over = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--version', '2.1.279', '--timeout', '1']);
     assert.equal(JSON.parse(r.rows.at(-1).content).args.version, '2.1.279', '--version overrides the pin'); void over;
+  } finally { r.close(); }
+});
+
+test('fabric-ctl upgrade exits 1 when any account failed, 0 when every answer is upgraded or current', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile();
+    const k = generateOperatorKey();
+    let lastTtl = null;
+    const go = (statuses, extra = ['--timeout', '5']) => new Promise(resolve => {
+      let done = false;
+      const answer = () => {
+        if (done) return;
+        const reqRec = [...r.rows].reverse().find(x => { try { const j = JSON.parse(x.content); return j.kind === 'request' && j.op === 'upgrade' && !x.answered; } catch { return false; } });
+        if (!reqRec) return setTimeout(answer, 30);
+        done = true; reqRec.answered = true;
+        const { id, ttl_s } = JSON.parse(reqRec.content); lastTtl = ttl_s;
+        for (const [login, st] of Object.entries(statuses)) r.add(`${H}/${login}`, JSON.stringify({ v: 1, kind: 'reply', id: 'r-' + login + Math.random(), in_reply_to: id, from: `${H}/${login}`, op: 'upgrade', ok: true, data: { upgrade: { ...(st && { status: st }), from: '2.1.281', to: '2.1.282', session: 'none' } } }));
+      };
+      setTimeout(answer, 30);
+      const child = spawn('node', [CTL, 'db-admin', 'web-dev-01', 'upgrade', 'claude', ...extra], { env: { ...process.env, HOME: scratch('ctl-home-'), CLAUDE_BRIDGE_URL: r.url(), CLAUDE_BRIDGE_AUTH_TOKEN: 'tok', FABRIC_CONTROL_CHANNEL: 'test:control', AGENT_FABRIC_HOSTS_REGISTRY: reg, FABRIC_CONTROL_SIGNING_KEY: k.privateKeySpec } });
+      let out = ''; child.stdout.on('data', d => { out += d; });
+      child.on('close', status => resolve({ status, out }));
+    });
+    const bad = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'failed' });
+    assert.equal(bad.status, 1, bad.out); assert.match(bad.out, /web-dev-01\s+failed/);
+    const good = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'current' });
+    assert.equal(good.status, 0, good.out);
+    const bare = await go({ 'db-admin': 'upgraded', 'web-dev-01': null });
+    assert.equal(bare.status, 1, `a reply with no status is not a success: ${bare.out}`);
+    const long = await go({ 'db-admin': 'upgraded', 'web-dev-01': 'current' }, ['--timeout', '3600']);
+    assert.equal(long.status, 0, long.out);
+    assert.equal(lastTtl, ACTION_TTL_MAX_S, 'a long wait for replies does not stretch the signed action\'s lifetime');
   } finally { r.close(); }
 });

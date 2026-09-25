@@ -147,14 +147,17 @@ if [[ "$PHASE" == prepare ]]; then
     # against the release pointer. Its layout is the one this script and the
     # runbook assume: ~/.local/bin/claude -> ~/.local/share/claude/versions/<v>.
     pinned="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("claude") or "")' "$ROOT/runtime/claude-code/harness.json" 2>/dev/null || true)"
-    # The pin reaches as_login's eval below, like --claude, which new-agent.sh
-    # validates for that reason: a pin that is not a version is refused, and
-    # a pin that cannot be read is said, never silently turned into latest.
+    # The pin reaches as_login's eval below: a pin that is not a version is
+    # refused, and a pin that cannot be read is said, never silently turned
+    # into latest. (--claude is checked by new-agent.sh and again below.)
     if [[ -n "$pinned" && ! "$pinned" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         die "runtime/claude-code/harness.json pins claude '$pinned', which is not a version; nothing installed"
     fi
     [[ -n "${CLAUDE_TARGET:-}" || -n "$pinned" ]] || say "   claude: no readable pin in runtime/claude-code/harness.json — the vendor's latest instead"
     want="${CLAUDE_TARGET:-${pinned:-latest}}"
+    # Checked again here, whatever the caller checked: this value is spliced
+    # into the string as_login evals.
+    [[ "$want" =~ ^(stable|latest|[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?)$ ]] || die "claude target '$want' is not stable, latest or a version; nothing installed"
     resolved="$want"
     if [[ "$want" == latest ]]; then
         resolved="$(curl -fsSL -m 20 https://downloads.claude.ai/claude-code-releases/latest 2>/dev/null | tr -d '[:space:]')"

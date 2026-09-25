@@ -26,7 +26,7 @@ import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.m
 import { api, syncedToken, syncedVar, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { execFileSync } from 'node:child_process';
 import { ACTION_OPS, ACTION_TTL_MAX_S, signRequest, generateOperatorKey, publicKeyFrom } from './sign.mjs';
-import { PIECES, VERSION_RE, pinnedVersion } from './upgrade.mjs';
+import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.mjs';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS } from './ops.mjs';
@@ -58,10 +58,9 @@ export function parseArgs(argv) {
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? ACTION_TTL_MAX_S : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : 20;
   if (out.op === 'upgrade' && !PIECES.includes(out.piece)) throw new Error(`upgrade takes a piece: ${PIECES.join(', ')}`);
   if (out.version !== null && (out.op !== 'upgrade' || !VERSION_RE.test(out.version))) throw new Error('--version takes digits.digits.digits, with upgrade only');
-  if (out.op === 'upgrade' && out.timeout > ACTION_TTL_MAX_S) throw new Error(`an action lives at most ${ACTION_TTL_MAX_S} s`);
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
   if (out.op === 'memory' && !out.out) throw new Error('memory takes --out <dir>: where the drain bundles are written');
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
@@ -130,7 +129,7 @@ export function table(op, rs) {
       const u = r.upgrade;
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const ft = u.status === 'current' ? `${u.version} (pinned)` : `${u.from ?? '-'} → ${u.to ?? '-'}`;
-      lines.push(`${r.account.padEnd(22)} ${String(u.status).padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
+      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
     }
     return lines.join('\n');
   }
@@ -304,7 +303,11 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const call = (p, init) => api(tok, p, { relayUrl: cfg.relay_url, ...init });
 
   const id = newId();
-  let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.max(cfg.ttl_s, Math.ceil(args.timeout)), ...(args.days ? { days: args.days } : {}),
+  // An action's signed ttl_s is how long an account may still ACCEPT it,
+  // capped; how long this command waits for replies is --timeout, which
+  // for a queued fleet upgrade is far longer — the last account replies
+  // long after every account accepted.
+  let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.min(ACTION_OPS.includes(args.op) ? ACTION_TTL_MAX_S : Infinity, Math.max(cfg.ttl_s, Math.ceil(args.timeout))), ...(args.days ? { days: args.days } : {}),
                   ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}) };
   // One command, one version: the coordinator's pin travels in the signed
   // request. Left to each account, an account that had not pulled the pin
@@ -352,7 +355,10 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   const rs = rows(expected, replies);
   if (args.json) for (const r of rs) console.log(JSON.stringify(r));
   else console.log(table(args.op, rs));
-  return want.size || short() || refused ? 1 : 0;
+  // An action that failed on an account is a failed run, whatever else
+  // answered: the first fleet upgrade printed nine failed rows and exited 0.
+  const actionFailed = ACTION_OPS.includes(args.op) && replies.some(r => !['current', 'upgraded'].includes(r.data?.[args.op]?.status));
+  return want.size || short() || refused || actionFailed ? 1 : 0;
 }
 
 // The operator's signing key, made once (or rotated): the private half goes

@@ -86,3 +86,13 @@ test('the action replay ledger: persisted per operator, survives a restart and r
   assert.equal(accept(rec(later), ctx()).ok, true, 'a genuinely newer action still passes');
   assert.equal(accept(rec(base({ op: 'status', args: undefined, ts: first.ts })), ctx()).ok, true, 'read ops are not held to the ledger');
 });
+
+test('an action dated in the future is refused before it can raise the ledger; a small skew is tolerated', () => {
+  const dir = scratch('sign-future-');
+  const k = generateOperatorKey();
+  const ctx = { me, operators: new Set([OP]), keys: operatorKeys(registry(dir, k.publicKeySpec)), ttl_s: 30, seen: new Set(), actionFloor: () => 0 };
+  const ahead = signRequest(base({ ts: new Date(Date.now() + 5 * 60 * 1000).toISOString() }), k.privateKeySpec);
+  const r = accept(rec(ahead), ctx);
+  assert.equal(r.ok, false); assert.match(r.why, /dated \d+ s in the future/);
+  assert.equal(accept(rec(signRequest(base({ ts: new Date(Date.now() + 20 * 1000).toISOString() }), k.privateKeySpec)), ctx).ok, true, 'twenty seconds of skew is not a lockout');
+});

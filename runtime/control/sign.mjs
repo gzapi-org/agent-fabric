@@ -15,8 +15,9 @@
 // What the signature covers is every field but `sig`, keys sorted at
 // every depth, so a relay or a re-serialisation that reorders keys cannot
 // break it and no field — `to`, `ts`, the op's arguments — can be changed
-// without breaking it. Replay inside the request's lifetime is bounded by
-// the daemon's seen-id LRU and the action ttl cap (agentd.mjs).
+// without breaking it. Replay is refused by the daemon's persisted
+// per-operator action ledger (agentd.mjs actionLedger), inside the action
+// ttl cap; an action dated in the future is refused before it can raise it.
 
 import crypto from 'node:crypto';
 

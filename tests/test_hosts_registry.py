@@ -65,7 +65,28 @@ def test_the_committed_key_parses_as_a_daemon_reads_it() -> None:
     out = subprocess.run(["node", "-e", js], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
     reg = json.load(open(os.path.join(ROOT, "runtime", "hosts", "registry.json"), encoding="utf-8"))
     keyed = sorted(f"{h}/{e.get('operator', 'user')}" for h, e in reg["hosts"].items() if e.get("operator_key"))
+    assert keyed, "no host carries an operator_key: this case would compare two empty lists and exercise no parser"
     assert sorted(json.loads(out)) == keyed, (out, keyed)
+
+
+def test_keygen_writes_a_registry_the_schema_admits() -> None:
+    """keygen's own output, not a hand-made fixture: the first real key
+    failed lint because nothing had put the writer's output through the
+    schema. Doppler is faked; the registry keygen writes is then linted."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = os.path.join(tmp, "fabric")
+        shutil.copytree(os.path.join(ROOT, "runtime", "hosts", "schema"), os.path.join(root, "runtime", "hosts", "schema"))
+        reg_path = os.path.join(root, "runtime", "hosts", "registry.json")
+        with open(reg_path, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1, "description": "fixture", "placement": {"user": "h"},
+                       "hosts": {"h": {"platform": "fedora", "ssh": None, "operator": "user", "fabric": "~/projects/agent-fabric"}}}, fh)
+        js = ("import('./runtime/control/ctl.mjs').then(m => { console.log = () => {}; "
+              "process.exit(m.keygen({ force: false }, { registry: process.env.REG, who: { host: 'h', agent: 'user' }, "
+              "exec: (bin, args) => (args[0] === 'configure' ? 'agents_user' : '') })); })")
+        run = subprocess.run(["node", "-e", js], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "REG": reg_path})
+        assert run.returncode == 0, run.stderr[-600:]
+        assert json.load(open(reg_path, encoding="utf-8"))["hosts"]["h"].get("operator_key", "").startswith("ed25519:")
+        assert lint.host_registry_findings(root) == [], lint.host_registry_findings(root)
 
 
 def main() -> int:

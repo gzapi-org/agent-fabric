@@ -19,7 +19,8 @@ overrides it for one account, for a trial. Provisioning installs the same
 pin, so a new account starts where the others are. Background auto-update
 is off on every account through `env.DISABLE_AUTOUPDATER` in each login's
 user settings (`runtime/claude-code/user-settings.py`, written by
-bootstrap), so nothing else moves the version. `autoUpdates: false` in
+bootstrap — on all sixteen since the 2026-09-25 distribution), so nothing
+else moves the version. `autoUpdates: false` in
 `~/.claude.json` is not enough on a native install: the harness ignores it
 when `autoUpdatesProtectedForNative` is true, and the coordinator's account
 updated itself to 2.1.282 that way on 2026-09-24.
@@ -31,15 +32,27 @@ running whether or not a session is open) receives the request and:
 
 1. checks it is **signed with the operator's key** (`docs/control-plane.md`,
    "The fence"); an unsigned or wrongly signed action does nothing;
-2. at the pin already: nothing moves, nothing restarts;
-3. a session running: writes the restart marker
+2. at the version the request names already: nothing moves, nothing
+   restarts. The version is the coordinator's: `fabric-ctl` puts its own
+   checkout's pin (or `--version`) into the signed request, so an account
+   that has not pulled the pin bump is still brought to it;
+3. waits its turn on the host lease `claude-install` (`bin/fabric-lease`,
+   up to 15 minutes) so the accounts of one host install one at a time —
+   thirteen at once failed nine times on 2026-09-25. The turn comes
+   **before** anything is stopped: a session waits in the queue running,
+   and a turn that never comes (or a host without its lease directory) is
+   a failure with nothing stopped. The lease is held until step 5;
+4. a session running: writes the restart marker
    (`<fabric state>/agents/<login>/restart.json`), then sends `claude` a
    **SIGTERM** — the harness's own graceful shutdown: SessionEnd hooks, the
    session saved, its failsafe bounding the wait. Never a SIGKILL: a session
    that does not stop within 90 s is a failure to report, not to force;
-4. installs the version with the harness's own installer (`claude install
-   <v>`) and verifies `claude --version`;
-5. marks the marker done or failed and replies: `from → to`, and whether a
+   then installs the version with the harness's own installer (`claude
+   install <v>`, at most 5 minutes) and verifies `claude --version`. A
+   failure is reported by the installer's last line. `fabric-ctl` waits
+   for replies as long as the slowest account can take (`UPGRADE_BUDGET_S`,
+   `runtime/control/upgrade.mjs`), and any failed account makes it exit 1;
+5. marks the marker done or failed, releases the lease and replies: `from → to`, and whether a
    session is restarting.
 
 The **launcher** is still in the session's terminal (the session is its
@@ -53,6 +66,16 @@ never obeyed.
 
 The requester's own session is never stopped: it is the one waiting for
 the reply. It is installed under it and told to relaunch.
+
+## When the ledger is ahead
+
+An action is refused when it is dated more than a minute in the future,
+so a fast clock on the operator's machine cannot raise an account's
+replay ledger past every honest action that follows. If one ever did get
+through (a clock stepped back afterwards), the account refuses each new
+action as `not newer than the last action accepted`; the ledger is
+`<fabric state>/agents/<login>/actions-seen.json` on that account, and
+removing it resets the floor.
 
 ## Setup, once
 
@@ -93,8 +116,9 @@ only.
   (the owner, 2026-09-24); a piece is an entry in `runtime/control/upgrade.mjs`
   `PIECES`, not a new op.
 - Signed replies: a forged reply can still show a false row.
-- A live run on the fleet: the sequence is tested against fakes; the first
-  real upgrade should read back that the SessionEnd hook ran, the session
-  resumed, and — on the broker path, where the launcher's child is `ori`,
+- A restart read back live: the first real run (2026-09-25,
+  `docs/live-checks/2026-09-25-first-fleet-upgrade.md`) met no running
+  session where it installed. The first that does should read back that
+  the SessionEnd hook ran, the session resumed, and — on the broker path, where the launcher's child is `ori`,
   which starts `claude` — that the launcher reached its GOODBYE after the
   SIGTERM to `claude`.

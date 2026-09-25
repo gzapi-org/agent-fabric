@@ -318,6 +318,8 @@ test('upgrade: the word after it is the piece, --version is digits, the wait is 
   assert.match(t[1], /^db-admin\s+upgraded\s+2\.1\.280 → 2\.1\.281\s+restarting$/);
   assert.match(t[2], /^web-dev-01\s+failed\s+2\.1\.280 → 2\.1\.281\s+none\s+claude install 2\.1\.281: network$/);
   assert.match(t[3], /^user\s+no answer$/);
+  const busy = table('upgrade', rows([expected[0]], [{ kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { status: 'busy', note: 'an upgrade is already running on this account' } } }])).split('\n');
+  assert.match(busy[1], /^db-admin\s+busy\s.*an upgrade is already running on this account$/, 'a busy row shows its note');
   const bare = table('upgrade', rows([expected[0]], [{ kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { from: '2.1.280', to: '2.1.281' } } }])).split('\n');
   assert.match(bare[1], /^db-admin\s+no status\s+2\.1\.280 → 2\.1\.281/, 'a reply with no status says so, never "undefined"');
 });

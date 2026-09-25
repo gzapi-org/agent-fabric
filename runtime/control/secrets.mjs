@@ -13,7 +13,8 @@
 //            token must match it, or the sync is a failure: a move the
 //            account did not take is said by the account, not assumed.
 //   restart  a running session not already on the token — read from its
-//            own environment, not from the record — is stopped (SIGTERM,
+//            own environment, not from the record; a broker session holds
+//            none by design and is left alone — is stopped (SIGTERM,
 //            never harder) and its launcher resumes it on the new sign-in
 //            — the upgrade's restart marker, written already done: nothing
 //            is left to wait for. A restart asked for and not done is a
@@ -55,18 +56,16 @@ export function checkArgs(args) {
 // 3 the config names another login. Only the first two changed anything.
 const APPLIED = new Set([0, 2]);
 
-// The token a running session was started with is in its environment
-// (the launcher exports it before the harness execs), readable by this
-// daemon — same uid. It, not the record, says whether the session is
-// already on the account: a record synced earlier under a session that
-// was never restarted must not read as "already on it" (review of #37).
-export function sessionToken(pid, opts = {}) { return sessionEnv(pid, opts).token; }
-// A broker session (the launcher's default provider) holds no Claude
+// A running session's own environment says what it runs on: the token
+// (the launcher exports it before the harness execs) and the provider the
+// launcher stamped, both readable by this daemon — same uid. The session,
+// not the record, says whether it is already on the account: a record
+// synced earlier under a session that was never restarted must not read
+// as "already on it" (review of #37). A broker session holds no Claude
 // account by design — the launcher removes the token — so it is never
 // "not on" one: restarting it would bring it back just as tokenless, on
-// every run (re-review of #37). The launcher stamps the provider into the
-// session's environment; a session without the stamp is taken as plain
-// claude, the only path a token reaches.
+// every run (re-review of #37). A session without the stamp is taken as
+// plain claude, the only path a token reaches.
 export function sessionEnv(pid, { envOf = p => fs.readFileSync(`/proc/${p}/environ`) } = {}) {
   const out = { token: null, provider: null };
   for (const kv of String(envOf(pid)).split('\0')) {

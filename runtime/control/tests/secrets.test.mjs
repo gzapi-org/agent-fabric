@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { scratch } from '../../../tests/scratch.mjs';
-import { secretsSync, sessionToken } from '../secrets.mjs';
+import { secretsSync, sessionEnv } from '../secrets.mjs';
 import { markerPath, upgrade } from '../upgrade.mjs';
 import { table, rows, ACTION_OK } from '../ctl.mjs';
 
@@ -60,6 +60,8 @@ test('fabric-ctl secrets-sync: one row per account with the sign-in and the sess
   assert.deepEqual(ACTION_OK['secrets-sync'], ['synced']);
   const bare = table('secrets-sync', rows([expected[0]], [{ kind: 'reply', from: 'h/flutter-dev-01', op: 'secrets-sync', data: { 'secrets-sync': { claude_sign_in: { via: 'setup-token', token_sha256_12: '183a68e97389' } } } }])).split('\n');
   assert.match(bare[1], /^flutter-dev-01\s+no status\s+setup-token 183a68e97389/, 'never "undefined"');
+  const busy = table('secrets-sync', rows([expected[0]], [{ kind: 'reply', from: 'h/flutter-dev-01', op: 'secrets-sync', data: { 'secrets-sync': { status: 'busy', note: 'a secrets-sync is already running on this account' } } }])).split('\n');
+  assert.match(busy[1], /^flutter-dev-01\s+busy\s.*a secrets-sync is already running on this account$/, 'a busy row shows its note');
 });
 
 test('expect: the synced token must be the template\'s; another one is a failure, and nothing is stopped', async () => {
@@ -114,8 +116,8 @@ test('the session, not the record, says whether it is on the token: a record syn
   const r2 = await secretsSync({ id: 'r3', from: 'h/user', args: { restart: true } }, { home: g.home, root: g.root, exec: g.exec, dir: g.dir, sessions: [67], me: 'h/db-admin',
     envOf: () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }, kill: () => { up = false; }, alive: () => false, sleep: async () => {} });
   assert.equal(r2.session, 'restarting', 'an environment that cannot be read is not "already on it"');
-  assert.equal(sessionToken(1, { envOf: envWith(TPL) }), TPL);
-  assert.equal(sessionToken(1, { envOf: envWith(null) }), null);
+  assert.deepEqual(sessionEnv(1, { envOf: envWith(TPL) }), { token: TPL, provider: 'anthropic' });
+  assert.deepEqual(sessionEnv(1, { envOf: envWith(null, 'openrouter') }), { token: null, provider: 'openrouter' });
 });
 
 test('restart refuses: no token to move to, a pgrep that failed, an upgrade in flight; a marker another action wrote is never removed', async () => {

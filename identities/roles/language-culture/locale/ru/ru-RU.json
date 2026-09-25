@@ -31,7 +31,7 @@
   "held.stale-no-pid": "{name}: не называет pid",
   "held.stale-gone": "{name}: сессии {pid} больше нет",
   "held.stale-reused": "{name}: pid {pid} занят заново",
-  "config.not-configured": "интеграция GZCoord не настроена для {what}. Где задать: {where} — relay_url и channel; либо CLAUDE_BRIDGE_URL и GZCOORD_CHANNEL в окружении",
+  "config.not-configured": "интеграция GZCoord не настроена для {what}; где задать: {where} — relay_url и channel; либо CLAUDE_BRIDGE_URL и GZCOORD_CHANNEL в окружении",
   "config.for-project": "проекта {project}",
   "config.for-working-copy": "этой рабочей копии",
   "config.where-registered": "зарегистрированный проект (эта рабочая копия ни к одному не относится)",

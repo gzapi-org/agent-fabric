@@ -26,6 +26,8 @@ import { fileURLToPath } from 'node:url';
 import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
+import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
+import { accountAddresses } from '../../../runtime/control/agentd.mjs';
 
 // The fallback marker for this harness session (CLAUDE_PID), if any, from
 // the login's own directory; a marker naming a dead pid is not one.
@@ -55,6 +57,7 @@ export async function main(argv = process.argv.slice(2)) {
   const who = whoami();
   const t = printer(dictionary(who));
   const dry = argv.includes('--dry-run');
+  const force = argv.includes('--force');
   const file = argv.find(a => !a.startsWith('--'));
   if (!file) { console.error(t('send.usage')); return 1; }
   let raw;
@@ -118,9 +121,31 @@ export async function main(argv = process.argv.slice(2)) {
     at: fb.at || t('send.fallback-unknown-time'),
     topic: fb.topic || t('send.fallback-unknown-topic'),
     topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
-  if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
-
   let tok = token(root, cfg);
+  // Is anyone there? A message to a login with no session waits in the
+  // relay until one starts, and a TO-ROLE with no running holder reaches
+  // nobody now. The control plane answers from the process table
+  // (runtime/control/presence.mjs); the sender decides — --force sends
+  // anyway (the owner, 2026-09-25). A broadcast is not checked.
+  if (tok) {
+    let pres;
+    try { pres = await checkAddressees(msg.metadata ?? {}, { from: me.address, token: tok, placed: [...accountAddresses()] }); }
+    catch (e) { pres = { checked: true, problems: [{ kind: 'unavailable', detail: String(e?.message ?? e).split('\n')[0].slice(0, 160) }] }; }
+    for (const p of pres.problems ?? []) {
+      if (p.kind === 'offline') console.error(t('send.presence-offline', { address: p.address }));
+      else if (p.kind === 'silent') console.error(t('send.presence-silent', { address: p.address, seconds: PRESENCE_WAIT_MS / 1000 }));
+      else if (p.kind === 'not-placed') console.error(t('send.presence-not-placed', { address: p.address }));
+      else if (p.kind === 'no-holder') {
+        console.error(p.holders.length ? t('send.presence-no-holder', { role: p.role, holders: p.holders.join(', ') }) : t('send.presence-no-account', { role: p.role }));
+        if (p.silent.length) console.error(t('send.presence-some-silent', { addresses: p.silent.join(', ') }));
+      } else console.error(t('send.presence-unavailable', { detail: p.detail }));
+    }
+    if (pres.problems?.length) {
+      if (!force) { console.error(t('send.presence-not-sent')); return 4; }
+      console.error(t('send.presence-forced'));
+    }
+  }
+  if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
   if (!tok) { console.error(t('send.no-token')); return 3; }
   let res;
   const post = authToken => api(authToken, '/api/send', { method: 'POST', body: JSON.stringify({ channel, sender: me.address, content: text }), relayUrl });

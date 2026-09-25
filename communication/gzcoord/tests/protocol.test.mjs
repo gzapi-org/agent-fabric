@@ -952,6 +952,67 @@ test('send posts a valid message as this login, to the configured channel', asyn
   });
 });
 
+// Presence before sending (runtime/control/presence.mjs): a relay stub that
+// answers `presence` requests on the control channel from a fixture table,
+// and a registry that places the addressees.
+function withPresenceRelay(answers, fn) {
+  const posts = []; const asked = [];
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'GET') {
+      const u = new URL(req.url, 'http://x');
+      const messages = u.searchParams.get('channel') === 'fabric:control' ? asked.flatMap(r => (r.to === '*' ? Object.keys(answers) : r.to).filter(a => answers[a]).map((a, i) =>
+        ({ id: `${r.id}-${i}`, content: JSON.stringify({ kind: 'reply', in_reply_to: r.id, from: a, data: { presence: answers[a] } }) }))) : [];
+      return res.end(JSON.stringify({ messages }));
+    }
+    let body = ''; req.on('data', c => body += c); req.on('end', () => {
+      const b = JSON.parse(body || '{}');
+      if (b.channel === 'fabric:control') { asked.push(JSON.parse(b.content)); return res.end(JSON.stringify({ id: 'ctl', seq: 1 })); }
+      posts.push({ url: req.url, body: b }); res.end(JSON.stringify({ seq: 42, id: 'relay-id', deduplicated: false }));
+    });
+  });
+  const reg = path.join(scratch('presence-reg-'), 'hosts.json');
+  fs.writeFileSync(reg, JSON.stringify({ version: 1, hosts: { h: { operator: 'user' } }, placement: { alpha: 'h', beta: 'h', gamma: 'h' } }));
+  return new Promise((resolve, reject) => server.listen(0, '127.0.0.1', async () => {
+    try { resolve(await fn(`http://127.0.0.1:${server.address().port}`, posts, asked, { AGENT_FABRIC_HOSTS_REGISTRY: reg, GZCOORD_PRESENCE_WAIT_MS: '1200' })); }
+    catch (e) { reject(e); } finally { server.closeAllConnections(); server.close(); }
+  }));
+}
+const addressed = field => valid.replace('BROADCAST: true', field).replace('[GZCOORD/1] INFO', '[GZCOORD/1] OBSERVATION');
+const up = role => ({ status: 'ok', online: true, sessions: 1, since: '2026-09-25T09:00:00.000Z', role, project: 'gzapp' });
+const down = role => ({ status: 'ok', online: false, sessions: 0, since: null, role, project: 'gzapp' });
+
+test('send checks presence first: a running addressee is sent to; one with no session, a silent agent or an unplaced address is refused, named, unless --force', async () => {
+  await withPresenceRelay({ 'h/alpha': up('web-dev'), 'h/beta': down('web-dev') }, async (relay, posts, asked, env) => {
+    const ok = await sendWith(relay, addressed('TO: h/alpha'), [], env);
+    assert.equal(ok.code, 0, ok.err); assert.equal(posts.length, 1, 'sent');
+    assert.deepEqual([asked[0].op, asked[0].to, asked[0].from], ['presence', ['h/alpha'], MY_ADDRESS]);
+    const offline = await sendWith(relay, addressed('TO: h/beta'), [], env);
+    assert.equal(offline.code, 4, offline.err);
+    assert.match(offline.err, /h\/beta has no session running[\s\S]*not sent — --force sends it anyway/);
+    assert.equal(posts.length, 1, 'nothing posted for an addressee with no session');
+    const silent = await sendWith(relay, addressed('TO: h/gamma'), [], env);
+    assert.equal(silent.code, 4); assert.match(silent.err, /h\/gamma's control agent did not answer within 1\.2 s/);
+    const stranger = await sendWith(relay, addressed('TO: other/nobody'), [], env);
+    assert.equal(stranger.code, 4); assert.match(stranger.err, /other\/nobody is not an account any host places/);
+    const forced = await sendWith(relay, addressed('TO: h/beta'), ['--force'], env);
+    assert.equal(forced.code, 0, forced.err); assert.match(forced.err, /sending anyway \(--force\)/);
+    assert.equal(posts.length, 2, '--force sends it');
+  });
+});
+
+test('send to a role: reached when any holder runs; a broadcast asks nothing', async () => {
+  await withPresenceRelay({ 'h/alpha': down('web-dev'), 'h/beta': up('web-dev'), 'h/gamma': up('db-admin') }, async (relay, posts, asked, env) => {
+    const r = await sendWith(relay, addressed('TO-ROLE: web-dev'), [], env);
+    assert.equal(r.code, 0, r.err); assert.equal(asked[0].to, '*');
+    const none = await sendWith(relay, addressed('TO-ROLE: flutter-dev'), [], env);
+    assert.equal(none.code, 4); assert.match(none.err, /no account holds flutter-dev/);
+    const n = asked.length;
+    const b = await sendWith(relay, valid, [], env);
+    assert.equal(b.code, 0, b.err); assert.equal(asked.length, n, 'a broadcast is not checked');
+  });
+});
+
 // A project with no integration, and no environment naming one, is NOT
 // configured: the defaults were gzapp's until 2026-09-16, so any other
 // project's working copy joined gzapp's channel with gzapp's token file.

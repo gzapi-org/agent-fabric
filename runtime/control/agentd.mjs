@@ -22,7 +22,10 @@
 // A `since_id_not_found` (the relay's history was cleared) re-primes.
 //
 // THE FENCE, v1. A request is answered only when its `from` is a host
-// operator's address as runtime/hosts/registry.json places it — read
+// operator's address as runtime/hosts/registry.json places it — except a
+// PUBLIC op (ops.mjs PUBLIC_OPS: `presence`), answered for any placed
+// <host>/<login>, since every sender needs it and it names nothing a relay
+// reader could not infer — read
 // again for every record, so a pull that changes the registry counts at
 // once, and the identity section asks whoami() per request, so a rebind
 // shows without a restart (review, 2026-09-17) — (a claim,

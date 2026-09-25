@@ -424,3 +424,17 @@ test('presence: one row per account — running since when, as what; none; a fai
   assert.match(t[3], /^edge-hosting\s+unknown\s+pgrep: spawn pgrep ENOENT$/);
   assert.match(t[4], /^user\s+no answer$/);
 });
+
+test('a non-operator may ask presence, and nothing else: presence is posted, status is refused before anything is sent', async () => {
+  const r = relay(); await r.listen();
+  try {
+    const reg = registryFile('someone-else');   // this login is not the host's operator
+    const asked = await run(r.url(), reg, ['db-admin', 'presence', '--timeout', '1']);
+    const reqs = r.rows.map(x => JSON.parse(x.content)).filter(x => x.kind === 'request');
+    assert.deepEqual(reqs.map(x => [x.op, x.to]), [['presence', [`${H}/db-admin`]]], asked.err);
+    const n = r.rows.length;
+    const refused = await run(r.url(), reg, ['db-admin', 'status', '--timeout', '1']);
+    assert.equal(refused.status, 2); assert.match(refused.err, /not a host operator/);
+    assert.equal(r.rows.length, n, 'nothing posted for an op only an operator may ask');
+  } finally { r.close(); }
+});

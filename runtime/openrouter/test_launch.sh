@@ -563,6 +563,15 @@ grep -q "the login's synced record has none" <<<"$out" && ok "no template in the
 printf "export CLAUDE_CODE_OAUTH_TOKEN='a-login-access-token'\n" > "$SEC"
 rc=0; out="$(run --provider anthropic --version 2>&1)" || rc=$?
 [[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ok "a token not of a setup-token's shape is refused too" || bad "a malformed token launched" "rc=$rc"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"
+printf '{"hasCompletedOnboarding": false, "theme": "dark"}\n' > "$HOME/.claude.json"
+out="$(run --provider anthropic --version 2>&1)"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get('hasCompletedOnboarding') is True and d.get('theme') == 'dark' else 1)" "$HOME/.claude.json" && grep -q "marked the harness's onboarding done" <<<"$out" \
+  && ok "a template login's unfinished onboarding is marked done before the session — the wizard would ask for a /login" || bad "onboarding left unfinished" "$(cat "$HOME/.claude.json")"
+out="$(run --provider anthropic --version 2>&1)"
+! grep -q "marked the harness's onboarding done" <<<"$out" && ok "…once: an onboarded login's file is not rewritten" || bad "rewrote an onboarded file"
+rm -f "$HOME/.claude.json"
+: > "$SEC"
 rc=0; out="$(run --provider anthropic --print 2>&1)" || rc=$?
 [[ $rc -eq 0 ]] && ok "--print needs no sign-in: a prompt read-back still works" || bad "--print refused without a sign-in" "rc=$rc $(tail -2 <<<"$out")"
 printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"

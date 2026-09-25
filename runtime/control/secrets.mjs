@@ -12,9 +12,12 @@
 //   expect   the fingerprint the coordinator's template holds. The synced
 //            token must match it, or the sync is a failure: a move the
 //            account did not take is said by the account, not assumed.
-//   restart  a running session is stopped (SIGTERM, never harder) and its
-//            launcher resumes it on the new sign-in — the upgrade's restart
-//            marker, written already done: nothing is left to wait for. The
+//   restart  a running session not already on the token — read from its
+//            own environment, not from the record — is stopped (SIGTERM,
+//            never harder) and its launcher resumes it on the new sign-in
+//            — the upgrade's restart marker, written already done: nothing
+//            is left to wait for. A restart asked for and not done is a
+//            failed reply. The
 //            requester's own session is never stopped (it is waiting for
 //            the reply). Without it a running session keeps the sign-in it
 //            started with, and the reply says it needs a relaunch.
@@ -30,7 +33,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { syncedVar } from '../../communication/gzcoord/scripts/inbox.mjs';
 import fs from 'node:fs';
-import { sessionPids, stateDir, writeMarker, markerPath, STOP_WAIT_MS } from './upgrade.mjs';
+import { sessionPids, stateDir, writeMarker, markerPath, upgradeRunning, STOP_WAIT_MS } from './upgrade.mjs';
 
 const execFileP = promisify(execFile);
 export const SYNC_TIMEOUT_MS = 120000;
@@ -52,19 +55,36 @@ export function checkArgs(args) {
 // 3 the config names another login. Only the first two changed anything.
 const APPLIED = new Set([0, 2]);
 
-export async function secretsSync(request, {
+// The token a running session was started with is in its environment
+// (the launcher exports it before the harness execs), readable by this
+// daemon — same uid. It, not the record, says whether the session is
+// already on the account: a record synced earlier under a session that
+// was never restarted must not read as "already on it" (review of #37).
+export function sessionToken(pid, { envOf = p => fs.readFileSync(`/proc/${p}/environ`) } = {}) {
+  for (const kv of String(envOf(pid)).split('\0'))
+    if (kv.startsWith('CLAUDE_CODE_OAUTH_TOKEN=')) return kv.slice('CLAUDE_CODE_OAUTH_TOKEN='.length) || null;
+  return null;
+}
+
+let syncing = null;   // one secrets-sync at a time per daemon
+export function secretsSync(request, opts = {}) {
+  if (syncing) return Promise.resolve({ status: 'busy', note: 'a secrets-sync is already running on this account' });
+  syncing = secretsSyncOnce(request, opts).finally(() => { syncing = null; });
+  return syncing;
+}
+
+export async function secretsSyncOnce(request, {
   home = os.homedir(), root = process.env.AGENT_FABRIC_ROOT ?? path.join(home, 'projects', 'agent-fabric'),
   exec = execFileP, sessions = null, me = null, dir = stateDir(home), now = () => new Date(),
   kill = process.kill.bind(process), alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } },
-  sleep = ms => new Promise(r => setTimeout(r, ms)), stopWaitMs = STOP_WAIT_MS,
+  sleep = ms => new Promise(r => setTimeout(r, ms)), stopWaitMs = STOP_WAIT_MS, envOf = undefined, upgrading = upgradeRunning, pgrep = null,
 } = {}) {
   const bad = checkArgs(request.args);
   if (bad) return { status: 'refused', reason: bad };
   const { expect = null, restart = false } = request.args ?? {};
-  const before = syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home);
   let code = 0, out = '';
   try {
-    const r = await exec(path.join(root, 'bin', 'fabric-secrets'), ['sync', '--json'], { encoding: 'utf8', timeout: SYNC_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+    const r = await exec(path.join(root, 'bin', 'fabric-secrets'), ['sync', '--json'], { encoding: 'utf8', timeout: SYNC_TIMEOUT_MS });
     out = typeof r === 'string' ? r : r.stdout;
   } catch (e) {
     code = typeof e?.code === 'number' ? e.code : -1;
@@ -77,25 +97,40 @@ export async function secretsSync(request, {
   const tok = syncedVar('CLAUDE_CODE_OAUTH_TOKEN', home);
   const sign = tok ? { via: 'setup-token', token_sha256_12: sha12(tok) } : { via: 'none: its next session is refused' };
   const missing = Array.isArray(report.missing) && report.missing.length ? { missing: report.missing } : {};
+  const fail = reason => ({ status: 'failed', claude_sign_in: sign, ...missing, reason });
   if (expect && sign.token_sha256_12 !== expect)
-    return { status: 'failed', claude_sign_in: sign, ...missing, reason: `the synced record holds ${sign.token_sha256_12 ? `setup-token ${sign.token_sha256_12}` : 'no token'}, not the expected ${expect}; nothing restarted` };
-  let running = [];
-  try { running = sessions ?? sessionPids({ exec: (c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) }); }
-  catch { running = null; }
+    return fail(`the synced record holds ${sign.token_sha256_12 ? `setup-token ${sign.token_sha256_12}` : 'no token'}, not the expected ${expect}; nothing restarted`);
+  // No token is nothing to move to: the launcher would refuse the resume.
+  if (restart && !tok) return fail('the synced record holds no token; nothing stopped');
+  let running;
+  try { running = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) }); }
+  catch (e) {
+    const why = `could not tell whether a session is running (pgrep: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)})`;
+    return restart ? fail(`${why}; nothing restarted`) : { status: 'synced', claude_sign_in: sign, ...missing, session: 'unknown', reason: why };
+  }
   const done = session => ({ status: 'synced', claude_sign_in: sign, ...missing, session });
-  if (running === null) return done('unknown');
   if (!running.length) return done('none');
+  const onIt = pid => { try { const t = sessionToken(pid, envOf ? { envOf } : {}); return !!t && !!tok && sha12(t) === sha12(tok); } catch { return false; } };
+  const stale = running.filter(pid => !onIt(pid));
+  if (!stale.length) return done('running, already on it');
   const own = me && request.from === me;
-  const changed = !before || sha12(before) !== sign.token_sha256_12;
-  if (!restart || own || !changed) return done(own && changed ? 'yours: relaunch to use it' : changed ? 'running: relaunch to use it' : 'running, already on it');
+  if (own) return done('yours: relaunch to use it');
+  if (!restart) return done('running: relaunch to use it');
+  if (upgrading()) return fail('an upgrade is running on this account (it owns the restart marker); synced, nothing stopped — run it again after');
   // The launcher reads the marker after the session's GOODBYE: written
   // first, and done already, so it resumes at once on what was synced.
-  writeMarker(dir, { request_id: request.id, requested_at: now().toISOString(), piece: 'the Claude account', from: before ? `setup-token ${sha12(before)}` : 'no token', to: `setup-token ${sign.token_sha256_12}`, installed: `setup-token ${sign.token_sha256_12}`, pids: running, status: 'done' });
-  for (const pid of running) { try { kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+  let before = null;
+  try { before = sessionToken(stale[0], envOf ? { envOf } : {}); } catch { /* unreadable: said as no token */ }
+  writeMarker(dir, { request_id: request.id, requested_at: now().toISOString(), piece: 'the Claude account', from: before ? `setup-token ${sha12(before)}` : 'no token', to: `setup-token ${sign.token_sha256_12}`, installed: `setup-token ${sign.token_sha256_12}`, pids: stale, status: 'done' });
+  for (const pid of stale) { try { kill(pid, 'SIGTERM'); } catch { /* gone */ } }
   const until = Date.now() + stopWaitMs;
-  while (running.some(alive) && Date.now() < until) await sleep(500);
-  // Not stopped: the marker goes, or the session would be resumed the
-  // moment it is ended on purpose, long after this action.
-  if (running.some(alive)) { fs.rmSync(markerPath(dir), { force: true }); return done(`did not stop within ${Math.round(stopWaitMs / 1000)} s (pid ${running.filter(alive).join(', ')}); nothing forced — relaunch to use it`); }
+  while (stale.some(alive) && Date.now() < until) await sleep(500);
+  if (stale.some(alive)) {
+    // Not stopped: our marker goes (only ours — an upgrade may have
+    // written its own since), or the session would be resumed the moment
+    // it is ended on purpose, long after this action.
+    try { if (JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).request_id === request.id) fs.rmSync(markerPath(dir), { force: true }); } catch { /* gone */ }
+    return fail(`synced, but the session (pid ${stale.filter(alive).join(', ')}) did not stop within ${Math.round(stopWaitMs / 1000)} s; nothing forced — run it again, or relaunch it`);
+  }
   return done('restarting');
 }

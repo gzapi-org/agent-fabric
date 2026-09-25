@@ -145,6 +145,8 @@ async function version(bin, exec) {
 }
 
 let running = null;   // one upgrade at a time per daemon
+// secrets-sync writes the same restart marker; it asks before restarting.
+export function upgradeRunning() { return running !== null; }
 export function upgrade(request, opts = {}) {
   if (running) return Promise.resolve({ status: 'busy', note: 'an upgrade is already running on this account' });
   running = upgradeOnce(request, opts).finally(() => { running = null; });

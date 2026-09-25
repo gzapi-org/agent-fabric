@@ -8,11 +8,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { scratch } from '../../../tests/scratch.mjs';
-import { secretsSync } from '../secrets.mjs';
+import { secretsSync, sessionToken } from '../secrets.mjs';
 import { markerPath } from '../upgrade.mjs';
 import { table, rows, ACTION_OK } from '../ctl.mjs';
 
 const TPL = 'sk-ant-oat01-TEMPLATE-FIXTURE';
+const envWith = tok => () => `PATH=/usr/bin\0${tok ? `CLAUDE_CODE_OAUTH_TOKEN=${tok}\0` : ''}HOME=/x\0`;
 const fp = v => crypto.createHash('sha256').update(v).digest('hex').slice(0, 12);
 function fixture({ writes = TPL, code = 0, report = {}, before = null } = {}) {
   const home = scratch('secrets-home-'); const root = scratch('secrets-root-');
@@ -38,7 +39,7 @@ test('a template in the login\'s config: synced, named by fingerprint, the value
 
 test('no template: its own sign-in; names missing in Doppler are applied around and said; a running session is told to relaunch', async () => {
   const f = fixture({ writes: null, code: 2, report: { missing: ['SSH_PRIVATE_KEY'] } });
-  const r = await secretsSync({ id: 'x' }, { home: f.home, root: f.root, exec: f.exec, sessions: [4242] });
+  const r = await secretsSync({ id: 'x' }, { home: f.home, root: f.root, exec: f.exec, sessions: [4242], envOf: envWith(null) });
   assert.deepEqual(r, { status: 'synced', claude_sign_in: { via: 'none: its next session is refused' }, missing: ['SSH_PRIVATE_KEY'], session: 'running: relaunch to use it' });
 });
 
@@ -57,6 +58,8 @@ test('fabric-ctl secrets-sync: one row per account with the sign-in and the sess
   assert.match(t[1], /^flutter-dev-01\s+synced\s+setup-token 183a68e97389\s+running: relaunch to use it$/);
   assert.match(t[2], /^web-dev-01\s+no answer$/);
   assert.deepEqual(ACTION_OK['secrets-sync'], ['synced']);
+  const bare = table('secrets-sync', rows([expected[0]], [{ kind: 'reply', from: 'h/flutter-dev-01', op: 'secrets-sync', data: { 'secrets-sync': { claude_sign_in: { via: 'setup-token', token_sha256_12: '183a68e97389' } } } }])).split('\n');
+  assert.match(bare[1], /^flutter-dev-01\s+no status\s+setup-token 183a68e97389/, 'never "undefined"');
 });
 
 test('expect: the synced token must be the template\'s; another one is a failure, and nothing is stopped', async () => {
@@ -78,7 +81,7 @@ test('restart: the marker first, already done, then SIGTERM; the launcher resume
   const f = fixture({ before: OLD });
   let up = true; const order = [];
   const kill = (pid, sig) => { const m = JSON.parse(fs.readFileSync(markerPath(f.dir))); order.push(`${sig} ${pid} marker=${m.status}`); up = false; };
-  const r = await secretsSync({ id: 'req-9', from: 'h/user', args: { expect: fp(TPL), restart: true } }, { home: f.home, root: f.root, exec: f.exec, dir: f.dir, sessions: [55], me: 'h/web-dev-01', kill, alive: () => up, sleep: async () => {}, now: () => new Date('2026-09-25T12:00:00Z') });
+  const r = await secretsSync({ id: 'req-9', from: 'h/user', args: { expect: fp(TPL), restart: true } }, { home: f.home, root: f.root, exec: f.exec, dir: f.dir, sessions: [55], me: 'h/web-dev-01', envOf: envWith(OLD), kill, alive: () => up, sleep: async () => {}, now: () => new Date('2026-09-25T12:00:00Z') });
   assert.deepEqual([r.status, r.session], ['synced', 'restarting']);
   assert.deepEqual(order, ['SIGTERM 55 marker=done'], 'the marker is written, done, before the session is signalled');
   const m = JSON.parse(fs.readFileSync(markerPath(f.dir)));
@@ -88,15 +91,53 @@ test('restart: the marker first, already done, then SIGTERM; the launcher resume
 
 test('restart spares the requester\'s own session, a session already on the token, and forces none that will not stop', async () => {
   const own = fixture({ before: 'sk-ant-oat01-OLD-ACCOUNT' });
-  const r1 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: own.home, root: own.root, exec: own.exec, dir: own.dir, sessions: [1], me: 'h/user', kill: () => assert.fail('own session stopped') });
+  const r1 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: own.home, root: own.root, exec: own.exec, dir: own.dir, sessions: [1], me: 'h/user', envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), kill: () => assert.fail('own session stopped') });
   assert.equal(r1.session, 'yours: relaunch to use it');
   const same = fixture({ before: TPL });
-  const r2 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: same.home, root: same.root, exec: same.exec, dir: same.dir, sessions: [2], me: 'h/db-admin', kill: () => assert.fail('a session already on it was stopped') });
+  const r2 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: same.home, root: same.root, exec: same.exec, dir: same.dir, sessions: [2], me: 'h/db-admin', envOf: envWith(TPL), kill: () => assert.fail('a session already on it was stopped') });
   assert.equal(r2.session, 'running, already on it');
   const stuck = fixture({ before: 'sk-ant-oat01-OLD-ACCOUNT' });
   const sigs = [];
-  const r3 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: stuck.home, root: stuck.root, exec: stuck.exec, dir: stuck.dir, sessions: [3], me: 'h/db-admin', kill: (p, s) => sigs.push(s), alive: () => true, sleep: async () => {}, stopWaitMs: 0 });
-  assert.equal(r3.status, 'synced'); assert.match(r3.session, /did not stop .*nothing forced/);
+  const r3 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: stuck.home, root: stuck.root, exec: stuck.exec, dir: stuck.dir, sessions: [3], me: 'h/db-admin', envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), kill: (p, s) => sigs.push(s), alive: () => true, sleep: async () => {}, stopWaitMs: 0 });
+  assert.equal(r3.status, 'failed', 'a restart asked for and not done is not a success'); assert.match(r3.reason, /synced, but the session .*did not stop .*nothing forced — run it again/);
   assert.deepEqual(sigs, ['SIGTERM']);
   assert.ok(!fs.existsSync(markerPath(stuck.dir)), 'no marker left to resume the session whenever it is ended later');
+});
+
+test('the session, not the record, says whether it is on the token: a record synced earlier under an unrestarted session still restarts it', async () => {
+  const f = fixture({ before: TPL });   // the record already moved (a --no-restart run, or a session that did not stop)
+  let up = true; const sigs = [];
+  const r = await secretsSync({ id: 'r2', from: 'h/user', args: { expect: fp(TPL), restart: true } }, { home: f.home, root: f.root, exec: f.exec, dir: f.dir, sessions: [66], me: 'h/db-admin',
+    envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), kill: (p, sg) => { sigs.push(sg); up = false; }, alive: () => up, sleep: async () => {} });
+  assert.deepEqual([r.status, r.session, sigs], ['synced', 'restarting', ['SIGTERM']]);
+  const g = fixture();
+  const r2 = await secretsSync({ id: 'r3', from: 'h/user', args: { restart: true } }, { home: g.home, root: g.root, exec: g.exec, dir: g.dir, sessions: [67], me: 'h/db-admin',
+    envOf: () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }, kill: () => { up = false; }, alive: () => false, sleep: async () => {} });
+  assert.equal(r2.session, 'restarting', 'an environment that cannot be read is not "already on it"');
+  assert.equal(sessionToken(1, { envOf: envWith(TPL) }), TPL);
+  assert.equal(sessionToken(1, { envOf: envWith(null) }), null);
+});
+
+test('restart refuses: no token to move to, a pgrep that failed, an upgrade in flight; a marker another action wrote is never removed', async () => {
+  const none = fixture({ writes: null });
+  const r1 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: none.home, root: none.root, exec: none.exec, dir: none.dir, sessions: [5], me: 'h/db-admin', envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), kill: () => assert.fail('stopped a session that could not come back') });
+  assert.deepEqual([r1.status, r1.reason], ['failed', 'the synced record holds no token; nothing stopped']);
+  assert.ok(!fs.existsSync(markerPath(none.dir)));
+  const pg = fixture();
+  const eacces = () => { const e = new Error('spawn pgrep EACCES'); e.code = 'EACCES'; throw e; };
+  const r2 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: pg.home, root: pg.root, exec: pg.exec, dir: pg.dir, me: 'h/db-admin', pgrep: eacces, kill: () => assert.fail('no signal') });
+  assert.equal(r2.status, 'failed'); assert.match(r2.reason, /could not tell whether a session is running \(pgrep: spawn pgrep EACCES\); nothing restarted/);
+  const quiet = fixture();
+  const r2b = await secretsSync({ id: 'x', from: 'h/user' }, { home: quiet.home, root: quiet.root, exec: quiet.exec, dir: quiet.dir, me: 'h/db-admin', pgrep: eacces });
+  assert.deepEqual([r2b.status, r2b.session], ['synced', 'unknown'], 'without a restart asked, the sync stands and the unknown is said'); assert.match(r2b.reason, /EACCES/);
+  const up = fixture();
+  const r3 = await secretsSync({ id: 'x', from: 'h/user', args: { restart: true } }, { home: up.home, root: up.root, exec: up.exec, dir: up.dir, sessions: [8], me: 'h/db-admin', envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), upgrading: () => true, kill: () => assert.fail('stopped under an upgrade') });
+  assert.equal(r3.status, 'failed'); assert.match(r3.reason, /an upgrade is running/);
+  const other = fixture();
+  fs.mkdirSync(other.dir, { recursive: true });
+  const sigs = [];
+  const r4 = await secretsSync({ id: 'mine', from: 'h/user', args: { restart: true } }, { home: other.home, root: other.root, exec: other.exec, dir: other.dir, sessions: [9], me: 'h/db-admin', envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'),
+    kill: () => { sigs.push(1); fs.writeFileSync(markerPath(other.dir), JSON.stringify({ request_id: 'an-upgrade', status: 'pending' })); }, alive: () => true, sleep: async () => {}, stopWaitMs: 0 });
+  assert.equal(r4.status, 'failed');
+  assert.equal(JSON.parse(fs.readFileSync(markerPath(other.dir))).request_id, 'an-upgrade', 'the upgrade\'s marker survives');
 });

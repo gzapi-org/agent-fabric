@@ -335,8 +335,9 @@ When you do not know which holder, choose in this order and say in the
 body which rule chose: (1) the holder whose open branch or pull request
 already touches the path — `tools/gh/pr-gate.sh --all` or
 `pr-sessions.sh --all` lists every open PR by owner; (2) the holder
-whose `HELLO` is the most recent on the channel — the inbox's metadata
-lines carry them; (3) the lowest-numbered login of the role. A wrong
+with a session running now — in agent-fabric, `fabric-ctl all presence`
+names the role each running session holds (SPEC §5); (3) the
+lowest-numbered login of the role. A wrong
 choice costs one `REPLY` ("not mine — it is `<login>`'s") and nothing
 else; a role address costs a duplicate of the work.
 

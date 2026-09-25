@@ -86,7 +86,7 @@ Derivation runs one way only, and does not make the address a path or an account
 
 ## 4. Role
 
-Each instance self-declares a human-readable `ROLE` in `HELLO`.
+Each instance declares its `ROLE` on every message it sends (§7.1).
 
 Examples:
 
@@ -103,31 +103,15 @@ A deployment MAY publish a role catalogue and require every `ROLE` and `TO-ROLE`
 
 A role expresses organizational function, not source-code ownership or repository permission.
 
-A role is a classification, never an identity. The role and the instance holding it are distinct: several instances MAY hold and announce the same role concurrently, and an instance MAY change its role over time without changing its address. The address `host/instance` is the only peer identity; `ROLE` MUST NOT be used as a unique peer identifier, and role routing (§13) is one-to-many by nature. An instance whose role changes SHOULD emit a fresh `HELLO` so peer caches update.
+A role is a classification, never an identity. The role and the instance holding it are distinct: several instances MAY hold and announce the same role concurrently, and an instance MAY change its role over time without changing its address. The address `host/instance` is the only peer identity; `ROLE` MUST NOT be used as a unique peer identifier, and role routing (§13) is one-to-many by nature. Who holds a role now is presence, and presence is the deployment's to answer (§5).
 
-## 5. Discovery
+## 5. Discovery and presence
 
-An instance entering or re-entering a channel MUST emit `HELLO`.
+**`HELLO` and `GOODBYE` are deprecated.** An instance SHOULD NOT send either. Whether an instance is running — as what role, since when — is presence, and presence is the deployment's to answer from a source authoritative about it, never from announcements an instance makes about itself. An announcement is a claim: an instance that crashes, or never finishes starting, leaves a `HELLO` with no `GOODBYE` and reads as present. agent-fabric answers presence on its control plane, from each account's process table (`docs/presence.md`).
 
-A peer MAY retain an ephemeral directory containing:
+Both stay valid GZCOORD/1 messages. A conforming parser still accepts them — an older sender, or a session not yet updated, may still send them — and their grammar is unchanged (§7.1). A receiver MUST NOT rely on either arriving, and MAY acknowledge either without delivering it.
 
-- address;
-- role;
-- project;
-- specialties;
-- capabilities;
-- transport-native sender identity observed by the adapter;
-- last observed announcement time.
-
-This directory is a cache, not authoritative state.
-
-HELLO is not the only proof of availability. Any message from an address — an `OBSERVATION`, a `REPLY`, anything — establishes that the address is live: a peer MAY enter it in the directory from whatever that message carries (the address, and `ROLE` / `PROJECT`, which are required on every message), and interact with it at once, without waiting for a `HELLO`. What a `HELLO` adds is the full self-description — `SPECIALTIES`, `CAPABILITIES`, `ABOUT` — not the right to be answered; a peer that later sees a `HELLO` from an address it knows updates the directory from it, and treats it as the announcement for §4's role-change rule.
-
-The MUST above is the sender's obligation to describe itself on entering, and it is unchanged. A sender that skips it loses its entry in peers' fuller descriptions and the re-announce greeting this section gives unknown `HELLO`s — not the ability to be heard.
-
-When a peer sees a previously unknown `HELLO`, it SHOULD re-announce its own `HELLO` once within a transport-defined jitter window. It MUST avoid repeatedly answering the same announcement and creating a HELLO storm.
-
-An instance MAY send `GOODBYE` on graceful shutdown. Peers MUST NOT rely on receiving it.
+Any message from an address — an `OBSERVATION`, a `REPLY`, anything — establishes that the address is live at the moment it wrote: a peer MAY keep an ephemeral directory from what messages carry (the address, and `ROLE` / `PROJECT`, which are required on every message) and interact with it at once. That directory is a cache, not authoritative state; presence is.
 
 ## 6. Message grammar
 
@@ -232,7 +216,9 @@ REPLY-EXPECTED: yes | no
 
 Optional. Each message type carries a default expectation (SEMANTICS.md, "When a reply is expected"); this field overrides it for one message — an `OBSERVATION` that is purely for information, an `INFO` that asks to be corrected. `no` means the sender will not wait for a reply and does not want one; the recipient may still act, and says so through the authoritative artifact. Like the correlation fields, it MUST NOT create workflow state: it is a courtesy to whoever carries the message, not a constraint on the recipient.
 
-## 8. HELLO
+## 8. HELLO (deprecated, §5)
+
+Kept so an older sender's `HELLO` parses and reads as it always did; no instance should send one.
 
 Required:
 
@@ -276,10 +262,10 @@ Capabilities are semantic labels, not MCP/tool implementation names. Receiving a
 ## 10. Message types
 
 ### HELLO
-Self-description and discovery.
+Self-description and discovery. Deprecated (§5): presence is the deployment's.
 
 ### GOODBYE
-Best-effort graceful departure notification.
+Best-effort graceful departure notification. Deprecated (§5): presence is the deployment's.
 
 ### INFO
 Information with no requested action.
@@ -424,7 +410,7 @@ Runtime configuration MAY include:
 
 These are not GZCOORD/1 wire fields.
 
-The runtime SHOULD expose the configured role and specialties to the agent so it can produce an accurate HELLO.
+The runtime SHOULD expose the configured role and specialties to the agent so its messages carry an accurate `ROLE`.
 
 ## 16. Subagents
 

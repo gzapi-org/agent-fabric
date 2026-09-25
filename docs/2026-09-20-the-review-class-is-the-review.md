@@ -54,6 +54,21 @@ its own from the forwarder on the same test for its repository. Until
 then a reader without them would report real coverage as "0 reviews",
 the defect the marker exists to end.
 
+## A marker is not a signature (2026-09-25)
+
+The marker says what a review is, never who posted it. It is published
+in every tree that carries `post-review.sh`, so on a public repository
+any account can post a review whose first line is the marker. Until
+2026-09-25 the reader counted such a review as the head's coverage,
+indistinguishable in the report from the one the session posted.
+Coverage now needs both: the marker, and a poster who is the PR author
+(the account every session pushes and posts as) or a login in
+`AGENT_FABRIC_REVIEW_POSTERS`. Any other marked review is listed under
+"marked, other login", with its login, and is not coverage. Every blind
+row names its login too, so a reader checks the poster without leaving
+the report. `--json` carries the same answer as fields, for a caller
+that arms on it.
+
 ## Why "blind" survives as a word
 
 "Review" is the noun everywhere. "Blind" appears only where the method

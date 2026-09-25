@@ -94,6 +94,7 @@ def test_context_changes_while_agent_does_not(tmp: str) -> None:
     outside = json.loads(sh(sys.executable, IDENTITY, "--json", "--cwd", tmp, env=env).stdout)
     assert inside["agent"] == outside["agent"] == id_un()
     assert inside["project"] == "demo" and inside["project_source"] == "working-copy"
+    assert inside["address"] == f"{inside['host']}/{inside['agent']}", "the GZCoord address, composed"
     assert inside["working_copy"] == os.path.realpath(repo) or inside["working_copy"] == repo
     assert inside["working_copy_id"] == "whatever-name", "the basename is a label, reported as such"
     assert outside["project"] is None and outside["working_copy"] is None

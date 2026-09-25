@@ -285,9 +285,14 @@ def resolve_context(cwd: str | None = None, session: str | None = None,
         project, source = binding["project"], "binding"
     else:
         project, source = None, None
+    host = current_host()
     return {
         "agent": agent,
-        "host": current_host(),
+        "host": host,
+        # The GZCoord address (SPEC §3.1), composed once here so a message
+        # written by hand takes it as printed rather than rebuilt from two
+        # fields; the relay transport doc points here for it.
+        "address": f"{host}/{agent}",
         "role": binding.get("role"),
         "project": project,
         "project_source": source,

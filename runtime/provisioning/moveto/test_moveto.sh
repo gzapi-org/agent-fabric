@@ -55,6 +55,11 @@ mkdir -p "$SANDBOX/home/nodir"
 mkdir -p "$SANDBOX/home/spaced/projects/spaced backup"
 mkdir -p "$SANDBOX/home/esc/projects/$(printf 'good\033]0;INJECTED\007tail')"
 
+# A bound role for two of them: --list prints it beside the account.
+mkdir -p "$SANDBOX/home/solo/.local/state/agent-fabric/agents/solo" "$SANDBOX/home/esc/.local/state/agent-fabric/agents/esc"
+printf '{"agent": "solo", "role": "web-dev", "updated_at": "x"}\n' > "$SANDBOX/home/solo/.local/state/agent-fabric/agents/solo/binding.json"
+printf '{"agent": "esc", "role": "evil\033]0;X\007role"}\n' > "$SANDBOX/home/esc/.local/state/agent-fabric/agents/esc/binding.json"
+
 ACCOUNTS="solo odd many empty nodir spaced esc"
 
 cat > "$BIN/getent" <<EOF
@@ -162,6 +167,9 @@ check "lists the template account" "solo" "$out"
 check "lists a multi-clone account's clones" "gamma" "$out"
 check_absent "omits an account whose projects/ is empty" "empty" "$out"
 check_absent "omits an account with no projects/ at all" "nodir" "$out"
+check "the role sits between the account and its clones" "$(printf '%-24s %-20s %s' solo web-dev solo)" "$out"
+check "an account with no binding shows -" "$(printf '%-24s %-20s' many -)" "$out"
+check "a role's control characters are stripped" "evil]0;Xrole" "$out"
 
 echo "7. a clone name containing a space is usable, not a wrong path"
 out=$("$UNDER_TEST" spaced "spaced backup" --print 2>&1); st=$?

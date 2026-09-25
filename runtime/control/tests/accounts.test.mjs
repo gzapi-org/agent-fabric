@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
-import { main, describe, listLines, templates } from '../accounts.mjs';
+import { main, describe, listLines, templates, templateRef } from '../accounts.mjs';
 import crypto from 'node:crypto';
 import { accountsDir } from '../ops.mjs';
 
@@ -104,4 +104,54 @@ test('templates: each Doppler template by fingerprint, read with the observer\'s
   assert.match(r.out, new RegExp(`claude-a\\s+setup-token ${fp}`));
   assert.match(r.out, /claude-b\s+no CLAUDE_CODE_OAUTH_TOKEN/);
   assert.ok(!r.out.includes('sk-ant-oat01-AAAA'));
+});
+
+// A Doppler with state: configs, secrets per config, the two templates.
+function fakeDoppler(initial = {}) {
+  const store = { 'agents_flutter-dev-01': {}, 'agents_db-admin': {}, 'agents2_web-dev-01': { CLAUDE_CODE_OAUTH_TOKEN: templateRef('claude-a') }, 'claude-accounts_claude-a': { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-A' }, 'claude-accounts_claude-b': { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-B' }, 'claude-accounts_claude-empty': {}, ...initial };
+  const writes = [];
+  const exec = (bin, args) => {
+    const cfg = args[args.indexOf('--config') + 1];
+    if (args[0] === 'configs') return JSON.stringify(['agents', 'agents2', 'claude-accounts', ...Object.keys(store)].map(name => ({ name })));
+    if (args[0] === 'secrets' && args[1] === 'get') { const v = store[cfg]?.[args[2]]; if (v === undefined) throw new Error('Doppler Error: Could not find requested secret'); return v + '\n'; }
+    if (args[0] === 'secrets' && args[1] === 'set') { writes.push(['set', cfg, args[2]]); const [k, ...v] = args[2].split('='); store[cfg][k] = v.join('='); return ''; }
+    if (args[0] === 'secrets' && args[1] === 'delete') { writes.push(['delete', cfg, args[2]]); delete store[cfg][args[2]]; return ''; }
+    throw new Error('unexpected doppler ' + args.join(' '));
+  };
+  return { store, writes, exec };
+}
+function placedRegistry() {
+  const f = path.join(scratch('assign-reg-'), 'registry.json');
+  fs.writeFileSync(f, JSON.stringify({ hosts: { h: { operator: 'user' } }, placement: { 'flutter-dev-01': 'h', 'db-admin': 'h', 'web-dev-01': 'h' } }));
+  return f;
+}
+
+test('assign: the reference is written and read back, a login already there is left alone in Doppler, and every named login syncs, proves the template\'s fingerprint and restarts', async () => {
+  const d = fakeDoppler(); const registry = placedRegistry();
+  let synced;
+  const r = await capture(() => main(['assign', 'flutter-dev-01', 'web-dev-01', 'claude-b'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: (bin, args) => { synced = [path.basename(bin), ...args]; return { status: 0 }; } }));
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.store['agents_flutter-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, templateRef('claude-b'));
+  assert.equal(d.store['agents2_web-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, templateRef('claude-b'));
+  assert.match(r.out, /flutter-dev-01\s+none\s+→ claude-b\s+written/);
+  assert.match(r.out, /web-dev-01\s+claude-a\s+→ claude-b\s+written/);
+  const fpB = crypto.createHash('sha256').update('sk-ant-oat01-B').digest('hex').slice(0, 12);
+  assert.deepEqual(synced, ['fabric-ctl', 'flutter-dev-01', 'web-dev-01', 'secrets-sync', '--expect', fpB, '--restart']);
+  assert.ok(!r.out.includes('sk-ant-oat01'), 'no template token in the output');
+  synced = null;
+  const again = await capture(() => main(['assign', 'flutter-dev-01', 'claude-b', '--no-restart'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: (bin, args) => { synced = args; return { status: 0 }; } }));
+  assert.equal(again.code, 0); assert.match(again.out, /flutter-dev-01\s+claude-b\s+→ claude-b\s+unchanged/);
+  assert.deepEqual(synced, ['flutter-dev-01', 'secrets-sync', '--expect', fpB], 'unchanged in Doppler, still proved on the account; --no-restart leaves its session alone');
+  const failed = await capture(() => main(['assign', 'flutter-dev-01', 'claude-b'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => ({ status: 1 }) }));
+  assert.equal(failed.code, 1, 'an account that did not prove the move fails the command');
+});
+
+test('assign: no way back to a login\'s own /login; an unknown login, an unknown template and an empty template are refused before anything is written', async () => {
+  const d = fakeDoppler(); const registry = placedRegistry();
+  const n = d.writes.length;
+  for (const [args, re] of [[['assign', 'web-dev-01', 'own'], /runs only on a template's token/], [['assign', 'nobody', 'claude-b'], /not a placed account/], [['assign', 'db-admin', 'claude-zzz'], /not a template/], [['assign', 'db-admin', 'claude-empty'], /holds no CLAUDE_CODE_OAUTH_TOKEN/]]) {
+    const r = await capture(() => main(args, { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => assert.fail('no sync') }));
+    assert.equal(r.code, 2, args.join(' ')); assert.match(r.err, re);
+  }
+  assert.equal(d.writes.length, n, 'a refusal writes nothing');
 });

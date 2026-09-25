@@ -429,6 +429,34 @@ fi
 # with a base URL set, an Anthropic subscription token has no business in
 # a process whose requests go to a third party (review of #33). Dropped
 # unconditionally on the broker path, by name.
+# Which Claude account a plain-claude session runs on is the login's synced
+# record, not the shell this launcher inherited: a shell opened before
+# `fabric-accounts assign` moved the login still holds the old token (or
+# none), and a relaunch from it — including the upgrade's automatic resume
+# — would start on the old account (2026-09-25, devex-tooling). Read from
+# ~/.config/agent-fabric/secrets.env at every launch; absent there, an
+# inherited one is dropped. Said by name when it replaces or drops one.
+if [[ "$PROVIDER" == anthropic ]]; then
+    SYNCED_TOKEN="$(python3 - "$HOME/.config/agent-fabric/secrets.env" <<'PY' 2>/dev/null
+import shlex, sys
+try:
+    for line in open(sys.argv[1], encoding="utf-8"):
+        if line.startswith("export CLAUDE_CODE_OAUTH_TOKEN="):
+            print(shlex.split(line[len("export "):])[0].split("=", 1)[1], end="")
+            break
+except (OSError, ValueError, IndexError):
+    pass
+PY
+)"
+    if [[ -n "$SYNCED_TOKEN" ]]; then
+        [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && "$CLAUDE_CODE_OAUTH_TOKEN" != "$SYNCED_TOKEN" ]] && echo "launch: CLAUDE_CODE_OAUTH_TOKEN taken from the login's synced record, not the older one this shell inherited" >&2
+        export CLAUDE_CODE_OAUTH_TOKEN="$SYNCED_TOKEN"
+    elif [[ -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
+        unset CLAUDE_CODE_OAUTH_TOKEN
+        echo "launch: dropped the CLAUDE_CODE_OAUTH_TOKEN this shell inherited — the login's synced record has none" >&2
+    fi
+    unset SYNCED_TOKEN
+fi
 if [[ "$PROVIDER" != anthropic && -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
     unset CLAUDE_CODE_OAUTH_TOKEN
     echo "launch: the broker path — dropped CLAUDE_CODE_OAUTH_TOKEN (a Claude-account template's token never reaches a broker session)" >&2
@@ -657,6 +685,42 @@ fi
 bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --provider "$PROVIDER" >/dev/null ||
     die "could not install the capability-class agent files for $PROVIDER (runtime/claude-code/install-agent-files.sh)."
 
+# A plain-claude session runs only on a long-lived sign-in: a template's
+# setup-token, valid a year (docs/claude-accounts.md). A login's own /login
+# is an 8-hour token with one refresh holder, and a fleet that silently fell
+# back to it ran on whichever account last signed in on that login — the
+# owner, 2026-09-25: no long-lived token, no session. Checked here, after
+# --print (a read-back needs no sign-in) and before the HELLO: a refused
+# launch announces nothing, so no GOODBYE is owed.
+if [[ "$PROVIDER" == anthropic && ! "${CLAUDE_CODE_OAUTH_TOKEN:-}" =~ ^sk-ant-oat[0-9]+-[A-Za-z0-9_-]+$ ]]; then
+    die "no long-lived Claude sign-in for $(id -un): the login's synced record ($HOME/.config/agent-fabric/secrets.env) has no CLAUDE_CODE_OAUTH_TOKEN of a setup-token's shape. The coordinator assigns one (bin/fabric-accounts assign $(id -un) <account>), then bin/fabric-secrets sync here. Nothing started, no HELLO sent."
+fi
+# The harness's first-run wizard ignores that token: until
+# hasCompletedOnboarding is set it asks for a theme, then a login method,
+# and opens a browser for the /login refused above (web-dev-01, which never
+# signed in, 2026-09-25; read back in a pty on 2.1.282). A login that runs
+# on a template has nothing to onboard, so the flag is set here, in the
+# file the harness reads — under CLAUDE_CONFIG_DIR when that is set.
+if [[ "$PROVIDER" == anthropic ]]; then
+    python3 - "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" <<'PY' || die "could not mark the harness's onboarding done in ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json; nothing started, no HELLO sent."
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p, encoding="utf-8"))
+except FileNotFoundError:
+    d = {}
+if not isinstance(d, dict):
+    sys.exit(f"launch: {p} is not a JSON object")
+if d.get("hasCompletedOnboarding") is not True:
+    d["hasCompletedOnboarding"] = True
+    tmp = f"{p}.fabric-tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+    os.replace(tmp, p)
+    print("launch: marked the harness's onboarding done — a template login has no /login to onboard", file=sys.stderr)
+PY
+fi
+
 # HELLO, now that a session is about to exist: derived from the binding
 # (role, project) by gzmsg.mjs, posted as this login by send.mjs. Best
 # effort — no relay, no project, no node is one line and no refusal; the
@@ -728,8 +792,9 @@ elif (( STATUS > 128 )); then note="session ended by signal $((STATUS - 128))"
 else note="session ended with status $STATUS"; fi
 goodbye "$note"
 
-# ── back on the new version: the restart an upgrade asked for ────────
-# The control agent's `upgrade` (runtime/control/upgrade.mjs) writes
+# ── back on the new version: the restart an action asked for ─────────
+# The control agent's `upgrade` or `secrets-sync --restart`
+# (runtime/control/{upgrade,secrets}.mjs) writes
 # $STATE_DIR/restart.json, then stops this session with SIGTERM — the
 # harness's graceful shutdown. This shell is still in the session's
 # terminal, so it is the one that can bring the session back: it waits
@@ -763,7 +828,8 @@ while m.get("status") == "pending" and time.time() < deadline:
     m = load()
 st = m.get("status")
 if st == "done":
-    print(f"launch: {m.get('piece')} upgraded {m.get('from')} → {m.get('installed') or m.get('to')}; resuming the session on it.", file=sys.stderr)
+    verb = "moved" if m.get("piece") == "the Claude account" else "upgraded"
+    print(f"launch: {m.get('piece')} {verb} {m.get('from')} → {m.get('installed') or m.get('to')}; resuming the session on it.", file=sys.stderr)
 elif st == "failed":
     print(f"launch: the upgrade of {m.get('piece')} to {m.get('to')} FAILED ({m.get('reason') or 'no reason given'}); resuming the session on what is installed.", file=sys.stderr)
 else:

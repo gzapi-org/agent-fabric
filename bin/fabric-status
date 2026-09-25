@@ -107,7 +107,7 @@ def fp12(v):
 # launcher removed it); the line names which, and the two disagreeing is
 # drift — a session launched before the sync that moved the login.
 _SIGNIN_ENV, _SIGNIN_FILE = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), synced_template_token()
-signin_drift = (f"this session runs on setup-token {fp12(_SIGNIN_ENV) if _SIGNIN_ENV else '(own /login)'}, the login's synced record "
+signin_drift = (f"this session runs on {'setup-token ' + fp12(_SIGNIN_ENV) if _SIGNIN_ENV else 'no token'}, the login's synced record "
                 f"names {'setup-token ' + fp12(_SIGNIN_FILE) if _SIGNIN_FILE else 'none'} — the next launch uses the record") \
     if (_SIGNIN_ENV or None) != (_SIGNIN_FILE or None) and not (not _SIGNIN_ENV and base) else None
 

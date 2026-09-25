@@ -5,14 +5,16 @@
 //
 // The sequence, for one account (docs/fleet-upgrade.md):
 //   1. already at the pin: nothing happens, and nothing restarts;
-//   2. a session running: write the restart marker the launcher reads,
+//   2. wait for the host's install lease (one account at a time, below);
+//      no turn, or no queue, is a failure with nothing stopped;
+//   3. a session running: write the restart marker the launcher reads,
 //      then SIGTERM its `claude` — the harness's own graceful shutdown
 //      (SessionEnd hooks, the transcript saved; 2.1.281, read from the
 //      binary) — and wait for it to be gone; never SIGKILL: a session
 //      that does not stop is a failure to report, not to force;
-//   3. install the pinned version with the harness's own installer and
-//      verify `claude --version` says it;
-//   4. mark the marker done or failed; the launcher, still in the
+//   4. install the pinned version with the harness's own installer and
+//      verify `claude --version` says it; release the lease;
+//   5. mark the marker done or failed; the launcher, still in the
 //      session's terminal, relaunches with --resume on whatever is now
 //      installed, and says which.
 // Installing under a running session is safe (each version is its own
@@ -103,7 +105,7 @@ export function stateDir(home = os.homedir(), env = process.env, login = os.user
   return path.join(root, 'agents', login);
 }
 export function markerPath(dir) { return path.join(dir, 'restart.json'); }
-function writeMarker(dir, m) {
+export function writeMarker(dir, m) {
   fs.mkdirSync(dir, { recursive: true });
   const f = markerPath(dir), tmp = `${f}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(m, null, 2) + '\n', { mode: 0o600 });
@@ -143,8 +145,14 @@ async function version(bin, exec) {
 }
 
 let running = null;   // one upgrade at a time per daemon
+// secrets-sync writes the same restart marker: each refuses while the
+// other holds it, in both directions (re-review of #37).
+let syncRestarting = false;
+export function upgradeRunning() { return running !== null; }
+export function restartInFlight(on) { syncRestarting = on; }
 export function upgrade(request, opts = {}) {
   if (running) return Promise.resolve({ status: 'busy', note: 'an upgrade is already running on this account' });
+  if (syncRestarting) return Promise.resolve({ status: 'busy', note: 'a secrets-sync is restarting the session on this account' });
   running = upgradeOnce(request, opts).finally(() => { running = null; });
   return running;
 }

@@ -33,8 +33,43 @@ CLAUDE_CODE_OAUTH_TOKEN = ${agent-fabric.claude-accounts_<account>.CLAUDE_CODE_O
 The login's read-only service token resolves the reference, `fabric-secrets
 sync` exports it (it is a fabric-wide `agent_env` name in
 `projects/registry.json`), and set, it outranks the login's own `/login`.
-Moving a login to the other account is that line, a sync and a relaunch —
-no browser. A login with no such line runs on its own sign-in, as before.
+**A plain-claude session needs it**: the launcher refuses one whose
+login's synced record holds no token of a setup-token's shape, before
+the HELLO (the owner, 2026-09-25). A login's own `/login` is an 8-hour
+token with a single refresh holder, and a fleet that fell back to it ran
+on whichever account last signed in there. The broker path is untouched.
+Moving logins is one command on the coordinator's login:
+
+```sh
+bin/fabric-accounts assign flutter-dev-01 p2p-network-dev-01 andrea-benetton-blueteam-ge
+```
+
+It is the whole move, and past the Doppler write it is messages only (the
+owner, 2026-09-25: no hostexec, no sudo, nobody on the account):
+
+1. the reference goes into each login's Doppler config and is read back
+   (the coordinator's token can write it; a login's own cannot);
+2. every named login — changed or not, since a reference says nothing of
+   what the account last synced — gets the signed `secrets-sync` action
+   with the template's fingerprint (`--expect`): the account runs its own
+   `fabric-secrets sync`, and a synced token that is not the template's is
+   a failure, said by the account;
+3. with `--restart` (assign's default; `--no-restart` leaves sessions
+   alone) a running session is stopped gracefully and its launcher
+   resumes the same conversation on the new sign-in — the upgrade's
+   restart marker, written already done. Only a session not already on
+   the token — read from its own environment — is stopped; a broker
+   session has no Claude account to move and is left alone. The
+   requester's own session is never stopped; one that does not stop
+   within 90 s is left running, and its row fails so a rerun is asked.
+
+Each row of the reply names the sign-in by fingerprint (`setup-token
+<sha>`, `fabric-accounts templates` maps it to an account), and any row
+that is not `synced` makes the command exit 1. A later relaunch in any
+shell stays on the new account, because the launcher takes the token
+from the login's synced record rather than from the shell. There is no
+`assign … own`: a login without a reference cannot start a plain-claude
+session.
 
 What a session on a template does not have: the claude.ai connectors, the
 plugins synced from claude.ai, Remote Control and web sessions. The

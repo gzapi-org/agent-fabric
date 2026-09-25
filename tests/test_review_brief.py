@@ -261,6 +261,13 @@ def test_the_parser_refuses_what_it_cannot_keep(tmp: str) -> None:
     # 5: a block indicator with text on its line would have rendered nothing
     assert "objective: a block indicator (>) takes no text on its line" in refused("objective: > 3 retries is an error\n")
     assert "block indicator (|-)" in refused("objective: |- x\n")
+    # 7: a # glued to its word is text, in a plain item and inside a folded
+    # scalar — YAML would cut there, and the brief lost both silently
+    # (backend-dev-01, 2026-09-25); a free-standing "# " is still a comment
+    doc = parse("objective: >-\n  onto PR #934 (which adds AnalysisMode=All and the rule that\n  findings are never silenced)\n"
+                "requirements:\n  - No #pragma, [SuppressMessage] or .editorconfig change is introduced.\n  - kept # dropped\n")
+    assert doc["objective"] == "onto PR #934 (which adds AnalysisMode=All and the rule that findings are never silenced)", doc
+    assert doc["requirements"] == ["No #pragma, [SuppressMessage] or .editorconfig change is introduced.", "kept"], doc
     # 6: the front door: no argument is a usage error, --help is not
     r = subprocess.run([BIN], capture_output=True, text=True)
     assert r.returncode == 2 and "numeric argument" not in r.stderr and "fabric-review brief" in r.stderr, r.stderr

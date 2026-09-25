@@ -74,6 +74,12 @@ def main() -> int:
         if drift:
             lines.append(f"agent-fabric: DRIFT {drift}")
         lines += project_layer(role, ctx["project"], ctx["working_copy"])
+        try:
+            missing = watch_running() is False
+        except Exception:  # noqa: BLE001 — a /proc oddity must not cost the session its project layer
+            missing = False
+        if missing:
+            lines.append(WATCH_MISSING.format(source=payload.get("source") or "start"))
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": "\n".join(lines)}}))
     except (Exception, SystemExit) as exc:  # noqa: BLE001 — a hook must never block a session
@@ -84,6 +90,65 @@ def main() -> int:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": f"agent-fabric: session-start could not resolve this session's binding — {msg}"}}))
     return 0
+
+
+# The inbox watch is a Monitor the session itself arms (gzcoord-receive
+# §1); a resume or a launcher restart ends the process that ran it and the
+# harness does not bring it back, so the inbox went quiet with no sign
+# (devex-tooling and architect-cto-01 after their restarts, 2026-09-25).
+# The skill said to re-arm; a resumed session did not reread it. A hook
+# cannot start a Monitor, so it says so here, at the moment it is true.
+WATCH_MISSING = ("agent-fabric: NO INBOX WATCH is running for this session ({source}) — arm it now, "
+                 "as your first action: Monitor(command: 'node \"$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs\" --follow', "
+                 "description: 'gzcoord inbox watch', persistent: true, timeout_ms: 1800000), and re-arm it at each expiry notice "
+                 "(gzcoord-receive §1). One watch per session: never a second.")
+
+
+def watch_running(proc: str = "/proc", pid: int | None = None) -> bool | None:
+    """Whether a `inbox.mjs --follow` runs under the session this hook
+    belongs to: the nearest ancestor whose command is `claude`. None when
+    there is no such ancestor (not under a harness) — nothing to say."""
+    def stat(p: int) -> tuple[str, int] | None:
+        try:
+            with open(f"{proc}/{p}/stat", encoding="utf-8", errors="replace") as fh:
+                raw = fh.read()
+        except OSError:
+            return None
+        comm = raw[raw.index("(") + 1:raw.rindex(")")]
+        return comm, int(raw[raw.rindex(")") + 2:].split()[1])
+    session, p = None, pid or os.getpid()
+    for _ in range(64):
+        st = stat(p)
+        if not st:
+            break
+        if st[0] == "claude":
+            session = p
+            break
+        if st[1] <= 1:
+            break
+        p = st[1]
+    if session is None:
+        return None
+    parents: dict[int, int] = {}
+    for d in os.listdir(proc):
+        if d.isdigit() and (st := stat(int(d))):
+            parents[int(d)] = st[1]
+    for d, _ in parents.items():
+        try:
+            with open(f"{proc}/{d}/cmdline", "rb") as fh:
+                cmd = fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if "inbox.mjs" not in cmd or "--follow" not in cmd:
+            continue
+        a = d
+        for _ in range(64):
+            a = parents.get(a, 0)
+            if a == session:
+                return True
+            if a <= 1:
+                break
+    return False
 
 
 def project_layer(role: str | None, project: str | None, working_copy: str | None) -> list[str]:

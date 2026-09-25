@@ -29,10 +29,14 @@ printf '{"version":1,"hosts":{"%s":{"platform":"fedora-qubes","ssh":null,"operat
 # leak this branch already fixed. A case that wants one sets it explicitly.
 # CLAUDE_CODE_OAUTH_TOKEN and CLAUDE_CONFIG_DIR likewise: a login moved to
 # an account template carries the first, and the sign-in line would differ.
+# HOME too: fabric-status reads the login's synced record from it, and once
+# every login ran on a template (2026-09-25) the record disagreed with the
+# scrubbed environment and every holder saw a sign-in DRIFT CI never did.
+mkdir -p "$SANDBOX/home"
 status() { env -u AGENT_FABRIC_LAUNCH_ROLE -u AGENT_FABRIC_LAUNCH_PROMPT_DIGEST -u AGENT_FABRIC_LAUNCH_SESSION_MODEL \
                -u AGENT_FABRIC_LAUNCH_PROVIDER -u AGENT_FABRIC_LAUNCH_PROFILE -u ANTHROPIC_BASE_URL \
                -u CLAUDE_EFFORT -u AGENT_FABRIC_LAUNCH_EFFORT -u CLAUDE_CODE_OAUTH_TOKEN -u CLAUDE_CONFIG_DIR \
-               AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_HOSTS_REGISTRY="$PLACED" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
+               HOME="$SANDBOX/home" AGENT_FABRIC_STATE_DIR="$STATE" AGENT_FABRIC_HOSTS_REGISTRY="$PLACED" "$@" bash "$ROOT/bin/fabric-status" "${MODE[@]}"; }
 MODE=()
 
 echo "fabric-status: unlaunched — nothing to drift from"
@@ -135,28 +139,28 @@ out="$(cd "$SANDBOX" && status 2>&1)"
 echo "fabric-status: which Claude sign-in plain claude uses"
 H="$SANDBOX/signin-home"; mkdir -p "$H"
 printf '{"oauthAccount":{"emailAddress":"someone@example.org"}}\n' > "$H/.claude.json"
-out="$(HOME="$H" status 2>&1)"
+out="$(status HOME="$H" 2>&1)"
 grep -q "^claude sign-in own /login (someone@example.org)$" <<<"$out" && ok "no template token: the login's own sign-in, by its email" || bad "own sign-in line" "$(grep -i "sign-in" <<<"$out")"
 TPL='sk-ant-oat01-TEMPLATE-FIXTURE'
 FP="$(printf %s "$TPL" | sha256sum | cut -c1-12)"
-out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
+out="$(status HOME="$H" CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
 grep -q "^claude sign-in setup-token $FP (CLAUDE_CODE_OAUTH_TOKEN" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
   && ok "a template token outranks the own sign-in and is named by fingerprint, not by the old account" || bad "template sign-in line" "$(grep -i "sign-in" <<<"$out")"
 ! grep -q "$TPL" <<<"$out" && ok "the token itself is never printed" || bad "token printed"
 # The shape that occurs: the launcher removed the variable from a broker
 # session, so only the login's synced record says which account it is on.
 mkdir -p "$H/.config/agent-fabric"; printf "export CLAUDE_CODE_OAUTH_TOKEN='%s'\n" "$TPL" > "$H/.config/agent-fabric/secrets.env"
-out="$(HOME="$H" status ANTHROPIC_BASE_URL=https://openrouter.ai/api 2>&1)"
+out="$(status HOME="$H" ANTHROPIC_BASE_URL=https://openrouter.ai/api 2>&1)"
 grep -q "^claude sign-in setup-token $FP .*(plain claude's; this session goes to broker (ori) and uses neither)$" <<<"$out" && ! grep -q "someone@example.org" <<<"$out" \
   && ok "a broker session on a template login names the template from the synced record, not the old account" || bad "broker sign-in line" "$(grep -i "sign-in" <<<"$out")"
 ! grep -q "$TPL" <<<"$out" && ! grep -q "^DRIFT.*setup-token" <<<"$out" && ok "…the token itself never printed, and no drift: the launcher removing it on the broker is the design" || bad "broker case" "$out"
 # A direct-path session launched before the sync that moved the login: its
 # environment has no token, the record has one. The line says which it
 # reports, and the disagreement is drift, not the template claimed as in use.
-out="$(HOME="$H" status 2>&1)"
-grep -q "^claude sign-in setup-token $FP (the login's synced record;" <<<"$out" && grep -q "^DRIFT .*this session runs on setup-token (own /login), the login's synced record names setup-token $FP" <<<"$out" \
+out="$(status HOME="$H" 2>&1)"
+grep -q "^claude sign-in setup-token $FP (the login's synced record;" <<<"$out" && grep -q "^DRIFT .*this session runs on no token, the login's synced record names setup-token $FP" <<<"$out" \
   && ok "direct path, record but no variable: named as the record, and said as drift" || bad "record without variable" "$(grep -iE "sign-in|DRIFT" <<<"$out")"
-out="$(HOME="$H" status CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
+out="$(status HOME="$H" CLAUDE_CODE_OAUTH_TOKEN="$TPL" 2>&1)"
 grep -q "^claude sign-in setup-token $FP (CLAUDE_CODE_OAUTH_TOKEN in this session;" <<<"$out" && ! grep -q "^DRIFT.*setup-token" <<<"$out" && ok "variable and record agree: this session's, no drift" || bad "agreeing case" "$(grep -iE "sign-in|DRIFT" <<<"$out")"
 rm -f "$H/.config/agent-fabric/secrets.env"
 

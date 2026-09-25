@@ -71,7 +71,7 @@
 #   -h, --help             this text
 #
 # Durations take an optional unit — 90, 90s, 10m, 2h. A bare number is
-# SECONDS. wait-merged.sh accepts exactly the same forms.
+# SECONDS.
 #
 # Exit codes:
 #   0  the current head has at least one counted review — ANY of them,
@@ -107,10 +107,10 @@ need_operand() {
 # SECONDS — which is what every existing invocation already meant, so
 # nothing changes for a caller that passed one.
 #
-# wait-merged.sh carries an identical copy. That is deliberate: these are
-# standalone scripts with no shared library, and a divergence in what
-# they accept is exactly the confusion the units were added to remove.
-# Both suites assert the same table, so a drift fails a test.
+# The table stands alone, pinned by this script's own suite. A project
+# that keeps a waiter of its own with the same units asserts its copy in
+# its own suite; the fabric's suite cannot see it, so nothing here claims
+# the two agree.
 as_seconds() {
     local flag="$1" raw="$2" n
     case "$raw" in

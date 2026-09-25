@@ -599,10 +599,8 @@ RUN_OUT="$(PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
     bash "$UNDER_TEST" 77 o/r --interval 0 2>&1)"; RUN_RC=$?
 assert_rc "zero --interval exits 2" 2
 
-# The SAME duration table wait-merged.sh asserts. as_seconds is
-# duplicated across the two standalone scripts on purpose; these paired
-# assertions are what stop the copies drifting into accepting different
-# things, which is the confusion units were added to remove.
+# The duration table, asserted here alone: this suite is what stops
+# as_seconds accepting something a caller did not mean.
 for bad in "" "10sm" "m" "-1" "1x" "10 m"; do
     RUN_OUT="$(PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
         bash "$UNDER_TEST" 77 o/r --wait "$bad" 2>&1)"; RUN_RC=$?

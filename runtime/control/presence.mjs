@@ -54,12 +54,18 @@ export async function checkAddressees(metadata, { from, token, placed, ask = ask
     const a = metadata.TO.trim();
     if (!placed.includes(a)) return { checked: true, problems: [{ kind: 'not-placed', address: a }] };
     const p = (await ask({ from, to: [a], expect: [a], token, waitMs }))[a];
-    return { checked: true, problems: p === null ? [{ kind: 'silent', address: a }] : p.online ? [] : [{ kind: 'offline', address: a, presence: p }] };
+    // A reply that could not read the process table is unknown, never
+    // "no session" (review of #38).
+    if (p === null) return { checked: true, problems: [{ kind: 'silent', address: a }] };
+    if (p.status !== 'ok') return { checked: true, problems: [{ kind: 'unavailable', detail: `${a}: ${p.error ?? p.status}` }] };
+    return { checked: true, problems: p.online ? [] : [{ kind: 'offline', address: a, presence: p }] };
   }
   const role = metadata['TO-ROLE'].trim();
   const all = await ask({ from, to: '*', expect: placed, token, waitMs });
-  const holders = Object.entries(all).filter(([, p]) => p?.role === role);
+  const holders = Object.entries(all).filter(([, p]) => p?.status === 'ok' && p.role === role);
   if (holders.some(([, p]) => p.online)) return { checked: true, problems: [] };
-  const silent = Object.entries(all).filter(([, p]) => p === null).map(([a]) => a);
+  // No answer, or an answer that could not read its process table: either
+  // may hide a running holder, and both are said as such.
+  const silent = Object.entries(all).filter(([, p]) => p === null || p.status !== 'ok').map(([a]) => a);
   return { checked: true, problems: [{ kind: 'no-holder', role, holders: holders.map(([a]) => a), silent }] };
 }

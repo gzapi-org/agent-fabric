@@ -35,7 +35,26 @@ const execFileP = promisify(execFile);
 export const PIECES = ['claude'];
 export const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 export const STOP_WAIT_MS = 90000;       // the harness's failsafe is the hook budget + 5 s
-export const INSTALL_TIMEOUT_MS = 300000;
+// One install per HOST at a time, across its accounts: `fabric-ctl all
+// upgrade claude` makes every daemon install at once, and on 2026-09-25
+// nine of thirteen concurrent installs on develop-qzapp failed where each
+// alone succeeded. The host lease (bin/fabric-lease, docs/resources.md)
+// queues them; the wait fits inside the action's 600 s lifetime.
+export const INSTALL_LEASE = 'claude-install';
+export const LEASE_WAIT_S = 480;
+export const LEASE_HELD = 75;   // fabric-lease's EX_TEMPFAIL: still held after the wait
+export const INSTALL_TIMEOUT_MS = (LEASE_WAIT_S + 90) * 1000;
+
+// The line that says what went wrong is the LAST one a failed command
+// wrote; execFile's message starts with "Command failed: <argv>", which
+// is all the first run's rows showed.
+export function lastLine(e) {
+  for (const s of [e?.stderr, e?.stdout, e?.message]) {
+    const lines = String(s ?? '').split('\n').map(x => x.trim()).filter(Boolean);
+    if (lines.length) return lines.at(-1);
+  }
+  return 'no output';
+}
 
 export function pinFile(root) { return path.join(root, 'runtime', 'claude-code', 'harness.json'); }
 export function pinnedVersion(root) {
@@ -126,10 +145,18 @@ export async function upgradeOnce(request, {
   }
   let installed = null, reason = null;
   try {
-    await exec(bin, ['install', target], { encoding: 'utf8', timeout: INSTALL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+    const lease = path.join(root, 'bin', 'fabric-lease');
+    const [cmd, argv] = fs.existsSync(lease)
+      ? [lease, [INSTALL_LEASE, '--wait', String(LEASE_WAIT_S), '--', bin, 'install', target]]
+      : [bin, ['install', target]];
+    await exec(cmd, argv, { encoding: 'utf8', timeout: INSTALL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
     installed = await version(bin, exec);
     if (installed !== target) reason = `after install, claude --version says ${installed}`;
-  } catch (e) { reason = `claude install ${target}: ${String(e.message).split('\n')[0].slice(0, 160)}`; }
+  } catch (e) {
+    reason = e?.code === LEASE_HELD
+      ? `the host's install lease (${INSTALL_LEASE}) stayed held for ${LEASE_WAIT_S} s; not installed — run it again`
+      : `claude install ${target}: ${lastLine(e).slice(0, 200)}`;
+  }
   const ok = !reason;
   if (stop) writeMarker(dir, { ...marker, status: ok ? 'done' : 'failed', installed, ...(reason && { reason }), finished_at: now().toISOString() });
   return {

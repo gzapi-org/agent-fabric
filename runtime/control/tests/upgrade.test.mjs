@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
-import { upgrade, upgradeOnce, checkArgs, markerPath, pinnedVersion, sessionPids } from '../upgrade.mjs';
+import { upgrade, upgradeOnce, checkArgs, markerPath, pinnedVersion, sessionPids, lastLine, INSTALL_LEASE, LEASE_HELD } from '../upgrade.mjs';
 
 function fixture({ installed = '2.1.280', pin = '2.1.281', installFails = false, installsWrong = false } = {}) {
   const home = scratch('upgrade-home-');
@@ -20,7 +20,7 @@ function fixture({ installed = '2.1.280', pin = '2.1.281', installFails = false,
   const exec = async (bin, args) => {
     calls.push(args.join(' '));
     if (args[0] === '--version') return { stdout: `${current} (Claude Code)\n` };
-    if (args[0] === 'install') { if (installFails) throw new Error('Install failed: network\nmore'); current = installsWrong ? '2.1.279' : args[1]; return { stdout: '' }; }
+    if (args[0] === 'install') { if (installFails) { const e = new Error(`Command failed: claude install ${args[1]}`); e.stderr = 'Downloading…\nInstall failed: network\n'; throw e; } current = installsWrong ? '2.1.279' : args[1]; return { stdout: '' }; }
     throw new Error('unexpected ' + args.join(' '));
   };
   return { home, root, dir, calls, exec, get current() { return current; } };
@@ -116,4 +116,62 @@ test('a pgrep that fails: nothing installed, nothing signalled, the reason said'
     pgrep: () => { const e = new Error('spawn pgrep EACCES'); e.code = 'EACCES'; throw e; } });
   assert.equal(r.status, 'failed'); assert.match(r.reason, /could not tell whether a session is running .*EACCES.*nothing installed/);
   assert.ok(!f.calls.some(c => c.startsWith('install')));
+});
+
+test('installs queue on the host lease when the fabric has one; a lease still held, and a failed install, say why by their last line', async () => {
+  const f = fixture();
+  fs.mkdirSync(path.join(f.root, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(f.root, 'bin', 'fabric-lease'), '', { mode: 0o755 });
+  const seen = [];
+  const exec = async (cmd, args) => {
+    seen.push([path.basename(cmd), ...args]);
+    if (path.basename(cmd) === 'fabric-lease') return f.exec(args[4], args.slice(5));
+    return f.exec(cmd, args);
+  };
+  const r = await upgradeOnce(req(), { home: f.home, root: f.root, dir: f.dir, exec, sessions: [], me: 'h/db-admin' });
+  assert.equal(r.status, 'upgraded');
+  const install = seen.find(c => c[0] === 'fabric-lease');
+  assert.deepEqual(install.slice(0, 5), ['fabric-lease', INSTALL_LEASE, '--wait', '480', '--'], 'the install runs under the host lease, waiting its turn');
+  assert.deepEqual(install.slice(6), ['install', '2.1.281']);
+
+  const held = fixture();
+  fs.mkdirSync(path.join(held.root, 'bin'), { recursive: true }); fs.writeFileSync(path.join(held.root, 'bin', 'fabric-lease'), '', { mode: 0o755 });
+  const r2 = await upgradeOnce(req(), { home: held.home, root: held.root, dir: held.dir, sessions: [], me: 'h/db-admin',
+    exec: async (cmd, args) => { if (path.basename(cmd) === 'fabric-lease') { const e = new Error('Command failed'); e.code = LEASE_HELD; throw e; } return held.exec(cmd, args); } });
+  assert.equal(r2.status, 'failed'); assert.match(r2.reason, /install lease \(claude-install\) stayed held for 480 s/);
+
+  const e = new Error('Command failed: /home/x/.local/bin/claude install 2.1.282\nline one'); e.stderr = 'Downloading…\n\nError: checksum mismatch for 2.1.282\n';
+  assert.equal(lastLine(e), 'Error: checksum mismatch for 2.1.282', 'the line that says why, not "Command failed: <argv>"');
+  assert.equal(lastLine({ message: 'only this' }), 'only this');
+});
+
+test('two accounts upgrading at once on one host install one after the other, through the real fabric-lease', async () => {
+  const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..', '..');
+  const leases = scratch('upgrade-leases-');
+  const log = path.join(scratch('upgrade-log-'), 'installs.log');
+  const account = name => {
+    const home = scratch(`upgrade-${name}-`);
+    fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+    const state = path.join(home, 'installed');
+    fs.writeFileSync(state, '2.1.281');
+    // A fake harness: --version reads its state; install records start and end around a 1 s "download".
+    fs.writeFileSync(path.join(home, '.local', 'bin', 'claude'), `#!/bin/sh
+case "$1" in
+  --version) echo "$(cat '${state}') (Claude Code)" ;;
+  install) echo "start ${name} $(date +%s%N)" >> '${log}'; sleep 1; printf %s "$2" > '${state}'; echo "end ${name} $(date +%s%N)" >> '${log}' ;;
+esac
+`, { mode: 0o755 });
+    return home;
+  };
+  const saved = process.env.AGENT_FABRIC_LEASES; process.env.AGENT_FABRIC_LEASES = leases;
+  try {
+    const [a, b] = ['alpha', 'beta'].map(account);
+    const run = home => upgradeOnce(req({ args: { piece: 'claude', version: '2.1.282' } }), { home, root: ROOT, dir: path.join(home, 'state'), sessions: [], me: 'h/x' });
+    const [ra, rb] = await Promise.all([run(a), run(b)]);
+    assert.deepEqual([ra.status, rb.status], ['upgraded', 'upgraded'], JSON.stringify([ra, rb]));
+    const ev = fs.readFileSync(log, 'utf8').trim().split('\n').map(l => l.split(' '));
+    assert.equal(ev.length, 4);
+    assert.deepEqual(ev.map(e => e[0]), ['start', 'end', 'start', 'end'], `the installs overlapped:\n${ev.map(e => e.join(' ')).join('\n')}`);
+    assert.equal(ev[0][1], ev[1][1], 'the first to start finished before the other began');
+  } finally { if (saved === undefined) delete process.env.AGENT_FABRIC_LEASES; else process.env.AGENT_FABRIC_LEASES = saved; }
 });

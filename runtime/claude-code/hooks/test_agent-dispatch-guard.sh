@@ -148,7 +148,7 @@ FABRIC_ROOT="$(cd "$(dirname "$UNDER_TEST")/../../.." && pwd)"
 cp -r "$FABRIC_ROOT/routing" "$FIXTURE_ROOT/routing"
 cp "$FABRIC_ROOT/tests/fixtures/routing-distinct/capabilities.json" "$FABRIC_ROOT/tests/fixtures/routing-distinct/effort.json" "$FIXTURE_ROOT/routing/"
 mkdir -p "$FIXTURE_ROOT/runtime/claude-code"; cp "$FABRIC_ROOT/runtime/claude-code/aliases.json" "$FIXTURE_ROOT/runtime/claude-code/"
-cp "$FABRIC_ROOT/runtime/identity.py" "$FIXTURE_ROOT/runtime/"   # `pins --me` asks it who is running; cp "$FABRIC_ROOT/runtime/identity.py" "$FIXTURE_ROOT/runtime/"   # `--me` asks it who runs
+cp "$FABRIC_ROOT/runtime/identity.py" "$FIXTURE_ROOT/runtime/"   # `pins --me` asks it who is running
 reviewer_file() { mkdir -p "$SCRATCH_HOME/agents"; printf -- '---\nname: code-review\nmodel: %s\n---\n' "$1" > "$SCRATCH_HOME/agents/code-review.md"; }
 launched() { local provider="$1"; shift; printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_ROOT="$FIXTURE_ROOT" AGENT_FABRIC_STATE_DIR="$EMPTY_STATE" CLAUDE_CONFIG_DIR="$SCRATCH_HOME" AGENT_FABRIC_LAUNCH_PROVIDER="$provider" bash "$UNDER_TEST" 2>/dev/null; }
 vanilla() { launched anthropic "$1"; }

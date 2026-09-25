@@ -66,6 +66,9 @@ import json, sys
 d = json.load(open(sys.argv[1])); d["roles"], d["agents"] = {}, {}
 json.dump(d, open(sys.argv[1], "w"), indent=2)
 PY
+    # Classes that differ, so a case can tell which one an export or an
+    # agent file came from: the committed column is one model at one level.
+    cp "$REAL_ROOT/tests/fixtures/routing-distinct/capabilities.json" "$REAL_ROOT/tests/fixtures/routing-distinct/effort.json" "$FABRIC/routing/"
     cp "$REAL_ROOT/runtime/claude-code/aliases.json" "$REAL_ROOT/runtime/claude-code/install-agent-files.sh" "$FABRIC/runtime/claude-code/"
     cp -r "$REAL_ROOT/runtime/claude-code/agents" "$FABRIC/runtime/claude-code/agents"
     mkdir -p "$FABRIC/runtime/mcp"; cp -r "$REAL_ROOT/runtime/mcp/websearch-locale" "$FABRIC/runtime/mcp/"   # the installer's MCP step reads its helper from the fabric

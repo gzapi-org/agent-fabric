@@ -12,32 +12,28 @@
   ],
   "levels_note": "Ordered, least to most. The union of the vendors' scales, not any one vendor's: Anthropic admits low..max, OpenAI all seven, xAI none..xhigh, DeepSeek low/high/max, GLM-5.3-Flash low/high/max. A level is an ORDINAL, never a magnitude — no vendor asserts that its `high` means another's, and neither does this file. What a class asks for is clamped DOWN to the nearest level its model admits, by the fabric, before the request leaves: the vendors disagree on the failure mode (OpenAI returns 400, xAI and Claude Code clamp silently, GLM-5.3-Flash errors, DeepSeek remaps), and a routing decision must not mean two different things depending on who serves it.",
   "classes": {
-    "code-low": "low",
+    "code-low": "medium",
     "code-medium": "medium",
-    "code-high": "high",
-    "code-plan": "xhigh",
-    "code-review": "xhigh"
+    "code-high": "medium",
+    "code-plan": "medium",
+    "code-review": "medium"
   },
-  "session": "code-high",
-  "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Naming the class keeps the session's thinking with the session's model: both are code-high on the anthropic path, and one edit moves both. A layer that gives one agent's session another model does not move its level: architect-cto-01's session is Fable 5.1 (routing/profiles.json) and still thinks at code-high's level, not code-plan's.",
+  "session": "medium",
+  "session_note": "A level, or a capability class whose level to take — as routing/profiles.json's own `session` may name a class. Every session thinks at medium (the owner, 2026-09-25), as every class does, so the level is named directly. A layer that gives one agent's session another model does not move its level: architect-cto-01's session is Fable 5.1 (routing/profiles.json) and thinks at medium too.",
   "providers": {
     "anthropic": {
-      "classes": {
-        "code-low": null
-      },
+      "classes": {},
       "notes": {
-        "code-low": "null, not a level: the harness's own model registry gives claude-haiku-4-5-20251001 the capability list [\"context_management\"] — no \"effort\" — and a model without it is gated out before a request is built, so no level is ever sent. So code-low's `low` is not a downgrade here, it is nothing at all, and the class runs on whatever the model does by itself. Acknowledged rather than silently dropped. If code-low ever moves to a model that takes effort, delete this line and check() will start judging it again.",
-        "code-medium": "No override: code-medium asks `medium` and claude-sonnet-5 admits it. Recorded because the model's OWN default is `high` (registry, 2.1.280), so the fabric is deliberately asking for less than the vendor would give. That is the routing decision working as intended — a level chosen here rather than inherited — but it is a real reduction and should be seen as one."
+        "all": "No override: every class is Opus 5.5 at medium (the owner, 2026-09-25), which Opus 5.5 admits and is its own default — so on plain claude the level is now the vendor's default as well as the fabric's decision. Before, code-low rode Haiku 4.5, which takes no effort (null here), and code-medium asked Sonnet 5 for less than its default high."
       }
     },
     "openrouter": {
       "classes": {
-        "code-plan": "high",
-        "code-review": "high"
+        "code-low": "low"
       },
       "notes": {
-        "code-plan": "code-plan asks for xhigh; deepseek/deepseek-v4-pro distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve. Written down because the alternative is a level of thinking lost between the routing file and the wire. Note the consequence while this column stands: code-high, code-plan and code-review all resolve to the same model AND now the same effort, so on the broker those three classes differ in neither. That is a true statement about today's broker column, not a property of the design — on the anthropic path they are high/xhigh/xhigh.",
-        "code-review": "The owner's decision of 2026-09-23: the review class thinks at xhigh, one level above code-high, because a review is judgement work of the same kind as code-plan and its failure mode — a defect that merges — is the expensive one. On the broker the reviewer is deepseek/deepseek-v4-pro, which distinguishes low/high/max and documents xhigh -> high, so `high` is what it would serve; written down rather than lost. On plain claude the reviewer is claude-opus-5[1m], which admits xhigh (the harness strips [1m] before its capability lookup), and gets it."
+        "code-low": "code-low asks for medium (the owner, 2026-09-25: every class at medium); z-ai/glm-5.3-flash distinguishes only low/high/max, and the nearest level at or below medium is low, so low is what it serves. Written down because that is a level lost, and a lost level is a commit.",
+        "all": "Every other class asks medium and its broker model has no medium: z-ai/glm-5.2 (code-medium) and deepseek/deepseek-v4-pro-0813 (code-high, code-plan, code-review) are served high, the vendors' documented mapping, one level above what the class asks. Nothing is lost there, so no override. On the broker code-high, code-plan and code-review therefore differ in neither model nor effort. That is true of today's broker column, not a property of the design."
       }
     }
   }

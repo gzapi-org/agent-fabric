@@ -4,13 +4,14 @@ class: domain
 description: "`gh pr merge --auto --merge` on gzapp prints what looks like a refusal, leaves autoMergeRequest null, yet DOES enqueue the PR."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"
     project: gzapp
     working_copy: gzapp
 derived_from:
+  - 3592cf3161d13a86
   - 796c6629674f5430
 ---
 
@@ -41,3 +42,14 @@ time, not its creation time, before diagnosing a stuck queue.
 
 Belongs in the `pr-lifecycle` skill eventually; recorded here because the
 session that found it could not commit.
+
+**Burned again 2026-09-18 (#881):** I told backend-dev-01 their green PR was
+"not armed" from `gh pr view --json autoMergeRequest,mergeStateStatus`
+(null + CLEAN). It had been in the queue for 12 minutes — a queued PR reads
+exactly like an unarmed one on those two fields. **Never assert "unarmed"
+from `autoMergeRequest`**: run `tools/gh/pr-gate.sh <n>` (it reads
+`mergeQueueEntry` and prints `queue=<pos>`), or query `mergeQueueEntry`
+directly. `arm.sh`'s post-arm check reads `autoMergeRequest` too and would
+fail on an instantly-queued PR — it must read the queue entry as well.
+
+*Observed 2026-09-18 (devex-tooling)*

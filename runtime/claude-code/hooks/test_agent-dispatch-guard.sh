@@ -139,10 +139,18 @@ echo "the file pin: under a fabric launch a review dispatch keeps its rules, the
 # The pin is merged for the login (`pins --me`): an empty state dir keeps
 # the runner's own binding and local layer out of these assertions, and a
 # scratch CLAUDE_CONFIG_DIR carries the reviewer file the guard checks.
-EMPTY_STATE="$(mktemp -d)"; SCRATCH_HOME="$(mktemp -d)"; trap 'rm -rf "$EMPTY_STATE" "$SCRATCH_HOME"' EXIT
+EMPTY_STATE="$(mktemp -d)"; SCRATCH_HOME="$(mktemp -d)"; FIXTURE_ROOT="$(mktemp -d)"; trap 'rm -rf "$EMPTY_STATE" "$SCRATCH_HOME" "$FIXTURE_ROOT"' EXIT
 FABRIC_ROOT="$(cd "$(dirname "$UNDER_TEST")/../../.." && pwd)"
+# The guard resolves through routing.py, which reads AGENT_FABRIC_ROOT: a
+# root on the frozen column of 2026-09-24, where the five classes differ
+# in model and level, so a guard that compared the wrong class's value
+# would be caught. The committed column is one model at one level.
+cp -r "$FABRIC_ROOT/routing" "$FIXTURE_ROOT/routing"
+cp "$FABRIC_ROOT/tests/fixtures/routing-distinct/capabilities.json" "$FABRIC_ROOT/tests/fixtures/routing-distinct/effort.json" "$FIXTURE_ROOT/routing/"
+mkdir -p "$FIXTURE_ROOT/runtime/claude-code"; cp "$FABRIC_ROOT/runtime/claude-code/aliases.json" "$FIXTURE_ROOT/runtime/claude-code/"
+cp "$FABRIC_ROOT/runtime/identity.py" "$FIXTURE_ROOT/runtime/"   # `pins --me` asks it who is running
 reviewer_file() { mkdir -p "$SCRATCH_HOME/agents"; printf -- '---\nname: code-review\nmodel: %s\n---\n' "$1" > "$SCRATCH_HOME/agents/code-review.md"; }
-launched() { local provider="$1"; shift; printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_STATE_DIR="$EMPTY_STATE" CLAUDE_CONFIG_DIR="$SCRATCH_HOME" AGENT_FABRIC_LAUNCH_PROVIDER="$provider" bash "$UNDER_TEST" 2>/dev/null; }
+launched() { local provider="$1"; shift; printf '{"tool_name":"Agent","tool_input":%s}' "$1" | AGENT_FABRIC_ROOT="$FIXTURE_ROOT" AGENT_FABRIC_STATE_DIR="$EMPTY_STATE" CLAUDE_CONFIG_DIR="$SCRATCH_HOME" AGENT_FABRIC_LAUNCH_PROVIDER="$provider" bash "$UNDER_TEST" 2>/dev/null; }
 vanilla() { launched anthropic "$1"; }
 reviewer_file "claude-opus-5[1m]"
 out="$(vanilla "$R")"

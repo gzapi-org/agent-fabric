@@ -4,7 +4,7 @@ class: domain
 description: A verbatim placeholder (stop name, line code) never takes a Georgian case ending; the case sits on a generic carrier noun and the name stays quoted in the nominative.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-21"
+distilled_at: "2026-09-25"
 origin:
   - agent: "language-culture-ge"
     host: "develop-qzapp"

@@ -4,13 +4,14 @@ class: domain
 description: To tell whether a gzapp contract closes an object, check unevaluatedProperties — additionalProperties alone is wrong wherever the schema uses $ref.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-18"
+distilled_at: "2026-09-25"
 origin:
   - agent: "flutter-dev-01"
     host: "develop-qzapp"
     project: gzapp
     working_copy: gzapp
 derived_from:
+  - 301af98f5e02e49e
   - 7c1ec8c0b9816689
 ---
 
@@ -60,4 +61,38 @@ Second, smaller trap from the same check: **resolve a contract by
 
 Related: [[verify-against-the-artifact]].
 
+## The nuance that stopped me raising a false finding (2026-09-19)
+
+`additionalProperties: false` fails to close a schema **only when the
+properties it must judge arrive from elsewhere** — a sibling `$ref` or
+`allOf` branch that introduces properties the keyword cannot see.
+
+It still closes when the REFERENCED schema closes itself. Measured on
+`journey-state` 1.2.0, whose `replacement_plan` is
+`allOf: [$ref journey-plan-response, {properties: {plan_kind: const}}]`
+with no closure key of its own:
+
+| instance | result |
+|---|---|
+| the repo's own valid fixture (control) | ACCEPTED |
+| an undeclared member INSIDE `replacement_plan` | **REJECTED** |
+| a misspelled top-level `replacment_plan` | **REJECTED** |
+
+It closes because `journey-plan-response` carries
+`additionalProperties: false` on its own object, and the `allOf` branch
+introduces no new property (`plan_kind` is already declared there).
+
+**Confirmed against the pipeline's own validator**, not just mine:
+backend-dev-02 re-ran the same three cases through Ajv 2020 (what
+`tools/validate_contracts/validate.js` runs), every contract loaded by
+`$id`, and got the same three answers. So the two implementations agree
+about `allOf` closure here and this is the pipeline's behaviour, not one
+library's reading.
+
+So: check where the properties are DECLARED before calling a composed
+schema open. I nearly reported a second blind side to backend-dev-02
+on the strength of the general rule alone.
+
 *References: verify-against-the-artifact*
+
+*Observed 2026-09-19 (flutter-dev)*

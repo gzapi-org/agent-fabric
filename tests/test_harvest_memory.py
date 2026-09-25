@@ -37,6 +37,14 @@ def write_memory(d: str, name: str, mtype: str, body: str = "the fact",
 
 
 def run(mem: str, out: str, *extra: str):
+    # A case that names no working copy gets an empty one of its own: the
+    # default is this checkout, whose committed drain report carries a real
+    # watermark once agent-fabric has been drained, and a fixture memory
+    # older than it was silently out of scope (the drain of 2026-09-25).
+    if "--working-copy" not in extra:
+        wc = out.rstrip(os.sep) + "-wc"
+        os.makedirs(os.path.join(wc, ".agent-fabric", "memory"), exist_ok=True)
+        extra = ("--working-copy", wc, "--project", "demo", *extra)
     return subprocess.run(
         [sys.executable, TOOL, "--role", "architect-cto", "--memory", mem,
          "--out", out, *extra],

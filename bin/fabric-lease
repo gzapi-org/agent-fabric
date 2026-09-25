@@ -2,7 +2,7 @@
 # bin/fabric-lease — run a command under a host-wide lease: one holder at
 # a time across every account on this host, by name.
 #
-#   fabric-lease <name> [--wait SECS] [--need-mem MB] -- <cmd> [args...]
+#   fabric-lease <name> [--wait SECS] [--need-mem MB] [--label JOB] -- <cmd> [args...]
 #   fabric-lease <name> --who              who holds it, if anyone; exit 0 free, 1 held
 #
 # The host is one machine the accounts share, and some of what they run
@@ -33,23 +33,33 @@
 # the lease's descriptor closed, so nothing it spawns and leaves behind
 # keeps the lease. Exit status: the command's; 75 (EX_TEMPFAIL) when
 # the lease is held or memory is short; 2 on usage.
+#
+# Every refusal ends with ONE stable line on stderr, the contract a caller
+# matches instead of the prose above it (docs/resources.md):
+#   fabric-lease: reason=memory|timeout|held|nodir
+# --label names the JOB under the lease (the lease names the resource):
+# it rides in the holder's record, so "heavy" held by a suite says so.
 set -uo pipefail
 LEASES="${AGENT_FABRIC_LEASES:-/run/lock/agent-fabric}"
 MEMINFO="${AGENT_FABRIC_MEMINFO:-/proc/meminfo}"
 usage() {
     cat >&2 <<'U'
-usage: fabric-lease <name> [--wait SECS] [--need-mem MB] -- <cmd> [args...]
+usage: fabric-lease <name> [--wait SECS] [--need-mem MB] [--label JOB] -- <cmd> [args...]
        fabric-lease <name> --who              who holds it, if anyone; exit 0 free, 1 held
 U
     exit 2
 }
-NAME=""; WAIT=0; NEED=0; WHO=0
+NAME=""; WAIT=0; NEED=0; WHO=0; LABEL=""
+# The machine-readable reason, always the last line of a refusal.
+refuse() { local code="$1" reason="$2"; shift 2; [[ $# -gt 0 ]] && echo "fabric-lease: $*" >&2; echo "fabric-lease: reason=$reason" >&2; exit "$code"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --wait) WAIT="${2:-}"; shift ;;
         --wait=*) WAIT="${1#--wait=}" ;;
         --need-mem) NEED="${2:-}"; shift ;;
         --need-mem=*) NEED="${1#--need-mem=}" ;;
+        --label) LABEL="${2:-}"; shift ;;
+        --label=*) LABEL="${1#--label=}" ;;
         --who) WHO=1 ;;
         --) shift; break ;;
         -*) echo "fabric-lease: unknown option $1" >&2; usage ;;
@@ -60,11 +70,14 @@ done
 [[ -n "$NAME" ]] || usage
 [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "fabric-lease: a name is [A-Za-z0-9._-], 64 at most: '$NAME'" >&2; exit 2; }
 [[ "$WAIT" =~ ^[0-9]+$ && "$NEED" =~ ^[0-9]+$ ]] || { echo "fabric-lease: --wait and --need-mem take whole numbers" >&2; exit 2; }
+# A label is written into a file every account reads and printed to
+# every refused caller: a token, no spaces, no control characters.
+[[ -z "$LABEL" || "$LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "fabric-lease: a label is [A-Za-z0-9._-], 64 at most: '$LABEL'" >&2; exit 2; }
 (( WHO )) || [[ $# -ge 1 ]] || { echo "fabric-lease: a command after --" >&2; usage; }
 # An agent has no sudo: the directory is root's to make (the boot script,
 # tmpfiles.d, or the operator's persist run), so the message names whose
 # action it is rather than a command the caller cannot run.
-[[ -d "$LEASES" ]] || { echo "fabric-lease: no lease directory at $LEASES — it is made at boot by the fabric's provisioning; ask the host's operator (fabric-coordinator) to run bin/fabric-host <host> persist" >&2; exit 2; }
+[[ -d "$LEASES" ]] || refuse 2 nodir "no lease directory at $LEASES — it is made at boot by the fabric's provisioning; ask the host's operator (fabric-coordinator) to run bin/fabric-host <host> persist"
 L="$LEASES/$NAME"
 # 0666 so a later holder, another login, can record itself; a file that
 # exists with tighter modes (made by hand) still locks, and the record is
@@ -78,7 +91,7 @@ L="$LEASES/$NAME"
 [[ -e "$L" ]] || ( umask 000; : >> "$L" ) 2>/dev/null
 exec 9<"$L" || { echo "fabric-lease: cannot open $L" >&2; exit 2; }
 holder() { local h; h="$(head -c 512 "$L" 2>/dev/null | head -1)"; [[ -n "$h" ]] && echo "$h" || echo "(holder unrecorded)"; }
-record() { [[ -w "$L" ]] && printf '%s %s %s %s\n' "$(id -un)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" | dd of="$L" conv=nocreat status=none 2>/dev/null; return 0; }
+record() { [[ -w "$L" ]] && printf '%s %s %s %s%s\n' "$(id -un)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "${LABEL:+ ($LABEL)}" | dd of="$L" conv=nocreat status=none 2>/dev/null; return 0; }
 # A probe is a SHARED lock, never the exclusive one: `flock -n` on a free
 # lease would take it for the probe's lifetime, and sixteen daemons
 # probing at once (fabric-ctl all host) or a --who could refuse a real
@@ -97,9 +110,9 @@ if ! flock -w 1 9; then
     h="$(holder)"
     if (( WAIT > 0 )); then
         echo "fabric-lease: $NAME is held by $h — waiting up to ${WAIT}s" >&2
-        flock -w "$WAIT" 9 || { echo "fabric-lease: $NAME still held by $(holder) after ${WAIT}s" >&2; exit 75; }
+        flock -w "$WAIT" 9 || refuse 75 timeout "$NAME still held by $(holder) after ${WAIT}s"
     else
-        echo "fabric-lease: $NAME is held by $h — retry later, or --wait SECS" >&2; exit 75
+        refuse 75 held "$NAME is held by $h — retry later, or --wait SECS"
     fi
 fi
 # Held. The record FIRST: a caller refused while this one is still
@@ -114,7 +127,7 @@ if (( NEED > 0 )); then
         total_kb="$(awk '/^MemTotal:/{print $2}' "$MEMINFO" 2>/dev/null)"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
         echo "fabric-lease: $NAME needs ${NEED} MB and this host has $((avail_kb / 1024)) MB available (MemTotal $((total_kb / 1024)) MB) — the largest processes:" >&2
         ps -eo user:20,pid,rss,comm --sort=-rss 2>/dev/null | head -6 | awk 'NR==1{print "   "$0; next}{printf "   %-20s %7s %6d MB %s\n", $1, $2, $3/1024, $4}' >&2
-        exit 75
+        refuse 75 memory
     fi
 fi
 # The command runs in ITS OWN PROCESS GROUP (set -m around the fork),

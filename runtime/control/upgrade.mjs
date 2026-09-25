@@ -92,7 +92,15 @@ export function holdLease(root, { spawnFn = spawn, waitS = LEASE_WAIT_S } = {}) 
       resolve({ release: () => { if (!exited) child.stdin.end(); return gone; } });
     });
     child.on('error', e => { if (!settled) { settled = true; reject({ code: -1, line: String(e.message) }); } });
-    child.on('close', code => { if (!settled) { settled = true; reject({ code, line: lastLine({ stderr: err, message: `fabric-lease exited ${code}` }) }); } });
+    // fabric-lease ends a refusal with a stable `reason=` line
+    // (docs/resources.md); the reason is kept as data and the line a
+    // person reads is the prose above it.
+    child.on('close', code => {
+      if (settled) return; settled = true;
+      const reason = /^fabric-lease: reason=(\w+)$/m.exec(err)?.[1] ?? null;
+      const prose = err.split('\n').filter(l => !/^fabric-lease: reason=/.test(l)).join('\n');
+      reject({ code, reason, line: lastLine({ stderr: prose, message: `fabric-lease exited ${code}` }) });
+    });
   });
 }
 

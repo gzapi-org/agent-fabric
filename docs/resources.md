@@ -35,18 +35,34 @@ one more line where the boot script re-adds the accounts.
 ## The host lease
 
 ```sh
-fabric-lease <name> [--wait SECS] [--need-mem MB] -- <cmd> [args...]
+fabric-lease <name> [--wait SECS] [--need-mem MB] [--label JOB] -- <cmd> [args...]
 fabric-lease <name> --who
 ```
 
-- **A name is a resource, not a job.** `backend-test` — the suite and
-  its postgres — whoever runs it, from whichever checkout. Two names
-  are two leases; the project decides its names, and writes them where
-  the job is started (a Makefile target), never in the fabric.
+- **A name is a resource, not a job.** Two names are two leases, and
+  two leases never queue against each other.
+- **`heavy` is the host's memory, and every memory-heavy job takes it**
+  — a backend suite, a stack bring-up, an app build, a large cargo
+  build — in any project, with `--label <job>` saying which. The
+  2026-09-25 crash was one account's standing stack plus a build
+  started beside it (`docs/live-checks/2026-09-25-develop-qzapp-crash.md`),
+  and the shape recurs with any two heavy jobs under different names:
+  each checks `--need-mem` against the same free memory, both pass, and
+  both grow after the check. Only one lease held across that growth
+  prevents it; a shared lock around the check alone would not. The cost,
+  accepted: a suite waits behind a bring-up. Other names stay for
+  resources that are not memory (a device, a port). Where the job is
+  started (a Makefile target) is the project's, never the fabric's.
 - **Fail fast by default.** A session's tool call has a timeout of its
-  own; refused, it is told `held by <login> <pid> <since> <name>` and
-  decides — wait (`--wait`), do something else, or ask. Exit 75
+  own; refused, it is told `held by <login> <pid> <since> <name> (<job>)`
+  and decides — wait (`--wait`), do something else, or ask. Exit 75
   (`EX_TEMPFAIL`) so a wrapper can tell "busy" from "failed".
+- **Why it was refused is a contract, not prose.** Every refusal ends
+  with one line on stderr, `fabric-lease: reason=<r>`: `held` (no
+  wait asked), `timeout` (the wait ran out), `memory` (under
+  `--need-mem`), `nodir` (no lease directory, exit 2). A caller that
+  tells refusals apart matches that last line; the prose above it may
+  be reworded at any time (tests/test_fabric-lease.sh pins the line).
 - **`--need-mem`** checks `MemAvailable` *under* the lease, so two
   callers cannot both pass. It exists because of the balloon: a Qubes
   VM grows on demand with a lag, and a suite started at 8.6 GiB does

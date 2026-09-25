@@ -323,8 +323,11 @@ export function host({ proc = '/proc', sys = '/sys', leases = '/run/lock/agent-f
       // The record is the holder's own line — informational, and read
       // bounded: the first 256 bytes, never a whole file a login has grown.
       const buf = Buffer.alloc(256); const nread = fs.readSync(fd, buf, 0, 256, 0);
-      const [login, pid, since] = buf.toString('utf8', 0, nread).split('\n')[0].split(' ');
-      out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null });
+      const rec = buf.toString('utf8', 0, nread).split('\n')[0];
+      const [login, pid, since] = rec.split(' ');
+      // The job the holder named with --label: "<name> (<job>)" at the end.
+      const label = /\(([A-Za-z0-9._-]{1,64})\)$/.exec(rec)?.[1] ?? null;
+      out.leases.push({ name: n, holder: login || null, pid: Number(pid) || null, since: since || null, label });
     } finally { try { fs.closeSync(fd); } catch { /* already closed */ } }
   }
   const ps = run('ps', ['-eo', 'user:32,pid,rss,comm', '--sort=-rss']);

@@ -129,6 +129,27 @@ HOLDER=$!; for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/n
 kill -HUP "$HOLDER"; wait "$HOLDER" 2>/dev/null; HOLDER=""
 grep -q child-got-hup "$SANDBOX/holder.out" && ok "HUP to the wrapper reaches the command" || bad "HUP not forwarded" "$(cat "$SANDBOX/holder.out")"
 
+echo "fabric-lease: every refusal ends with one stable reason line; --label names the job"
+# The contract callers match (docs/resources.md): the LAST stderr line, whatever the prose above it says.
+last() { tail -1 <<<"$1"; }
+out="$(AGENT_FABRIC_LEASES="$SANDBOX/absent" bash "$ROOT/bin/fabric-lease" x -- true 2>&1)"
+[[ "$(last "$out")" == "fabric-lease: reason=nodir" ]] && ok "no lease directory: reason=nodir, last" || bad "nodir reason" "$out"
+out="$(AGENT_FABRIC_MEMINFO="$SANDBOX/meminfo" lease heavy --need-mem 4096 -- true 2>&1)"
+[[ "$(last "$out")" == "fabric-lease: reason=memory" ]] && ok "short of memory: reason=memory, last" || bad "memory reason" "$out"
+AGENT_FABRIC_LEASES="$D" bash "$ROOT/bin/fabric-lease" heavy --label backend-test -- sh -c 'echo started; sleep 20' > "$SANDBOX/holder.out" 2>&1 &
+HOLDER=$!
+for _ in $(seq 50); do grep -q started "$SANDBOX/holder.out" 2>/dev/null && break; sleep 0.1; done
+out="$(lease heavy --label stack-up -- true 2>&1)"; rc=$?
+[[ $rc -eq 75 && "$(last "$out")" == "fabric-lease: reason=held" ]] && ok "held, no wait: exit 75, reason=held, last" || bad "held reason" "rc=$rc $out"
+grep -q "held by $(id -un) .* heavy (backend-test)" <<<"$out" && ok "…and the holder's job is named: heavy (backend-test)" || bad "label not in the holder record" "$out"
+out="$(lease heavy --wait 1 -- true 2>&1)"; rc=$?
+[[ $rc -eq 75 && "$(last "$out")" == "fabric-lease: reason=timeout" ]] && ok "the wait ran out: exit 75, reason=timeout, last" || bad "timeout reason" "rc=$rc $out"
+out="$(lease heavy --who 2>&1)"; grep -q "^held: .* heavy (backend-test)$" <<<"$out" && ok "--who shows the label too" || bad "--who label" "$out"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null; HOLDER=""
+lease heavy --label 'two words' -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a label with a space is refused (it is written into a shared file)" || bad "bad label accepted"
+lease heavy --label "$(printf 'x\033]0;y')" -- true 2>/dev/null; [[ $? -eq 2 ]] && ok "a label with a control character is refused" || bad "control label accepted"
+out="$(lease heavy -- sh -c 'echo ran' 2>&1)"; [[ "$out" == "ran" ]] && ok "a run that is not refused prints no reason line" || bad "reason on success" "$out"
+
 echo
 if (( FAIL )); then echo "fabric-lease: $FAIL failure(s), $PASS passed"; exit 1; fi
 echo "fabric-lease: $PASS passed"

@@ -268,7 +268,7 @@ export function table(op, rs) {
       const bal = m.balloon_mb ? `${G(m.balloon_mb.current)}/${G(m.balloon_mb.static_max)}` : 'none';
       const disks = (m.disk ?? []).map(d => `${d.mount} ${d.avail_gb}G free (${d.use_pct}%)`).join(', ') || '-';
       lines.push(`${host.padEnd(16)} ${answered.padEnd(9)} ${load.padEnd(17)} ${G(m.cpus).padStart(4)}  ${mem.padEnd(19)} ${swap.padStart(9)}  ${bal.padEnd(19)} ${disks}`);
-      const leases = (m.leases ?? []).map(l => `${l.name}: ${l.holder ?? '?'}${l.pid ? ` pid ${l.pid}` : ''}${l.since ? ` since ${l.since.slice(11, 16)}Z` : ''}`).join('; ') || 'none';
+      const leases = (m.leases ?? []).map(l => `${l.name}${l.label ? ` (${l.label})` : ''}: ${l.holder ?? '?'}${l.pid ? ` pid ${l.pid}` : ''}${l.since ? ` since ${l.since.slice(11, 16)}Z` : ''}`).join('; ') || 'none';
       const top = (m.top_rss ?? []).slice(0, 5).map(p => `${p.comm} ${p.user} ${p.rss_mb} MB`).join(', ') || '-';
       lines.push(`${''.padEnd(16)} ${''.padEnd(9)} leases: ${leases}`);
       lines.push(`${''.padEnd(16)} ${''.padEnd(9)} largest: ${top}`);

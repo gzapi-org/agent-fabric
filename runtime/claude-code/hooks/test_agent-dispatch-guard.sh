@@ -84,6 +84,9 @@ expect "Opus in caps still asks" ask '{"model":"Opus","isolation":"worktree","de
 echo "the denial says why"
 r="$(reason '{"subagent_type":"code-review","model":"sonnet","description":"Review PR 626"}')"
 if grep -q "green PR that merges" <<<"$r"; then pass "the tier denial names the failure mode"; else fail "the tier denial names the failure mode" "$r"; fi
+# The pointer is the fabric's own skill, installed on every account; a
+# heading in one project's CLAUDE.md is missing from the others.
+if grep -q "subagent-dispatch skill" <<<"$r" && ! grep -q "CLAUDE.md - Subagent" <<<"$r"; then pass "the denial points at the fabric's skill, not one project's heading"; else fail "the denial points at a project heading" "$r"; fi
 r="$(reason '{"subagent_type":"code-review","model":"fable","isolation":"worktree","description":"Review PR 626"}')"
 if grep -q "baseRef" <<<"$r"; then pass "the isolation denial names baseRef"; else fail "the isolation denial names baseRef" "$r"; fi
 

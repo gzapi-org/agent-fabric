@@ -126,7 +126,7 @@ function placedRegistry() {
   return f;
 }
 
-test('assign: the reference is written and read back, a login already there is left alone, and only the changed ones are synced', async () => {
+test('assign: the reference is written and read back, a login already there is left alone in Doppler, and every named login syncs, proves the template\'s fingerprint and restarts', async () => {
   const d = fakeDoppler(); const registry = placedRegistry();
   let synced;
   const r = await capture(() => main(['assign', 'flutter-dev-01', 'web-dev-01', 'claude-b'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: (bin, args) => { synced = [path.basename(bin), ...args]; return { status: 0 }; } }));
@@ -135,11 +135,15 @@ test('assign: the reference is written and read back, a login already there is l
   assert.equal(d.store['agents2_web-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, templateRef('claude-b'));
   assert.match(r.out, /flutter-dev-01\s+none\s+→ claude-b\s+written/);
   assert.match(r.out, /web-dev-01\s+claude-a\s+→ claude-b\s+written/);
-  assert.deepEqual(synced, ['fabric-ctl', 'flutter-dev-01', 'web-dev-01', 'secrets-sync']);
+  const fpB = crypto.createHash('sha256').update('sk-ant-oat01-B').digest('hex').slice(0, 12);
+  assert.deepEqual(synced, ['fabric-ctl', 'flutter-dev-01', 'web-dev-01', 'secrets-sync', '--expect', fpB, '--restart']);
   assert.ok(!r.out.includes('sk-ant-oat01'), 'no template token in the output');
   synced = null;
-  const again = await capture(() => main(['assign', 'flutter-dev-01', 'claude-b'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => { synced = true; return { status: 0 }; } }));
-  assert.equal(again.code, 0); assert.match(again.out, /flutter-dev-01\s+claude-b\s+→ claude-b\s+unchanged/); assert.equal(synced, null, 'nothing changed, nothing synced');
+  const again = await capture(() => main(['assign', 'flutter-dev-01', 'claude-b', '--no-restart'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: (bin, args) => { synced = args; return { status: 0 }; } }));
+  assert.equal(again.code, 0); assert.match(again.out, /flutter-dev-01\s+claude-b\s+→ claude-b\s+unchanged/);
+  assert.deepEqual(synced, ['flutter-dev-01', 'secrets-sync', '--expect', fpB], 'unchanged in Doppler, still proved on the account; --no-restart leaves its session alone');
+  const failed = await capture(() => main(['assign', 'flutter-dev-01', 'claude-b'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => ({ status: 1 }) }));
+  assert.equal(failed.code, 1, 'an account that did not prove the move fails the command');
 });
 
 test('assign: no way back to a login\'s own /login; an unknown login, an unknown template and an empty template are refused before anything is written', async () => {

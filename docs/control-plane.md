@@ -142,7 +142,7 @@ the harness's own headless `/usage`, which renews the observer's 8-hour
 sign-in and makes no model call, run every 4 hours by the daemon and on
 request, cached 5 minutes; one row per Claude account in `fabric-ctl`,
 only the observing login has any; `docs/claude-accounts.md`), `status`
-(all but `script`, `tokens`, `memory` and `accounts`), and the two ACTIONS, answered only when signed (below) and never part of `status`: `upgrade` (`docs/fleet-upgrade.md`) — bring the harness to the version the request names, stopping and resuming a running session — and `secrets-sync` (`docs/claude-accounts.md`) — re-apply the login's own Doppler config through its own `fabric-secrets sync`, reporting the Claude sign-in by fingerprint, stopping nothing. A login running on a
+(all but `script`, `tokens`, `memory` and `accounts`), and the two ACTIONS, answered only when signed (below) and never part of `status`: `upgrade` (`docs/fleet-upgrade.md`) — bring the harness to the version the request names, stopping and resuming a running session — and `secrets-sync` (`docs/claude-accounts.md`) — re-apply the login's own Doppler config through its own `fabric-secrets sync`, reporting the Claude sign-in by fingerprint, failing when it is not the fingerprint the request expects, and — asked to — resuming a running session on it through the launcher's restart marker. A login running on a
 template's setup-token reports it by fingerprint in `identity`, and its
 `usage` points at the observer: its own `~/.claude.json` names the
 account it last signed into, not the one in use. A section that

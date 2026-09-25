@@ -44,13 +44,28 @@ Moving logins is one command on the coordinator's login:
 bin/fabric-accounts assign flutter-dev-01 p2p-network-dev-01 andrea-benetton-blueteam-ge
 ```
 
-It writes the reference into each login's Doppler config (the
-coordinator's token can; a login's own cannot), reads it back, and has
-the changed accounts apply it at once through their daemons — the signed
-`secrets-sync` action. No browser, nobody logs in to the account. A
-running session keeps the account it started with; its next launch — in
-any shell, because the launcher takes the token from the login's synced
-record rather than from the shell — runs on the new one. There is no
+It is the whole move, and past the Doppler write it is messages only (the
+owner, 2026-09-25: no hostexec, no sudo, nobody on the account):
+
+1. the reference goes into each login's Doppler config and is read back
+   (the coordinator's token can write it; a login's own cannot);
+2. every named login — changed or not, since a reference says nothing of
+   what the account last synced — gets the signed `secrets-sync` action
+   with the template's fingerprint (`--expect`): the account runs its own
+   `fabric-secrets sync`, and a synced token that is not the template's is
+   a failure, said by the account;
+3. with `--restart` (assign's default; `--no-restart` leaves sessions
+   alone) a running session is stopped gracefully and its launcher
+   resumes the same conversation on the new sign-in — the upgrade's
+   restart marker, written already done. The requester's own session is
+   never stopped; one that does not stop within 90 s is left running and
+   said.
+
+Each row of the reply names the sign-in by fingerprint (`setup-token
+<sha>`, `fabric-accounts templates` maps it to an account), and any row
+that is not `synced` makes the command exit 1. A later relaunch in any
+shell stays on the new account, because the launcher takes the token
+from the login's synced record rather than from the shell. There is no
 `assign … own`: a login without a reference cannot start a plain-claude
 session.
 

@@ -103,7 +103,7 @@ export function stateDir(home = os.homedir(), env = process.env, login = os.user
   return path.join(root, 'agents', login);
 }
 export function markerPath(dir) { return path.join(dir, 'restart.json'); }
-function writeMarker(dir, m) {
+export function writeMarker(dir, m) {
   fs.mkdirSync(dir, { recursive: true });
   const f = markerPath(dir), tmp = `${f}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(m, null, 2) + '\n', { mode: 0o600 });

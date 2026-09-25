@@ -19,10 +19,10 @@ import { fileURLToPath } from 'node:url';
 const CTL = fileURLToPath(new URL('../ctl.mjs', import.meta.url));
 
 test('parseArgs: targets, op, flags, defaults', () => {
-  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null, piece: null, version: null, force: false });
-  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null, days: null, piece: null, version: null, force: false });
-  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d', days: null, piece: null, version: null, force: false });
-  assert.deepEqual(parseArgs(['all', 'tokens', '--days', '3']), { targets: ['all'], op: 'tokens', json: false, timeout: 60, out: null, days: 3, piece: null, version: null, force: false });
+  assert.deepEqual(parseArgs(['all']), { targets: ['all'], op: 'status', json: false, timeout: 20, out: null, days: null, piece: null, version: null, force: false, expect: null, restart: false });
+  assert.deepEqual(parseArgs(['db-admin', 'ping', '--json']), { targets: ['db-admin'], op: 'ping', json: true, timeout: 5, out: null, days: null, piece: null, version: null, force: false, expect: null, restart: false });
+  assert.deepEqual(parseArgs(['all', 'memory', '--out', '/tmp/d']), { targets: ['all'], op: 'memory', json: false, timeout: 120, out: '/tmp/d', days: null, piece: null, version: null, force: false, expect: null, restart: false });
+  assert.deepEqual(parseArgs(['all', 'tokens', '--days', '3']), { targets: ['all'], op: 'tokens', json: false, timeout: 60, out: null, days: 3, piece: null, version: null, force: false, expect: null, restart: false });
   assert.equal(parseArgs(['all', 'tokens', '--days=14']).days, 14);
   assert.throws(() => parseArgs(['all', 'tokens', '--days', '0']), /--days/);
   assert.throws(() => parseArgs(['all', 'status', '--days', '3']), /--days/, 'a window belongs to tokens only');
@@ -366,6 +366,13 @@ test('fabric-ctl upgrade: the coordinator\'s pin travels in the signed request; 
     const over = await runKey(k.privateKeySpec, ['db-admin', 'upgrade', 'claude', '--version', '2.1.279', '--timeout', '1']);
     assert.equal(JSON.parse(r.rows.at(-1).content).args.version, '2.1.279', '--version overrides the pin'); void over;
   } finally { r.close(); }
+});
+
+test('secrets-sync takes --expect (a fingerprint) and --restart, and nothing else takes them', () => {
+  const a = parseArgs(['flutter-dev-01', 'secrets-sync', '--expect', '183a68e97389', '--restart']);
+  assert.deepEqual([a.op, a.expect, a.restart, a.timeout], ['secrets-sync', '183a68e97389', true, 240]);
+  assert.throws(() => parseArgs(['all', 'secrets-sync', '--expect', 'sk-ant-oat01-x']), /12-hex/);
+  assert.throws(() => parseArgs(['all', 'status', '--restart']), /secrets-sync only/);
 });
 
 test('fabric-ctl upgrade exits 1 when any account failed, 0 when every answer is upgraded or current', async () => {

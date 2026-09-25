@@ -7,6 +7,8 @@
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
 //   fabric-ctl <login|all> upgrade claude [--version V]   an ACTION, signed with the operator's key: bring the harness
 //                                                   to the pinned version, restarting a running session (docs/fleet-upgrade.md)
+//   fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]   an ACTION: re-apply the login's Doppler config,
+//                                                   check its setup-token, restart a running session on it (docs/claude-accounts.md)
 //   fabric-ctl keygen [--force]                     the operator's signing key: private half into Doppler, public into the registry
 //
 // A login becomes an address through the registry's placement
@@ -38,7 +40,7 @@ export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ??
 }
 
 export function parseArgs(argv) {
-  const out = { targets: [], op: 'status', json: false, timeout: null, out: null, days: null, piece: null, version: null, force: false };
+  const out = { targets: [], op: 'status', json: false, timeout: null, out: null, days: null, piece: null, version: null, force: false, expect: null, restart: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
@@ -51,6 +53,9 @@ export function parseArgs(argv) {
     else if (a === '--version') out.version = argv[++i];
     else if (a.startsWith('--version=')) out.version = a.slice(10);
     else if (a === '--force') out.force = true;
+    else if (a === '--expect') out.expect = argv[++i];
+    else if (a.startsWith('--expect=')) out.expect = a.slice(9);
+    else if (a === '--restart') out.restart = true;
     else if (a === '-h' || a === '--help') out.help = true;
     else if (a.startsWith('--')) throw new Error(`unknown option ${a}`);
     else if (a === 'keygen' && !out.targets.length) out.op = 'keygen';
@@ -58,9 +63,11 @@ export function parseArgs(argv) {
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : out.op === 'secrets-sync' ? 180 : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : out.op === 'secrets-sync' ? 240 : 20;
   if (out.op === 'upgrade' && !PIECES.includes(out.piece)) throw new Error(`upgrade takes a piece: ${PIECES.join(', ')}`);
   if (out.version !== null && (out.op !== 'upgrade' || !VERSION_RE.test(out.version))) throw new Error('--version takes digits.digits.digits, with upgrade only');
+  if ((out.expect !== null || out.restart) && out.op !== 'secrets-sync') throw new Error('--expect and --restart go with secrets-sync only');
+  if (out.expect !== null && !/^[0-9a-f]{12}$/.test(out.expect)) throw new Error('--expect takes a 12-hex setup-token fingerprint (fabric-accounts templates)');
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
   if (out.op === 'memory' && !out.out) throw new Error('memory takes --out <dir>: where the drain bundles are written');
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) throw new Error('--timeout takes seconds, a positive number');
@@ -292,7 +299,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || (!args.targets.length && args.op !== 'keygen')) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>\n       fabric-ctl <login|all> upgrade claude [--version V]\n       fabric-ctl keygen [--force]'); return args.help ? 0 : 2; }
+  if (args.help || (!args.targets.length && args.op !== 'keygen')) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>\n       fabric-ctl <login|all> upgrade claude [--version V]\n       fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]\n       fabric-ctl keygen [--force]'); return args.help ? 0 : 2; }
   if (args.op === 'keygen') return keygen(args, { registry });
   const all = placements(registry);
   let expected;
@@ -321,7 +328,8 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   // for a queued fleet upgrade is far longer — the last account replies
   // long after every account accepted.
   let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.min(ACTION_OPS.includes(args.op) ? ACTION_TTL_MAX_S : Infinity, Math.max(cfg.ttl_s, Math.ceil(args.timeout))), ...(args.days ? { days: args.days } : {}),
-                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}) };
+                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}),
+                  ...(args.op === 'secrets-sync' && (args.expect || args.restart) ? { args: { ...(args.expect ? { expect: args.expect } : {}), ...(args.restart ? { restart: true } : {}) } } : {}) };
   // One command, one version: the coordinator's pin travels in the signed
   // request. Left to each account, an account that had not pulled the pin
   // bump would read its own older pin and answer `current` (review of #34).

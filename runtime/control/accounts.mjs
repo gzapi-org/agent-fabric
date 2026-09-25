@@ -7,9 +7,11 @@
 //                                     browser AS THAT ACCOUNT, then /exit. A real terminal.
 //   fabric-accounts list              each observed account: signed in, email, sign-in expiry
 //   fabric-accounts read              read every account's windows now (the harness's /usage)
-//   fabric-accounts assign <login…|all> <account> [--no-sync]
+//   fabric-accounts assign <login…|all> <account> [--no-restart] [--no-sync]
 //                                     which Claude account those logins run on: the reference in each
-//                                     login's Doppler config, then `fabric-ctl <logins> secrets-sync`
+//                                     login's Doppler config, then `fabric-ctl <logins> secrets-sync
+//                                     --expect <template's fingerprint> --restart` — every account
+//                                     applies it, proves it, and resumes a running session on it
 //   fabric-accounts templates         each Doppler template's token fingerprint, to name the account
 //                                     behind a login's `setup-token <sha>` (fabric-ctl, fabric-status)
 //
@@ -26,7 +28,7 @@ import { accountsDir, accountSlugs, accounts, claudeBin, ACCOUNT_SLUG, takeReadL
 import { placements } from './ctl.mjs';
 import { FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 
-const USAGE = `usage: fabric-accounts login <account> | list | read | templates | assign <login…|all> <account|own> [--no-sync]
+const USAGE = `usage: fabric-accounts login <account> | list | read | templates | assign <login…|all> <account> [--no-restart] [--no-sync]
   <account>: lowercase letters, digits and hyphens — the account's email with @ and . as -,
              e.g. claude-pzhuy-8alias-com (the Doppler template's name without its prefix)`;
 
@@ -114,8 +116,8 @@ export async function main(argv = process.argv.slice(2), { home = os.homedir(), 
   const dir = accountsDir(home, env);
   if (cmd === 'list' && argv.length === 1) { console.log(listLines(dir).join('\n')); return 0; }
   if (cmd === 'assign') {
-    const noSync = argv.includes('--no-sync');
-    const rest = argv.slice(1).filter(a => a !== '--no-sync');
+    const noSync = argv.includes('--no-sync'), noRestart = argv.includes('--no-restart');
+    const rest = argv.slice(1).filter(a => a !== '--no-sync' && a !== '--no-restart');
     if (rest.length < 2) { console.error(USAGE); return 2; }
     const account = rest.at(-1); const who = rest.slice(0, -1);
     const placed = placements(registry).map(p => p.login);
@@ -131,9 +133,13 @@ export async function main(argv = process.argv.slice(2), { home = os.homedir(), 
     for (const r of rows) console.log(`${r.login.padEnd(22)} ${String(r.from ?? '-').padEnd(30)} → ${String(r.to ?? '-').padEnd(30)} ${r.status}${r.reason ? `  ${r.reason}` : ''}`);
     const bad = rows.some(r => !['written', 'unchanged'].includes(r.status));
     const changed = rows.filter(r => r.status === 'written').map(r => r.login);
-    if (noSync || !changed.length) { if (changed.length) console.error('fabric-accounts: --no-sync — each changed login applies it at its next fabric-secrets sync'); return bad ? 1 : 0; }
-    // The accounts apply it now, each through its own daemon (a signed action).
-    const r = spawn(path.join(FABRIC_ROOT, 'bin', 'fabric-ctl'), [...changed, 'secrets-sync'], { stdio: 'inherit', env });
+    const reached = rows.filter(r => ['written', 'unchanged'].includes(r.status)).map(r => r.login);
+    if (noSync || !reached.length) { if (changed.length) console.error('fabric-accounts: --no-sync — each changed login applies it at its next fabric-secrets sync'); return bad ? 1 : 0; }
+    // Every named login applies it now through its own daemon (a signed
+    // action) — the unchanged ones too, since a Doppler reference says
+    // nothing of what the account last synced — and proves it against the
+    // template's fingerprint; a running session is resumed on it.
+    const r = spawn(path.join(FABRIC_ROOT, 'bin', 'fabric-ctl'), [...reached, 'secrets-sync', '--expect', t.token_sha256_12, ...(noRestart ? [] : ['--restart'])], { stdio: 'inherit', env });
     return bad || r.status !== 0 ? 1 : 0;
   }
   if (cmd === 'templates' && argv.length === 1) {

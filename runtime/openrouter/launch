@@ -802,7 +802,8 @@ while m.get("status") == "pending" and time.time() < deadline:
     m = load()
 st = m.get("status")
 if st == "done":
-    print(f"launch: {m.get('piece')} upgraded {m.get('from')} → {m.get('installed') or m.get('to')}; resuming the session on it.", file=sys.stderr)
+    verb = "moved" if m.get("piece") == "the Claude account" else "upgraded"
+    print(f"launch: {m.get('piece')} {verb} {m.get('from')} → {m.get('installed') or m.get('to')}; resuming the session on it.", file=sys.stderr)
 elif st == "failed":
     print(f"launch: the upgrade of {m.get('piece')} to {m.get('to')} FAILED ({m.get('reason') or 'no reason given'}); resuming the session on what is installed.", file=sys.stderr)
 else:

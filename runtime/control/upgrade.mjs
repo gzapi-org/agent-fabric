@@ -44,7 +44,8 @@ export const VERSION_TIMEOUT_MS = 30000;
 // the new version is read back: a session is stopped only when its install
 // can start, so the queue costs the operator's wait and never an account's
 // downtime. The wait is sixteen accounts (develop-qzapp's count) at up to
-// ~56 s an install; a larger host needs a longer one.
+// ~56 s a turn — the stop wait, the install and the read-back together; a
+// larger host needs a longer one.
 export const INSTALL_LEASE = 'claude-install';
 export const LEASE_WAIT_S = 900;
 export const LEASE_HELD = 75;   // fabric-lease's EX_TEMPFAIL: still held after the wait

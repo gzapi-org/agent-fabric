@@ -129,7 +129,7 @@ export function table(op, rs) {
       const u = r.upgrade;
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const ft = u.status === 'current' ? `${u.version} (pinned)` : `${u.from ?? '-'} → ${u.to ?? '-'}`;
-      lines.push(`${r.account.padEnd(22)} ${String(u.status).padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
+      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
     }
     return lines.join('\n');
   }

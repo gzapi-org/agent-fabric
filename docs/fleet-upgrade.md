@@ -49,9 +49,9 @@ running whether or not a session is open) receives the request and:
    that does not stop within 90 s is a failure to report, not to force;
    then installs the version with the harness's own installer (`claude
    install <v>`, at most 5 minutes) and verifies `claude --version`. A
-   failure is reported by the installer's last line; any failed account
-   makes `fabric-ctl` exit 1, which waits for replies as long as the
-   slowest account can take (`UPGRADE_BUDGET_S`, `runtime/control/upgrade.mjs`);
+   failure is reported by the installer's last line. `fabric-ctl` waits
+   for replies as long as the slowest account can take (`UPGRADE_BUDGET_S`,
+   `runtime/control/upgrade.mjs`), and any failed account makes it exit 1;
 5. marks the marker done or failed, releases the lease and replies: `from → to`, and whether a
    session is restarting.
 

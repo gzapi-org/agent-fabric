@@ -31,7 +31,9 @@ exited 0.
 
 What this decided (PR #36): installs queue on the host lease
 (`fabric-lease claude-install --wait 480`); the reported reason is the
-command's last line; a failed action makes the run exit 1.
+command's last line; a failed action makes the run exit 1. (Its review
+moved the queue ahead of the stop and the wait to 900 s:
+`docs/fleet-upgrade.md` is the current procedure.)
 
 Read back after finishing one at a time: `fabric-ctl all upgrade claude` →
 16 × `current`.

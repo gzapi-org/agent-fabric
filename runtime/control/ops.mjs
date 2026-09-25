@@ -20,7 +20,12 @@ import zlib from 'node:zlib';
 import { whoami } from '../../communication/gzcoord/scripts/gzmsg.mjs';
 import { syncedVar, holdStatus } from '../../communication/gzcoord/scripts/inbox.mjs';
 
-export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'upgrade', 'secrets-sync', 'status'];
+export const OPS = ['ping', 'identity', 'usage', 'keys', 'fabric', 'session', 'script', 'recall', 'tokens', 'memory', 'host', 'accounts', 'upgrade', 'secrets-sync', 'status', 'presence'];
+// Answered for any placed account, not only an operator: whether a session
+// is running is what every sender needs before it writes to one, and it
+// names nothing a relay reader could not already infer (the owner,
+// 2026-09-25: presence moves from HELLO/GOODBYE to the control plane).
+export const PUBLIC_OPS = ['presence'];
 export const KEY_NAMES = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GH_TOKEN', 'CLAUDE_BRIDGE_AUTH_TOKEN', 'SERPAPI_API_KEY', 'BRAVE_SEARCH_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -211,6 +216,25 @@ export function session(uid = process.getuid(), exec = execFileSync) {
   try { n = exec('pgrep', ['-u', String(uid), '-x', 'claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').filter(Boolean).length; }
   catch { n = 0; }   // pgrep exits 1 when nothing matches
   return { claude_processes: n, planning: holdStatus().held };
+}
+
+// Presence: whether this account has a session, from the process table,
+// so a crash or a launch that never reached the harness is never
+// "present" — the two cases a HELLO/GOODBYE pair got wrong on 2026-09-25.
+// The daemon's own children (the observer's /usage runs) are not a
+// session. Role and project are the binding's: what the last session here
+// was launched as and worked in.
+export function presence({ uid = process.getuid(), exec = execFileSync, proc = '/proc', self = process.pid, binding = null } = {}) {
+  let pids = [];
+  try { pids = String(exec('pgrep', ['-u', String(uid), '-x', 'claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim().split('\n').filter(Boolean).map(Number); }
+  catch (e) { if (e?.status !== 1) return { status: 'failed', error: `pgrep: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}` }; }
+  const stat = p => { try { const s = fs.readFileSync(path.join(proc, String(p), 'stat'), 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
+  const btime = (() => { try { return Number(/^btime (\d+)/m.exec(fs.readFileSync(path.join(proc, 'stat'), 'utf8'))[1]); } catch { return null; } })();
+  const live = pids.map(p => ({ p, f: stat(p) })).filter(x => x.f && Number(x.f[1]) !== self);
+  // field 22 of stat, starttime, in clock ticks since boot (USER_HZ, 100 on Linux)
+  const starts = live.map(x => btime == null ? null : new Date((btime + Number(x.f[19]) / 100) * 1000).toISOString()).filter(Boolean).sort();
+  const b = binding ?? (readJson(whoami().binding) ?? {});
+  return { status: 'ok', online: live.length > 0, sessions: live.length, since: starts[0] ?? null, role: b.role ?? null, project: b.project ?? null };
 }
 
 // The MACHINE this account shares — what develop-qzapp's crash of
@@ -764,6 +788,7 @@ export async function collect(op, ctx = {}) {
     if (name === 'keys') return guard(name, () => keys(ctx.home));
     if (name === 'fabric') return guard(name, () => fabric(ctx.root, ctx.exec));
     if (name === 'session') return guard(name, () => session(ctx.uid, ctx.exec));
+    if (name === 'presence') return guard(name, () => presence(ctx.presenceOpts));
     if (name === 'script') return guard(name, () => script(ctx.home));
     if (name === 'recall') return guard(name, () => recall(ctx.home));
     if (name === 'tokens') return guard(name, () => tokens(ctx.home, ctx.days ? { days: ctx.days } : {}));

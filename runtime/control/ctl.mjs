@@ -9,6 +9,8 @@
 //                                                   to the pinned version, restarting a running session (docs/fleet-upgrade.md)
 //   fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]   an ACTION: re-apply the login's Doppler config,
 //                                                   check its setup-token, restart a running session on it (docs/claude-accounts.md)
+//   fabric-ctl <login|all> presence                 whether each has a session, since when, as what — any
+//                                                   placed account may ask this one (ops.mjs PUBLIC_OPS)
 //   fabric-ctl keygen [--force]                     the operator's signing key: private half into Doppler, public into the registry
 //
 // A login becomes an address through the registry's placement
@@ -31,7 +33,7 @@ import { ACTION_OPS, ACTION_TTL_MAX_S, signRequest, generateOperatorKey, publicK
 import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.mjs';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
-import { OPS } from './ops.mjs';
+import { OPS, PUBLIC_OPS } from './ops.mjs';
 import { controlConfig, newId, operatorAddresses } from './agentd.mjs';
 
 export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
@@ -122,7 +124,7 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? (d.identity?.claude_account?.via === 'setup-token' ? `setup-token ${d.identity.claude_account.token_sha256_12}` : null), role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, upgrade: d.upgrade ?? null, secretsSync: d['secrets-sync'] ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, upgrade: d.upgrade ?? null, secretsSync: d['secrets-sync'] ?? null, presence: d.presence ?? null, agentd: d.agentd ?? null };
   });
 }
 
@@ -140,6 +142,17 @@ export function table(op, rs) {
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const si = u.claude_sign_in?.via === 'setup-token' ? `setup-token ${u.claude_sign_in.token_sha256_12}` : (u.claude_sign_in?.via ?? '-');
       lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${si.padEnd(34)} ${String(u.session ?? '-').padEnd(28)} ${u.reason ?? u.note ?? (u.missing ? `missing in Doppler: ${u.missing.join(', ')}` : '')}`.trimEnd());
+    }
+    return lines.join('\n');
+  }
+  if (op === 'presence') {
+    lines.push(`${'account'.padEnd(22)} ${'session'.padEnd(10)} ${'since (UTC)'.padEnd(20)} ${'role'.padEnd(20)} project`);
+    for (const r of rs) {
+      const p = r.presence;
+      if (r.status !== 'ok' || !p) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      if (p.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${'unknown'.padEnd(10)} ${p.error ?? ''}`.trimEnd()); continue; }
+      const since = p.since ? p.since.slice(0, 19).replace('T', ' ') : '-';
+      lines.push(`${r.account.padEnd(22)} ${(p.online ? `running${p.sessions > 1 ? ` ×${p.sessions}` : ''}` : 'none').padEnd(10)} ${since.padEnd(20)} ${String(p.role ?? '-').padEnd(20)} ${p.project ?? '-'}`.trimEnd());
     }
     return lines.join('\n');
   }
@@ -314,7 +327,7 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   }
   const who = whoami();
   const me = gzIdentity(who);
-  if (!operatorAddresses().has(me.address)) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
+  if (!operatorAddresses().has(me.address) && !PUBLIC_OPS.includes(args.op)) { console.error(`fabric-ctl: ${me.address} is not a host operator in runtime/hosts/registry.json — no agent would answer; not sent`); return 2; }
   const cfg = controlConfig();
   const gz = integrationConfig(who.project);
   const tok = gzToken(inboxRoot(who), gz.configured ? gz : undefined) ?? syncedToken();

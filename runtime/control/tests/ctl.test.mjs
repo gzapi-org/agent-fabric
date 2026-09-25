@@ -409,3 +409,16 @@ test('fabric-ctl upgrade exits 1 when any account failed, 0 when every answer is
     assert.equal(lastTtl, ACTION_TTL_MAX_S, 'a long wait for replies does not stretch the signed action\'s lifetime');
   } finally { r.close(); }
 });
+
+test('presence: one row per account — running since when, as what; none; a failed read says unknown', () => {
+  const expected = [{ login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }, { login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'edge-hosting', host: 'h', address: 'h/edge-hosting' }, { login: 'user', host: 'h', address: 'h/user' }];
+  const reply = (from, presence) => ({ kind: 'reply', from, op: 'presence', data: { presence } });
+  const t = table('presence', rows(expected, [
+    reply('h/web-dev-01', { status: 'ok', online: true, sessions: 2, since: '2026-09-25T09:57:22.000Z', role: 'web-dev', project: 'gzapp' }),
+    reply('h/db-admin', { status: 'ok', online: false, sessions: 0, since: null, role: 'db-admin', project: 'gzapp' }),
+    reply('h/edge-hosting', { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' })])).split('\n');
+  assert.match(t[1], /^web-dev-01\s+running ×2\s+2026-09-25 09:57:22\s+web-dev\s+gzapp$/);
+  assert.match(t[2], /^db-admin\s+none\s+-\s+db-admin\s+gzapp$/);
+  assert.match(t[3], /^edge-hosting\s+unknown\s+pgrep: spawn pgrep ENOENT$/);
+  assert.match(t[4], /^user\s+no answer$/);
+});

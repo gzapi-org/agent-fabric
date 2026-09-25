@@ -18,7 +18,7 @@
   "replay.title": "--- relay seq {seq}, от {sender}, {when} (повтор; курсор не сдвинут)",
   "replay.no-message": "gzcoord inbox: сообщения {which} нет среди последних {n} на {channel}",
   "replay.usage": "вызов: inbox.mjs --replay <seq|message-id>",
-  "held.held": "удерживается: inbox {agent} — {sessions}",
+  "held.held": "удерживается: inbox {agent}; держатели: {sessions}",
   "held.not-held": "не удерживается: {reason}",
   "held.session": "сессия {session} (pid {pid}) с {since}",
   "held.unknown": "?",

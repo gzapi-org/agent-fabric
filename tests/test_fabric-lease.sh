@@ -156,8 +156,17 @@ printf 'x 1 T heavy \033]0;PWNED\007\302\233(bad)\n' > "$D/rogue"; chmod 666 "$D
 exec 8<"$D/rogue"; flock 8
 out="$(lease rogue -- true 2>&1)"; flock -u 8; exec 8<&-
 ! grep -q $'\033' <<<"$out" && ! grep -q $'\007' <<<"$out" && ! LC_ALL=C grep -q $'\302\233' <<<"$out" && grep -q "held by x 1 T heavy" <<<"$out" && ok "the holder record is printed as printable ASCII only (C0, DEL and C1 dropped)" || bad "control characters reached the caller" "$(cat -v <<<"$out")"
-out="$(AGENT_FABRIC_LEASES=/proc bash "$ROOT/bin/fabric-lease" kcore -- true 2>&1)"; rc=$?
+# A lease file in the sandbox that its owner cannot read. Not a file of
+# the host's: /proc/kcore is absent here, readable under a container's
+# default mask, and the case passed or failed with the machine (the
+# review of #39). Root reads a mode-000 file, so the case is skipped there.
+: > "$D/sealed"; chmod 000 "$D/sealed"
+if (( EUID == 0 )); then ok "unopenable: skipped under root, which opens a mode-000 file"
+else
+out="$(lease sealed -- true 2>&1)"; rc=$?
 [[ $rc -eq 2 && "$(last "$out")" == "fabric-lease: reason=unopenable" ]] && ok "a lease file that cannot be opened: exit 2, reason=unopenable, last" || bad "unopenable reason" "rc=$rc $out"
+fi
+chmod 600 "$D/sealed"
 
 echo
 if (( FAIL )); then echo "fabric-lease: $FAIL failure(s), $PASS passed"; exit 1; fi

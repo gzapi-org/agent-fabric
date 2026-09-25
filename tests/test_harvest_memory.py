@@ -97,6 +97,39 @@ def test_a_claim_carries_the_date_the_memory_was_written(tmp: str) -> None:
     assert got == {"stamped": "2026-09-12", "unstamped": "2026-09-11"}, got
 
 
+def test_a_quoted_description_is_read_as_yaml_reads_it(tmp: str) -> None:
+    """A double-quoted value is unescaped and a single-quoted one undoubled:
+    stripping the quotes alone carried the backslash of `\\"` into the
+    claim, its heading and the index (gzapi.ge #18). Kills: strip-only."""
+    mem, out = os.path.join(tmp, "mq"), os.path.join(tmp, "oq")
+    os.makedirs(mem)
+    write_memory(mem, "dq", "project", roles_class="workflow", description='"a trailing `echo \\"exit $?\\"` hides it"')
+    write_memory(mem, "sq", "project", roles_class="workflow", description="'it''s the last command'")
+    assert run(mem, out).returncode == 0
+    got = {c["topic"]: c["title"] for c in claims_of(out)}
+    assert got == {"dq": 'a trailing `echo "exit $?"` hides it', "sq": "it's the last command"}, got
+
+
+def test_a_cue_in_another_script_needs_its_english(tmp: str) -> None:
+    """The index line and the heading are read by every holder of the role
+    in every project, so they are English like the body: a non-Latin
+    description travels under `description_en`, and without one the memory
+    waits under needs_rendering (gzapp #938, F1). Kills: the original
+    description as the title."""
+    mem, out = os.path.join(tmp, "mc"), os.path.join(tmp, "oc")
+    os.makedirs(mem)
+    ru = "Русский факт о слиянии веток.\n\n## English\n\nThe fact in English."
+    for name, extra in (("cued", '\n  description_en: "Merge is rendered with vlivat"'), ("uncued", "")):
+        with open(os.path.join(mem, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f"---\nname: {name}\ndescription: По-русски merge — вливать\n"
+                     f"metadata:\n  type: project\n  roles_class: domain{extra}\n---\n\n{ru}\n")
+    assert run(mem, out).returncode == 0
+    got = {c["topic"]: c["title"] for c in claims_of(out)}
+    assert got == {"cued": "Merge is rendered with vlivat"}, got
+    with open(os.path.join(out, "harvest-report.json"), encoding="utf-8") as fh:
+        assert json.load(fh)["needs_rendering"] == ["uncued.md"]
+
+
 def test_merge_target_travels_from_the_memory_to_the_claim(tmp: str) -> None:
     """`merge_target: "<heading>"` in a memory's metadata is the author's own
     supersession; the README promised it and the harvest dropped it. It
@@ -598,6 +631,8 @@ def main() -> int:
         test_the_watermark_round_trips_through_the_committed_report,
         test_a_bundle_round_trips_and_a_damaged_one_is_refused_by_file,
         test_a_claim_carries_the_date_the_memory_was_written,
+        test_a_quoted_description_is_read_as_yaml_reads_it,
+        test_a_cue_in_another_script_needs_its_english,
         test_merge_target_travels_from_the_memory_to_the_claim,
         test_role_knowledge_is_opt_in,
         test_a_memory_in_another_language_drains_through_its_rendering,

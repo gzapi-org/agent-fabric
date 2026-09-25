@@ -201,6 +201,23 @@ def previous_watermark(working_copy: str, host: str) -> tuple[int, str | None]:
         return 0, None
 
 
+def scalar(value: str) -> str:
+    """A frontmatter value as YAML reads it: a double-quoted one is
+    unescaped (`\\"` is a quote, `\\\\` a backslash), a single-quoted one
+    has its doubled quote undoubled. The quotes were once only stripped,
+    and a `\\"` reached the claim, its heading and the index with the
+    backslash in it (a drain's blind review, 2026-09-25)."""
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v[1:-1]
+    if len(v) >= 2 and v[0] == v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    return v
+
+
 def parse_memory(path: str) -> dict[str, Any] | None:
     """Parse one memory file. Returns None for a file that is not one."""
     with open(path, encoding="utf-8") as fh:
@@ -220,7 +237,7 @@ def parse_memory(path: str) -> dict[str, Any] | None:
         km = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
         if not km:
             continue
-        key, value = km.group(1), km.group(2).strip().strip('"\'')
+        key, value = km.group(1), scalar(km.group(2))
         # `metadata:` nests one level; flatten it, since `type` is the only
         # field under it that this reads.
         meta[key if section is None else f"{section}.{key}"] = value
@@ -230,6 +247,10 @@ def parse_memory(path: str) -> dict[str, Any] | None:
     return {
         "name": name,
         "description": meta.get("description", ""),
+        # The cue a memory written in another language travels under: the
+        # index line and the slice heading are English like the body, which
+        # comes from the `## English` rendering (see RENDERING_RE).
+        "description_en": (meta.get("metadata.description_en") or meta.get("description_en") or "").strip(),
         "type": meta.get("metadata.type") or meta.get("type", ""),
         "body": body,
         "roles_class": meta.get("metadata.roles_class") or meta.get("roles_class", ""),
@@ -378,6 +399,17 @@ def main() -> int:
         # A memory in another language drains through its English rendering.
         text, language = parsed["body"], None
         original, rendering = split_rendering(parsed["body"])
+        # The cue counts as much as the body: an index line in another
+        # script is read by every holder of the role, in every project. A
+        # non-Latin description needs `description_en` beside it, or the
+        # memory waits, named, like an unrendered body (a drain's blind review, 2026-09-25).
+        title = parsed["description"] or parsed["name"]
+        if is_mostly_non_latin(title):
+            if not parsed["description_en"] or is_mostly_non_latin(parsed["description_en"]):
+                needs_rendering.append(name)
+                unrendered_ms.append(parsed["mtime_ms"])
+                continue
+            title = parsed["description_en"]
         if is_mostly_non_latin(original):
             if not rendering or is_mostly_non_latin(rendering):
                 # Named in every report until rendered: the watermark does
@@ -410,7 +442,7 @@ def main() -> int:
         next_ms = max(next_ms, parsed["mtime_ms"])
         claims.append({
             "topic": parsed["name"],
-            "title": parsed["description"] or parsed["name"],
+            "title": title,
             "class": klass,
             "knowledge_scope": "full",
             "body": text,

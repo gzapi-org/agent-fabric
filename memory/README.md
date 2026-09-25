@@ -154,7 +154,10 @@ A holder that writes its memory in another language (language-culture,
 in the language it answers for) drains through the **English rendering**
 each drain-ready memory carries under a `## English` heading: the claim
 is the rendering, the original stays in the holder's home, the
-observation records the language. A non-Latin memory without one is
+observation records the language. Its cue is English too: a description
+in another script travels under `description_en: "…"` in the `metadata:`
+block, because the index line and the heading are what every holder of
+the role reads first. A non-Latin memory without either is
 named under `needs_rendering` in the report and yields no claim — so a
 drain of such a login is two steps: the coordinator's dry run, whose
 `needs_rendering` names go to the holder as a `REQUEST` on the relay;

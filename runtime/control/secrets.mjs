@@ -52,7 +52,7 @@ export async function secretsSync(request, {
   catch { running = null; }
   return {
     status: 'synced',
-    claude_sign_in: tok ? { via: 'setup-token', token_sha256_12: crypto.createHash('sha256').update(tok).digest('hex').slice(0, 12) } : { via: 'own /login' },
+    claude_sign_in: tok ? { via: 'setup-token', token_sha256_12: crypto.createHash('sha256').update(tok).digest('hex').slice(0, 12) } : { via: 'none: its next session is refused' },
     ...(Array.isArray(report.missing) && report.missing.length ? { missing: report.missing } : {}),
     session: running === null ? 'unknown' : running.length ? 'running: relaunch to use it' : 'none',
   };

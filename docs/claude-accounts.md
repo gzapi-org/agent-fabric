@@ -33,11 +33,15 @@ CLAUDE_CODE_OAUTH_TOKEN = ${agent-fabric.claude-accounts_<account>.CLAUDE_CODE_O
 The login's read-only service token resolves the reference, `fabric-secrets
 sync` exports it (it is a fabric-wide `agent_env` name in
 `projects/registry.json`), and set, it outranks the login's own `/login`.
+**A plain-claude session needs it**: the launcher refuses one whose
+login's synced record holds no token of a setup-token's shape, before
+the HELLO (the owner, 2026-09-25). A login's own `/login` is an 8-hour
+token with a single refresh holder, and a fleet that fell back to it ran
+on whichever account last signed in there. The broker path is untouched.
 Moving logins is one command on the coordinator's login:
 
 ```sh
 bin/fabric-accounts assign flutter-dev-01 p2p-network-dev-01 andrea-benetton-blueteam-ge
-bin/fabric-accounts assign web-dev-01 own        # back to its own /login
 ```
 
 It writes the reference into each login's Doppler config (the
@@ -46,8 +50,9 @@ the changed accounts apply it at once through their daemons — the signed
 `secrets-sync` action. No browser, nobody logs in to the account. A
 running session keeps the account it started with; its next launch — in
 any shell, because the launcher takes the token from the login's synced
-record rather than from the shell — runs on the new one. A login with no
-reference runs on its own sign-in, as before.
+record rather than from the shell — runs on the new one. There is no
+`assign … own`: a login without a reference cannot start a plain-claude
+session.
 
 What a session on a template does not have: the claude.ai connectors, the
 plugins synced from claude.ai, Remote Control and web sessions. The

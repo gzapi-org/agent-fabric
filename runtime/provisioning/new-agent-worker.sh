@@ -292,10 +292,8 @@ new-agent: done. Left for a person, in a terminal (nothing here can do them):
        sudo -u $LOGIN bash -c \"echo '\$(git config --get user.signingkey):6:' | gpg --import-ownertrust\"" )
    $( case "$creds" in
         template) echo "- Claude account: a template token (plain-claude path ready)" ;;
-        yes) echo "- Claude account: its own /login (plain-claude path ready)" ;;
-        *) echo "- Claude account: none — the plain-claude path (--provider anthropic) needs one; the broker path does not.
-       In the login's Doppler config: CLAUDE_CODE_OAUTH_TOKEN=\${agent-fabric.claude-accounts_<account>.CLAUDE_CODE_OAUTH_TOKEN}
-       then, as $LOGIN: bin/fabric-secrets sync (docs/claude-accounts.md). Never copy another login's .credentials.json." ;;
+        *) echo "- Claude account: no template token — the launcher refuses a plain-claude session (--provider anthropic) without one, its own /login included; the broker path does not need one.
+       As the coordinator: bin/fabric-accounts assign $LOGIN <account> (docs/claude-accounts.md). Never copy another login's .credentials.json." ;;
       esac )
    - first launch is interactive, to accept the workspace-trust dialog:
        moveto $LOGIN${first:+ $first}   then   runtime/openrouter/launch

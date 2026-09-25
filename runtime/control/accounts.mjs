@@ -7,7 +7,7 @@
 //                                     browser AS THAT ACCOUNT, then /exit. A real terminal.
 //   fabric-accounts list              each observed account: signed in, email, sign-in expiry
 //   fabric-accounts read              read every account's windows now (the harness's /usage)
-//   fabric-accounts assign <login…|all> <account|own> [--no-sync]
+//   fabric-accounts assign <login…|all> <account> [--no-sync]
 //                                     which Claude account those logins run on: the reference in each
 //                                     login's Doppler config, then `fabric-ctl <logins> secrets-sync`
 //   fabric-accounts templates         each Doppler template's token fingerprint, to name the account
@@ -74,8 +74,8 @@ export function templates({ exec = execFileSync, project = 'agent-fabric' } = {}
 }
 
 // Which Claude account a login runs on is one line in its own Doppler
-// config: a reference to a template (docs/claude-accounts.md), or nothing
-// for its own /login. Written with the coordinator's Doppler token — a
+// config: a reference to a template (docs/claude-accounts.md). With none
+// it is 'none', and the launcher refuses its plain-claude sessions. Written with the coordinator's Doppler token — a
 // login's own is read-only — and read back raw, so the account is named
 // by its template, not by a token.
 export const templateRef = slug => `\${agent-fabric.${TEMPLATE_ENV}_${slug}.CLAUDE_CODE_OAUTH_TOKEN}`;
@@ -88,9 +88,9 @@ export function loginConfigs({ exec = execFileSync, project = 'agent-fabric' } =
 export function currentAccount(config, { exec = execFileSync, project = 'agent-fabric' } = {}) {
   let raw = '';
   try { raw = String(exec('doppler', ['secrets', 'get', 'CLAUDE_CODE_OAUTH_TOKEN', '--raw', '--plain', '--project', project, '--config', config], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })).trim(); }
-  catch { return 'own'; }   // no such secret: the login's own /login
+  catch { return 'none'; }   // no such secret
   const m = new RegExp(`^\\$\\{${project}\\.${TEMPLATE_ENV}_([a-z0-9-]+)\\.CLAUDE_CODE_OAUTH_TOKEN\\}$`).exec(raw);
-  return m ? m[1] : raw ? '(not a template reference)' : 'own';
+  return m ? m[1] : raw ? '(not a template reference)' : 'none';
 }
 export function assign(logins, account, { exec = execFileSync, project = 'agent-fabric' } = {}) {
   const configs = loginConfigs({ exec, project });
@@ -101,8 +101,7 @@ export function assign(logins, account, { exec = execFileSync, project = 'agent-
     const from = currentAccount(config, { exec, project });
     if (from === account) { rows.push({ login, config, from, to: account, status: 'unchanged' }); continue; }
     try {
-      if (account === 'own') exec('doppler', ['secrets', 'delete', 'CLAUDE_CODE_OAUTH_TOKEN', '--project', project, '--config', config, '--yes', '--silent'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
-      else exec('doppler', ['secrets', 'set', `CLAUDE_CODE_OAUTH_TOKEN=${templateRef(account)}`, '--project', project, '--config', config, '--silent'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+      exec('doppler', ['secrets', 'set', `CLAUDE_CODE_OAUTH_TOKEN=${templateRef(account)}`, '--project', project, '--config', config, '--silent'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
       const now = currentAccount(config, { exec, project });
       rows.push({ login, config, from, to: now, status: now === account ? 'written' : 'not-written' });
     } catch (e) { rows.push({ login, config, from, status: 'failed', reason: String(e.message).split('\n').pop().slice(0, 160) }); }
@@ -123,11 +122,11 @@ export async function main(argv = process.argv.slice(2), { home = os.homedir(), 
     const logins = who.length === 1 && who[0] === 'all' ? placed : who;
     const unknown = logins.filter(l => !placed.includes(l));
     if (unknown.length) { console.error(`fabric-accounts: not a placed account (runtime/hosts/registry.json): ${unknown.join(', ')}`); return 2; }
-    if (account !== 'own') {
-      const t = templates({ exec }).find(x => x.account === account);
-      if (!t) { console.error(`fabric-accounts: ${JSON.stringify(account)} is not a template in Doppler environment ${TEMPLATE_ENV} (fabric-accounts templates)`); return 2; }
-      if (!t.token_sha256_12) { console.error(`fabric-accounts: template ${account} holds no CLAUDE_CODE_OAUTH_TOKEN yet; nothing written`); return 2; }
-    }
+    // No way back to a login's own /login: the launcher refuses a session
+    // without a template's long-lived token (runtime/openrouter/launch).
+    const t = templates({ exec }).find(x => x.account === account);
+    if (!t) { console.error(`fabric-accounts: ${JSON.stringify(account)} is not a template in Doppler environment ${TEMPLATE_ENV} (fabric-accounts templates)${account === 'own' || account === 'none' ? ' — a login runs only on a template\'s token; assign it another account' : ''}`); return 2; }
+    if (!t.token_sha256_12) { console.error(`fabric-accounts: template ${account} holds no CLAUDE_CODE_OAUTH_TOKEN yet; nothing written`); return 2; }
     const rows = assign(logins, account, { exec });
     for (const r of rows) console.log(`${r.login.padEnd(22)} ${String(r.from ?? '-').padEnd(30)} → ${String(r.to ?? '-').padEnd(30)} ${r.status}${r.reason ? `  ${r.reason}` : ''}`);
     const bad = rows.some(r => !['written', 'unchanged'].includes(r.status));

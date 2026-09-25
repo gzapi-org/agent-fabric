@@ -35,7 +35,7 @@ test('a template in the login\'s config: synced, named by fingerprint, the value
 test('no template: its own sign-in; names missing in Doppler are applied around and said; a running session is told to relaunch', async () => {
   const f = fixture({ writes: null, code: 2, report: { missing: ['SSH_PRIVATE_KEY'] } });
   const r = await secretsSync({ id: 'x' }, { home: f.home, root: f.root, exec: f.exec, sessions: [4242] });
-  assert.deepEqual(r, { status: 'synced', claude_sign_in: { via: 'own /login' }, missing: ['SSH_PRIVATE_KEY'], session: 'running: relaunch to use it' });
+  assert.deepEqual(r, { status: 'synced', claude_sign_in: { via: 'none: its next session is refused' }, missing: ['SSH_PRIVATE_KEY'], session: 'running: relaunch to use it' });
 });
 
 test('a sync that applied nothing is a failure with its reason; arguments are refused before anything runs', async () => {

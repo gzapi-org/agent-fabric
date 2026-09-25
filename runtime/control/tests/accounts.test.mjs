@@ -133,7 +133,7 @@ test('assign: the reference is written and read back, a login already there is l
   assert.equal(r.code, 0, r.err + r.out);
   assert.equal(d.store['agents_flutter-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, templateRef('claude-b'));
   assert.equal(d.store['agents2_web-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, templateRef('claude-b'));
-  assert.match(r.out, /flutter-dev-01\s+own\s+→ claude-b\s+written/);
+  assert.match(r.out, /flutter-dev-01\s+none\s+→ claude-b\s+written/);
   assert.match(r.out, /web-dev-01\s+claude-a\s+→ claude-b\s+written/);
   assert.deepEqual(synced, ['fabric-ctl', 'flutter-dev-01', 'web-dev-01', 'secrets-sync']);
   assert.ok(!r.out.includes('sk-ant-oat01'), 'no template token in the output');
@@ -142,13 +142,10 @@ test('assign: the reference is written and read back, a login already there is l
   assert.equal(again.code, 0); assert.match(again.out, /flutter-dev-01\s+claude-b\s+→ claude-b\s+unchanged/); assert.equal(synced, null, 'nothing changed, nothing synced');
 });
 
-test('assign own deletes the reference; an unknown login, an unknown template and an empty template are refused before anything is written', async () => {
+test('assign: no way back to a login\'s own /login; an unknown login, an unknown template and an empty template are refused before anything is written', async () => {
   const d = fakeDoppler(); const registry = placedRegistry();
-  const own = await capture(() => main(['assign', 'web-dev-01', 'own', '--no-sync'], { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => assert.fail('no sync with --no-sync') }));
-  assert.equal(own.code, 0, own.err); assert.equal(d.store['agents2_web-dev-01'].CLAUDE_CODE_OAUTH_TOKEN, undefined);
-  assert.match(own.out, /web-dev-01\s+claude-a\s+→ own\s+written/);
   const n = d.writes.length;
-  for (const [args, re] of [[['assign', 'nobody', 'claude-b'], /not a placed account/], [['assign', 'db-admin', 'claude-zzz'], /not a template/], [['assign', 'db-admin', 'claude-empty'], /holds no CLAUDE_CODE_OAUTH_TOKEN/]]) {
+  for (const [args, re] of [[['assign', 'web-dev-01', 'own'], /runs only on a template's token/], [['assign', 'nobody', 'claude-b'], /not a placed account/], [['assign', 'db-admin', 'claude-zzz'], /not a template/], [['assign', 'db-admin', 'claude-empty'], /holds no CLAUDE_CODE_OAUTH_TOKEN/]]) {
     const r = await capture(() => main(args, { home: scratch('assign-home-'), env: {}, exec: d.exec, registry, spawn: () => assert.fail('no sync') }));
     assert.equal(r.code, 2, args.join(' ')); assert.match(r.err, re);
   }

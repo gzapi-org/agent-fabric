@@ -453,7 +453,7 @@ PY
         export CLAUDE_CODE_OAUTH_TOKEN="$SYNCED_TOKEN"
     elif [[ -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]]; then
         unset CLAUDE_CODE_OAUTH_TOKEN
-        echo "launch: dropped the CLAUDE_CODE_OAUTH_TOKEN this shell inherited — the login's synced record has none (its own /login)" >&2
+        echo "launch: dropped the CLAUDE_CODE_OAUTH_TOKEN this shell inherited — the login's synced record has none" >&2
     fi
     unset SYNCED_TOKEN
 fi
@@ -684,6 +684,17 @@ fi
 # launch on this account has since rewritten it.
 bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --provider "$PROVIDER" >/dev/null ||
     die "could not install the capability-class agent files for $PROVIDER (runtime/claude-code/install-agent-files.sh)."
+
+# A plain-claude session runs only on a long-lived sign-in: a template's
+# setup-token, valid a year (docs/claude-accounts.md). A login's own /login
+# is an 8-hour token with one refresh holder, and a fleet that silently fell
+# back to it ran on whichever account last signed in on that login — the
+# owner, 2026-09-25: no long-lived token, no session. Checked here, after
+# --print (a read-back needs no sign-in) and before the HELLO: a refused
+# launch announces nothing, so no GOODBYE is owed.
+if [[ "$PROVIDER" == anthropic && ! "${CLAUDE_CODE_OAUTH_TOKEN:-}" =~ ^sk-ant-oat[0-9]+-[A-Za-z0-9_-]+$ ]]; then
+    die "no long-lived Claude sign-in for $(id -un): the login's synced record ($HOME/.config/agent-fabric/secrets.env) has no CLAUDE_CODE_OAUTH_TOKEN of a setup-token's shape. The coordinator assigns one (bin/fabric-accounts assign $(id -un) <account>), then bin/fabric-secrets sync here. Nothing started, no HELLO sent."
+fi
 
 # HELLO, now that a session is about to exist: derived from the binding
 # (role, project) by gzmsg.mjs, posted as this login by send.mjs. Best

@@ -20,6 +20,10 @@ bad() { FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; [[ -n "${2:-}" ]] && printf 
 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 export HOME="$SANDBOX/home"; mkdir -p "$HOME"
+# Every plain-claude launch needs a long-lived sign-in in the login's synced
+# record; the fixture holds one of the right shape (never a real token).
+SEC="$HOME/.config/agent-fabric/secrets.env"; mkdir -p "$(dirname "$SEC")"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"
 mkdir -p "$SANDBOX/bin"
 PATH_EXPORT="$SANDBOX/bin:$PATH"
 
@@ -544,7 +548,6 @@ cat > "$SANDBOX/bin/claude" <<'FAKE'
 v="${CLAUDE_CODE_OAUTH_TOKEN:-}"; if [ -n "$v" ]; then echo "CLAUDE-OAUTH-SHA:$(printf %s "$v" | sha256sum | cut -c1-12)"; else echo "CLAUDE-OAUTH-SHA:none"; fi
 FAKE
 chmod +x "$SANDBOX/bin/claude"
-SEC="$HOME/.config/agent-fabric/secrets.env"; mkdir -p "$(dirname "$SEC")"
 fp() { printf %s "$1" | sha256sum | cut -c1-12; }
 printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-NEW-TEMPLATE'\n" > "$SEC"
 out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)"
@@ -553,8 +556,17 @@ grep -q "^CLAUDE-OAUTH-SHA:$(fp sk-ant-oat01-NEW-TEMPLATE)$" <<<"$out" && grep -
 ! grep -q "sk-ant-oat01-" <<<"$out" && ok "…by name, never by value" || bad "token value printed"
 : > "$SEC"
 out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)"
-grep -q "^CLAUDE-OAUTH-SHA:none$" <<<"$out" && grep -q "the login's synced record has none" <<<"$out" && ok "no template in the record: an inherited one is dropped (own /login)" || bad "inherited token kept" "$(grep -iE "oauth|synced" <<<"$out")"
-rm -f "$SEC" "$SANDBOX/bin/claude"
+rc=0; out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)" || rc=$?
+grep -q "the login's synced record has none" <<<"$out" && ok "no template in the record: an inherited one is dropped, by name" || bad "inherited token kept" "$(grep -iE "oauth|synced" <<<"$out")"
+[[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ! grep -q "^CLAUDE-OAUTH-SHA:" <<<"$out" \
+  && ok "…and the launch is refused: no session on a login's own /login" || bad "launched without a long-lived sign-in" "rc=$rc $(grep -iE "oauth|sign-in" <<<"$out")"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='a-login-access-token'\n" > "$SEC"
+rc=0; out="$(run --provider anthropic --version 2>&1)" || rc=$?
+[[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ok "a token not of a setup-token's shape is refused too" || bad "a malformed token launched" "rc=$rc"
+rc=0; out="$(run --provider anthropic --print 2>&1)" || rc=$?
+[[ $rc -eq 0 ]] && ok "--print needs no sign-in: a prompt read-back still works" || bad "--print refused without a sign-in" "rc=$rc $(tail -2 <<<"$out")"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"
+rm -f "$SANDBOX/bin/claude"
 
 echo "launch: HELLO before the session, GOODBYE after it, however it ended"
 # A stub announce.py that records every call; the binding names a project
@@ -575,6 +587,12 @@ grep -q "^goodbye --role backend-dev --project gzapp --note session ended" "$ALO
 [[ "$(grep -c . "$ALOG")" == 2 ]] && ok "exactly one of each" || bad "announce count" "$(cat "$ALOG")"
 h="$(grep '^hello' "$ALOG" | sed 's/.*@//')"; g="$(grep '^goodbye' "$ALOG" | sed 's/.*@//')"
 python3 -c "import sys; sys.exit(0 if float('$h') < float('$g') else 1)" && ok "…in that order" || bad "goodbye before hello" "$(cat "$ALOG")"
+# A plain-claude launch refused for want of a long-lived sign-in announces nothing.
+: > "$SEC"; rm -f "$ALOG"
+rc=0; out="$(runa --provider anthropic --version 2>&1)" || rc=$?
+[[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && [[ ! -s "$ALOG" ]] \
+  && ok "a launch refused for want of a long-lived sign-in sends no HELLO, so owes no GOODBYE" || bad "a refused launch announced itself" "rc=$rc $(cat "$ALOG" 2>/dev/null)"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"; rm -f "$ALOG"
 # The session's failure is the launcher's failure, and still a GOODBYE.
 cat > "$SANDBOX/bin/ori" <<'FAKE'
 #!/usr/bin/env bash

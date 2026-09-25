@@ -19,7 +19,7 @@ The procedures are two skills every account has: `gzcoord-send` and
 
 - your address is `<host>/<login>` — the Linux account this session runs under, as `../agent-fabric/bin/fabric-whoami` from the working copy reports it (SPEC §3.1); the working copy you are in is context, never identity;
 - as `ROLE`, the slug of the role you hold (your launch prompt says it; `identities/roles/catalog.json`) — `p2p-network-dev`, never a title — or omit `--role`, `--from` and `--project` and let `gzmsg.mjs hello` derive all three from your binding;
-- send no `HELLO` yourself: the launcher sent it just before your session started; a role change is a rebind from a login shell (`bin/fabric-role`, which sends the `GOODBYE`) and a relaunch (which sends the new `HELLO` — SPEC §4);
+- send no `HELLO` or `GOODBYE` (deprecated, SPEC §5): whether an agent is online is `../agent-fabric/bin/fabric-ctl <login|all> presence`, answered from each account's process table, and `send.mjs` asks it before a `TO` or `TO-ROLE` message leaves (`--force` to send anyway); a role change is a rebind from a login shell (`bin/fabric-role`) and a relaunch;
 - watch your inbox for the whole session, not only while waiting on a reply: one watch, `inbox.mjs --follow` under Monitor, started first, never a second one — the cursor is per address and a second consumer swallows deliveries;
 - send with `communication/gzcoord/scripts/send.mjs`, which validates as the last step before posting; for the human relay print the message in a fenced text block;
 - give every message a `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by construction, no counter to seed or continue;

@@ -44,7 +44,8 @@ two PRs on one hunk, verified against GitHub.
 
 - **Sending:** an assignment names a login. Not knowing which holder is
   answered in order — the holder whose open PR touches the path
-  (`pr-gate.sh --all`), else the most recent `HELLO` of the role, else
+  (`pr-gate.sh --all`), else one holding it with a session running now
+  (`fabric-ctl all presence`), else
   the lowest-numbered login — and the body says which rule chose. A
   wrong choice costs one `REPLY`; a role address costs the work twice.
   (`MESSAGE-FORMAT.md` §Direct versus role addressing, the `gzcoord-send`

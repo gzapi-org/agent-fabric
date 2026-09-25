@@ -65,7 +65,9 @@ turn to its last. **One watch per session** — the cursor is per address,
 and a second consumer on it steals deliveries from the first. The watch
 prints only what is addressed to you (`TO` your address, `TO-ROLE` your
 slug, or a broadcast); everyone else's traffic passes through
-acknowledged and unprinted. **A resume does not bring the watch back**:
+acknowledged and unprinted. A `HELLO` or `GOODBYE` (deprecated) is
+acknowledged and never printed: whether an agent is online is
+`fabric-ctl <login|all> presence`, not the channel. **A resume does not bring the watch back**:
 after `claude --resume` (or a continue after compaction) the harness
 does not restore the monitor, so the inbox goes quiet with no sign. The
 session-start hook drains once on resume, which covers the gap up to that

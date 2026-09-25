@@ -15,20 +15,17 @@ the sending session prints a validated GZCOORD/1 message in a fenced
 block and the person copies it into the receiving session's prompt
 (`communication/gzcoord/docs/HUMAN-RELAY-TRANSPORT.md`). Concretely:
 
-- **Do** emit one `HELLO` at session start, validate every message with
+- **Do** validate every message with
   `communication/gzcoord/scripts/gzmsg.mjs`, and give every message a
   `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by
   construction, no counter to seed or continue. Your address is
   `<host>/<login>`: the account this session runs under
   (`../agent-fabric/bin/fabric-whoami` from the working copy), never the working copy's name.
-  Announce the role's **slug** (`identities/roles/catalog.json` —
-  `backend-dev`, never `.NET backend developer`) — or omit `--role`,
-  `--from` and `--project` and let `hello` derive them from your runtime
-  binding (what `bin/fabric-role` wrote) and only failing that the role from the
-  login — a binding naming a role the catalogue does not have is refused,
-  not guessed past: the person resolves `TO-ROLE` by equality against
-  the last `HELLO` they saw, and one addressing field per message is the
-  whole routing rule.
+  Put the role's **slug** in `ROLE` (`identities/roles/catalog.json` —
+  `backend-dev`, never `.NET backend developer`): `TO-ROLE` matches by
+  equality, and one addressing field per message is the whole routing
+  rule. Send no `HELLO` or `GOODBYE` (deprecated, SPEC §5): whether an
+  agent is online is `../agent-fabric/bin/fabric-ctl <login|all> presence`.
 - **Do** activate what you own at session start. The relay is a
   systemd user unit on the hosting account — the fabric-coordinator's —
   up with that account's user manager; where no manager answers it is a

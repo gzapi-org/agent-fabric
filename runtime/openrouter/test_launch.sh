@@ -595,12 +595,15 @@ grep -q "^goodbye --role backend-dev --project gzapp --note session ended" "$ALO
 [[ "$(grep -c . "$ALOG")" == 2 ]] && ok "exactly one of each" || bad "announce count" "$(cat "$ALOG")"
 h="$(grep '^hello' "$ALOG" | sed 's/.*@//')"; g="$(grep '^goodbye' "$ALOG" | sed 's/.*@//')"
 python3 -c "import sys; sys.exit(0 if float('$h') < float('$g') else 1)" && ok "…in that order" || bad "goodbye before hello" "$(cat "$ALOG")"
-# A plain-claude launch refused for want of a long-lived sign-in announces nothing.
+# A plain-claude launch refused for want of a long-lived sign-in announces
+# nothing. Its own fake claude: the one above is gone, and a runner has no
+# real harness on PATH for the launcher's earlier checks to find (CI, #37).
+printf '#!/usr/bin/env bash\necho "CLAUDE-RAN"\n' > "$SANDBOX/bin/claude"; chmod +x "$SANDBOX/bin/claude"
 : > "$SEC"; rm -f "$ALOG"
 rc=0; out="$(runa --provider anthropic --version 2>&1)" || rc=$?
-[[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && [[ ! -s "$ALOG" ]] \
-  && ok "a launch refused for want of a long-lived sign-in sends no HELLO, so owes no GOODBYE" || bad "a refused launch announced itself" "rc=$rc $(cat "$ALOG" 2>/dev/null)"
-printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"; rm -f "$ALOG"
+[[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ! grep -q "CLAUDE-RAN" <<<"$out" && [[ ! -s "$ALOG" ]] \
+  && ok "a launch refused for want of a long-lived sign-in sends no HELLO, so owes no GOODBYE" || bad "a refused launch announced itself" "rc=$rc $(tail -3 <<<"$out") $(cat "$ALOG" 2>/dev/null)"
+printf "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-SUITE-FIXTURE'\n" > "$SEC"; rm -f "$ALOG" "$SANDBOX/bin/claude"
 # The session's failure is the launcher's failure, and still a GOODBYE.
 cat > "$SANDBOX/bin/ori" <<'FAKE'
 #!/usr/bin/env bash

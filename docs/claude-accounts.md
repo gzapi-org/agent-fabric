@@ -57,9 +57,11 @@ owner, 2026-09-25: no hostexec, no sudo, nobody on the account):
 3. with `--restart` (assign's default; `--no-restart` leaves sessions
    alone) a running session is stopped gracefully and its launcher
    resumes the same conversation on the new sign-in — the upgrade's
-   restart marker, written already done. The requester's own session is
-   never stopped; one that does not stop within 90 s is left running and
-   said.
+   restart marker, written already done. Only a session not already on
+   the token — read from its own environment — is stopped; a broker
+   session has no Claude account to move and is left alone. The
+   requester's own session is never stopped; one that does not stop
+   within 90 s is left running, and its row fails so a rerun is asked.
 
 Each row of the reply names the sign-in by fingerprint (`setup-token
 <sha>`, `fabric-accounts templates` maps it to an account), and any row

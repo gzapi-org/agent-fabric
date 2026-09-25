@@ -145,7 +145,7 @@ def _strip_comment(line: str, value_at: int = 0) -> str:
             quote = ch
         elif inline_list and ch in "[,":
             since = i + 1                 # an item of an inline list starts after `[` or `,`
-        elif ch == "#" and (i == 0 or line[i - 1] in " \t") and (i + 1 == len(line) or line[i + 1] in " \t"):
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t") and (i + 1 == len(line) or line[i + 1] in " \t\r"):
             return line[:i].rstrip()
     return line.rstrip()
 

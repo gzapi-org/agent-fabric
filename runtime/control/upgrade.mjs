@@ -145,10 +145,14 @@ async function version(bin, exec) {
 }
 
 let running = null;   // one upgrade at a time per daemon
-// secrets-sync writes the same restart marker; it asks before restarting.
+// secrets-sync writes the same restart marker: each refuses while the
+// other holds it, in both directions (re-review of #37).
+let syncRestarting = false;
 export function upgradeRunning() { return running !== null; }
+export function restartInFlight(on) { syncRestarting = on; }
 export function upgrade(request, opts = {}) {
   if (running) return Promise.resolve({ status: 'busy', note: 'an upgrade is already running on this account' });
+  if (syncRestarting) return Promise.resolve({ status: 'busy', note: 'a secrets-sync is restarting the session on this account' });
   running = upgradeOnce(request, opts).finally(() => { running = null; });
   return running;
 }

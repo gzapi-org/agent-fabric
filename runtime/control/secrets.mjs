@@ -33,7 +33,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { syncedVar } from '../../communication/gzcoord/scripts/inbox.mjs';
 import fs from 'node:fs';
-import { sessionPids, stateDir, writeMarker, markerPath, upgradeRunning, STOP_WAIT_MS } from './upgrade.mjs';
+import { sessionPids, stateDir, writeMarker, markerPath, upgradeRunning, restartInFlight, STOP_WAIT_MS } from './upgrade.mjs';
 
 const execFileP = promisify(execFile);
 export const SYNC_TIMEOUT_MS = 120000;
@@ -60,10 +60,20 @@ const APPLIED = new Set([0, 2]);
 // daemon — same uid. It, not the record, says whether the session is
 // already on the account: a record synced earlier under a session that
 // was never restarted must not read as "already on it" (review of #37).
-export function sessionToken(pid, { envOf = p => fs.readFileSync(`/proc/${p}/environ`) } = {}) {
-  for (const kv of String(envOf(pid)).split('\0'))
-    if (kv.startsWith('CLAUDE_CODE_OAUTH_TOKEN=')) return kv.slice('CLAUDE_CODE_OAUTH_TOKEN='.length) || null;
-  return null;
+export function sessionToken(pid, opts = {}) { return sessionEnv(pid, opts).token; }
+// A broker session (the launcher's default provider) holds no Claude
+// account by design — the launcher removes the token — so it is never
+// "not on" one: restarting it would bring it back just as tokenless, on
+// every run (re-review of #37). The launcher stamps the provider into the
+// session's environment; a session without the stamp is taken as plain
+// claude, the only path a token reaches.
+export function sessionEnv(pid, { envOf = p => fs.readFileSync(`/proc/${p}/environ`) } = {}) {
+  const out = { token: null, provider: null };
+  for (const kv of String(envOf(pid)).split('\0')) {
+    if (kv.startsWith('CLAUDE_CODE_OAUTH_TOKEN=')) out.token = kv.slice('CLAUDE_CODE_OAUTH_TOKEN='.length) || null;
+    else if (kv.startsWith('AGENT_FABRIC_LAUNCH_PROVIDER=')) out.provider = kv.slice('AGENT_FABRIC_LAUNCH_PROVIDER='.length) || null;
+  }
+  return out;
 }
 
 let syncing = null;   // one secrets-sync at a time per daemon
@@ -110,27 +120,30 @@ export async function secretsSyncOnce(request, {
   }
   const done = session => ({ status: 'synced', claude_sign_in: sign, ...missing, session });
   if (!running.length) return done('none');
-  const onIt = pid => { try { const t = sessionToken(pid, envOf ? { envOf } : {}); return !!t && !!tok && sha12(t) === sha12(tok); } catch { return false; } };
-  const stale = running.filter(pid => !onIt(pid));
-  if (!stale.length) return done('running, already on it');
+  const envs = new Map(running.map(pid => { try { return [pid, sessionEnv(pid, envOf ? { envOf } : {})]; } catch { return [pid, null]; } }));
+  const broker = running.filter(pid => { const e = envs.get(pid); return e?.provider && e.provider !== 'anthropic'; });
+  const stale = running.filter(pid => { if (broker.includes(pid)) return false; const t = envs.get(pid)?.token; return !(t && tok && sha12(t) === sha12(tok)); });
+  if (!stale.length) return done(broker.length === running.length ? 'running (broker): no Claude account to move' : 'running, already on it');
   const own = me && request.from === me;
   if (own) return done('yours: relaunch to use it');
   if (!restart) return done('running: relaunch to use it');
   if (upgrading()) return fail('an upgrade is running on this account (it owns the restart marker); synced, nothing stopped — run it again after');
-  // The launcher reads the marker after the session's GOODBYE: written
-  // first, and done already, so it resumes at once on what was synced.
-  let before = null;
-  try { before = sessionToken(stale[0], envOf ? { envOf } : {}); } catch { /* unreadable: said as no token */ }
-  writeMarker(dir, { request_id: request.id, requested_at: now().toISOString(), piece: 'the Claude account', from: before ? `setup-token ${sha12(before)}` : 'no token', to: `setup-token ${sign.token_sha256_12}`, installed: `setup-token ${sign.token_sha256_12}`, pids: stale, status: 'done' });
-  for (const pid of stale) { try { kill(pid, 'SIGTERM'); } catch { /* gone */ } }
-  const until = Date.now() + stopWaitMs;
-  while (stale.some(alive) && Date.now() < until) await sleep(500);
-  if (stale.some(alive)) {
-    // Not stopped: our marker goes (only ours — an upgrade may have
-    // written its own since), or the session would be resumed the moment
-    // it is ended on purpose, long after this action.
-    try { if (JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).request_id === request.id) fs.rmSync(markerPath(dir), { force: true }); } catch { /* gone */ }
-    return fail(`synced, but the session (pid ${stale.filter(alive).join(', ')}) did not stop within ${Math.round(stopWaitMs / 1000)} s; nothing forced — run it again, or relaunch it`);
-  }
-  return done('restarting');
+  restartInFlight(true);
+  try {
+    // The launcher reads the marker after the session's GOODBYE: written
+    // first, and done already, so it resumes at once on what was synced.
+    const before = envs.get(stale[0])?.token ?? null;
+    writeMarker(dir, { request_id: request.id, requested_at: now().toISOString(), piece: 'the Claude account', from: before ? `setup-token ${sha12(before)}` : 'no token', to: `setup-token ${sign.token_sha256_12}`, installed: `setup-token ${sign.token_sha256_12}`, pids: stale, status: 'done' });
+    for (const pid of stale) { try { kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+    const until = Date.now() + stopWaitMs;
+    while (stale.some(alive) && Date.now() < until) await sleep(500);
+    if (stale.some(alive)) {
+      // Not stopped: our marker goes (only ours — an upgrade may have
+      // written its own since), or the session would be resumed the moment
+      // it is ended on purpose, long after this action.
+      try { if (JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).request_id === request.id) fs.rmSync(markerPath(dir), { force: true }); } catch { /* gone */ }
+      return fail(`synced, but the session (pid ${stale.filter(alive).join(', ')}) did not stop within ${Math.round(stopWaitMs / 1000)} s; nothing forced — run it again, or relaunch it`);
+    }
+    return done('restarting');
+  } finally { restartInFlight(false); }
 }

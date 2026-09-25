@@ -9,11 +9,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { scratch } from '../../../tests/scratch.mjs';
 import { secretsSync, sessionToken } from '../secrets.mjs';
-import { markerPath } from '../upgrade.mjs';
+import { markerPath, upgrade } from '../upgrade.mjs';
 import { table, rows, ACTION_OK } from '../ctl.mjs';
 
 const TPL = 'sk-ant-oat01-TEMPLATE-FIXTURE';
-const envWith = tok => () => `PATH=/usr/bin\0${tok ? `CLAUDE_CODE_OAUTH_TOKEN=${tok}\0` : ''}HOME=/x\0`;
+const envWith = (tok, provider = 'anthropic') => () => `PATH=/usr/bin\0${provider ? `AGENT_FABRIC_LAUNCH_PROVIDER=${provider}\0` : ''}${tok ? `CLAUDE_CODE_OAUTH_TOKEN=${tok}\0` : ''}HOME=/x\0`;
 const fp = v => crypto.createHash('sha256').update(v).digest('hex').slice(0, 12);
 function fixture({ writes = TPL, code = 0, report = {}, before = null } = {}) {
   const home = scratch('secrets-home-'); const root = scratch('secrets-root-');
@@ -140,4 +140,32 @@ test('restart refuses: no token to move to, a pgrep that failed, an upgrade in f
     kill: () => { sigs.push(1); fs.writeFileSync(markerPath(other.dir), JSON.stringify({ request_id: 'an-upgrade', status: 'pending' })); }, alive: () => true, sleep: async () => {}, stopWaitMs: 0 });
   assert.equal(r4.status, 'failed');
   assert.equal(JSON.parse(fs.readFileSync(markerPath(other.dir))).request_id, 'an-upgrade', 'the upgrade\'s marker survives');
+});
+
+test('a broker session has no Claude account to move: never restarted, however often the sync is asked', async () => {
+  const f = fixture();
+  for (let run = 0; run < 2; run++) {
+    const r = await secretsSync({ id: `b${run}`, from: 'h/user', args: { expect: fp(TPL), restart: true } }, { home: f.home, root: f.root, exec: f.exec, dir: f.dir, sessions: [70], me: 'h/db-admin',
+      envOf: envWith(null, 'openrouter'), kill: () => assert.fail('a broker session was stopped') });
+    assert.deepEqual([r.status, r.session], ['synced', 'running (broker): no Claude account to move']);
+  }
+  assert.ok(!fs.existsSync(markerPath(f.dir)));
+  const g = fixture();
+  let up = true; const sigs = [];
+  const r = await secretsSync({ id: 'mix', from: 'h/user', args: { restart: true } }, { home: g.home, root: g.root, exec: g.exec, dir: g.dir, sessions: [71, 72], me: 'h/db-admin',
+    envOf: pid => (pid === 71 ? envWith(null, 'openrouter') : envWith('sk-ant-oat01-OLD-ACCOUNT'))(), kill: (pid) => { sigs.push(pid); up = false; }, alive: () => up, sleep: async () => {} });
+  assert.deepEqual([r.session, sigs], ['restarting', [72]], 'only the plain-claude session on another account is stopped');
+  assert.deepEqual(JSON.parse(fs.readFileSync(markerPath(g.dir))).pids, [72]);
+});
+
+test('an upgrade asked for while a secrets-sync restarts the session is busy, and says why', async () => {
+  const f = fixture();
+  let release, up = true; const gate = new Promise(r => { release = () => { up = false; r(); }; });
+  const sync = secretsSync({ id: 's', from: 'h/user', args: { restart: true } }, { home: f.home, root: f.root, exec: f.exec, dir: f.dir, sessions: [80], me: 'h/db-admin',
+    envOf: envWith('sk-ant-oat01-OLD-ACCOUNT'), kill: () => {}, alive: () => up, sleep: () => gate, stopWaitMs: 60000 });
+  await new Promise(r => setImmediate(r));
+  const u = await upgrade({ id: 'u', from: 'h/user', op: 'upgrade', args: { piece: 'claude' } }, {});
+  assert.deepEqual([u.status, u.note], ['busy', 'a secrets-sync is restarting the session on this account']);
+  release(); assert.equal((await sync).session, 'restarting');
+  assert.equal((await upgrade({ id: 'u2', from: 'h/user', op: 'upgrade', args: { piece: 'claude', version: 'x' } }, {})).status, 'refused', 'the interlock is released afterwards');
 });

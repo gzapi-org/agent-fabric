@@ -139,7 +139,7 @@ export function table(op, rs) {
       const u = r.secretsSync;
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const si = u.claude_sign_in?.via === 'setup-token' ? `setup-token ${u.claude_sign_in.token_sha256_12}` : (u.claude_sign_in?.via ?? '-');
-      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${si.padEnd(34)} ${String(u.session ?? '-').padEnd(28)} ${u.reason ?? (u.missing ? `missing in Doppler: ${u.missing.join(', ')}` : '')}`.trimEnd());
+      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${si.padEnd(34)} ${String(u.session ?? '-').padEnd(28)} ${u.reason ?? u.note ?? (u.missing ? `missing in Doppler: ${u.missing.join(', ')}` : '')}`.trimEnd());
     }
     return lines.join('\n');
   }
@@ -149,7 +149,7 @@ export function table(op, rs) {
       const u = r.upgrade;
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
       const ft = u.status === 'current' ? `${u.version} (pinned)` : `${u.from ?? '-'} → ${u.to ?? '-'}`;
-      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? ''}`.trimEnd());
+      lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? u.note ?? ''}`.trimEnd());
     }
     return lines.join('\n');
   }

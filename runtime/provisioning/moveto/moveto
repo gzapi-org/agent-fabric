@@ -24,7 +24,7 @@ usage: moveto <account>             open a shell as <account>, in its workspace
                                    (~/projects: the place a session launches from)
        moveto <account> <clone>     …in that clone (~/projects/<clone>) instead
        moveto <account> --print     print the resolved path, spawn nothing
-       moveto --list                accounts that have at least one clone
+       moveto --list                accounts that have at least one clone: account, role, clones
        moveto <account> --list      that account's clones
 
 Sudo here comes from the `qubes` group and role accounts are not in it, so
@@ -84,6 +84,17 @@ list_clones() {
     return 0
 }
 
+# The role an account holds is in its own binding, bound from a login shell
+# (bin/fabric-role) and readable only as the account — so it is read the
+# way the clones are, through run_as. "-" when none is bound or readable.
+role_of() {
+    local acct="$1" home b role
+    home=$(home_of "$acct"); [[ -n "$home" ]] || { printf -- '-'; return; }
+    b="$home/.local/state/agent-fabric/agents/$acct/binding.json"
+    role=$(run_as "$acct" cat "$b" 2>/dev/null | sed -n 's/.*"role": *"\([^"]*\)".*/\1/p' | head -1)
+    display_safe "${role:--}"
+}
+
 # The window title is the ROLE INSTANCE — the account — because that is what
 # names a session here. Entering a named clone in an account that holds
 # several is the exception: its own name cannot tell two of them apart, so
@@ -107,7 +118,7 @@ case "$1" in
             [[ ${#CLONES[@]} -gt 0 ]] || continue
             line=""
             for c in "${CLONES[@]}"; do line+="$(display_safe "$c") "; done
-            printf '%-24s %s\n' "$u" "${line% }"
+            printf '%-24s %-20s %s\n' "$u" "$(role_of "$u")" "${line% }"
         done
         exit 0 ;;
 esac

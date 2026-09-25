@@ -74,7 +74,11 @@ def main() -> int:
         if drift:
             lines.append(f"agent-fabric: DRIFT {drift}")
         lines += project_layer(role, ctx["project"], ctx["working_copy"])
-        if watch_running() is False:
+        try:
+            missing = watch_running() is False
+        except Exception:  # noqa: BLE001 — a /proc oddity must not cost the session its project layer
+            missing = False
+        if missing:
             lines.append(WATCH_MISSING.format(source=payload.get("source") or "start"))
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": "\n".join(lines)}}))
@@ -96,7 +100,7 @@ def main() -> int:
 # cannot start a Monitor, so it says so here, at the moment it is true.
 WATCH_MISSING = ("agent-fabric: NO INBOX WATCH is running for this session ({source}) — arm it now, "
                  "as your first action: Monitor(command: 'node \"$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs\" --follow', "
-                 "description: 'gzcoord inbox watch', timeout_ms: 1800000), and re-arm it at each expiry notice "
+                 "description: 'gzcoord inbox watch', persistent: true, timeout_ms: 1800000), and re-arm it at each expiry notice "
                  "(gzcoord-receive §1). One watch per session: never a second.")
 
 

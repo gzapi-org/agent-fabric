@@ -792,8 +792,9 @@ elif (( STATUS > 128 )); then note="session ended by signal $((STATUS - 128))"
 else note="session ended with status $STATUS"; fi
 goodbye "$note"
 
-# ── back on the new version: the restart an upgrade asked for ────────
-# The control agent's `upgrade` (runtime/control/upgrade.mjs) writes
+# ── back on the new version: the restart an action asked for ─────────
+# The control agent's `upgrade` or `secrets-sync --restart`
+# (runtime/control/{upgrade,secrets}.mjs) writes
 # $STATE_DIR/restart.json, then stops this session with SIGTERM — the
 # harness's graceful shutdown. This shell is still in the session's
 # terminal, so it is the one that can bring the session back: it waits

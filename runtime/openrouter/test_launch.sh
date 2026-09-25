@@ -555,7 +555,6 @@ grep -q "^CLAUDE-OAUTH-SHA:$(fp sk-ant-oat01-NEW-TEMPLATE)$" <<<"$out" && grep -
   && ok "plain claude: the synced record's token, not the older one the shell inherited, and that is said" || bad "stale inherited token used" "$(grep -iE "oauth|synced" <<<"$out")"
 ! grep -q "sk-ant-oat01-" <<<"$out" && ok "…by name, never by value" || bad "token value printed"
 : > "$SEC"
-out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)"
 rc=0; out="$(CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-OLD-TEMPLATE run --provider anthropic --version 2>&1)" || rc=$?
 grep -q "the login's synced record has none" <<<"$out" && ok "no template in the record: an inherited one is dropped, by name" || bad "inherited token kept" "$(grep -iE "oauth|synced" <<<"$out")"
 [[ $rc -eq 1 ]] && grep -q "no long-lived Claude sign-in" <<<"$out" && ! grep -q "^CLAUDE-OAUTH-SHA:" <<<"$out" \

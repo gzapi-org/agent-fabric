@@ -295,7 +295,80 @@ def hygiene_substitute(text: str, where: str) -> tuple[str, list[str]]:
     return text, notes
 
 
-def scan_collisions(dirs: list[str]) -> list[str]:
+def report_rel(path: str, project: str | None) -> str:
+    """A path as the drain report and its stderr name it: relative to the
+    project's working copy for a project file, to the fabric root for a
+    fabric file. The report is committed into the project, and an
+    absolute path pinned the directory one coordinator happened to drain
+    in (a scratch checkout) into a file every clone reads."""
+    path = os.path.abspath(path)
+    wc = layout.working_copy_for(project) if project else None
+    for base in ([os.path.abspath(wc)] if wc else []) + [os.path.abspath(layout.FABRIC_ROOT)]:
+        if os.path.commonpath([path, base]) == base:
+            return os.path.relpath(path, base)
+    return os.path.basename(path)
+
+
+REPORT_LISTS = ("files", "hygiene_problems", "rejected_hygiene", "redactions", "retired_in_siblings",
+                "oversized_claims", "clipped_descriptions", "migrated", "merge_target_unresolved")
+
+
+def merge_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """The drain report this run leaves, given the one already on disk.
+
+    A drain across accounts is one run per bundle into the same working
+    copy, and each run rewrote the report whole: the committed report
+    described the last bundle alone, every earlier run's decisions, roles,
+    moves and files gone, and an index-only run (no claims) wrote empty
+    watermarks (a drain's blind review, 2026-09-25). A report of the SAME
+    stamp is therefore the same drain and is merged into: roles and
+    shared topics unioned, the lists appended without repeats, one
+    decision per key (the later run's, as the tree now reflects it), the
+    telemetry kept per source (agent@host) so re-running a bundle
+    replaces its counts instead of adding them twice. A report of another
+    stamp is an earlier drain, replaced — except its watermarks: they say
+    where each host's store was read up to, which only ever moves forward,
+    so every host keeps the higher of the two and a run that read nothing
+    never lowers or empties one. `title_collisions` is read from the tree,
+    which already holds every run's result."""
+    marks = {h: v for h, v in (previous.get("watermarks") or {}).items() if isinstance(v, (int, float))}
+    for host, mark in (current.get("watermarks") or {}).items():
+        marks[host] = max(mark, marks.get(host, mark))
+    if previous.get("stamp") != current["stamp"]:
+        return dict(current, watermarks=marks)
+    merged = dict(current, watermarks=marks)
+    merged["roles"] = sorted(set(previous.get("roles") or []) | set(current["roles"]))
+    merged["shared_topics"] = sorted(set(previous.get("shared_topics") or []) | set(current["shared_topics"]))
+    merged["shared_slices"] = len(merged["shared_topics"])
+    for key in REPORT_LISTS:
+        seen = list(previous.get(key) or [])
+        seen += [item for item in current.get(key) or [] if item not in seen]
+        merged[key] = seen
+    merged["files_written"] = len(merged["files"])
+    decisions = {d.get("key"): d for d in previous.get("collision_decisions") or [] if isinstance(d, dict)}
+    for d in current["collision_decisions"]:
+        decisions.pop(d["key"], None)
+        decisions[d["key"]] = d
+    merged["collision_decisions"] = list(decisions.values())
+    sources = dict(previous.get("telemetry_sources") or {})
+    sources.update(current["telemetry_sources"])
+    merged["telemetry_sources"] = sources
+    telemetry: dict[str, dict[str, Any]] = {}
+    for per_role in sources.values():
+        for role, counts in (per_role or {}).items():
+            into = telemetry.setdefault(role, {})
+            for name, value in (counts or {}).items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    into[name] = into.get(name, 0) + value
+                else:
+                    into.setdefault(name, value)
+    merged["telemetry"] = telemetry
+    if current.get("harvest") is None:
+        merged["harvest"] = previous.get("harvest")
+    return merged
+
+
+def scan_collisions(dirs: list[str], rel: Callable[[str], str] = layout.root_rel) -> list[str]:
     """Report title collisions still recorded in the committed corpus.
 
     Read from the `collisions` frontmatter the assembler writes, not from the
@@ -314,7 +387,7 @@ def scan_collisions(dirs: list[str]) -> list[str]:
                 meta, _sections = read_existing_slice(path)
                 for title in meta.get("collisions", []) or []:
                     found.append(
-                        f"{layout.root_rel(path)}: {title!r} appears twice "
+                        f"{rel(path)}: {title!r} appears twice "
                         "— set merge_target to resolve"
                     )
     return sorted(found)
@@ -599,6 +672,9 @@ def main() -> int:
     def base_for(role: str, klass: str) -> str:
         """The directory a slice of `klass` for `role` lives in."""
         return layout.class_home(klass, role, project)
+
+    def in_report(path: str) -> str:
+        return report_rel(path, project)
 
     with open(os.path.join(args.drain, "references.json"), encoding="utf-8") as fh:
         references = json.load(fh)
@@ -1070,6 +1146,8 @@ def main() -> int:
         if len(description) <= DESCRIPTION_MAX:
             return description
         cut = description[: DESCRIPTION_MAX - 1].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+        if os.path.isabs(where):
+            where = in_report(where)
         clipped_descriptions.append(f"{where}: description clipped from {len(description)} to {len(cut) + 1} characters")
         return cut + "…"
 
@@ -1122,7 +1200,7 @@ def main() -> int:
             touched is written and reported."""
             touched = retire_in_siblings(directory, filename, target, clip=clip_description)
             for tpath, what in touched:
-                retired_in.append(f"{layout.root_rel(tpath)}: '{target}' {what}")
+                retired_in.append(f"{in_report(tpath)}: '{target}' {what}")
                 # `written` counts files on disk once: a rewritten
                 # sibling joins it, a removed one leaves it.
                 if what == "rewritten" and tpath not in written:
@@ -1253,17 +1331,17 @@ def main() -> int:
         body = "\n\n".join(f"## {h}\n\n{blocks[h]}" for h in order) + "\n"
         # Carried text (a slice written before a pattern existed) is
         # substituted the same way, and named.
-        body, notes = hygiene_substitute(body, layout.root_rel(path))
+        body, notes = hygiene_substitute(body, in_report(path))
         redactions.extend(notes)
         if isinstance(meta.get("description"), str):
-            meta["description"], notes = hygiene_substitute(meta["description"], layout.root_rel(path) + " description")
+            meta["description"], notes = hygiene_substitute(meta["description"], in_report(path) + " description")
             redactions.extend(notes)
         text = render_frontmatter(meta) + "\n\n" + body
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.rstrip() + "\n")
         if path not in written:   # a retire may have rewritten this part earlier in the run
             written.append(path)
-        problems.extend(hygiene_check(body, layout.root_rel(path)))
+        problems.extend(hygiene_check(body, in_report(path)))
 
     def carried_chars(claims: list[dict[str, Any]], *candidates: str) -> int:
         """How much text merge mode will carry into the FIRST part, BEYOND
@@ -1727,7 +1805,7 @@ def main() -> int:
         os.path.join(layout.FABRIC_ROOT, "memory", "domains"),
         layout.project_memory_root(project),
         layout.shared_dir(),
-    ])
+    ], in_report)
 
     # The harvest's own provenance has to survive into the COMMITTED record,
     # because the drain directory it lives in is temporary. Two things were
@@ -1764,13 +1842,19 @@ def main() -> int:
         if hr.get("host") is not None and hr.get("next_watermark") is not None:
             watermarks[hr["host"]] = hr["next_watermark"]
 
+    source = f"{hr.get('agent') or 'unattributed'}@{hr.get('host') or 'unknown'}" \
+        if harvest_meta is not None else "unattributed"
+    files = [in_report(p) for p in written]
     report = {
         "stamp": args.stamp,
         "project": project,
         "roles": owning_roles,
-        "files_written": len(written),
+        "files": files,
+        "files_written": len(files),
+        "shared_topics": sorted(f"{k}:{t}" for (k, t) in shared),
         "shared_slices": len(shared),
         "telemetry": telemetry,
+        "telemetry_sources": {source: telemetry},
         "hygiene_problems": problems,
         "rejected_hygiene": rejected_hygiene,
         "redactions": redactions,
@@ -1785,6 +1869,14 @@ def main() -> int:
         "watermarks": watermarks,
     }
     report_path = layout.project_report_path(project)
+    try:
+        with open(report_path, encoding="utf-8") as fh:
+            previous = json.load(fh)
+        if not isinstance(previous, dict):
+            previous = {}
+    except (OSError, ValueError):
+        previous = {}
+    report = merge_reports(previous, report)
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)

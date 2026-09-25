@@ -829,13 +829,11 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
     first = read(report_path(out))
     run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     second = read(report_path(out))
-    # `collision_decisions` records what THIS run applied: the first run
-    # applied keep-both, the second found the pair already present and
-    # asked nothing — so that key alone may differ between the two.
-    strip = lambda t: {k: v for k, v in json.loads(t).items() if k != "collision_decisions"}  # noqa: E731
-    assert strip(first) == strip(second), "the drain report must be identical for identical input"
-    assert json.loads(first)["collision_decisions"] and not json.loads(second)["collision_decisions"], \
-        "the decision is applied once and not asked for again"
+    # The first run applied keep-both; the second found the pair already
+    # present and asked nothing. Both are the same drain (one stamp), so
+    # the report the second leaves still carries the first's decision.
+    assert first == second, "the drain report must be identical for identical input"
+    assert json.loads(second)["collision_decisions"], "the drain's decision survives its re-run"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
 
@@ -1291,7 +1289,9 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     part one was written and indexed before the retire touched it. Its
     index line must follow: re-described when a section remains; lint
     accepts the tree; a part counts once in files_written (re-review of
-    2026-09-20, finding 1)."""
+    2026-09-20, finding 1). Each superseding run is a drain of its own,
+    stamped so: a report of the same stamp is merged into, and the count
+    would then be the whole drain's."""
     big = "y " * 900
     # Part one holds First alone: its replacement goes to part one.
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
@@ -1304,7 +1304,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
         json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "First", "body": "w " * 200, "evidence": ["h3"]}]), fh)
     _lintable(out)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}), "--stamp", "2026-01-02")
     assert proc.returncode == 0, proc.stderr
     parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
     assert sum(t.count("## First") for t in parts.values()) == 1 and any("w w w" in t for t in parts.values()), parts
@@ -1334,7 +1334,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
         json.dump(claims("alpha", [{"class": "domain", "topic": "keep", "title": "Alpha one", "body": big, "evidence": ["h7"]}]), fh)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}), "--stamp", "2026-01-03")
     assert proc.returncode == 0, proc.stderr
     first_part = read(dom(out, "alpha", "domain", "keep.md"))
     assert "## Alpha one" not in first_part and "## Beta two" in first_part and "description: Beta two" in first_part, first_part
@@ -1361,7 +1361,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
             {"class": "domain", "topic": "twice", "title": "Four", "body": big, "evidence": ["h12"]},
         ]), fh)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}), "--stamp", "2026-01-04")
     assert proc.returncode == 0, proc.stderr
     n_parts = len([n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("twice")])
     assert json.loads(read(report_path(out)))["files_written"] == n_parts + 1, (n_parts, proc.stderr)
@@ -1952,8 +1952,78 @@ def test_part_one_of_a_split_topic_is_always_the_topic_file(tmp: str) -> None:
     assert all(f"domain/{p}" in index for p in parts), index
 
 
+def harvest_report(drain: str, agent: str, host: str, next_watermark: int | None) -> None:
+    with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"agent": agent, "host": host, "since_watermark": 0, "next_watermark": next_watermark,
+                   "counts": {"provisional_agent": 0, "in_scope": 1}}, fh)
+
+
+def test_the_drain_report_gathers_every_bundle_of_one_drain(tmp: str) -> None:
+    """A drain across accounts is one run per bundle into one working copy,
+    and each run rewrote the report whole: the committed report described
+    the last bundle alone, and an index-only run wrote empty watermarks
+    (a drain's blind review, 2026-09-25). Runs of one stamp merge; a new
+    stamp replaces all but the watermarks, which never move back; and no
+    path in the report is absolute."""
+    drain_a, claims_a, out = build(os.path.join(tmp, "a"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "Same title", "body": "First.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "one", "title": "Same title", "body": "Second.", "evidence": ["h2"]},
+        {"class": "solution", "topic": "long", "title": "A cue that runs on " * 20,
+         "body": "Seen in Springfield.", "evidence": ["h3"]},
+    ])})
+    harvest_report(drain_a, "dev-01", "hostA", 2000)
+    proc = run_assemble(drain_a, claims_a, out, *keep_both(tmp, "alpha/domain:one#Same title"))
+    assert proc.returncode == 0, proc.stderr
+    drain_b, claims_b, _ = build(os.path.join(tmp, "b"), {"beta": claims("beta", [
+        {"class": "solution", "topic": "two", "title": "Beta fact", "body": "b", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_b, "dev-02", "hostB", 3000)
+    proc = run_assemble(drain_b, claims_b, out)
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert report["roles"] == ["alpha", "beta"], f"the first bundle's roles were lost: {report['roles']}"
+    assert [d["key"] for d in report["collision_decisions"]] == ["alpha/domain:one#Same title"], \
+        report["collision_decisions"]
+    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+    assert set(report["telemetry"]) == {"alpha", "beta"}, report["telemetry"]
+    assert any("alpha/" in f for f in report["files"]) and any("beta/" in f for f in report["files"]), report["files"]
+    assert report["files_written"] == len(report["files"])
+
+    # Every path is relative: to the working copy, or to the fabric root.
+    text = read(report_path(out))
+    assert tmp not in text and os.path.realpath(tmp) not in text, "an absolute path reached the report"
+    paths = report["files"] + [e.split(":")[0] for e in report["redactions"] + report["clipped_descriptions"]]
+    assert report["redactions"] and report["clipped_descriptions"], report
+    assert all(not p.startswith(("/", "..")) for p in paths), paths
+    assert ".agent-fabric/memory/beta/solution.md" in report["files"], report["files"]
+    assert "memory/domains/alpha/domain.md" in report["files"], report["files"]
+
+    # Re-running a bundle does not count it twice.
+    admitted = report["telemetry"]["beta"]["admitted"]
+    assert run_assemble(drain_b, claims_b, out).returncode == 0
+    assert json.loads(read(report_path(out)))["telemetry"]["beta"]["admitted"] == admitted
+
+    # An index-only run (no claims, a harvest that read nothing) keeps
+    # every watermark and every earlier bundle's record.
+    drain_c, claims_c, _ = build(os.path.join(tmp, "c"), {"beta": claims("beta", [])})
+    harvest_report(drain_c, "dev-02", "hostB", None)
+    assert run_assemble(drain_c, claims_c, out).returncode == 0
+    report = json.loads(read(report_path(out)))
+    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+    assert report["roles"] == ["alpha", "beta"] and report["collision_decisions"], report
+
+    # The next drain replaces the record, and still never lowers a mark.
+    harvest_report(drain_b, "dev-02", "hostB", 2500)
+    assert run_assemble(drain_b, claims_b, out, "--stamp", "2026-01-02").returncode == 0
+    report = json.loads(read(report_path(out)))
+    assert report["stamp"] == "2026-01-02" and report["roles"] == ["beta"], report["roles"]
+    assert report["collision_decisions"] == [], report["collision_decisions"]
+    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+
+
 def main() -> int:
     cases = [
+        test_the_drain_report_gathers_every_bundle_of_one_drain,
         test_part_one_of_a_split_topic_is_always_the_topic_file,
         test_a_claim_in_the_carried_file_is_not_written_twice,
         test_a_retitled_memory_is_asked_about_not_appended,

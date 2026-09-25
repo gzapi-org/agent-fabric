@@ -17,7 +17,7 @@ memory/                          (this repository — field knowledge)
     │   ├── crossref.json        artifact → where it was learned and landed
     │   ├── solution/ intersection/ rationale/ workflow/ threads/
     ├── shared/                  project knowledge two or more roles own
-    └── last-drain-report.json   the last assembly's telemetry and watermarks
+    └── last-drain-report.json   the last drain's record (every bundle of its stamp) and watermarks
 ```
 
 **Project knowledge lives in the project's repository.** A `solution`
@@ -199,6 +199,16 @@ digest is wrong or whose manifest names another agent is refused with a
 status and no file.
 `bin/fabric-host <host> drain <login> > drain.tar` remains only as the
 sudo fallback for a host whose daemons are down.
+
+One `assemble.py --bundle` run per bundle, all with the drain's one
+`--stamp`, build one drain report: a run finding a report of the same
+stamp merges into it — roles and shared topics unioned, decisions (one
+per key, the later), moves, files and findings appended without
+repeats, telemetry kept per agent@host so a re-run bundle replaces its
+counts — and a report of another stamp is replaced. Watermarks carry
+across both: each host keeps the higher mark, and a run that read
+nothing never lowers or empties one. Every path in the report is
+relative to the working copy, or to the fabric root for a fabric file.
 
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the
 project from the working copy's remote, and the working copy as a label.

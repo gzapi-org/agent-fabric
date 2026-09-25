@@ -2021,8 +2021,43 @@ def test_the_drain_report_gathers_every_bundle_of_one_drain(tmp: str) -> None:
     assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
 
 
+def test_a_claim_body_s_own_headings_never_open_a_section(tmp: str) -> None:
+    """A claim renders as one `## <heading>` section, but a memory may
+    carry `## ` headings of its own; the reader split the section at
+    them, the first part lost its dated footer, and re-running the same
+    bundle was refused as a collision with itself. Body headings are
+    demoted one level, the same claims twice give a byte-identical tree,
+    and a slice already written the old way is repaired on its next
+    write rather than refused."""
+    body = "Intro line.\n\n## Inner heading\n\nInner text.\n\n### Deeper\n\nDeep text."
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "doc", "title": "A structured memory", "body": body,
+         "evidence": ["h1"], "observed_at": "2026-09-20"},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    path = dom(out, "alpha", "domain", "doc.md")
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"the same bundle again was refused:\n{proc.stderr}"
+    assert tree(out) == before, "the same claims twice changed the tree"
+    text = read(path)
+    assert text.count("\n## ") == 1 and "### Inner heading" in text and "#### Deeper" in text, text
+    assert "*Observed 2026-09-20 (alpha)*" in text, text
+
+    # A slice written before the demotion: its body headings split it.
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text.replace("### Inner heading", "## Inner heading").replace("#### Deeper", "### Deeper"))
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"a slice written the old way was refused against itself:\n{proc.stderr}"
+    assert read(path) == text, read(path)
+    assert tree(out) == before
+
+
 def main() -> int:
     cases = [
+        test_a_claim_body_s_own_headings_never_open_a_section,
         test_the_drain_report_gathers_every_bundle_of_one_drain,
         test_part_one_of_a_split_topic_is_always_the_topic_file,
         test_a_claim_in_the_carried_file_is_not_written_twice,

@@ -540,9 +540,48 @@ def claim_heading(claim: dict[str, Any]) -> str:
     return (claim.get("title") or claim["topic"].replace("-", " ").capitalize()).strip()
 
 
+SECTION_BREAK = re.compile(r"(?m)^## ")
+BODY_HEADING = re.compile(r"(?m)^(#{2,})(?=[ \t]|$)")
+
+
+def demote_headings(text: str) -> str:
+    """Every heading of level two or deeper one level down. A slice's
+    sections are its `## ` lines — read_existing_slice splits there — so
+    a claim body that keeps the `## ` headings its memory had opened
+    sections of its own: the first part lost its dated footer, and
+    re-assembling the same bundle was refused as a collision with itself
+    (a drain's blind review, 2026-09-25). Fenced code is demoted too: the
+    reader does not know fences, and a split inside one is the same break."""
+    return BODY_HEADING.sub(r"#\1", text)
+
+
+def absorbed(sections: dict[str, str], claim: dict[str, Any]) -> list[str]:
+    """The sections that are this claim as a slice written BEFORE body
+    headings were demoted holds it: its own heading and the sections its
+    `## ` lines opened after it, when together — rejoined, demoted, with
+    whitespace and date aside — they are the claim's rendering. Empty when
+    they are not. Such a slice is only recognised when its claim arrives
+    again; until then its split sections stand as they were read, and the
+    next write of the claim puts it back together."""
+    heading = claim_heading(claim)
+    count = len(SECTION_BREAK.findall(claim["body"]))
+    keys = list(sections)
+    if not count or heading not in sections:
+        return []
+    start = keys.index(heading)
+    following = keys[start + 1:start + 1 + count]
+    if len(following) < count:
+        return []
+    joined = sections[heading] + "".join(f"\n\n## {h}\n\n{sections[h]}" for h in following)
+    rendered = undated(claim_block(claim).split("\n", 1)[1])
+    if " ".join(undated(demote_headings(joined)).split()) != " ".join(rendered.split()):
+        return []
+    return [heading] + following
+
+
 def claim_block(claim: dict[str, Any]) -> str:
     title = claim_heading(claim)
-    body = claim["body"].strip()
+    body = demote_headings(claim["body"].strip())
     cites = claim.get("citations") or {}
     flat = [c for values in cites.values() for c in values]
     tail = ""
@@ -1060,6 +1099,8 @@ def main() -> int:
             siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
             if any(undated(present[k]) == rendered for k in siblings if k in present):
                 continue
+            if absorbed(present, claim):
+                continue   # itself, as a slice written before body headings were demoted split it
             rival = present.get(heading)
             rival_date = observed_of(rival) if rival is not None else None
             if rival is None and heading in seen_incoming and \
@@ -1221,6 +1262,18 @@ def main() -> int:
 
         for claim in claims:
             heading = claim_heading(claim)
+            legacy = absorbed(blocks, claim)
+            if legacy:
+                # The claim as a pre-demotion slice split it: put it back
+                # together, keeping a date only the old text recorded.
+                whole = claim_block(claim).split("\n", 1)[1].strip()
+                old_date = OBSERVED_RE.search(blocks[legacy[-1]])
+                if old_date and not OBSERVED_RE.search(whole):
+                    whole += "\n\n" + old_date.group(0).strip()
+                for stale in legacy[1:]:
+                    del blocks[stale]
+                    order.remove(stale)
+                blocks[heading] = whole
             retire = claim.get("_retire") or []
             if retire:
                 # A retitle the owner superseded: the old sections go
@@ -1372,8 +1425,9 @@ def main() -> int:
         for path in candidates:
             _meta, sections = read_existing_slice(path)
             if sections:
+                itself = {h for c in claims for h in absorbed(sections, c)}
                 return sum(len(h) + len(t) + 8 for h, t in sections.items()
-                           if (h, undated(t)) not in incoming and h not in replaced)
+                           if (h, undated(t)) not in incoming and h not in replaced and h not in itself)
         return 0
 
     def holds_one_of(claims: list[dict[str, Any]]) -> Callable[[str], bool]:

@@ -806,11 +806,14 @@ test('waitLoop exits only on an addressed message; others pass acknowledged', as
     ack: async () => {}, waitTotal: 0, forMeFn: msg => forMe(msg, me) });
   assert.equal(r3.delivered, false, 'drain does not exit early — it lists');
   assert.equal(r3.classified.length, 1);
-  // A HELLO is a broadcast by definition: it wakes the waiter.
+  // HELLO and GOODBYE are acknowledged and never delivered, not even listed:
+  // presence is the control plane's (docs/presence.md).
+  const acked4 = [];
   const r4 = await waitLoop({
-    fetchPage: async () => ({ messages: [rec('h', 'HELLO', '')] }),
-    ack: async () => {}, waitTotal: 1800, forMeFn: msg => forMe(msg, me) });
-  assert.equal(r4.delivered, true, 'HELLO is a broadcast by definition');
+    fetchPage: async () => ({ messages: [rec('h', 'HELLO', ''), rec('g', 'GOODBYE', 'NOTES:\nsession ended\n')] }),
+    ack: async id => { acked4.push(id); }, waitTotal: 4, forMeFn: msg => forMe(msg, me) });
+  assert.deepEqual([r4.delivered, r4.classified.length, r4.othersPassed], [false, 0, 0], 'a HELLO wakes nobody and is not listed');
+  assert.deepEqual(acked4, ['h', 'g'], 'but the cursor moves past it');
 });
 
 // --keyword: reasons to stop waiting on a message NOT addressed to this

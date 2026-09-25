@@ -445,6 +445,14 @@ export const HOLD_POLL_MS = 1000;
 // the loop then waits, polling nothing, until the hold clears. `onHold`
 // is told once per transition, for the stderr line. The guard's own
 // sleep is cut when the slice ends, so a delivery waits for no tick.
+// HELLO and GOODBYE are acknowledged and never delivered, not even as a
+// line among the others: presence is the control plane's to answer
+// (`fabric-ctl <login|all> presence`, docs/presence.md), and the
+// announcements a session not yet relaunched still sends were, on a busy
+// day, most of what every watch printed (the owner, 2026-09-25). A
+// replay by seq still shows one — that is asked for.
+export const ANNOUNCEMENT_TYPES = ['HELLO', 'GOODBYE'];
+
 export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, keywords = [], ownAddress,
                                  held = () => false, onHold = () => {}, holdPollMs = HOLD_POLL_MS, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
   let waited = 0;
@@ -472,6 +480,7 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
     for (const rec of page.messages ?? []) {
       let msg = null;
       try { msg = parse(rec.content); } catch { /* not GZCOORD/1: never addressed */ }
+      if (msg && ANNOUNCEMENT_TYPES.includes(msg.type)) { try { await ack(rec.id); } catch { /* re-read next arm */ } continue; }
       const isMine = msg ? forMeFn(msg) : false;
       classified.push({ rec, msg, isMine });
       if (isMine) delivered = true;

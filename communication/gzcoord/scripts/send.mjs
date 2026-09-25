@@ -63,9 +63,9 @@ export async function main(argv = process.argv.slice(2)) {
   const text = normalize(raw);
 
   const root = inboxRoot(who);
-  const cfg = integrationConfig(who.project);
+  const cfg = integrationConfig(who.project, process.env, t);
   if (!cfg.configured) { console.error(t('send.not-configured', { reason: cfg.reason })); return 3; }
-  try { assertNotControlChannel(cfg.channel); } catch (e) { console.error(t('send.error-not-sent', { detail: e.message })); return 2; }
+  try { assertNotControlChannel(cfg.channel, t); } catch (e) { console.error(t('send.error-not-sent', { detail: e.message })); return 2; }
   const relayUrl = cfg.relay_url;
   const channel = cfg.channel;
   const taxPath = findTaxonomy(root);

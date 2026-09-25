@@ -69,6 +69,37 @@ test('every key the code prints is in en-US.json, and en-US.json has no key noth
   assert.deepEqual(Object.keys(en).filter(k => !used.has(k)).sort(), [], 'in en-US.json but nothing prints it');
 });
 
+test('a helper that defaults its printer to English is handed the caller\'s at every call', () => {
+  // send.mjs called integrationConfig and assertNotControlChannel without
+  // its printer, so on a login with an active locale two refusals were an
+  // English body in a translated frame (review of #29). The defaults exist
+  // for callers with no locale at all; every script here has one.
+  const inbox = fs.readFileSync(path.join(SCRIPTS, 'inbox.mjs'), 'utf8');
+  // The capture stops at en()'s own ")"; a printer inside an options
+  // object ({ t = en() }) is passed by name, not positionally, and is not
+  // what this rule reads.
+  const helpers = [...inbox.matchAll(/export (?:async )?function (\w+)\(([^)]*)\)/g)]
+    .filter(m => /\bt = en\($/.test(m[2]) && !m[2].includes('{')).map(m => m[1]);
+  assert.ok(helpers.includes('integrationConfig') && helpers.includes('assertNotControlChannel'), `helpers found: ${helpers}`);
+  const bare = [];
+  for (const file of ['inbox.mjs', 'gzmsg.mjs', 'send.mjs']) {
+    const src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8');
+    for (const name of helpers) {
+      for (const m of src.matchAll(new RegExp(`(?<![\\w.])${name}\\(`, 'g'))) {
+        const lineStart = src.lastIndexOf('\n', m.index) + 1;
+        const line = src.slice(lineStart, src.indexOf('\n', m.index));
+        // Its definition, or a default parameter value (token's cfg): that
+        // supplies fields, and prints nothing.
+        if (/^\s*(export )?(async )?function /.test(line) && m.index - lineStart < line.indexOf(') {')) continue;
+        let depth = 0, i = m.index + name.length, args = '';
+        for (; i < src.length; i++) { const ch = src[i]; if (ch === '(') depth++; else if (ch === ')' && --depth === 0) break; args += ch; }
+        if (!/,\s*t\s*$/.test(args.slice(1))) bare.push(`${file}: ${name}${args})`);
+      }
+    }
+  }
+  assert.deepEqual(bare, [], 'called without the caller\'s printer');
+});
+
 const active = (body, { tag = 'ka-GE', locale = { tag } } = {}) => {
   const root = scratch('locale-');
   const dir = path.join(root, 'identities', 'roles', 'language-culture', 'locale', 'ge');

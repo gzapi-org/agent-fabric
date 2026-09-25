@@ -271,19 +271,10 @@ def append_history(state_dir: str, record: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Announcing a role change on the channel. A GOODBYE from the role being
-# left closes it for anyone routing by TO-ROLE (SPEC §4). HELLO is NOT sent
-# here any more: this runs from a login shell with no session behind it,
-# and a HELLO means a session exists — the launcher sends it just before
-# exec. One implementation serves both (tools/fabric/announce.py). Best
-# effort, like every message: the relay down or the account not enrolled
-# is one line on stderr and never a failed activation. Disabled by
-# --no-announce or AGENT_FABRIC_NO_ANNOUNCE=1 (tests, scripted use).
-announce = _load("fabric_announce", os.path.join(HERE, "announce.py"))
-
-
-def _announce(kind: str, ctx: dict, role: str | None, project: str | None, note: str) -> None:
-    announce.announce(kind, ctx, role, project, note)
+# A role change announces nothing on the channel. It once sent a GOODBYE as
+# the role being left; who holds which role, and whether a session runs, is
+# now the control plane's to answer, from each account's binding and
+# process table (runtime/control/presence.mjs, docs/presence.md).
 
 
 def cmd_list() -> int:
@@ -387,7 +378,6 @@ def _deactivate_locked(ctx: dict) -> int:
     if os.path.islink(active) or os.path.exists(active):
         os.remove(active)
     print(f"agent: {ctx['agent']}   role: (none)")
-    _announce("GOODBYE", ctx, binding.get("role"), binding.get("project"), "role deactivated")
     return 0
 
 
@@ -477,7 +467,6 @@ def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project:
     if not project and ctx.get("project_source") == "working-copy":
         project = ctx["project"]
     changed = binding.get("role") != role or binding.get("project") != project
-    previous_role = binding.get("role")
 
     # 2–4 are one transaction: stage the new copies, move the previous ones
     # out (never a sweep, never a delete), swap the staged ones in by rename,
@@ -514,8 +503,6 @@ def _activate_locked(ctx: dict, role: str, workspace: str, force: bool, project:
               file=sys.stderr)
         raise
     tx.commit()
-    if changed and previous_role:
-        _announce("GOODBYE", ctx, previous_role, binding.get("project"), f"role change: {previous_role} -> {role}")
     if changed or not binding:
         append_history(ctx["state_dir"], {
             "agent": ctx["agent"], "host": ctx["host"], "role": role,
@@ -564,11 +551,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--project", default=None, help="logical project id to bind the role to")
     ap.add_argument("--workspace", default=None,
                     help="directory whose .claude/ receives skills (default: $CLAUDE_PROJECT_DIR or cwd)")
-    ap.add_argument("--no-announce", action="store_true",
-                    help="do not send GOODBYE/HELLO over GZCoord for this change")
+    # Accepted so a script that passes it keeps working; nothing is announced.
+    ap.add_argument("--no-announce", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
-    if args.no_announce:
-        os.environ["AGENT_FABRIC_NO_ANNOUNCE"] = "1"
 
     workspace = os.path.abspath(args.workspace or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     ctx = identity.resolve_context(cwd=workspace)

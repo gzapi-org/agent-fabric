@@ -63,7 +63,9 @@
 # The role, and the prompt's sha256, are stamped into the child's
 # environment (AGENT_FABRIC_LAUNCH_ROLE, _PROMPT_DIGEST) so fabric-status
 # can say what this session was launched as and see a rebind under it.
-# HELLO is sent here, just before exec: a HELLO means a session exists.
+# The launcher announces nothing: whether a session is running is the
+# control plane's to answer, from the process table (runtime/control/
+# presence.mjs, docs/presence.md) — HELLO/GOODBYE are retired.
 #
 # The merged REVIEW model MUST be in routing/policies/review-grade.json:
 # a review's failure mode is a green PR that merges, so the reviewer's
@@ -690,10 +692,9 @@ bash "$FABRIC_ROOT/runtime/claude-code/install-agent-files.sh" --provider "$PROV
 # is an 8-hour token with one refresh holder, and a fleet that silently fell
 # back to it ran on whichever account last signed in on that login — the
 # owner, 2026-09-25: no long-lived token, no session. Checked here, after
-# --print (a read-back needs no sign-in) and before the HELLO: a refused
-# launch announces nothing, so no GOODBYE is owed.
+# --print (a read-back needs no sign-in) and before anything starts.
 if [[ "$PROVIDER" == anthropic && ! "${CLAUDE_CODE_OAUTH_TOKEN:-}" =~ ^sk-ant-oat[0-9]+-[A-Za-z0-9_-]+$ ]]; then
-    die "no long-lived Claude sign-in for $(id -un): the login's synced record ($HOME/.config/agent-fabric/secrets.env) has no CLAUDE_CODE_OAUTH_TOKEN of a setup-token's shape. The coordinator assigns one (bin/fabric-accounts assign $(id -un) <account>), then bin/fabric-secrets sync here. Nothing started, no HELLO sent."
+    die "no long-lived Claude sign-in for $(id -un): the login's synced record ($HOME/.config/agent-fabric/secrets.env) has no CLAUDE_CODE_OAUTH_TOKEN of a setup-token's shape. The coordinator assigns one (bin/fabric-accounts assign $(id -un) <account>), then bin/fabric-secrets sync here. Nothing started."
 fi
 # The harness's first-run wizard ignores that token: until
 # hasCompletedOnboarding is set it asks for a theme, then a login method,
@@ -702,7 +703,7 @@ fi
 # on a template has nothing to onboard, so the flag is set here, in the
 # file the harness reads — under CLAUDE_CONFIG_DIR when that is set.
 if [[ "$PROVIDER" == anthropic ]]; then
-    python3 - "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" <<'PY' || die "could not mark the harness's onboarding done in ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json; nothing started, no HELLO sent."
+    python3 - "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" <<'PY' || die "could not mark the harness's onboarding done in ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json; nothing started."
 import json, os, sys
 p = sys.argv[1]
 try:
@@ -721,27 +722,19 @@ if d.get("hasCompletedOnboarding") is not True:
 PY
 fi
 
-# HELLO, now that a session is about to exist: derived from the binding
-# (role, project) by gzmsg.mjs, posted as this login by send.mjs. Best
-# effort — no relay, no project, no node is one line and no refusal; the
-# role activator no longer sends it (it runs with no session behind it).
-PROJECT="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("project") or "")' <<<"$CONTEXT")"
-[[ -z "$PROJECT" ]] || python3 "$FABRIC_ROOT/tools/fabric/announce.py" hello --role "$ROLE" --project "$PROJECT" || true
-
 # Plain claude: no broker, no shim; the exports above are the column's
 # and the profile's native pins, the review pin is served by its agent
 # file under the dispatch guard; the session model, the role's system
 # prompt and the refusals are what the launcher contributed.
 #
-# THE SESSION IS A CHILD, NOT AN EXEC (owner, 2026-09-16). The launcher
-# sent the HELLO, so the launcher sends the GOODBYE — after the session
-# returns, whatever ended it: /exit, a double Ctrl-C, a crash, a kill of
-# the child. A harness hook could not promise that (it fires on the
-# exit paths the harness chooses to run it on); the parent's wait can.
+# THE SESSION IS A CHILD, NOT AN EXEC (owner, 2026-09-16). This shell
+# outlives the session, which is what lets it bring the session back
+# after an upgrade or an account move (the restart marker, below). It
+# once also sent the GOODBYE; presence is the control plane's now.
 # Signals: Ctrl-C is the session's (one interrupts a turn, two end it),
 # so this shell ignores SIGINT while the child runs; SIGTERM and SIGHUP
-# — the terminal closing — are forwarded so the child can end, and the
-# GOODBYE still goes out. The child's exit status is the launcher's.
+# — the terminal closing — are forwarded so the child can end. The
+# child's exit status is the launcher's.
 # When the caller supplied --model, the launcher's own is OMITTED rather
 # than placed first: "last wins" would be an assumption about claude's
 # argv handling, and the stamp above must not be able to disagree with
@@ -766,12 +759,8 @@ CMD+=("${PROMPT_ARGS[@]}" "$@")
 # 2026-09-18: it ate a positional prompt in a -p probe).
 if [[ "$ROLE" == language-culture && -f "$LOCALE_SEARCH" ]]; then CMD+=(--disallowedTools WebSearch); fi
 
-goodbye() {  # goodbye <note> — best effort, once; never delays the exit by more than the send
-    [[ -n "${GOODBYE_SENT:-}" ]] && return 0; GOODBYE_SENT=1
-    [[ -z "$PROJECT" ]] || timeout 20 python3 "$FABRIC_ROOT/tools/fabric/announce.py" goodbye --role "$ROLE" --project "$PROJECT" --note "$1" >/dev/null 2>&1 || true
-}
 CHILD=""
-forward() {  # forward <signal>: end the child the way we were asked to; the wait below then runs goodbye
+forward() {  # forward <signal>: end the child the way we were asked to
     [[ -n "$CHILD" ]] && kill -s "$1" "$CHILD" 2>/dev/null
 }
 trap '' INT
@@ -784,13 +773,9 @@ trap 'forward HUP' HUP
 CHILD=$!
 wait "$CHILD"; STATUS=$?
 # A signal that landed here made `wait` return early; wait again for the
-# child to actually be gone, then say goodbye with how it ended.
+# child to actually be gone.
 wait "$CHILD" 2>/dev/null; s2=$?; [[ $s2 -eq 127 ]] || STATUS=$s2
 trap - INT TERM HUP
-if (( STATUS == 0 )); then note="session ended"
-elif (( STATUS > 128 )); then note="session ended by signal $((STATUS - 128))"
-else note="session ended with status $STATUS"; fi
-goodbye "$note"
 
 # ── back on the new version: the restart an action asked for ─────────
 # The control agent's `upgrade` or `secrets-sync --restart`

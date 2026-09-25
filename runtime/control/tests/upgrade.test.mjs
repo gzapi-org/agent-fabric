@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { scratch } from '../../../tests/scratch.mjs';
+import { fileURLToPath } from 'node:url';
 import { upgrade, upgradeOnce, checkArgs, markerPath, pinnedVersion, sessionPids, lastLine, INSTALL_LEASE, LEASE_HELD } from '../upgrade.mjs';
 
 function fixture({ installed = '2.1.280', pin = '2.1.281', installFails = false, installsWrong = false } = {}) {
@@ -146,7 +147,7 @@ test('installs queue on the host lease when the fabric has one; a lease still he
 });
 
 test('two accounts upgrading at once on one host install one after the other, through the real fabric-lease', async () => {
-  const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..', '..');
+  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const leases = scratch('upgrade-leases-');
   const log = path.join(scratch('upgrade-log-'), 'installs.log');
   const account = name => {

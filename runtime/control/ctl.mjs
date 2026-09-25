@@ -58,7 +58,7 @@ export function parseArgs(argv) {
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : out.op === 'secrets-sync' ? 180 : 20;
   if (out.op === 'upgrade' && !PIECES.includes(out.piece)) throw new Error(`upgrade takes a piece: ${PIECES.join(', ')}`);
   if (out.version !== null && (out.op !== 'upgrade' || !VERSION_RE.test(out.version))) throw new Error('--version takes digits.digits.digits, with upgrade only');
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
@@ -115,14 +115,27 @@ export function rows(expected, replies) {
     return { account: e.login, host: e.host, status: 'ok', op: r.op, latency_ms: r.latency_ms ?? null,
              email: d.identity?.claude_account?.email ?? (d.identity?.claude_account?.via === 'setup-token' ? `setup-token ${d.identity.claude_account.token_sha256_12}` : null), role: d.identity?.role ?? null,
              five_hour: d.usage?.five_hour ?? null, seven_day: d.usage?.seven_day ?? null, usage_status: d.usage?.status ?? null,
-             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, upgrade: d.upgrade ?? null, agentd: d.agentd ?? null };
+             keys: d.keys ?? null, fabric: d.fabric ?? null, session: d.session ?? null, script: d.script ?? null, recall: d.recall ?? null, tokens: d.tokens ?? null, memory: d.memory ?? null, machine: d.host ?? null, accounts: d.accounts ?? null, upgrade: d.upgrade ?? null, secretsSync: d['secrets-sync'] ?? null, agentd: d.agentd ?? null };
   });
 }
 
 const pct = w => (w && w.utilization != null) ? `${Number(w.utilization).toFixed(0).padStart(3)}%` : '   -';
 const at = w => (w && w.resets_at) ? String(w.resets_at).slice(0, 16) : '-';
+// What counts as success for each action; anything else fails the run.
+export const ACTION_OK = { upgrade: ['current', 'upgraded'], 'secrets-sync': ['synced'] };
+
 export function table(op, rs) {
   const lines = [];
+  if (op === 'secrets-sync') {
+    lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'claude sign-in'.padEnd(34)} ${'session'.padEnd(28)} reason`);
+    for (const r of rs) {
+      const u = r.secretsSync;
+      if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
+      const si = u.claude_sign_in?.via === 'setup-token' ? `setup-token ${u.claude_sign_in.token_sha256_12}` : (u.claude_sign_in?.via ?? '-');
+      lines.push(`${r.account.padEnd(22)} ${String(u.status).padEnd(10)} ${si.padEnd(34)} ${String(u.session ?? '-').padEnd(28)} ${u.reason ?? (u.missing ? `missing in Doppler: ${u.missing.join(', ')}` : '')}`.trimEnd());
+    }
+    return lines.join('\n');
+  }
   if (op === 'upgrade') {
     lines.push(`${'account'.padEnd(22)} ${'status'.padEnd(10)} ${'from → to'.padEnd(22)} ${'session'.padEnd(26)} reason`);
     for (const r of rs) {
@@ -357,7 +370,7 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   else console.log(table(args.op, rs));
   // An action that failed on an account is a failed run, whatever else
   // answered: the first fleet upgrade printed nine failed rows and exited 0.
-  const actionFailed = ACTION_OPS.includes(args.op) && replies.some(r => !['current', 'upgraded'].includes(r.data?.[args.op]?.status));
+  const actionFailed = ACTION_OPS.includes(args.op) && replies.some(r => !(ACTION_OK[args.op] ?? []).includes(r.data?.[args.op]?.status));
   return want.size || short() || refused || actionFailed ? 1 : 0;
 }
 

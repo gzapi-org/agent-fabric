@@ -95,7 +95,7 @@ same as a default. The session's level rides `--effort` and is stamped as
 `AGENT_FABRIC_LAUNCH_EFFORT`; `docs/effort-is-routed.md` is the concept.
 
 ```text
-code-low     low    -> ~/.claude/agents/code-low.md      (asked medium; GLM 5.3 Flash has none below high, so low — the committed acknowledgement)
+code-low     low    -> ~/.claude/agents/code-low.md      (asked medium; GLM 5.3 Flash has no medium, so low — the committed acknowledgement)
 code-medium  high   -> ~/.claude/agents/code-medium.md   (asked medium; GLM 5.2 remaps it up)
 code-high    high   -> ~/.claude/agents/code-high.md     (asked medium; DeepSeek V4 Pro remaps it up)
 code-plan    high   -> ~/.claude/agents/code-plan.md     (asked medium; the same)

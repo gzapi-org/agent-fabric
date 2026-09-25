@@ -20,7 +20,7 @@
           "session": "claude-fable-5-1"
         }
       },
-      "notes": "The architect's main conversation runs on Fable 5.1, the top tier, not the coding tier's Opus (the owner, 2026-09-24). Only the model moves: its effort is the session's, code-high's high (routing/effort.json), which is also Fable 5.1's own default, while its code-plan subagents on the same model think at xhigh."
+      "notes": "The architect's main conversation runs on Fable 5.1, the top tier, not the coding tier's model (the owner, 2026-09-24). Only the model moves: its effort is the session's, routing/effort.json's medium, as every class's is since 2026-09-25; its code-plan subagents run on the column's model, Opus 5.5, at the same level."
     }
   }
 }

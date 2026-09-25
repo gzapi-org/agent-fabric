@@ -24,9 +24,14 @@ GLM_SHIM = "@preset/glm2claude-shim"
 
 
 def scratch_root(tmp: str) -> str:
-    """A copy of the real routing files and aliases, to be edited freely."""
+    """A copy of the real routing files and aliases, to be edited freely —
+    with the column and levels of 2026-09-24, where the five classes differ
+    (tests/fixtures/routing-distinct/): the committed column is one model at
+    one level, and a mechanic that answered from the wrong class would pass."""
     root = os.path.join(tmp, "fabric")
     shutil.copytree(os.path.join(ROOT, "routing"), os.path.join(root, "routing"))
+    for name in ("capabilities.json", "effort.json"):
+        shutil.copy2(os.path.join(HERE, "fixtures", "routing-distinct", name), os.path.join(root, "routing", name))
     os.makedirs(os.path.join(root, "runtime", "claude-code"))
     shutil.copy2(os.path.join(ROOT, "runtime", "claude-code", "aliases.json"),
                  os.path.join(root, "runtime", "claude-code", "aliases.json"))
@@ -75,6 +80,12 @@ def test_native_path_pins_opus_5_5_on_every_class() -> None:
     assert {k: v["alias"] for k, v in got.items()} == {
         "code-low": "haiku", "code-medium": "sonnet", "code-high": "opus", "code-plan": "fable", "code-review": "fable"}
     assert all(v["shim"] is None for v in got.values()), "no shim on the native path"
+    # …and every class and the session ask medium (the owner, 2026-09-25):
+    # check() judges a level only where it is lost, so nothing else pins them.
+    effort = routing.load_effort()
+    assert effort["classes"] == dict.fromkeys(routing.load_capabilities()["classes"], "medium"), effort["classes"]
+    assert effort["session"] == "medium", effort["session"]
+    assert {k: v["effort"]["level"] for k, v in got.items()} == dict.fromkeys(got, "medium"), got
     assert routing.review_grade_ok("claude-opus-5-5"), "the native spelling is graded under anthropic/"
     assert routing.review_grade_ok("claude-opus-5[1m]"), "the reviewer of 2026-09-15 stays admitted"
     assert not routing.review_grade_ok("claude-haiku-4-5")
@@ -115,11 +126,8 @@ def test_a_layer_is_per_provider(tmp: str) -> None:
     alias; the merge is per provider, per key, nearest layer wins. The
     flat session/capabilities are the OpenRouter form (and an anthropic/
     session serves plain claude too), so an old local file reads exactly
-    as before. A session may name a class. Run on a column whose classes
-    differ, so a result names which class it came from."""
+    as before. A session may name a class."""
     root = scratch_root(tmp)
-    set_model(root, "anthropic", "code-low", "claude-haiku-4-5-20251001")
-    set_model(root, "anthropic", "code-plan", "claude-fable-5-1")
     local = {"providers": {"openrouter": {"session": "z-ai/glm-5.3", "capabilities": {"code-low": "z-ai/glm-5.2"}},
                            "anthropic": {"session": "code-plan",
                                          "capabilities": {"code-high": "claude-opus-5[1m]", "code-review": "claude-opus-5"}}}}
@@ -205,13 +213,9 @@ def test_a_downgrade_is_refused_until_it_is_written_down(tmp: str) -> None:
     """The rule the dimension exists for: a level the provider will not
     give is a committed value with a note, or check() refuses."""
     root = scratch_root(tmp)
-    # The column of 2026-09-24, where the divergences were: Haiku takes no
-    # effort, and DeepSeek has no xhigh.
-    set_model(root, "anthropic", "code-low", "claude-haiku-4-5-20251001")
     path = os.path.join(root, "routing", "effort.json")
     doc = json.load(open(path, encoding="utf-8"))
-    doc["classes"].update({"code-low": "low", "code-plan": "xhigh", "code-review": "xhigh"})
-    doc["providers"] = {}                      # drop every acknowledgement
+    doc["providers"] = {}                      # drop both acknowledgements
     json.dump(doc, open(path, "w", encoding="utf-8"))
     findings = routing.check(root)
     assert any("code-plan" in f and "'high'" in f for f in findings), findings
@@ -243,11 +247,11 @@ def test_an_agent_layer_outranks_a_committed_acknowledgement(tmp: str) -> None:
     above them once, and an agent asking for a level its model admits was
     served the acknowledgement's instead (review 2026-09-23, F3)."""
     root = scratch_root(tmp)
-    ack = routing.load_effort(root)["providers"]["openrouter"]["classes"]["code-low"]
-    assert routing.resolve("code-low", "openrouter", root=root)["effort"]["intent"] == ack, \
+    ack = routing.load_effort(root)["providers"]["openrouter"]["classes"]["code-plan"]
+    assert routing.resolve("code-plan", "openrouter", root=root)["effort"]["intent"] == ack, \
         "with no layer the acknowledgement decides"
-    local = {"providers": {"openrouter": {"effort": {"code-low": "max"}}}}
-    got = routing.resolve("code-low", "openrouter", None, "someone", local, root=root)["effort"]
+    local = {"providers": {"openrouter": {"effort": {"code-plan": "max"}}}}
+    got = routing.resolve("code-plan", "openrouter", None, "someone", local, root=root)["effort"]
     assert got["intent"] == "max" and got["source"] == "local", got
     assert got["level"] == "max", f"the model admits max; the agent asked for it and must get it: {got}"
 
@@ -439,7 +443,6 @@ def test_every_class_rides_an_alias_and_only_the_review_class_shares(tmp: str) -
     d = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "aliases.json")))
     d["file_pinned"] = []
     json.dump(d, open(path, "w"))
-    set_model(root, "anthropic", "code-plan", "claude-fable-5-1")   # the two fable riders differ, as on 2026-09-24
     findings = routing.check(root)
     assert any("share the fable alias" in f for f in findings), findings
     assert any("gated class" in f and "not file_pinned" in f for f in findings), findings

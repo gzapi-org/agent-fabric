@@ -312,7 +312,11 @@ export async function upgradeFabric(request, {
     // The one place that knows the control agent's unit changed: bootstrap
     // installed it and left the restart to us (the line is bootstrap.sh's).
     unitDeferred = /restart left to the caller/.test(String(typeof r === 'string' ? r : r?.stdout ?? ''));
-  } catch (e) { reason = `bootstrap: ${e?.killed ? `timed out after ${BOOTSTRAP_TIMEOUT_MS / 1000} s` : lastLine(e).slice(0, 200)}`; }
+  } catch (e) {
+    // A bootstrap that installed the unit and then failed later still left
+    // the restart to us, and no rerun would see the unit change again.
+    unitDeferred = /restart left to the caller/.test(String(e?.stdout ?? ''));
+    reason = `bootstrap: ${e?.killed ? `timed out after ${BOOTSTRAP_TIMEOUT_MS / 1000} s` : lastLine(e).slice(0, 200)}`; }
   return {
     status: reason ? 'failed' : from === to ? 'current' : 'upgraded', piece: 'fabric', from, to,
     ...(provider && { provider }), ...(reason && { reason }),

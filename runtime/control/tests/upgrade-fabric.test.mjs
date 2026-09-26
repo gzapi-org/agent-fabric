@@ -22,7 +22,7 @@ function fixture({ bootstrapFails = false, unitChanged = false } = {}) {
   fs.mkdirSync(path.join(seed, 'runtime', 'claude-code'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'runtime', 'claude-code', 'bootstrap.sh'),
     bootstrapFails
-      ? 'echo "  *  settings"\necho "bootstrap: the agent files could not be written" >&2\nexit 1\n'
+      ? (unitChanged ? 'echo "  *  agent-fabric-agentd: unit changed; restart left to the caller"\n' : '') + 'echo "  *  settings"\necho "bootstrap: the agent files could not be written" >&2\nexit 1\n'
       : `printf 'defer=%s provider=%s\\n' "\${AGENT_FABRIC_DEFER_AGENTD_RESTART:-}" "\${AGENT_FABRIC_LAUNCH_PROVIDER:-}" >> "${record}"\n`
         + (unitChanged ? 'echo "  *  agent-fabric-agentd: unit changed; restart left to the caller"\n' : ''));
   git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'one');
@@ -167,4 +167,10 @@ test('a commit the account has but not on its origin/main (a pushed branch): ref
   const r = await upgradeFabric(req(side), opts(f));
   assert.equal(r.status, 'refused'); assert.match(r.reason, /not on this account's origin\/main/);
   assert.equal(f.head(), before);
+});
+
+test('a bootstrap that installed the unit and then failed: failed, and the daemon still restarts (no rerun would see the change)', async () => {
+  const f = fixture({ bootstrapFails: true, unitChanged: true });
+  const r = await upgradeFabric(req(f.head()), opts(f));
+  assert.equal(r.status, 'failed'); assert.equal(r.restart_daemon, true);
 });

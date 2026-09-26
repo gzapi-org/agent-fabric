@@ -228,6 +228,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (p.silent.length) console.error(t('send.presence-some-silent', { addresses: p.silent.join(', ') }));
       } else console.error(t('send.presence-unavailable', { detail: p.detail }));
     }
+    for (const n of pres.notes ?? []) if (n.kind === 'planning') console.error(t('send.presence-planning', { address: n.address }));
     if (pres.problems?.length) {
       if (!force) { console.error(t('send.presence-not-sent')); return 4; }
       console.error(t('send.presence-forced'));

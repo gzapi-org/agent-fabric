@@ -574,8 +574,9 @@ test('presence: a session is a claude process that is not the daemon\'s own chil
   stat(100, 50, 1000); stat(200, 999, 500); stat(300, 60, 3000);
   const binding = { role: 'web-dev', project: 'gzapp' };
   const who = { agent: 'web-dev-01', host: 'h', role: 'web-dev', binding: '/nonexistent' };
-  const r = presence({ proc, self: 999, exec: () => '100\n200\n300\n', who, binding });
-  assert.deepEqual(r, { status: 'ok', online: true, sessions: 2, since: new Date((1790000000 + 10) * 1000).toISOString(), role: 'web-dev', project: 'gzapp' },
+  const notHeld = () => ({ held: false });
+  const r = presence({ proc, self: 999, exec: () => '100\n200\n300\n', who, binding, hold: notHeld });
+  assert.deepEqual(r, { status: 'ok', online: true, sessions: 2, since: new Date((1790000000 + 10) * 1000).toISOString(), role: 'web-dev', project: 'gzapp', planning: false },
     'the daemon\'s child (200) is not a session; the earliest start is the since');
   // A login with no role recorded is its name's slug, as the inbox's delivery reads it (review of #38).
   const unbound = presence({ proc, self: 999, exec: () => '100\n', who: { agent: 'web-dev-02', host: 'h', role: undefined, binding: '/nonexistent' }, binding: {} });
@@ -584,6 +585,9 @@ test('presence: a session is a claude process that is not the daemon\'s own chil
   assert.deepEqual([none.online, none.sessions, none.since], [false, 0, null], 'pgrep finding nothing is offline');
   const broken = presence({ proc, self: 999, exec: () => { const e = new Error('spawn pgrep ENOENT'); e.code = 'ENOENT'; throw e; }, who, binding });
   assert.equal(broken.status, 'failed', 'a pgrep that cannot run is not "offline"');
+  assert.equal(presence({ proc, self: 999, exec: () => '100\n', who, binding, hold: () => ({ held: true }) }).planning, true, 'a held inbox is planning');
+  assert.equal(presence({ proc, self: 999, exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; }, who, binding, hold: () => ({ held: true }) }).planning, false, 'no session is never planning, whatever a stale marker says');
+  assert.equal(presence({ proc, self: 999, exec: () => '100\n', who, binding, hold: () => { throw new Error('no hold dir'); } }).planning, false, 'an unreadable hold is not planning');
 });
 
 test('collect(presence) answers under the presence key — the name fabric-ctl reads', async () => {

@@ -13,7 +13,7 @@ const asker = answers => async ({ expect }) => Object.fromEntries(expect.map(a =
 test('TO: a running session passes; no session, a silent agent and an unplaced address are each said', async () => {
   const ask = asker({ 'h/web-dev-01': on(), 'h/web-dev-02': off() });
   const chk = to => checkAddressees({ TO: to }, { from: 'h/user', token: 't', placed, ask });
-  assert.deepEqual(await chk('h/web-dev-01'), { checked: true, problems: [] });
+  assert.deepEqual(await chk('h/web-dev-01'), { checked: true, problems: [], notes: [] });
   assert.deepEqual((await chk('h/web-dev-02')).problems.map(p => [p.kind, p.address]), [['offline', 'h/web-dev-02']]);
   assert.deepEqual((await chk('h/db-admin')).problems.map(p => [p.kind, p.address]), [['silent', 'h/db-admin']], 'no answer is unknown, never offline');
   assert.deepEqual((await chk('h/nobody')).problems.map(p => p.kind), ['not-placed']);
@@ -21,7 +21,7 @@ test('TO: a running session passes; no session, a silent agent and an unplaced a
 
 test('TO-ROLE: reached when any holder runs; otherwise its holders, and the silent agents a holder may hide behind', async () => {
   const chk = (answers, role = 'web-dev') => checkAddressees({ 'TO-ROLE': role }, { from: 'h/user', token: 't', placed, ask: asker(answers) });
-  assert.deepEqual(await chk({ 'h/web-dev-01': off(), 'h/web-dev-02': on(), 'h/db-admin': on('db-admin') }), { checked: true, problems: [] });
+  assert.deepEqual(await chk({ 'h/web-dev-01': off(), 'h/web-dev-02': on(), 'h/db-admin': on('db-admin') }), { checked: true, problems: [], notes: [] });
   const none = (await chk({ 'h/web-dev-01': off(), 'h/web-dev-02': off() })).problems[0];
   assert.deepEqual([none.kind, none.role, none.holders, none.silent], ['no-holder', 'web-dev', ['h/web-dev-01', 'h/web-dev-02'], ['h/db-admin']]);
   const nobody = (await chk({ 'h/web-dev-01': on(), 'h/web-dev-02': on(), 'h/db-admin': on('db-admin') }, 'p2p-network-dev')).problems[0];
@@ -67,8 +67,18 @@ test('a reply that could not read its process table is unknown, never "no sessio
 test('an operator address may be a TO without being placed; a TO-ROLE asks only the placements, never waits on an operator', async () => {
   const seen = [];
   const ask = async ({ to, expect }) => { seen.push({ to, expect }); return Object.fromEntries(expect.map(a => [a, on(a === 'h2/user' ? 'fabric-coordinator' : 'web-dev')])); };
-  assert.deepEqual(await checkAddressees({ TO: 'h2/user' }, { from: 'h/user', token: 't', placed, operators: ['h2/user'], ask }), { checked: true, problems: [] });
+  assert.deepEqual(await checkAddressees({ TO: 'h2/user' }, { from: 'h/user', token: 't', placed, operators: ['h2/user'], ask }), { checked: true, problems: [], notes: [] });
   assert.deepEqual((await checkAddressees({ TO: 'h2/user' }, { from: 'h/user', token: 't', placed, ask })).problems.map(p => p.kind), ['not-placed'], 'without it, unplaced');
   await checkAddressees({ 'TO-ROLE': 'web-dev' }, { from: 'h/user', token: 't', placed, operators: ['h2/user'], ask });
   assert.deepEqual(seen.at(-1).expect, placed, 'a TO-ROLE waits only on the accounts that can hold a role');
+});
+
+test('a session that is planning is said as a note, never a problem: TO; TO-ROLE only when every running holder plans', async () => {
+  const planning = (role = 'web-dev') => ({ ...on(role), planning: true });
+  const to = await checkAddressees({ TO: 'h/web-dev-01' }, { from: 'h/user', token: 't', placed, ask: asker({ 'h/web-dev-01': planning() }) });
+  assert.deepEqual(to, { checked: true, problems: [], notes: [{ kind: 'planning', address: 'h/web-dev-01' }] });
+  const role = answers => checkAddressees({ 'TO-ROLE': 'web-dev' }, { from: 'h/user', token: 't', placed, ask: asker(answers) });
+  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': on() })).notes, [], 'a holder that is not planning reads it now');
+  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off() })).notes, [{ kind: 'planning', address: 'h/web-dev-01' }]);
+  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off() })).problems, [], 'planning never blocks the send');
 });

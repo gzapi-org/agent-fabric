@@ -61,12 +61,19 @@ export async function checkAddressees(metadata, { from, token, placed, operators
     // "no session" (review of #38).
     if (p === null) return { checked: true, problems: [{ kind: 'silent', address: a }] };
     if (p.status !== 'ok') return { checked: true, problems: [{ kind: 'unavailable', detail: `${a}: ${p.error ?? p.status}` }] };
-    return { checked: true, problems: p.online ? [] : [{ kind: 'offline', address: a, presence: p }] };
+    // Planning is said, never a refusal: the message waits in the relay
+    // for the approved plan, which is what it would do anyway.
+    return { checked: true, problems: p.online ? [] : [{ kind: 'offline', address: a, presence: p }],
+             notes: p.online && p.planning ? [{ kind: 'planning', address: a }] : [] };
   }
   const role = metadata['TO-ROLE'].trim();
   const all = await ask({ from, to: '*', expect: placed, token, waitMs });
   const holders = Object.entries(all).filter(([, p]) => p?.status === 'ok' && p.role === role);
-  if (holders.some(([, p]) => p.online)) return { checked: true, problems: [] };
+  const online = holders.filter(([, p]) => p.online);
+  // A role is planning only when every running holder is: one that is
+  // not will read the message now.
+  if (online.length) return { checked: true, problems: [],
+    notes: online.every(([, p]) => p.planning) ? online.map(([a]) => ({ kind: 'planning', address: a })) : [] };
   // No answer, or an answer that could not read its process table: either
   // may hide a running holder, and both are said as such.
   const silent = Object.entries(all).filter(([, p]) => p === null || p.status !== 'ok').map(([a]) => a);

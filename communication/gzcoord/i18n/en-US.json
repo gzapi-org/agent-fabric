@@ -61,6 +61,7 @@
   "send.presence-unavailable": "send: presence is unknown ({detail})",
   "send.presence-skipped": "send: presence not asked — the relay refused the token in hand; the post says whether it is accepted",
   "send.presence-not-sent": "send: not sent — --force sends it anyway",
+  "send.presence-planning": "send: {address} is planning — its inbox is held until the plan is approved; the message waits in the relay, and no answer comes before then",
   "send.presence-forced": "send: sending anyway (--force)",
   "send.warning": "send: warning: {detail}",
   "send.error": "send: {detail}",

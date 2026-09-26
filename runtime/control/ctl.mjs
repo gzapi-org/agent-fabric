@@ -7,6 +7,8 @@
 //   fabric-ctl <login|all> memory --out <dir>       each account's drain bundles, <dir>/<login>/<working copy>.tar
 //   fabric-ctl <login|all> upgrade claude [--version V]   an ACTION, signed with the operator's key: bring the harness
 //                                                   to the pinned version, restarting a running session (docs/fleet-upgrade.md)
+//   fabric-ctl <login|all> upgrade fabric             an ACTION: fast-forward each account's fabric to this checkout's
+//                                                   origin/main and bootstrap it; no session stopped (docs/fleet-upgrade.md)
 //   fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]   an ACTION: re-apply the login's Doppler config,
 //                                                   check its setup-token, restart a running session on it (docs/claude-accounts.md)
 //   fabric-ctl <login|all> presence                 whether each has a session, since when, as what — any
@@ -30,11 +32,20 @@ import { whoami, FABRIC_ROOT } from '../../communication/gzcoord/scripts/gzmsg.m
 import { api, syncedToken, syncedVar, identity as gzIdentity, integrationConfig, inboxRoot, token as gzToken } from '../../communication/gzcoord/scripts/inbox.mjs';
 import { execFileSync } from 'node:child_process';
 import { ACTION_OPS, ACTION_TTL_MAX_S, signRequest, generateOperatorKey, publicKeyFrom } from './sign.mjs';
-import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.mjs';
+import { PIECES, VERSION_RE, UPGRADE_BUDGET_S, FABRIC_UPGRADE_BUDGET_S, pinnedVersion } from './upgrade.mjs';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { OPS, PUBLIC_OPS } from './ops.mjs';
 import { controlConfig, newId, operatorAddresses, accountAddresses } from './agentd.mjs';
+
+// The commit `upgrade fabric` moves every account to: this checkout's
+// origin/main after a fetch, never its HEAD — a coordinator on a branch
+// must not ship the branch. A fetch that fails leaves no commit, and
+// nothing is sent.
+export function originMain(root = FABRIC_ROOT, exec = execFileSync) {
+  const git = (...a) => String(exec('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 })).trim();
+  try { git('fetch', '-q', 'origin', 'main'); return git('rev-parse', 'origin/main'); } catch { return null; }
+}
 
 export function placements(registry = process.env.AGENT_FABRIC_HOSTS_REGISTRY ?? path.join(FABRIC_ROOT, 'runtime', 'hosts', 'registry.json')) {
   const d = JSON.parse(fs.readFileSync(registry, 'utf8'));
@@ -65,9 +76,10 @@ export function parseArgs(argv) {
     else if (OPS.includes(a) && out.targets.length) out.op = a;
     else out.targets.push(a);
   }
-  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? UPGRADE_BUDGET_S : out.op === 'secrets-sync' ? 240 : 20;
+  if (out.timeout === null) out.timeout = out.op === 'ping' ? 5 : out.op === 'memory' ? 120 : out.op === 'tokens' ? 60 : out.op === 'accounts' ? 300 : out.op === 'upgrade' ? (out.piece === 'fabric' ? FABRIC_UPGRADE_BUDGET_S : UPGRADE_BUDGET_S) : out.op === 'secrets-sync' ? 240 : 20;
   if (out.op === 'upgrade' && !PIECES.includes(out.piece)) throw new Error(`upgrade takes a piece: ${PIECES.join(', ')}`);
   if (out.version !== null && (out.op !== 'upgrade' || !VERSION_RE.test(out.version))) throw new Error('--version takes digits.digits.digits, with upgrade only');
+  if (out.version !== null && out.piece === 'fabric') throw new Error('upgrade fabric takes no --version: it moves every account to this checkout\'s origin/main');
   if ((out.expect !== null || out.restart) && out.op !== 'secrets-sync') throw new Error('--expect and --restart go with secrets-sync only');
   if (out.expect !== null && !/^[0-9a-f]{12}$/.test(out.expect)) throw new Error('--expect takes a 12-hex setup-token fingerprint (fabric-accounts templates)');
   if (out.days !== null && (out.op !== 'tokens' || !Number.isFinite(out.days) || out.days <= 0)) throw new Error('--days takes a positive number of days, with tokens only');
@@ -161,7 +173,7 @@ export function table(op, rs) {
     for (const r of rs) {
       const u = r.upgrade;
       if (r.status !== 'ok' || !u) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
-      const ft = u.status === 'current' ? `${u.version} (pinned)` : `${u.from ?? '-'} → ${u.to ?? '-'}`;
+      const ft = u.status === 'current' ? (u.piece === 'fabric' ? `${u.to} (main)` : `${u.version} (pinned)`) : `${u.from ?? '-'} → ${u.to ?? '-'}`;
       lines.push(`${r.account.padEnd(22)} ${String(u.status ?? 'no status').padEnd(10)} ${ft.padEnd(22)} ${String(u.session ?? '-').padEnd(26)} ${u.reason ?? u.note ?? ''}`.trimEnd());
     }
     return lines.join('\n');
@@ -312,7 +324,7 @@ export function table(op, rs) {
 export async function main(argv = process.argv.slice(2), { registry, fetchImpl } = {}) {
   let args;
   try { args = parseArgs(argv); } catch (e) { console.error(`fabric-ctl: ${e.message}`); return 2; }
-  if (args.help || (!args.targets.length && args.op !== 'keygen')) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>\n       fabric-ctl <login|all> upgrade claude [--version V]\n       fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]\n       fabric-ctl <login|all> presence   (any placed account may ask)\n       fabric-ctl keygen [--force]'); return args.help ? 0 : 2; }
+  if (args.help || (!args.targets.length && args.op !== 'keygen')) { console.error('usage: fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|accounts|ping] [--json] [--timeout S]\n       fabric-ctl <login|all> tokens [--days N]\n       fabric-ctl <login|all> memory --out <dir>\n       fabric-ctl <login|all> upgrade claude [--version V]\n       fabric-ctl <login|all> upgrade fabric   (every account to this checkout\'s origin/main, then bootstrap)\n       fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]\n       fabric-ctl <login|all> presence   (any placed account may ask)\n       fabric-ctl keygen [--force]'); return args.help ? 0 : 2; }
   if (args.op === 'keygen') return keygen(args, { registry });
   const all = placements(registry);
   let expected;
@@ -342,12 +354,13 @@ export async function main(argv = process.argv.slice(2), { registry, fetchImpl }
   // for a queued fleet upgrade is far longer — the last account replies
   // long after every account accepted.
   let request = { v: 1, kind: 'request', id, from: me.address, to: expected === all ? '*' : expected.map(e => e.address), op: args.op, ts: new Date().toISOString(), ttl_s: Math.min(ACTION_OPS.includes(args.op) ? ACTION_TTL_MAX_S : Infinity, Math.max(cfg.ttl_s, Math.ceil(args.timeout))), ...(args.days ? { days: args.days } : {}),
-                  ...(args.op === 'upgrade' ? { args: { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}),
+                  ...(args.op === 'upgrade' ? { args: args.piece === 'fabric' ? { piece: 'fabric', commit: originMain() } : { piece: args.piece, version: args.version ?? pinnedVersion(FABRIC_ROOT) } } : {}),
                   ...(args.op === 'secrets-sync' && (args.expect || args.restart) ? { args: { ...(args.expect ? { expect: args.expect } : {}), ...(args.restart ? { restart: true } : {}) } } : {}) };
   // One command, one version: the coordinator's pin travels in the signed
   // request. Left to each account, an account that had not pulled the pin
   // bump would read its own older pin and answer `current` (review of #34).
-  if (args.op === 'upgrade' && !request.args.version) { console.error(`fabric-ctl: no pinned version in ${path.join(FABRIC_ROOT, 'runtime', 'claude-code', 'harness.json')} and no --version; nothing sent`); return 2; }
+  if (args.op === 'upgrade' && args.piece === 'fabric' && !request.args.commit) { console.error(`fabric-ctl: could not read origin/main in ${FABRIC_ROOT} after a fetch; nothing sent`); return 2; }
+  if (args.op === 'upgrade' && args.piece !== 'fabric' && !request.args.version) { console.error(`fabric-ctl: no pinned version in ${path.join(FABRIC_ROOT, 'runtime', 'claude-code', 'harness.json')} and no --version; nothing sent`); return 2; }
   if (ACTION_OPS.includes(args.op)) {
     // An action is signed or not sent: an unsigned one is refused by every
     // daemon, and a silent table would read as agents that did not answer.

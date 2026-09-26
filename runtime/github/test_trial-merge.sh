@@ -159,5 +159,33 @@ mkdir -p "$SCRATCH/trial-merge.DEAD01"; echo 999999 > "$SCRATCH/trial-merge.DEAD
 run h/a/one >/dev/null
 [[ -z "$(ls -A "$SCRATCH")" ]] && pass "a dead run's worktree, pid and output file are swept by the next run" || fail "a dead run's files survived" "$(ls -A "$SCRATCH")"
 
+echo "trial-merge: the re-review of #47's cases"
+# A declared lease runs the check in a group of its own, as fabric-lease
+# does (set -m around the child): the check's leftovers are ended anyway.
+mkdir -p "$SANDBOX/leasebin"
+cat > "$SANDBOX/leasebin/fabric-lease" <<'LEASE'
+#!/usr/bin/env bash
+shift; [[ "$1" == "--" ]] && shift
+set -m; "$@" & child=$!; set +m
+wait "$child"
+LEASE
+chmod +x "$SANDBOX/leasebin/fabric-lease"
+cfg '{"check": ["sh", "-c", "sleep 43.5 & exit 0"], "lease": "trial"}'
+out="$(cd "$SANDBOX/repo" && PATH="$SANDBOX/leasebin:$PATH" TMPDIR="$SCRATCH" AGENT_FABRIC_TRIAL_MIN_FREE_KB=0 AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" bash "$UNDER_TEST" h/a/one --check 2>&1)"; rc=$?; sleep 0.3
+[[ $rc -eq 0 ]] && grep -q 'check passed' <<<"$out" && pass "…a check under a declared lease runs and passes" || fail "the leased check did not run (rc=$rc)" "$out"
+! pgrep -u "$(id -u)" -fx "sleep 43.5" >/dev/null && pass "…and what it left running in its own group under the lease is ended too" \
+  || { fail "a leased check's leftover outlived the run" "$(pgrep -a -u "$(id -u)" -fx 'sleep 43.5')"; pkill -u "$(id -u)" -fx "sleep 43.5"; }
+clean && pass "…nothing left behind" || fail "leftovers after a leased check"
+# The check on refs that did not merge says so, whatever the reason.
+cfg '{"check": ["true"]}'
+out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one h/d/alien --check --json)"; rc=$?
+[[ $rc -eq 2 && "$(jq -r .check <<<"$out")" == "not run: did not combine" ]] && pass "a merge that failed without a conflict: its check reads 'not run: did not combine'" || fail "wrong check state on a failed merge (rc=$rc)" "$out"
+# A worktree left without a pid by a run killed before writing it: swept once an hour old.
+mkdir -p "$SCRATCH/trial-merge.NOPID1"; touch -d '2 hours ago' "$SCRATCH/trial-merge.NOPID1"
+mkdir -p "$SCRATCH/trial-merge.NOPID2"
+run h/a/one >/dev/null
+[[ ! -e "$SCRATCH/trial-merge.NOPID1" && -d "$SCRATCH/trial-merge.NOPID2" ]] && pass "a pid-less worktree an hour old is swept; a fresh one (a run just starting) is left" || fail "the pid-less sweep is wrong" "$(ls -A "$SCRATCH")"
+rm -rf "$SCRATCH/trial-merge.NOPID2"
+
 echo
 if [[ $failures -eq 0 ]]; then echo "test_trial-merge: OK — all assertions passed."; else echo "test_trial-merge: FAILED — $failures assertion(s)."; exit 1; fi

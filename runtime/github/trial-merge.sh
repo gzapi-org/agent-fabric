@@ -27,7 +27,7 @@
 #   check unavailable  (--check) it could not say: timed out, not found,
 #                      its lease still held, or its verdict line missing —
 #                      never read as a pass
-#   check not run      the refs do not combine, so there is nothing to check
+#   check not run      the refs did not combine, so there is nothing to check
 #   The shas tried are printed: a result is true for those shas only, and
 #   says nothing of branches not named or of the base after it moves.
 #   It reserves, pushes and decides nothing.
@@ -126,10 +126,13 @@ free_kb="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
 
 # A worktree of a run that died is this tool's to clear, and only when its
 # owner is gone: a concurrent run's is left alone.
+# A run killed before it wrote its pid leaves none: such a worktree is
+# taken for dead once it is an hour old, longer than any check may run.
 for d in "$scratch"/trial-merge.*; do
-    [[ -d "$d" && -f "$d.pid" ]] || continue
-    kill -0 "$(cat "$d.pid" 2>/dev/null)" 2>/dev/null && continue
-    git worktree remove --force "$d" >/dev/null 2>&1; rm -rf "$d" "$d.pid" "$d.out"
+    [[ -d "$d" ]] || continue
+    if [[ -f "$d.pid" ]]; then kill -0 "$(cat "$d.pid" 2>/dev/null)" 2>/dev/null && continue
+    else [[ -n "$(find "$d" -maxdepth 0 -mmin +60 2>/dev/null)" ]] || continue; fi
+    git worktree remove --force "$d" >/dev/null 2>&1; rm -rf "$d" "$d.pid" "$d.pid.tmp" "$d.out"
 done
 git worktree prune 2>/dev/null
 
@@ -142,8 +145,21 @@ echo $$ > "$wt.pid.tmp" && mv -f "$wt.pid.tmp" "$wt.pid"
 # The group is killed at the end even when the check exited on its own:
 # whatever it started in the background (a server, a build daemon) would
 # otherwise outlive the worktree it runs in.
+# The group is not always the whole check: a declared lease runs it in a
+# group of its own (fabric-lease), so whatever of this login still runs
+# with its working directory inside the worktree is taken as the check's
+# too, and ended before the worktree goes.
+worktree_procs() {
+    local p cwd me; me="$(id -u)"
+    for p in /proc/[0-9]*; do
+        [[ "$(stat -c %u "$p" 2>/dev/null)" == "$me" ]] || continue
+        cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
+        [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && echo "${p#/proc/}"
+    done
+}
+end_worktree_procs() { local pids; pids="$(worktree_procs)"; [[ -n "$pids" ]] && kill -TERM $pids 2>/dev/null; return 0; }
 cpid=""
-cleanup() { [[ -n "$cpid" ]] && kill -TERM -- "-$cpid" 2>/dev/null; git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt" "$wt.pid" "$wt.out"; git -C "$top" worktree prune 2>/dev/null; }
+cleanup() { [[ -n "$cpid" ]] && kill -TERM -- "-$cpid" 2>/dev/null; end_worktree_procs; git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt" "$wt.pid" "$wt.out"; git -C "$top" worktree prune 2>/dev/null; }
 trap cleanup EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git worktree add -q --detach "$wt" "$base_sha" 2>/dev/null || { echo "trial-merge: git worktree add failed; nothing tried" >&2; exit 2; }
@@ -163,7 +179,7 @@ done
 [[ "$result" == combines ]] && tree="$(git -C "$wt" rev-parse 'HEAD^{tree}')"
 
 check_rc=""; check_tail=""
-[[ "$result" != combines && "$check_state" == pending ]] && check_state="not run: conflicts"
+[[ "$result" != combines && "$check_state" == pending ]] && check_state="not run: did not combine"
 if [[ "$result" == combines && "$check_state" == pending ]]; then
     runner=(timeout --kill-after=30 "$check_timeout")
     if [[ -n "$check_lease" ]]; then
@@ -211,7 +227,7 @@ else
     else echo "could not merge ${failed_ref} (not a conflict):"; tail -n 3 <<<"$merge_err" | sed 's/^/    /'; fi
     case "$check_state" in
         "not asked") ;;
-        "not run: conflicts") echo "check: not run — the refs did not combine" ;;
+        "not run: did not combine") echo "check: not run — the refs did not combine" ;;
         "none declared") echo "check: none declared for this project (projects/<id>/integration/gh/trial.json); merge only" ;;
         *) echo "check ${check_state} (exit ${check_rc})"; [[ "$check_state" == passed ]] || sed 's/^/    /' <<<"$check_tail" ;;
     esac

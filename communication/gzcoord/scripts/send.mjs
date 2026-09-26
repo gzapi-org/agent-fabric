@@ -35,11 +35,14 @@
 // message would carry the last one's id, and every reader would discard
 // the new message as a copy (review of #47, R1). Each confirmed send is
 // recorded — id and a hash of the message — in this login's state
-// directory, and an id that already went out with other content is
-// refused; the same message again (a retry) passes.
+// directory (<state>/agents/<login>/gzcoord-sent.jsonl, beside its
+// binding; the one file send writes besides the message), and an id that
+// already went out with other content is refused, exit 2; the same
+// message again (a retry) passes. A post whose reply was lost is not
+// recorded, so an edited resend under that id is not caught.
 //
-// Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
-// FROM is not this session; 3 no token or relay unreachable; 4 an
+// Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message,
+// FROM is not this session, or an id already sent with other text; 3 no token or relay unreachable; 4 an
 // addressee has no session, did not answer, could not tell, or is not
 // placed, or presence could not be asked (--force).
 import fs from 'node:fs';
@@ -191,12 +194,12 @@ export async function main(argv = process.argv.slice(2)) {
     at: fb.at || t('send.fallback-unknown-time'),
     topic: fb.topic || t('send.fallback-unknown-topic'),
     topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
-  // A dry run posts nothing, not even a presence request on the control
-  // channel (review of #38): it validates and resolves, and stops here.
   const sha = crypto.createHash('sha256').update(text).digest('hex');
   const ledger = sentLedgerPath(who);
   const spent = id !== '(none)' ? spentElsewhere(ledger, id, sha) : null;
   if (spent) { console.error(t('send.id-reused', { id, seq: spent.seq ?? '?' })); return 2; }
+  // A dry run posts nothing, not even a presence request on the control
+  // channel (review of #38): it validates and resolves, and stops here.
   if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
   let tok = token(root, cfg);
   // Is anyone there? A message to a login with no session waits in the

@@ -47,7 +47,7 @@ fabric-ctl all status                   # (coordinator) the fleet in real time: 
                                         # key fingerprints, fabric head, session (docs/control-plane.md)
 fabric-ctl all upgrade claude           # (coordinator) every account to the pinned Claude Code,
                                         # a running session stopped gracefully and resumed on it (docs/fleet-upgrade.md)
-fabric-accounts assign <login…> <account># (coordinator) which Claude account those
+fabric-accounts assign <login…> <account>  # (coordinator) which Claude account those
                                         # logins run on; each applies, proves and resumes on it by signed
                                         # message (docs/claude-accounts.md)
 fabric-usage                            # (coordinator) the usage windows through the host executor —

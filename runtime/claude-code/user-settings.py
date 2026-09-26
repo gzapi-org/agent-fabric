@@ -76,10 +76,31 @@ ENV = {"DISABLE_AUTOUPDATER": "1"}
 COMMANDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands.json")
 
 
-def allow_rules() -> list[str]:
+FABRIC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def local_bin() -> str:
+    return os.environ.get("AGENT_FABRIC_LOCAL_BIN") or os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
+def rules() -> tuple[list[str], list[str]]:
+    """(granted, withheld). A rule is granted only for a name whose
+    ~/.local/bin entry IS the fabric's script: a foreign file bootstrap
+    refused to replace would otherwise run under the fabric's approval
+    (review of #42, 2026-09-26)."""
     with open(COMMANDS, encoding="utf-8") as fh:
         doc = json.load(fh)
-    return [f"Bash({name} *)" for name in doc["commands"] if name not in doc.get("not_allowed", {})]
+    granted, withheld = [], []
+    for name, rel in doc["commands"].items():
+        if name in doc.get("not_allowed", {}):
+            continue
+        ours = os.path.realpath(os.path.join(local_bin(), name)) == os.path.realpath(os.path.join(FABRIC_ROOT, rel))
+        (granted if ours else withheld).append(f"Bash({name} *)")
+    return granted, withheld
+
+
+def allow_rules() -> list[str]:
+    return rules()[0]
 
 
 class Unreadable(Exception):
@@ -120,6 +141,7 @@ def settled(doc: dict) -> bool:
     return (all(current.get(k) == v for k, v in ATTRIBUTION.items())
             and perms.get("defaultMode") == "auto"
             and all(r in allowed(doc) for r in allow_rules())
+            and not any(r in allowed(doc) for r in rules()[1])
             and "includeCoAuthoredBy" not in doc
             and all(doc.get(k) == v for k, v in TOP_LEVEL.items())
             and isinstance(doc.get("env"), dict) and all(doc["env"].get(k) == v for k, v in ENV.items()))
@@ -161,7 +183,8 @@ def main(argv: list[str]) -> int:
     env = doc.get("env") if isinstance(doc.get("env"), dict) else {}
     doc["env"] = {**env, **ENV}
     perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
-    perms["allow"] = allowed(doc) + [r for r in allow_rules() if r not in allowed(doc)]
+    granted, withheld = rules()
+    perms["allow"] = [r for r in allowed(doc) if r not in withheld] + [r for r in granted if r not in allowed(doc)]
     perms["defaultMode"] = "auto"
     doc["permissions"] = perms
     save(path, doc)

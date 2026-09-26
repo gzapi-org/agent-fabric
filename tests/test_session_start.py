@@ -247,6 +247,8 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     os.remove(foreign); open(foreign, "w").write("mine\n")
     again = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
     assert "is not a link this fabric made" in again.stderr and open(foreign).read() == "mine\n", again.stderr
+    allow = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["permissions"]["allow"]
+    assert "Bash(gzmsg *)" not in allow, "a foreign gzmsg on PATH kept the fabric's allow rule"
     os.remove(foreign)
     for f in ("code-low.md", "code-medium.md", "code-high.md"):
         assert os.path.isfile(os.path.join(home, ".claude", "agents", f))

@@ -1366,7 +1366,10 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
             cues = [("description", meta.get("description"))] + \
                    [("heading", h) for h in re.findall(r"^#{1,6} (.+)$", prose, re.MULTILINE)]
             for kind, cue in cues:
-                if isinstance(cue, str) and _is_mostly_non_latin(cue):
+                # Italian is the fleet's one other Latin-script language;
+                # the body's marker check now reaches the cues too.
+                if isinstance(cue, str) and (_is_mostly_non_latin(cue)
+                                             or len({w.lower() for w in ITALIAN_MARKERS.findall(cue)}) >= 3):
                     findings.append(f"{rel}: {kind} is not English ({cue[:60]!r}); "
                                     "the holder renders it — description_en in the memory")
     return slices

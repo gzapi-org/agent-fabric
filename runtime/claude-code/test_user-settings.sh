@@ -13,6 +13,13 @@ ok()  { PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; [[ -n "${2:-}" ]] && printf '%s\n' "$2" | sed 's/^/      /' | head -6; }
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 S="$SANDBOX/.claude/settings.json"
+# The links bootstrap makes: a rule is granted only where the link is the
+# fabric's script.
+FABRIC="$(cd "$HERE/../.." && pwd)"
+# Inside .claude/: the flag cases assert nothing else appears in the sandbox.
+export AGENT_FABRIC_LOCAL_BIN="$SANDBOX/.claude/local-bin"; mkdir -p "$AGENT_FABRIC_LOCAL_BIN"
+while IFS=$'\t' read -r name rel; do ln -s "$FABRIC/$rel" "$AGENT_FABRIC_LOCAL_BIN/$name"; done \
+    < <(python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1]))["commands"].items()]' "$HERE/commands.json")
 run() { python3 "$HERE/user-settings.py" "$@" 2>&1; }
 check() { python3 -c "import json,sys; d=json.load(open('$S')); a=d['attribution']; assert (a['commit'],a['pr'],a['sessionUrl'])==('','',False), d; assert d['showThinkingSummaries'] is True and d['verbose'] is True, d; assert d['env']['DISABLE_AUTOUPDATER'] == '1', d; $1" 2>&1; }
 
@@ -80,10 +87,18 @@ out="$(run "$S")"; [[ "$out" == "  =  "* ]] && ok "…and a second run changes n
 # An account the earlier bootstrap already settled — every other key in
 # place, no allow rule yet — still gets the rules: a check that ignored
 # them would print "=" and never write them (review of #42).
-jq 'del(.permissions)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
+jq 'del(.permissions.allow)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
 out="$(run "$S")"
 [[ "$out" == "  +  "* ]] && jq -e '.permissions.allow | index("Bash(gzcoord-inbox *)")' "$S" >/dev/null \
     && ok "a settings file settled but for the allow rules gets them" || bad "settled file left without rules" "$out"
+# A foreign file at a command's name (bootstrap refused to replace it) gets
+# no rule, and a rule granted before is withdrawn: the name would run that
+# file under the fabric's approval (review of #42).
+rm -f "$AGENT_FABRIC_LOCAL_BIN/gzmsg"; printf '#!/bin/sh\necho mine\n' > "$AGENT_FABRIC_LOCAL_BIN/gzmsg"
+out="$(run "$S")"
+jq -e '(.permissions.allow | index("Bash(gzmsg *)")) == null and (.permissions.allow | index("Bash(gzcoord-send *)")) != null' "$S" >/dev/null \
+    && ok "a name that is not the fabric's script gets no rule, and loses one it had" || bad "foreign name allowed" "$(jq -c .permissions.allow "$S")"
+rm -f "$AGENT_FABRIC_LOCAL_BIN/gzmsg"; ln -s "$FABRIC/communication/gzcoord/scripts/gzmsg.mjs" "$AGENT_FABRIC_LOCAL_BIN/gzmsg"; run "$S" >/dev/null
 # Every session starts in auto mode (the owner, 2026-09-26): a file
 # settled in every other key but the mode is written.
 jq 'del(.permissions.defaultMode)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"

@@ -29,12 +29,15 @@ in_flight() {
     local prmap
     prmap="$(gh pr list --repo "$REPO" --state open --limit 500 --json number,headRefName 2>/dev/null)" \
         || { prs_ok=false; prmap="[]"; echo "pr-gate: could not list pull requests — the PR column reads unavailable, never \"no PR\"" >&2; }
+    [[ "$(jq 'length' <<<"$prmap")" -ge 500 ]] && echo "pr-gate: 500 open pull requests read — the list is capped there." >&2
 
-    local rows="" ref sha when name owner pr ahead paths total
-    while IFS=$'\t' read -r ref sha when; do
+    local rows="" ref sha when epoch name owner pr ahead paths
+    # The full ref name: a short one is ambiguous beside a local branch
+    # called origin/<x>, and origin/HEAD shortens to a bare "origin".
+    while IFS=$'\t' read -r ref sha when epoch; do
         [[ -n "$ref" ]] || continue
-        name="${ref#origin/}"
-        [[ "$ref" == "$base" || "$name" == "HEAD" ]] && continue
+        name="${ref#refs/remotes/origin/}"
+        [[ "$name" == "HEAD" || "origin/$name" == "$base" ]] && continue
         git merge-base --is-ancestor "$sha" "$base" 2>/dev/null && continue   # merged: not in flight
         if [[ "$name" =~ ^([^/]+/[^/]+)/.+ ]]; then owner="${BASH_REMATCH[1]}"; else owner="unattributed"; fi
         if [[ "$prs_ok" == true ]]; then
@@ -43,23 +46,21 @@ in_flight() {
         ahead="$(git rev-list --count "$base..$sha" 2>/dev/null)" || ahead=null
         paths="$(git diff --name-only "$base...$sha" 2>/dev/null)" || { echo "pr-gate: $name could not be diffed (deleted meanwhile?) — skipped" >&2; continue; }
         rows+="$(jq -cn --arg branch "$name" --arg owner "$owner" --arg pr "$pr" --arg sha "$sha" --arg when "$when" \
-                    --argjson ahead "${ahead:-null}" --arg paths "$paths" \
+                    --argjson ahead "${ahead:-null}" --argjson epoch "${epoch:-0}" --arg paths "$paths" \
                     '{branch:$branch, owner:$owner, pr:(if ($pr|test("^[0-9]+$")) then ($pr|tonumber) else $pr end),
-                      sha:$sha, last_commit:$when, ahead:$ahead,
+                      sha:$sha, last_commit:$when, epoch:$epoch, ahead:$ahead,
                       paths:($paths | split("\n") | map(select(length > 0)))}')"$'\n'
-    done < <(git for-each-ref --format=$'%(refname:short)\t%(objectname)\t%(committerdate:iso8601-strict)' refs/remotes/origin/)
+    done < <(git for-each-ref --format=$'%(refname)\t%(objectname)\t%(committerdate:iso8601-strict)\t%(committerdate:unix)' refs/remotes/origin/)
 
     local all
     all="$(printf '%s' "$rows" | jq -s '.')"
 
-    if (( ${#PATHS[@]} > 0 )); then
-        local pj; pj="$(printf '%s\n' "${PATHS[@]}" | jq -R . | jq -s .)"
-        all="$(jq --argjson pre "$pj" '[.[] | select(any(.paths[]; . as $p | any($pre[]; . as $x | $p == $x or ($p | startswith(($x | rtrimstr("/")) + "/")))))]' <<<"$all")"
-    fi
-
+    # The target is found among ALL rows, before --path narrows them: a
+    # target changing nothing under the prefix is still in flight.
     local target=""
     if [[ -n "$OVERLAP" ]]; then
         if [[ "$OVERLAP" =~ ^[0-9]+$ ]]; then
+            [[ "$prs_ok" == true ]] || { echo "pr-gate: #$OVERLAP cannot be resolved to a branch — the PR list is unavailable; name the branch instead" >&2; return 2; }
             target="$(jq -r --argjson n "$OVERLAP" '[.[] | select(.pr == $n) | .branch][0] // empty' <<<"$all")"
             [[ -n "$target" ]] || { echo "pr-gate: #$OVERLAP is not an open PR with a branch in flight on origin" >&2; return 2; }
         else
@@ -71,8 +72,13 @@ in_flight() {
             | [.[] | select(.branch != $t) | .shared = [.paths[] | select(. as $p | $tp | index($p))] | select(.shared | length > 0)]' <<<"$all")"
     fi
 
+    if (( ${#PATHS[@]} > 0 )); then
+        local pj; pj="$(printf '%s\n' "${PATHS[@]}" | jq -R . | jq -s .)"
+        all="$(jq --argjson pre "$pj" '[.[] | select(any(.paths[]; . as $p | any($pre[]; . as $x | $p == $x or ($p | startswith(($x | rtrimstr("/")) + "/")))))]' <<<"$all")"
+    fi
+
     all="$(jq --argjson cap "$INFLIGHT_PATHS_CAP" '[.[] | .paths_total = (.paths | length) | .paths = .paths[:$cap]
-        | if .shared then .shared_total = (.shared | length) | .shared = .shared[:$cap] else . end] | sort_by(.last_commit) | reverse' <<<"$all")"
+        | if .shared then .shared_total = (.shared | length) | .shared = .shared[:$cap] else . end] | sort_by(.epoch) | reverse | map(del(.epoch))' <<<"$all")"
 
     if (( JSON )); then
         jq -n --argjson rows "$all" --arg base "$base" --argjson fetch_ok "$fetch_ok" --argjson prs_ok "$prs_ok" \

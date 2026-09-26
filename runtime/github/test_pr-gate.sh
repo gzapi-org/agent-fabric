@@ -272,6 +272,14 @@ out="$(run --in-flight 42)"; rc=$?
 [[ $rc -eq 2 ]] && pass "--in-flight takes no PR numbers" || fail "numbers accepted with --in-flight (rc=$rc)" "$out"
 out="$(run --overlap develop-qzapp/other/feat/parked)"
 grep -q 'no shared path is not the same as compatible' <<<"$out" && pass "--overlap says that no shared path does not mean compatible" || fail "the overlap caveat is missing" "$out"
+out="$(run --overlap develop-qzapp/me/feat/thing --path api/)"; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'not a branch in flight' <<<"$out" \
+  && pass "--overlap with --path: the target is found among every branch, though it changes nothing under the prefix" || fail "the target was lost to the --path filter (rc=$rc)" "$out"
+touch "$STATE/prlist_fail"
+out="$(run --overlap 42)"; rc=$?
+rm -f "$STATE/prlist_fail"
+[[ $rc -eq 2 ]] && grep -q 'cannot be resolved to a branch — the PR list is unavailable' <<<"$out" \
+  && pass "--overlap by number with no PR list: said as such, not 'not in flight'" || fail "the wrong reason given (rc=$rc)" "$out"
 touch "$STATE/prlist_fail"
 out="$(run --in-flight)"; rc=$?
 rm -f "$STATE/prlist_fail"

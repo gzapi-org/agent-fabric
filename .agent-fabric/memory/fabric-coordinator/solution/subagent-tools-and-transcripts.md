@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: solution
+topic: "subagent-tools-and-transcripts"
 description: "What a Claude Code custom agent file's tools line really does (empty = every tool; none is refused), and what a subagent's transcript and sidecar carry — read back live 2026-09-17"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - bf91c22085d998e5
 ---

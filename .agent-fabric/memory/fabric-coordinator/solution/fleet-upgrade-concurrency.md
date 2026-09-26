@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: solution
+topic: "fleet-upgrade-concurrency"
 description: "fabric-ctl all upgrade claude run on 13 accounts of one host at once: 9 installs failed; one at a time every one succeeded — serialize installs per host (fabric-lease), keep the error's LAST line, exit 1 on any failure"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 97d8b90083da6f7f
 ---

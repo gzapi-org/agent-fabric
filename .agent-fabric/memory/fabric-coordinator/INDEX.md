@@ -3,7 +3,7 @@ role: "fabric-coordinator"
 class: index
 description: "What fabric-coordinator knows and where it lives."
 tier: 1
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 ---
 
 # fabric-coordinator — knowledge index
@@ -61,6 +61,8 @@ control plane checked out beside it.
 ## threads
 
 - [`.agent-fabric/memory/fabric-coordinator/threads/assemble-hygiene-inconsistent.md`](.agent-fabric/memory/fabric-coordinator/threads/assemble-hygiene-inconsistent.md) — CLOSED 2026-09-20: assemble substitutes a banned term in place on both paths (new claim and carried text) since the 2026-09-16 decision; only non-English prose is still refused in a claim and reported in carried text — both make the run…
+- [`.agent-fabric/memory/fabric-coordinator/threads/assemble-subheading-breaks-idempotence.md`](.agent-fabric/memory/fabric-coordinator/threads/assemble-subheading-breaks-idempotence.md) — A claim whose body has its own `## ` headings is split at them on re-read: the first part loses its Observed date and the same memory collides with itself on the next drain
+- [`.agent-fabric/memory/fabric-coordinator/threads/drain-report-last-run-wins.md`](.agent-fabric/memory/fabric-coordinator/threads/drain-report-last-run-wins.md) — A multi-bundle drain writes last-drain-report.json once per assemble run — the last run wins: earlier runs' collision_decisions are lost and an index-only run empties the watermarks
 - [`.agent-fabric/memory/fabric-coordinator/threads/inbox-history-mode.md`](.agent-fabric/memory/fabric-coordinator/threads/inbox-history-mode.md) — To do: gzcoord inbox.mjs needs a history-listing mode (a seq range, addressed-to-me only, HELLO/GOODBYE filtered) — an agent planned ~400 --replay calls to read 3808..4200; replay already fetches 500 records per call
 - [`.agent-fabric/memory/fabric-coordinator/threads/suite-scratch-leak.md`](.agent-fabric/memory/fabric-coordinator/threads/suite-scratch-leak.md) — tests/run.sh fails naming anything a run left under TMPDIR (since agent-fabric #26, 2026-09-20); node suites use tests/scratch.mjs, static.sh refuses inline mkdtempSync; never run the suite twice at once — the two share scratch and fail…
 

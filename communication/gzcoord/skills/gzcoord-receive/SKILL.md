@@ -5,10 +5,9 @@ description: "Receive messages from other agents over GZCoord — how the sessio
 
 # Receiving GZCoord messages
 
-The relay holds one cursor per address (`<host>/<login>`,
-`"$AGENT_FABRIC_ROOT/bin/fabric-whoami"`, or `../agent-fabric/bin/fabric-whoami`
-from a working copy). Two things read it for you, and both
-are `communication/gzcoord/scripts/inbox.mjs`:
+The relay holds one cursor per address (`<host>/<login>`, as
+`fabric-whoami` prints it). Two things read it for you, and both
+are `gzcoord-inbox` (`communication/gzcoord/scripts/inbox.mjs`):
 
 - the **session-start drain** — the `SessionStart` hook runs it once,
   shows what is addressed to you in full and only the metadata line of
@@ -25,7 +24,7 @@ Run it under the Monitor tool so each printed delivery becomes a
 notification:
 
 ```
-Monitor(command: 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --follow',
+Monitor(command: 'gzcoord-inbox --follow',
         description: "GZCoord inbox — <host>/<login>",
         persistent: true,              # honoured only by an interactive Monitor
         timeout_ms: 1800000)           # the cap a timed (launched) Monitor uses
@@ -78,9 +77,11 @@ names the old session's watch (and any `wait-merged` / `pr-review-status`
 watchers). Those processes died with that session; nothing keeps running
 and nothing is lost (the relay holds the cursor, the start drain shows
 what arrived since). It is not an error to investigate: re-arm, and
-restart any PR watcher you still need. `AGENT_FABRIC_ROOT` is
-exported into your shell by the session-start hook; in a clone without
-it, the fabric is `../agent-fabric` beside the working copy. To read on
+restart any PR watcher you still need. The fabric's commands are on your PATH by name — `gzcoord-inbox`,
+`gzcoord-send`, `gzmsg`, `fabric-status` and the other `fabric-*` —
+and allowed in your settings: run them bare. Never write one through
+`$AGENT_FABRIC_ROOT` or any other expansion; the harness asks before a
+command that carries one. To read on
 demand — the user says "read messages", or you are about to decide
 something a peer may have written about — run the same command once
 without the loop, `--wait 3`.
@@ -96,8 +97,8 @@ poll after the plan is approved delivers everything at once, at your
 next turn boundary. You do nothing for this. What it means for you:
 after a plan is approved, expect the deliveries of the whole planning
 span to arrive together, and read them before acting on the plan — the
-tree may have moved. `node "$AGENT_FABRIC_ROOT/communication/gzcoord/
-scripts/inbox.mjs" --held` says whether your inbox is held right now
+tree may have moved. `gzcoord-inbox --held` says whether your inbox is
+held right now
 and by which session. The hold is per address: a second session under
 the same login is held with you, as it shares your cursor, and the
 account is released when the last planning session leaves plan mode.
@@ -186,7 +187,7 @@ advance the cursor past a message whose body never reached you. The
 cursor does not go back; the message can be read again:
 
 ```sh
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay <relay seq | MESSAGE-ID>
+gzcoord-inbox --replay <relay seq | MESSAGE-ID>
 ```
 
 It reads the channel's recent history without a consumer id (nothing

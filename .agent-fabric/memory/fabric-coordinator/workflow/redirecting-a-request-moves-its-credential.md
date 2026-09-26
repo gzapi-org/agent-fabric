@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "redirecting-a-request-moves-its-credential"
 description: When a fix changes WHERE a request goes, list every credential that travels with it first — clearing the destination alone can send a secret to a third party
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 0b17494c95e6e567
 ---

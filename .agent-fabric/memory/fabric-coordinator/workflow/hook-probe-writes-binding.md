@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "hook-probe-writes-binding"
 description: "Running session-start.sh by hand as yourself rewrites your own binding's session id — the id the launcher resumes after a restart; probe with AGENT_FABRIC_STATE_DIR set to scratch"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - d02cfb32917ecbbf
 ---

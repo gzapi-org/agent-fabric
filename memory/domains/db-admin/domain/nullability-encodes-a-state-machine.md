@@ -1,10 +1,11 @@
 ---
 role: "db-admin"
 class: domain
+topic: "nullability-encodes-a-state-machine"
 description: "A nullable timestamp copied from a sibling table carries that table's state machine; if the copy's status CHECK has no state where the column is absent, the nullability is a bug."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "db-admin"
     host: "develop-qzapp"

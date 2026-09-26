@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "smoke-container-before-ci"
 description: "Run a platform smoke job under podman on this host, as an unprivileged login, before pushing a CI change that adds a container job — the containers find host facts (a missing cmp, Debian's /etc/profile resetting PATH, dash as sh) that the…"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 8426a37c6be555fe
 ---

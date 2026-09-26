@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "house-i18n-standard"
 description: Translated strings follow the house i18n standard — check a managed project for an existing convention before inventing a file format
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 59dc78ff13f1c305
 ---

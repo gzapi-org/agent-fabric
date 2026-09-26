@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "distribute-after-merge"
 description: After a fabric PR merges, distribute it to every account yourself — pull + bootstrap via hostexec — a broadcast alone is not distribution
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - c1a54fb163856f15
 ---

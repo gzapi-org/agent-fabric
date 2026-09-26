@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "fleet-ops-via-control-plane"
 description: "An operation on accounts (move Claude account, sync, verify, restart) goes through signed control-plane messages, never hostexec/sudo per login — build the action if it is missing"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 41a1a42f00b22ded
 ---

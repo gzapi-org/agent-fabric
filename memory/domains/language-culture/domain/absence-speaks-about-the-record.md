@@ -1,10 +1,11 @@
 ---
 role: "language-culture"
 class: domain
-description: Подпись об отсутствующем атрибуте человека (имя, контакты, решение по заявке) говорит о записи или заявке, а не о человеке — на поверхности режима 3 это не нюанс
+topic: "absence-speaks-about-the-record"
+description: "A label for a person's missing attribute (name, contacts, a decision on their application) speaks about the record or the application, not the person — on a Regime 3 surface that is no nuance"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "language-culture-ru"
     host: "develop-qzapp"
@@ -14,7 +15,7 @@ derived_from:
   - 1ef909d9ebd1a1f0
 ---
 
-## Подпись об отсутствующем атрибуте человека (имя, контакты, решение по заявке) говорит о записи или заявке, а не о человеке — на поверхности режима 3 это не нюанс
+## A label for a person's missing attribute (name, contacts, a decision on their application) speaks about the record or the application, not the person — on a Regime 3 surface that is no nuance
 
 On a staff surface (driver registry, statistics, Regime 3) a label for
 a person's missing attribute — name, contacts — or for a decision on

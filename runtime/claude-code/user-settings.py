@@ -46,6 +46,21 @@ an agent's session is read by the person operating the fleet, not only
 by the agent — the thinking summaries and the full tool output are what
 lets a stalled or misdirected session be seen for what it is from its
 terminal, rather than reconstructed afterwards from a transcript.
+
+`permissions.allow`: `Bash(<name> *)` for every command in
+runtime/claude-code/commands.json — the fabric's own commands, which
+bootstrap links into ~/.local/bin (the owner, 2026-09-26: no approval
+for any fabric script or executable). A narrow rule, one command name
+each — never one in its `not_allowed`, a wrapper that runs another
+command — because in auto mode a narrow Bash rule is resolved before the
+classifier while a broad one, or one naming Monitor, is set aside; a
+Monitor follows the Bash rules. Every other rule the account allows,
+denies or asks is kept as read, and an `ask` rule still wins.
+
+`permissions.defaultMode` "auto" (the owner, 2026-09-26): every agent's
+session starts in auto mode. Eight accounts provisioned by hand had no
+mode and started in the default one, asking for what the classifier
+would allow; the allow rules above assume auto.
 """
 from __future__ import annotations
 
@@ -58,6 +73,34 @@ USAGE = (__doc__ or "user-settings.py <settings.json> [--dry-run]").strip()
 ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 TOP_LEVEL = {"showThinkingSummaries": True, "verbose": True}
 ENV = {"DISABLE_AUTOUPDATER": "1"}
+COMMANDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands.json")
+
+
+FABRIC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def local_bin() -> str:
+    return os.environ.get("AGENT_FABRIC_LOCAL_BIN") or os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
+def rules() -> tuple[list[str], list[str]]:
+    """(granted, withheld). A rule is granted only for a name whose
+    ~/.local/bin entry IS the fabric's script: a foreign file bootstrap
+    refused to replace would otherwise run under the fabric's approval
+    (review of #42, 2026-09-26)."""
+    with open(COMMANDS, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    granted, withheld = [], []
+    for name, rel in doc["commands"].items():
+        if name in doc.get("not_allowed", {}):
+            continue
+        ours = os.path.realpath(os.path.join(local_bin(), name)) == os.path.realpath(os.path.join(FABRIC_ROOT, rel))
+        (granted if ours else withheld).append(f"Bash({name} *)")
+    return granted, withheld
+
+
+def allow_rules() -> list[str]:
+    return rules()[0]
 
 
 class Unreadable(Exception):
@@ -87,9 +130,18 @@ def save(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def allowed(doc: dict) -> list:
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
+    return perms.get("allow") if isinstance(perms.get("allow"), list) else []
+
+
 def settled(doc: dict) -> bool:
     current = doc.get("attribution") if isinstance(doc.get("attribution"), dict) else {}
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
     return (all(current.get(k) == v for k, v in ATTRIBUTION.items())
+            and perms.get("defaultMode") == "auto"
+            and all(r in allowed(doc) for r in allow_rules())
+            and not any(r in allowed(doc) for r in rules()[1])
             and "includeCoAuthoredBy" not in doc
             and all(doc.get(k) == v for k, v in TOP_LEVEL.items())
             and isinstance(doc.get("env"), dict) and all(doc["env"].get(k) == v for k, v in ENV.items()))
@@ -130,6 +182,11 @@ def main(argv: list[str]) -> int:
     doc.update(TOP_LEVEL)
     env = doc.get("env") if isinstance(doc.get("env"), dict) else {}
     doc["env"] = {**env, **ENV}
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
+    granted, withheld = rules()
+    perms["allow"] = [r for r in allowed(doc) if r not in withheld] + [r for r in granted if r not in allowed(doc)]
+    perms["defaultMode"] = "auto"
+    doc["permissions"] = perms
     save(path, doc)
     print(f"  +  {path} fabric user settings")
     return 0

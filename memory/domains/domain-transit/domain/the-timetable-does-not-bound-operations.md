@@ -1,10 +1,11 @@
 ---
 role: "domain-transit"
 class: domain
+topic: "the-timetable-does-not-bound-operations"
 description: the schedule answers what the service PLANS, never what a vehicle or a shift actually does — those are bounded by driver behaviour, not by a published window
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "domain-transit"
     host: "develop-qzapp"

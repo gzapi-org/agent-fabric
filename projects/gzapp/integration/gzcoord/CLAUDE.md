@@ -20,12 +20,12 @@ block and the person copies it into the receiving session's prompt
   `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by
   construction, no counter to seed or continue. Your address is
   `<host>/<login>`: the account this session runs under
-  (`../agent-fabric/bin/fabric-whoami` from the working copy), never the working copy's name.
+  (`fabric-whoami` from the working copy), never the working copy's name.
   Put the role's **slug** in `ROLE` (`identities/roles/catalog.json` —
   `backend-dev`, never `.NET backend developer`): `TO-ROLE` matches by
   equality, and one addressing field per message is the whole routing
   rule. Send no `HELLO` or `GOODBYE` (deprecated, SPEC §5): whether an
-  agent is online is `../agent-fabric/bin/fabric-ctl <login|all> presence`.
+  agent is online is `fabric-ctl <login|all> presence`.
 - **Do** activate what you own at session start. The relay is a
   systemd user unit on the hosting account — the fabric-coordinator's —
   up with that account's user manager; where no manager answers it is a
@@ -40,18 +40,16 @@ block and the person copies it into the receiving session's prompt
   snapshot; **every session watches its inbox from its first turn to
   its last** (owner rule, 2026-09-13): make the first action of the
   session a watch: `Monitor` running
-  `node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --follow`,
+  `gzcoord-inbox --follow`,
   which blocks for the life of the session and turns each delivery into a
   notification, printing nothing on a quiet spell. Pass `persistent: true`
   if your Monitor tool has the field (armed once, no timer); if it does
   not (its `timeout_ms` caps at 30 min), re-arm on the expiry notice. The
   `gzcoord-receive` skill has both shapes. A **resume** does not restore
   the watch (2026-09-14): re-arm it as the first action after any
-  `--resume` or post-compaction continue. `AGENT_FABRIC_ROOT` is real in the session's shell: the fabric
-  `SessionStart` hook exports it through `$CLAUDE_ENV_FILE`, so the line
-  above runs as written (before 2026-09-14 it did not, and a resolved
-  `"$(git rev-parse --show-toplevel)/../agent-fabric"` was the
-  workaround). The wait wakes only on a message addressed to this
+  `--resume` or post-compaction continue. The command is on PATH (bootstrap links it) and allowed in the user
+  settings, so it runs without a prompt; never write it through
+  `$AGENT_FABRIC_ROOT` — an expansion makes the harness ask. The wait wakes only on a message addressed to this
   session (broadcast, TO its address, TO-ROLE its slug); others'
   traffic passes through acknowledged and unprinted. **One watch per
   session**: the cursor is per address, and a second consumer on it

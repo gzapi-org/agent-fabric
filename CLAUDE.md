@@ -36,23 +36,23 @@ role, whatever account it runs as, is what is refused.
 Your name is the account this session runs under. Ask it, never guess it:
 
 ```sh
-agent-fabric/bin/fabric-whoami          # the agent name (== id -un)
-agent-fabric/bin/fabric-whoami --json   # agent, host, role, project, working copy
-agent-fabric/bin/fabric-status          # all of that plus the API path, model pins,
+fabric-whoami                           # the agent name (== id -un)
+fabric-whoami --json                    # agent, host, role, project, working copy
+fabric-status                           # all of that plus the API path, model pins,
                                         # capability resolution and routing health — ONE call
-agent-fabric/bin/fabric-model list      # every model choice per provider, with its source layer;
+fabric-model list                       # every model choice per provider, with its source layer;
                                         # `set --provider <p> <target> <model>` writes your own layer
-agent-fabric/bin/fabric-ctl all status  # (coordinator) the fleet in real time: each account's control
+fabric-ctl all status                   # (coordinator) the fleet in real time: each account's control
                                         # agent answers over the relay — Claude account, usage windows,
                                         # key fingerprints, fabric head, session (docs/control-plane.md)
-agent-fabric/bin/fabric-ctl all upgrade claude  # (coordinator) every account to the pinned Claude Code,
+fabric-ctl all upgrade claude           # (coordinator) every account to the pinned Claude Code,
                                         # a running session stopped gracefully and resumed on it (docs/fleet-upgrade.md)
-agent-fabric/bin/fabric-accounts assign <login…> <account>  # (coordinator) which Claude account those
+fabric-accounts assign <login…> <account>  # (coordinator) which Claude account those
                                         # logins run on; each applies, proves and resumes on it by signed
                                         # message (docs/claude-accounts.md)
-agent-fabric/bin/fabric-usage           # (coordinator) the usage windows through the host executor —
+fabric-usage                            # (coordinator) the usage windows through the host executor —
                                         # the sudo fallback when a host's control agents are down
-agent-fabric/bin/fabric-lease <name> -- <cmd>   # one holder per host resource across every account on
+fabric-lease <name> -- <cmd>            # one holder per host resource across every account on
                                         # this host (a backend suite with its postgres); docs/resources.md
 ```
 
@@ -87,7 +87,7 @@ directory, the repository, the branch or the session.
   arrive from the session-start hook and follow your working copy.
   Everything else loads when an index line matches what you are doing.
   A role is bound from a **login shell**, never inside a session:
-  `agent-fabric/bin/fabric-role bind <role>`, then launch; a different
+  `fabric-role bind <role>`, then launch; a different
   role is a rebind there and a relaunch. `bin/fabric-role status` (or
   `bin/fabric-status`) says what you are. Holding a role never entitles
   you to change its charter or brief, or anything else here (above).

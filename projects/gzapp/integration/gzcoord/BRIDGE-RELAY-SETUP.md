@@ -112,7 +112,7 @@ would target:
 - `POST /api/send` — `{channel, sender, content}`. The field is
   **`content`**; `text` is rejected. **Validate before sending** (SPEC
   §1): compose the message in a file, run
-  `node $AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs validate <file>`, and send only
+  `gzmsg validate <file>`, and send only
   what passes. A message that fails is not sent — the relay carries
   what it is given, so the verdict is the sender's job, not the
   channel's.

@@ -1,10 +1,11 @@
 ---
 role: "flutter-dev"
 class: domain
+topic: "killed-flutter-test-leaves-children"
 description: A flutter test run killed by the harness (timeout, OOM) leaves its dartvm and frontend_server children alive for hours, and they are what starve the next run.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "flutter-dev-01"
     host: "develop-qzapp"

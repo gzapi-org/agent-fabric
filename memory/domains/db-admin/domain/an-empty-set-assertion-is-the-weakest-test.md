@@ -1,10 +1,11 @@
 ---
 role: "db-admin"
 class: domain
+topic: "an-empty-set-assertion-is-the-weakest-test"
 description: Assert.Empty on a query passes for ANY predicate matching nothing — including a malformed one; to test a predicate, give it something it must match and something it must not.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "db-admin"
     host: "develop-qzapp"

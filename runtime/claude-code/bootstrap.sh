@@ -24,6 +24,8 @@
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
 #   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md
 #                                      the dispatch policy as a loadable skill, from policies/
+#   ~/.local/bin/<name>                every command a session runs, by name
+#                                      (runtime/claude-code/commands.json)
 #   ~/.config/systemd/user/agent-fabric-agentd.service
 #                                      the control agent (runtime/control/), enabled and started
 #                                      in this account's user manager when one is running
@@ -139,6 +141,36 @@ fi
 # projects/ (no .claude/ of its own) found no guard and lost Bash entirely
 # (docs/live-checks/2026-09-13-openrouter-routing.md).
 put "$CLAUDE_HOME/hooks/review-bash-guard.sh" "$FABRIC_ROOT/runtime/claude-code/hooks/review-bash-guard.sh"
+# Every command a session is told to run, on PATH under its own name
+# (runtime/claude-code/commands.json): a skill says `gzcoord-send <file>`,
+# never `node "$AGENT_FABRIC_ROOT/…"`, because the harness asks before any
+# command carrying a shell expansion (the owner, 2026-09-26). A link this
+# fabric made — to this checkout or another one's same path — is
+# refreshed; anything else at that name is the account's and is refused,
+# never replaced.
+LOCAL_BIN="${AGENT_FABRIC_LOCAL_BIN:-$HOME/.local/bin}"
+# Read first, then loop: a list that cannot be read inside a process
+# substitution linked nothing and reported success (review of #42).
+if ! commands="$(python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1]))["commands"].items()]' \
+                   "$FABRIC_ROOT/runtime/claude-code/commands.json")"; then
+    echo "  !  runtime/claude-code/commands.json unreadable — no command linked" >&2; failed=$((failed+1)); commands=""
+fi
+while IFS=$'\t' read -r name rel; do
+    [[ -n "$name" ]] || continue
+    target="$FABRIC_ROOT/$rel"; link="$LOCAL_BIN/$name"
+    if [[ -L "$link" && "$(readlink "$link")" == "$target" ]]; then
+        echo "  =  $link"; same=$((same+1)); continue
+    fi
+    if [[ -e "$link" || -L "$link" ]] && ! { [[ -L "$link" ]] && [[ "$(readlink "$link")" == */"$rel" ]]; }; then
+        echo "  !  $link is not a link this fabric made — left alone; $name is not on PATH" >&2
+        failed=$((failed+1)); continue
+    fi
+    if (( DRY_RUN )); then echo "  +  $link -> $target (would link)"; continue; fi
+    mkdir -p "$LOCAL_BIN" && ln -sfn "$target" "$link" && { echo "  +  $link -> $target"; changed=$((changed+1)); } \
+        || { echo "  !  $link: could not link" >&2; failed=$((failed+1)); }
+done <<<"$commands"
+# Linked BEFORE the settings are written: an allow rule is granted only for
+# a name whose link is the fabric's script (user-settings.py).
 # The login's user settings carry what the fabric wants in every session
 # of the account whatever directory it launches from: the harness's
 # attribution reminder — a system reminder asking for a Co-Authored-By

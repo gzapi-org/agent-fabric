@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "pr-band-accumulate"
 description: "One open PR per agent (gzapp's rule, with its exceptions) and 8–16 work commits to arm — the next piece of work is another commit, never a PR per topic; two one-commit PRs in a morning was the mistake"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 2324a79955f986c3
 ---

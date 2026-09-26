@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "blind-review-loop"
 description: "How to review a fabric change — render a request with bin/fabric-review, dispatch code-review on fable with the brief verbatim, POST the brief, the report and the per-finding judgement on the PR, fix, then re-review the fix range with…"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 2ff3e1161c2af3f2
 ---

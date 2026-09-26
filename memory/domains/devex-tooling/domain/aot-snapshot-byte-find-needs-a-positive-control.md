@@ -1,10 +1,11 @@
 ---
 role: "devex-tooling"
 class: domain
+topic: "aot-snapshot-byte-find-needs-a-positive-control"
 description: "A byte-find on a Flutter release snapshot (libapp.so) passes on an --obfuscate build because the names are gone; require a control string that only an unobfuscated snapshot carries."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"

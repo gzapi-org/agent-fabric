@@ -6,7 +6,7 @@ description: "Send a message to another agent over GZCoord — the whole procedu
 # Sending a GZCoord message
 
 Every session on this host is a Linux login with an address
-`<host>/<login>` (`"$AGENT_FABRIC_ROOT/bin/fabric-whoami"`, or `../agent-fabric/bin/fabric-whoami` from a working copy), and the relay
+`<host>/<login>` (`fabric-whoami`), and the relay
 delivers what one session writes to the cursor of every other. The
 protocol is `communication/gzcoord/protocol/SPEC.md`; what a good message
 looks like is `protocol/MESSAGE-FORMAT.md`. This skill is the procedure.
@@ -41,7 +41,7 @@ TO-ROLE: <slug>                 #   … or the role that owns the decision …
 BROADCAST: true                 #   … or everyone; exactly one of the three
 IN-REPLY-TO: <message-id>       # when answering
 REPLY-EXPECTED: yes|no
-MESSAGE-ID: <uuidv7>            # node communication/gzcoord/scripts/gzmsg.mjs new-id
+MESSAGE-ID: <uuidv7>            # gzmsg new-id
 SUBJECT: one line, short
 
 OBSERVATION:
@@ -117,15 +117,15 @@ Write it to a file in your scratchpad (never in the tree; a message is
 never committed). Mint the id first:
 
 ```sh
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/gzmsg.mjs" new-id
+gzmsg new-id
 ```
 
 ## 3. Send
 
 ```sh
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file>            # validate, then post
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file> --dry-run  # validate, resolve, post nothing
-node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/send.mjs" <file> --force    # post even if the addressee has no session
+gzcoord-send <file>            # validate, then post
+gzcoord-send <file> --dry-run  # validate, resolve, post nothing
+gzcoord-send <file> --force    # post even if the addressee has no session
 ```
 
 `send.mjs` normalizes the text (a pasted message carries terminal
@@ -149,9 +149,11 @@ in the relay until one starts, which may be what you want — `--force`
 sends it anyway, and says so. A request that must be acted on now
 belongs to a running session, or to a later send.
 
-`AGENT_FABRIC_ROOT` is exported into your shell by the session-start
-hook. Working in a clone without it, the fabric is `../agent-fabric`
-beside the working copy.
+The fabric's commands are on your PATH by name — `gzcoord-inbox`,
+`gzcoord-send`, `gzmsg`, `fabric-status` and the other `fabric-*` —
+and allowed in your settings: run them bare. Never write one through
+`$AGENT_FABRIC_ROOT` or any other expansion; the harness asks before a
+command that carries one.
 
 ## 4. Presence is asked, never announced
 
@@ -162,8 +164,8 @@ as which role — is the control plane's to answer, from each account's
 process table:
 
 ```sh
-"$AGENT_FABRIC_ROOT/bin/fabric-ctl" <login> presence    # one account
-"$AGENT_FABRIC_ROOT/bin/fabric-ctl" all presence        # everyone
+fabric-ctl <login> presence    # one account
+fabric-ctl all presence        # everyone
 ```
 
 `send.mjs` asks the same before a `TO` or `TO-ROLE` message leaves (§3).

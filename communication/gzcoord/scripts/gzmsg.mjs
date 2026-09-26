@@ -541,8 +541,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (id) lines.push(`MESSAGE-ID: ${id}`);
     if (arg('specialties')) lines.push(`SPECIALTIES: ${arg('specialties')}`);
     if (arg('capabilities')) lines.push(`CAPABILITIES: ${arg('capabilities')}`);
-    // A HELLO is how peers learn an address, so emitting one this same tool
-    // would reject publishes an identity nobody can route back to.
+    // Validated like any message before it is printed: a HELLO this tool
+    // would reject names an address nobody could route to. HELLO itself
+    // is deprecated (SPEC §5) — no launcher or session sends one, presence
+    // is the control plane's — and the subcommand stays because it builds
+    // a valid GZCOORD/1 message the validator's address and role checks
+    // are exercised on, and a parser still accepts one.
     const text = lines.join('\n');
     const result = validate(text, { taxonomy, t: printer(dictionary(me)) });
     for (const w of result.warnings) console.error(`warning: ${w}`);
@@ -559,7 +563,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // alias until 2026-09-16 and is now an unknown command.)
     console.log(mintId());
   } else {
-    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] | new-id   (--taxonomy <path> | --no-taxonomy)');
+    console.error('usage: gzmsg.mjs validate <file> | normalize <file> | hello --from ... --project ... [--role ...] [--message-id ...] (deprecated, SPEC §5) | new-id   (--taxonomy <path> | --no-taxonomy)');
     process.exit(2);
   }
 }

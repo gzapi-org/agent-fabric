@@ -17,7 +17,7 @@ memory/                          (this repository — field knowledge)
     │   ├── crossref.json        artifact → where it was learned and landed
     │   ├── solution/ intersection/ rationale/ workflow/ threads/
     ├── shared/                  project knowledge two or more roles own
-    └── last-drain-report.json   the last assembly's telemetry and watermarks
+    └── last-drain-report.json   the last drain's record (every bundle of its stamp) and watermarks
 ```
 
 **Project knowledge lives in the project's repository.** A `solution`
@@ -126,7 +126,14 @@ origin:
 derived_from:                    # observation content hashes
   - 42bc0c9685ab878c
 distilled_at: "2026-09-05"       # when
+topic: release                   # the memory this file is (not on a flat <class>.md)
 ```
+
+`topic` is what tells a budget part from a memory named like one: part
+two of `release` is `release-2.md`, and so is a memory named `release-2`
+(a drain's blind review, 2026-09-26). A slice written before the field
+existed is read as a part when `release.md` exists and neither the drain
+nor the role's crossref names `release-2` as a topic.
 
 Agent, host, project and working copy are four separate facts. Slices
 written before the identity migration carry `clone_id` instead of `agent`;
@@ -134,7 +141,11 @@ they are preserved verbatim, and
 the label is kept as it is — a record of where the slice was learned, not
 resolved to a login. An observation that resolves to no agent is reported
 **provisional**, never guessed, and the tally lands in
-`last-drain-report.json` and on stderr at assembly.
+`last-drain-report.json` and on stderr at assembly. The runs of one
+stamp — one per bundle — merge into that report: each bundle's harvest
+record is kept under `harvest_sources` (by agent@host), and `files`
+lists what the tree holds after the last run, not a file a later run
+of the stamp retired.
 
 ## The drain cycle
 
@@ -154,7 +165,10 @@ A holder that writes its memory in another language (language-culture,
 in the language it answers for) drains through the **English rendering**
 each drain-ready memory carries under a `## English` heading: the claim
 is the rendering, the original stays in the holder's home, the
-observation records the language. A non-Latin memory without one is
+observation records the language. Its cue is English too: a description
+in another script travels under `description_en: "…"` in the `metadata:`
+block, because the index line and the heading are what every holder of
+the role reads first. A non-Latin memory without either is
 named under `needs_rendering` in the report and yields no claim — so a
 drain of such a login is two steps: the coordinator's dry run, whose
 `needs_rendering` names go to the holder as a `REQUEST` on the relay;
@@ -197,11 +211,22 @@ status and no file.
 `bin/fabric-host <host> drain <login> > drain.tar` remains only as the
 sudo fallback for a host whose daemons are down.
 
+One `assemble.py --bundle` run per bundle, all with the drain's one
+`--stamp`, build one drain report: a run finding a report of the same
+stamp merges into it — roles and shared topics unioned, decisions (one
+per key, the later), moves, files and findings appended without
+repeats, telemetry kept per agent@host so a re-run bundle replaces its
+counts — and a report of another stamp is replaced. Watermarks carry
+across both: each host keeps the higher mark, and a run that read
+nothing never lowers or empties one. Every path in the report is
+relative to the working copy, or to the fabric root for a fabric file.
+
 `harvest_memory.py` stamps the agent from `runtime/identity.py`, the
 project from the working copy's remote, and the working copy as a label.
 It reads only memories newer than the **watermark** the project's last
-report recorded for this host (`last-drain-report.json`, `watermarks`;
-`--all` ignores it), and writes `harvest-report.json` with the next one,
+report recorded for this agent's store (`last-drain-report.json`,
+`watermarks`, keyed `agent@host` — every account on a host has its own
+store; `--all` ignores it), and writes `harvest-report.json` with the next one,
 which `assemble.py` commits — so each drain starts where the last one
 stopped, and `bin/fabric-status` can say how much is undrained.
 Each agent drains **its own** memories; nothing reads another account's
@@ -265,11 +290,46 @@ siblings: `merge_target`, the author's instrument, applied on the
 owner's decision), `keep-both` (both stand, side by side, dated), or
 `drop` (the incoming claim is wrong). Every applied decision is
 recorded in the drain report under `collision_decisions`. Two claims of
-one drain under one heading collide the same way. An author who knows
+one drain under one heading collide the same way. So does a **retitled
+memory**: a memory's topic is its file name and its heading its
+description, so a claim bringing a new heading into a topic whose every
+section one agent wrote — that agent's own — is the same memory
+rewritten (a tracker's "OPEN" become "MERGED"), not a second fact.
+Only the topic's own file answers that — `<class>/<topic>.md` and its
+budget parts, or the shared `<class>-<topic>.md` and its parts: the
+flat `<class>.md` holds every memory of its class until the class
+splits, and a carried file every memory it moved with, so a claim
+landing there is never a retitle and never falls under the rule below
+(a drain's blind review, 2026-09-26: one agent's second memory in a
+flat file deleted its first).
+**An agent's newer text replaces its own older text without a
+question** (the owner, 2026-09-26, after 34 such pairs asked and all 34
+superseded): a retitle, or a new text under a heading of that agent's
+own topic, supersedes — the old sections are retired and the new one
+takes their place — and it is printed (`SUPERSEDED, same agent`) and
+recorded in `collision_decisions` with `"rule": "same-agent"`. An
+owner's decision in `--collision-decisions` still wins. Two agents'
+texts under one heading, and two claims of one drain under one heading
+with different texts — whether or not the corpus holds that heading
+too — still stop the run. A topic several agents wrote appends a new heading as before, and
+a memory whose `merge_target` names the old section is not asked about. An author who knows
 the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no
 question is asked: the harvest carries the field to the claim and the
-assembler replaces the section and retires its siblings.
+assembler replaces the section and retires its siblings; the section
+then carries the correcting memory's own heading, not the stale one —
+also when the stale section sat in another budget part of the topic
+and was retired there. The heading is
+found wherever it lives in the role's class (or the shared class), not
+only in the correcting memory's own topic — a correction is a memory of
+its own, so its file name is never the stale slice's. A heading held by
+two topics refuses the run (`MERGE TARGET AMBIGUOUS`, nothing written);
+a heading held by none is written as its own topic and named on stderr
+and under `merge_target_unresolved` in the report — on every drain that
+brings the memory, not only the first. The tree cannot tell a target
+that never matched from one an earlier drain already replaced, so the
+author reads the line and either retargets the memory, if a stale section
+remains, or drops the `merge_target`, if it was applied.
 
 **Every section is dated.** A claim carries `observed_at` — the
 memory's own `modified` stamp, else the file's mtime — and the section

@@ -25,20 +25,33 @@
 #
 # WHAT COUNTS. Three buckets, reported on their own lines:
 #   independent reviews — review objects by an account other than the
-#                         PR author (every session pushes as one account,
-#                         so this is a person or another organisation
-#                         member, not another session);
+#                         PR author that the repository trusts: its
+#                         owner, an organisation member or a collaborator
+#                         (GitHub's author_association), or a login named
+#                         in AGENT_FABRIC_VERDICT_AUTHORS (an App's review
+#                         carries the association NONE). Every session
+#                         pushes as one account, so this is a person, not
+#                         another session; anyone else's review is listed
+#                         as "not trusted" and is not coverage;
 #   blind reviews       — the review class's reviews, posted by
 #                         post-review.sh as review objects whose FIRST
-#                         LINE is REVIEW_MARKER (below): the fabric's
-#                         review of every PR, dispatched by the session
-#                         that owns it and judged before it is answered;
+#                         LINE is REVIEW_MARKER (below), BY the account
+#                         the sessions push as — the PR author, or one
+#                         named in AGENT_FABRIC_REVIEW_POSTERS: the
+#                         fabric's review of every PR, dispatched by the
+#                         session that owns it and judged before it is
+#                         answered. A marked review by any other account
+#                         is reported, with its login, and is NOT
+#                         coverage: the marker is published in every
+#                         tree, and on a public repository anyone can
+#                         post it;
 #   self reviews        — the author's own thread replies; not coverage.
 # A head is reviewed when an independent or a blind review targets it.
 #
 # An AUTOMATED REVIEWER is not assumed. A project that runs one names
 # its accounts in AGENT_FABRIC_VERDICT_AUTHORS (a JSON array); then a
-# comment from one of them naming `Reviewed commit: <sha>` counts as a
+# review object from one of them is independent coverage whatever its
+# association, a comment from one of them naming `Reviewed commit: <sha>` counts as a
 # verdict on that sha, the phrases in AGENT_FABRIC_REVIEWER_REFUSAL_RE
 # read as that reviewer declining (exit 5, the cause named), and a
 # comment matching AGENT_FABRIC_REVIEW_REQUEST_RE reads as a pending
@@ -68,10 +81,18 @@
 #   --interval <duration>  between polls (default 30; the API is rate
 #                          limited and reviewers are slow)
 #   -q, --quiet            no progress lines on stderr
+#   --json                 the final answer as one JSON object on stdout
+#                          instead of the report (the exit code is the
+#                          same): state, merge_state, head,
+#                          head_reviewed, the three buckets as
+#                          {count, rows}, marked_by_others, not_trusted,
+#                          no_review_coming ({cause, reason} or null),
+#                          verdicts, unresolved_threads (null when the
+#                          lookup failed), checks {pass, other}
 #   -h, --help             this text
 #
 # Durations take an optional unit — 90, 90s, 10m, 2h. A bare number is
-# SECONDS. wait-merged.sh accepts exactly the same forms.
+# SECONDS.
 #
 # Exit codes:
 #   0  the current head has at least one counted review — ANY of them,
@@ -96,6 +117,7 @@ REPO=""
 WAIT=0
 INTERVAL=30
 QUIET=0
+JSON=0
 
 die() { echo "pr-review-status: $*" >&2; exit 2; }
 
@@ -107,10 +129,10 @@ need_operand() {
 # SECONDS — which is what every existing invocation already meant, so
 # nothing changes for a caller that passed one.
 #
-# wait-merged.sh carries an identical copy. That is deliberate: these are
-# standalone scripts with no shared library, and a divergence in what
-# they accept is exactly the confusion the units were added to remove.
-# Both suites assert the same table, so a drift fails a test.
+# The table stands alone, pinned by this script's own suite. A project
+# that keeps a waiter of its own with the same units asserts its copy in
+# its own suite; the fabric's suite cannot see it, so nothing here claims
+# the two agree.
 as_seconds() {
     local flag="$1" raw="$2" n
     case "$raw" in
@@ -142,6 +164,7 @@ while [[ $# -gt 0 ]]; do
             need_operand "$@"; INTERVAL="$(as_seconds "$1" "$2")" || exit 2
             want_positive "$1" "$INTERVAL" "$2"; shift 2 ;;
         -q|--quiet) QUIET=1; shift ;;
+        --json) JSON=1; shift ;;
         -h|--help)
             sed -n '/^# >>> help$/,/^# <<< help$/p' "$0" \
                 | sed 's/^# \{0,1\}//; 1d; $d'
@@ -195,6 +218,10 @@ LEGACY_MARKERS="$(printf '%s\n%s' '<!-- agent-fabric-substitute-review v1 -->' "
 # only a reviewer can create, and wrong for a comment, which anyone with
 # access may leave). Empty means no comment is ever a verdict.
 VERDICT_AUTHORS="${AGENT_FABRIC_VERDICT_AUTHORS:-[]}"
+# Who may post a blind review, besides the PR author: a JSON array of
+# logins. Empty by default, because every session pushes AND posts as one
+# account, which is the author of every PR a session opens.
+REVIEW_POSTERS="${AGENT_FABRIC_REVIEW_POSTERS:-[]}"
 # The reviewer's own refusal wording (a regex over the comment body) and
 # the phrase a request for it takes; both empty by default, so nothing
 # reads as a decline and nothing as a pending request. A request never
@@ -213,6 +240,8 @@ REVIEW_REQUEST_RE="${AGENT_FABRIC_REVIEW_REQUEST_RE:-}"
 # one.
 jq -e 'type == "array" and all(.[]; type == "string")' <<<"$VERDICT_AUTHORS" >/dev/null 2>&1 \
     || die "AGENT_FABRIC_VERDICT_AUTHORS must be a JSON array of logins, got '$VERDICT_AUTHORS'."
+jq -e 'type == "array" and all(.[]; type == "string")' <<<"$REVIEW_POSTERS" >/dev/null 2>&1 \
+    || die "AGENT_FABRIC_REVIEW_POSTERS must be a JSON array of logins, got '$REVIEW_POSTERS'."
 for _re_name in REVIEWER_REFUSAL_RE REVIEW_REQUEST_RE; do
     [[ -z "${!_re_name}" ]] && continue
     # Compiled with the same "i" flag the consumers use, so what passes
@@ -226,6 +255,11 @@ qualifying='[]'
 qual_count=0
 verdicts='[]'
 verdict_count=0
+independent='[]'; blind='[]'; marked_others='[]'; others_count=0; self_count=0
+outsiders='[]'; outsiders_count=0
+# Why no review is coming, when that is the answer (exit 5): carried as a
+# field under --json, where stdout must stay one object.
+no_coming_cause=""; no_coming_reason=""
 refusal_at=""
 refusal_current=no
 pending_others=0
@@ -283,10 +317,11 @@ probe() {
     # review carrying only inline comments. Authorship is the honest axis.
     # MARKED FIRST, then authorship. A blind review is authored by the
     # same account as everything else, so classifying by author first
-    # loses it; and a marked review from ANY account is a blind review,
-    # not an independent reviewer — gating the marker test on authorship
-    # made a marked review from another login count as a genuine
-    # independent review, silently, in the dangerous direction.
+    # loses it; and a marked review is never an independent one — gating
+    # the marker test on authorship made a marked review from another
+    # login count as genuine independent coverage, silently, in the
+    # dangerous direction. It is blind only from the author or a named
+    # poster (below), and otherwise counts as nothing.
     #
     # startswith, NOT contains. The emitter guarantees the marker is the
     # FIRST LINE; a substring test counted any review whose body merely
@@ -302,7 +337,17 @@ probe() {
     unmarked="$(jq --argjson ms "$markers_json" \
         '[.[] | select((.body // "") as $b | ($ms | map(. as $m | $b | startswith($m)) | any) | not)]' <<<"$reviews")"
 
-    independent="$(jq --arg a "$author" '[.[] | select(.user.login != $a)]' <<<"$unmarked")"
+    # AN INDEPENDENT REVIEWER IS SOMEONE THE REPOSITORY TRUSTS: its owner,
+    # a member of its organisation, or a collaborator, as GitHub's own
+    # `author_association` says. On a public repository anyone can review;
+    # binding only the MARKED review to its poster left a stranger's
+    # unmarked review counting as coverage (the review of #41, 2026-09-26).
+    # Any other account's review is reported as not coverage.
+    # A configured reviewer (AGENT_FABRIC_VERDICT_AUTHORS) is trusted by
+    # name: a GitHub App's review carries the association NONE.
+    trusted='(.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r)) or (.user.login as $l | $bots | index($l))'
+    independent="$(jq --arg a "$author" --argjson bots "$VERDICT_AUTHORS" "[.[] | select(.user.login != \$a) | select($trusted)]" <<<"$unmarked")"
+    outsiders="$(jq --arg a "$author" --argjson bots "$VERDICT_AUTHORS" "[.[] | select(.user.login != \$a) | select(($trusted) | not)]" <<<"$unmarked")"
 
     # BLIND REVIEWS ARE COVERAGE, and authorship cannot see them. Every
     # session pushes as the SAME account, so the review class's review,
@@ -310,7 +355,17 @@ probe() {
     # and would fall into `self` — the bucket labelled "thread replies …
     # not coverage". The marker is what tells them apart: an exact string
     # post-review.sh emits and nothing else produces by accident.
-    blind="$marked"
+    # AND THE POSTER IS BOUND. The marker is published in every tree that
+    # carries post-review.sh, so on a public repository any account can
+    # post a review whose first line is the marker; counting it made a
+    # stranger's review the head's coverage, indistinguishable in the
+    # report (a blind review of a managed project, 2026-09-25). A marked
+    # review counts only from the PR author or a named poster; any other
+    # is reported, login and all, as not coverage.
+    blind="$(jq --arg a "$author" --argjson p "$REVIEW_POSTERS" \
+        '[.[] | select(.user.login == $a or (.user.login as $l | $p | index($l)))]' <<<"$marked")"
+    marked_others="$(jq --arg a "$author" --argjson p "$REVIEW_POSTERS" \
+        '[.[] | select(.user.login != $a and ((.user.login as $l | $p | index($l)) | not))]' <<<"$marked")"
     self="$(jq --arg a "$author" '[.[] | select(.user.login == $a)]' <<<"$unmarked")"
 
     # WHAT COUNTS AS COVERAGE: every independent review, and every blind
@@ -321,6 +376,8 @@ probe() {
     qual_count="$(jq 'length' <<<"$qualifying")"
     self_count="$(jq 'length' <<<"$self")"
     blind_count="$(jq 'length' <<<"$blind")"
+    others_count="$(jq 'length' <<<"$marked_others")"
+    outsiders_count="$(jq 'length' <<<"$outsiders")"
 
     # VERDICT COMMENTS. Unreadable rather than empty, for the same reason
     # the reviews call is: a swallowed failure here would report a clean
@@ -728,25 +785,68 @@ no_review_coming() {
 }
 
 # ── The full report, rendered once ───────────────────────────────────
-render() {
-    local threads unresolved checks_pass checks_other
-
+fetch_extras() {
     # Unresolved threads no longer gate the merge (the ruleset dropped
     # required_review_thread_resolution on 2026-08-06), so they belong in
     # this glance more than ever — nothing else will raise them.
-    threads="$(gh api graphql -f query='
+    # A FAILED LOOKUP IS "unknown", never 0: a caller that arms on
+    # "no unresolved threads" read a query error as a clean PR (a
+    # project's arm tool, found 2026-09-25). JSON says null.
+    if threads="$(gh api graphql -f query='
       query($owner:String!,$name:String!,$pr:Int!){
         repository(owner:$owner,name:$name){
           pullRequest(number:$pr){
             reviewThreads(first:100){nodes{isResolved isOutdated path}}}}}' \
       -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F pr="$PR" \
       --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]' 2>/dev/null)" \
-      || threads='[]'
-    unresolved="$(jq 'length' <<<"$threads")"
+      && jq -e 'type == "array"' <<<"$threads" >/dev/null 2>&1; then
+        unresolved="$(jq 'length' <<<"$threads")"
+    else
+        threads='[]'; unresolved="unknown"
+    fi
 
     checks_pass="$(gh pr checks "$PR" --repo "$REPO" 2>/dev/null | grep -cE '\spass\s' || true)"
     checks_other="$(gh pr checks "$PR" --repo "$REPO" 2>/dev/null | grep -vcE '\spass\s' || true)"
+}
 
+render() {
+    local threads unresolved checks_pass checks_other
+    fetch_extras
+    if (( JSON )); then render_json; else render_text; fi
+}
+
+# THE --json CONTRACT. Built with jq from the same values the report
+# prints, so the two cannot disagree; a caller reads fields, never the
+# report's prose, whose wording is free to change.
+render_json() {
+    jq -n --arg pr "$PR" --arg state "$state" --arg mergest "$mergest" --arg head "$head" \
+          --arg head_reviewed "$head_reviewed" --arg unresolved "$unresolved" \
+          --argjson independent "$independent" --argjson blind "$blind" \
+          --argjson others "$marked_others" --argjson verdicts "$verdicts" \
+          --argjson outsiders "$outsiders" --arg ncause "$no_coming_cause" --arg nreason "$no_coming_reason" \
+          --argjson self_count "$self_count" --argjson threads "$threads" \
+          --arg cpass "$checks_pass" --arg cother "$checks_other" '{
+        pr: ($pr | tonumber), state: $state, merge_state: $mergest, head: $head,
+        head_reviewed: $head_reviewed,
+        independent: {count: ($independent | length),
+                      rows: [$independent[] | {login: .user.login, state, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        blind: {count: ($blind | length),
+                rows: [$blind[] | {login: .user.login, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        not_trusted: {count: ($outsiders | length),
+                      rows: [$outsiders[] | {login: .user.login, association: .author_association, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        no_review_coming: (if $ncause == "" then null else {cause: $ncause, reason: (if $nreason == "" then null else $nreason end)} end),
+        marked_by_others: {count: ($others | length),
+                           rows: [$others[] | {login: .user.login, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        verdicts: {count: ($verdicts | length),
+                   rows: [$verdicts[] | {login, commit_sha8: .sha[0:8], at}]},
+        self: {count: $self_count},
+        unresolved_threads: (if $unresolved == "unknown" then null else ($unresolved | tonumber) end),
+        unresolved_paths: [$threads[] | .path],
+        checks: {pass: ($cpass | tonumber? // 0), other: ($cother | tonumber? // 0)}
+    }'
+}
+
+render_text() {
     printf 'PR #%s  state=%s  mergeState=%s  head=%s\n' \
         "$PR" "$state" "$mergest" "${head:0:8}"
     printf '  independent reviews : %s' "$ind_count"
@@ -771,7 +871,16 @@ render() {
               && echo '   (the review class — coverage)' \
               || echo '' )"
     if (( blind_count > 0 )); then
-        jq -r '.[] | "      - commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$blind"
+        jq -r '.[] | "      - \(.user.login)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$blind"
+    fi
+    if (( outsiders_count > 0 )); then
+        printf '  not trusted         : %s   (NOT coverage — not the owner, a member, a collaborator or a configured reviewer)\n' "$outsiders_count"
+        jq -r '.[] | "      - \(.user.login)  \(.author_association)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$outsiders"
+    fi
+    if (( others_count > 0 )); then
+        printf '  marked, other login : %s   (NOT coverage — the marker is public; only the\n' "$others_count"
+        printf '                        account the sessions push as may post a blind review)\n'
+        jq -r '.[] | "      - \(.user.login)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$marked_others"
     fi
     printf '  self reviews        : %s   (thread replies etc. — not coverage)\n' "$self_count"
     printf '  review requested?   : %s\n' "$( (( requested > 0 )) && echo yes || echo no )"
@@ -794,7 +903,7 @@ render() {
         printf '                          push by itself — dispatch a re-review of the new range.\n'
     fi
     printf '  unresolved threads  : %s\n' "$unresolved"
-    if (( unresolved > 0 )); then
+    if [[ "$unresolved" != unknown ]] && (( unresolved > 0 )); then
         jq -r '.[] | "      - \(.path)  outdated=\(.isOutdated)"' <<<"$threads"
     fi
     printf '  checks              : %s pass, %s other\n' "$checks_pass" "$checks_other"
@@ -851,16 +960,18 @@ while :; do
         # after whatever made it decline has passed.
         if [[ "$state" == "OPEN" && "$refusal_current" == "yes" ]]; then
             note "the reviewer declined this PR — no review will arrive without a change"
+            no_coming_cause="reviewer-declined"; no_coming_reason="$refusal_reason"
             render
-            printf 'PR #%s NO REVIEW COMING — the reviewer declined%s (exit 5)\n' "$PR" \
+            (( JSON )) || printf 'PR #%s NO REVIEW COMING — the reviewer declined%s (exit 5)\n' "$PR" \
                 "$( [[ -z "$refusal_reason" ]] || printf ': %s' "$refusal_reason" )"
             exit 5
         fi
 
         if [[ "$state" == "OPEN" ]] && no_review_coming; then
             note "head has advanced past the newest review and none is requested"
+            no_coming_cause="head-moved"
             render
-            printf 'PR #%s NO REVIEW COMING — the head moved past every review; dispatch a re-review (exit 5)\n' "$PR"
+            (( JSON )) || printf 'PR #%s NO REVIEW COMING — the head moved past every review; dispatch a re-review (exit 5)\n' "$PR"
             exit 5
         fi
     else

@@ -164,7 +164,7 @@ checks = routing.check(root)
 # --- memory: what this agent wrote that no drain has taken yet -----------
 # The drain reads ~/.claude/projects/<launch-dir-slug>/memory/ and takes a
 # file only if it carries metadata.roles_class; the project's last drain
-# report records the watermark (ms since the epoch, per host). Counting
+# report records the watermark (ms since the epoch, per agent@host). Counting
 # what is newer than it, with and without the class, is the one number
 # that says whether a drain is owed — a rule (memory/README.md, "When a
 # drain runs") that nothing else makes visible. Best effort: no working
@@ -175,12 +175,9 @@ try:
         harvest = load("fabric_harvest", os.path.join(root, "tools", "fabric", "harvest_memory.py"))
         mem_dir = harvest.default_memory_dir(ctx["working_copy"])
         report_path = os.path.join(ctx["working_copy"], ".agent-fabric", "memory", "last-drain-report.json")
-        watermark_ms = 0
-        try:
-            with open(report_path, encoding="utf-8") as fh:
-                watermark_ms = int((json.load(fh).get("watermarks") or {}).get(ctx["host"], 0))
-        except (OSError, ValueError):
-            pass
+        # The harvester's own reading of the mark, so the count and the
+        # next drain agree on where this agent's store was read up to.
+        watermark_ms, _ = harvest.previous_watermark(ctx["working_copy"], ctx["host"], ctx["agent"])
         drainable, private = 0, 0
         if os.path.isdir(mem_dir):
             for name in os.listdir(mem_dir):

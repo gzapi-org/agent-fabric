@@ -274,7 +274,9 @@ def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
 
     # .get throughout: a missing key must fail this test with a readable
     # message, not raise KeyError and abort the whole suite behind it.
-    assert report.get("watermarks") == {"boxA": 2500}, report.get("watermarks")
+    # Keyed agent@host: every account on a host has its own store.
+    assert list((report.get("watermarks") or {}).values()) == [2500] and \
+        all(k.endswith("@boxA") for k in report["watermarks"]), report.get("watermarks")
     harvest = report.get("harvest") or {}
     assert harvest.get("next_watermark") == 2500, harvest
     assert harvest.get("since_watermark") == 1000, harvest
@@ -829,13 +831,11 @@ def test_collision_is_reported_on_every_run(tmp: str) -> None:
     first = read(report_path(out))
     run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:one#Same title"))
     second = read(report_path(out))
-    # `collision_decisions` records what THIS run applied: the first run
-    # applied keep-both, the second found the pair already present and
-    # asked nothing — so that key alone may differ between the two.
-    strip = lambda t: {k: v for k, v in json.loads(t).items() if k != "collision_decisions"}  # noqa: E731
-    assert strip(first) == strip(second), "the drain report must be identical for identical input"
-    assert json.loads(first)["collision_decisions"] and not json.loads(second)["collision_decisions"], \
-        "the decision is applied once and not asked for again"
+    # The first run applied keep-both; the second found the pair already
+    # present and asked nothing. Both are the same drain (one stamp), so
+    # the report the second leaves still carries the first's decision.
+    assert first == second, "the drain report must be identical for identical input"
+    assert json.loads(second)["collision_decisions"], "the drain's decision survives its re-run"
     assert json.loads(second)["title_collisions"], \
         "an unresolved collision must still be reported on later drains"
 
@@ -1289,11 +1289,13 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     """The other ordering: the target lives in part ONE, which is full of
     carried text, so the superseding claim is grouped into part two — and
     part one was written and indexed before the retire touched it. Its
-    index line must follow: gone when the part is removed, re-described
-    when a section remains; lint accepts the tree; a part counts once in
-    files_written (re-review of 2026-09-20, finding 1)."""
+    index line must follow: re-described when a section remains; lint
+    accepts the tree; a part counts once in files_written (re-review of
+    2026-09-20, finding 1). Each superseding run is a drain of its own,
+    stamped so: a report of the same stamp is merged into, and the count
+    would then be the whole drain's."""
     big = "y " * 900
-    # Removed shape: part one holds First alone.
+    # Part one holds First alone: its replacement goes to part one.
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "grow", "title": "First", "body": big, "evidence": ["h1"]},
         {"class": "domain", "topic": "grow", "title": "Second", "body": big, "evidence": ["h2"]},
@@ -1304,7 +1306,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
         json.dump(claims("alpha", [{"class": "domain", "topic": "grow", "title": "First", "body": "w " * 200, "evidence": ["h3"]}]), fh)
     _lintable(out)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:grow#First": "supersede"}), "--stamp", "2026-01-02")
     assert proc.returncode == 0, proc.stderr
     parts = {n: read(dom(out, "alpha", "domain", n)) for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("grow")}
     assert sum(t.count("## First") for t in parts.values()) == 1 and any("w w w" in t for t in parts.values()), parts
@@ -1314,9 +1316,12 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     lint = _lint(out)
     assert lint.returncode == 0, lint.stderr
     report = json.loads(read(report_path(out)))
-    # On disk: grow-2.md and INDEX.md; grow.md was written, then removed by
-    # the retire, and leaves the count with it.
+    # grow.md and INDEX.md. The section being replaced is not carried text,
+    # so the superseding claim lands in part one beside nothing and
+    # grow-2.md is untouched; part one used to be written, emptied by the
+    # retire and removed, taking the topic's name with it (2026-09-25).
     assert report["files_written"] == 2, report["files_written"]
+    assert os.path.exists(dom(out, "alpha", "domain", "grow.md"))
 
     # Rewritten shape: part one keeps Second after First is retired from it.
     with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
@@ -1331,7 +1336,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
     with open(os.path.join(claims_dir, "alpha.json"), "w", encoding="utf-8") as fh:
         json.dump(claims("alpha", [{"class": "domain", "topic": "keep", "title": "Alpha one", "body": big, "evidence": ["h7"]}]), fh)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:keep#Alpha one": "supersede"}), "--stamp", "2026-01-03")
     assert proc.returncode == 0, proc.stderr
     first_part = read(dom(out, "alpha", "domain", "keep.md"))
     assert "## Alpha one" not in first_part and "## Beta two" in first_part and "description: Beta two" in first_part, first_part
@@ -1358,7 +1363,7 @@ def test_a_retired_sibling_already_indexed_this_run_is_re_listed_by_what_remains
             {"class": "domain", "topic": "twice", "title": "Four", "body": big, "evidence": ["h12"]},
         ]), fh)
     proc = run_assemble(drain, claims_dir, out, "--budget", "500", "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}))
+                        decisions_file(tmp, {"alpha/domain:twice#Two": "supersede"}), "--stamp", "2026-01-04")
     assert proc.returncode == 0, proc.stderr
     n_parts = len([n for n in os.listdir(dom(out, "alpha", "domain")) if n.startswith("twice")])
     assert json.loads(read(report_path(out)))["files_written"] == n_parts + 1, (n_parts, proc.stderr)
@@ -1676,8 +1681,742 @@ def test_an_oversized_single_claim_is_written_whole_and_reported(tmp: str) -> No
     assert "OVER BUDGET" in proc.stderr and "split the memory" in proc.stderr, proc.stderr
 
 
+def set_claims(claims_dir: str, role: str, items: list[dict]) -> None:
+    with open(os.path.join(claims_dir, f"{role}.json"), "w", encoding="utf-8") as fh:
+        json.dump(claims(role, items), fh)
+
+
+def tree(out: str) -> dict[str, str]:
+    """Every file under the fabric root and the working copy, by path —
+    the corpus, not the drain report, which says what each run did."""
+    found: dict[str, str] = {}
+    for dirpath, _dirs, files in os.walk(out):
+        for name in files:
+            if name == "last-drain-report.json":
+                continue
+            path = os.path.join(dirpath, name)
+            found[os.path.relpath(path, out)] = read(path)
+    return found
+
+
+def test_a_correction_naming_another_topic_s_section_replaces_it_there(tmp: str) -> None:
+    """memory/README.md tells an agent to correct a wrong slice with a
+    memory naming the slice's section in merge_target. That memory has
+    its own topic (its file name), and the target was looked for in that
+    topic alone: the correction landed as a new slice beside the stale
+    one, silently (a drain's blind review, 2026-09-25). The target is
+    resolved across the role's class; the section is replaced where it
+    lives, and a second run of the same drain changes nothing."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "deploy", "title": "How we deploy",
+         "body": "By hand, from the operator's laptop.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Something else",
+         "body": "Unrelated.", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "deploy-correction", "title": "Deploys go through the pipeline",
+         "merge_target": "How we deploy", "body": "Through the pipeline, never by hand.", "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    names = sorted(os.listdir(dom(out, "alpha", "domain")))
+    assert names == ["deploy.md", "other.md"], f"the correction was written beside the stale slice: {names}"
+    text = read(dom(out, "alpha", "domain", "deploy.md"))
+    assert "Through the pipeline, never by hand." in text and "operator's laptop" not in text, text
+    assert text.count("## ") == 1, text
+    assert "MERGE TARGET" not in proc.stderr, proc.stderr
+    before = tree(out)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert tree(out) == before, "the same correction harvested again changed the tree"
+
+    # A target that names no section anywhere is written as its own topic
+    # and said aloud — in stderr and in the report.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "orphan", "title": "An orphan correction",
+         "merge_target": "No such heading", "body": "Text.", "evidence": ["h4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "MERGE TARGET UNRESOLVED" in proc.stderr and "No such heading" in proc.stderr, proc.stderr
+    assert os.path.exists(dom(out, "alpha", "domain", "orphan.md"))
+    unresolved = json.loads(read(report_path(out))).get("merge_target_unresolved") or []
+    assert any("No such heading" in u for u in unresolved), unresolved
+
+    # A heading two topics hold is refused before anything is written.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "twin-a", "title": "Twin", "body": "A.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "twin-b", "title": "Twin", "body": "B.", "evidence": ["h2"]},
+    ])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "fix", "title": "Fixed twin", "merge_target": "Twin",
+         "body": "C.", "evidence": ["h3"]},
+    ])
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1, proc.stderr
+    assert "MERGE TARGET AMBIGUOUS" in proc.stderr and "domain:twin-a" in proc.stderr \
+        and "domain:twin-b" in proc.stderr, proc.stderr
+    assert tree(out) == before, "an ambiguous target must leave the tree untouched"
+
+    # The same holds for a shared slice: the owners' correction replaces
+    # the section in the shared topic that holds it.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint", "title": "Joint finding", "shared_with": ["beta"],
+         "body": "Old joint text.", "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint-fix", "title": "Joint finding, corrected", "shared_with": ["beta"],
+         "merge_target": "Joint finding", "body": "New joint text.", "evidence": ["h2"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert not os.path.exists(shared_path(out, "domain-joint-fix.md")), os.listdir(shared_path(out, ""))
+    joint = read(shared_path(out, "domain-joint.md"))
+    assert "New joint text." in joint and "Old joint text." not in joint, joint
+
+
+def with_agents(drain: str, rows: dict[str, str]) -> None:
+    """Observations that name the agent, as harvest_memory.py writes them."""
+    with open(os.path.join(drain, "observations.jsonl"), "w", encoding="utf-8") as fh:
+        for h, agent in sorted(rows.items()):
+            fh.write(json.dumps({"content_hash": h, "agent": agent, "host": "hostA"}) + "\n")
+
+
+def test_a_retitled_memory_replaces_its_own_old_section(tmp: str) -> None:
+    """A memory's topic is its file name and its heading its description.
+    An agent that rewrites a tracker with a new description brings a new
+    heading into a topic whose every section it wrote; appending it left
+    the stale "open" section standing beside the "merged" one (a drain's
+    blind review, 2026-09-25). The agent's newer text supersedes its own
+    older text without a question, recorded as the same-agent rule (the
+    owner, 2026-09-26); an owner's decision still wins; a topic several
+    agents wrote keeps appending, and a collision between two agents'
+    texts still stops the drain."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is open",
+         "body": "Waiting on review.", "evidence": ["a1"], "observed_at": "2026-09-20"},
+        {"class": "domain", "topic": "joint", "title": "First view", "body": "One.", "evidence": ["a2"]},
+        {"class": "domain", "topic": "joint", "title": "Second view", "body": "Two.", "evidence": ["b1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "b1": "dev-02", "b2": "dev-02"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    retitle = {"class": "domain", "topic": "tracker", "title": "Issue 851 is merged",
+               "body": "Merged on 2026-09-24.", "evidence": ["a3"], "observed_at": "2026-09-24"}
+    set_claims(claims_dir, "alpha", [retitle])
+    tracker = dom(out, "alpha", "domain", "tracker.md")
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "SUPERSEDED, same agent" in proc.stderr and "alpha/domain:tracker#Issue 851 is merged  (dev-01)" in proc.stderr, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert any(d.get("rule") == "same-agent" and d["decision"] == "supersede"
+               and d["key"].endswith("tracker#Issue 851 is merged") for d in report["collision_decisions"]), report["collision_decisions"]
+    text = read(tracker)
+    assert "## Issue 851 is merged" in text and "Issue 851 is open" not in text and "Waiting" not in text, text
+    assert "description: Issue 851 is merged" in text, text
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert "Issue 851 is open" not in index and "Issue 851 is merged" in index, index
+
+    # The author's own merge_target naming the old section is no question.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is released",
+         "merge_target": "Issue 851 is merged", "body": "Released.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert "Released." in read(tracker) and read(tracker).count("## ") == 1, read(tracker)
+    assert "## Issue 851 is released" in read(tracker) and "is merged" not in read(tracker), \
+        "the corrected section kept its stale heading:\n" + read(tracker)
+
+    # A topic two agents wrote is two memories: a new heading appends.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "joint", "title": "Third view", "body": "Three.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    joint = read(dom(out, "alpha", "domain", "joint.md"))
+    assert all(h in joint for h in ("## First view", "## Second view", "## Third view")), joint
+
+    # Another agent's text under a heading this agent wrote is still asked.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is released",
+         "body": "Not released yet.", "evidence": ["b2"]},
+    ])
+    before = read(tracker)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(tracker) == before, "a refused drain must not touch the slice"
+
+
+def test_a_claim_in_the_carried_file_is_not_written_twice(tmp: str) -> None:
+    """A flat class file holding several topics moves whole into
+    `<class>/<class>-carried-<stamp>.md` when the class splits. That file
+    was no topic's candidate, so the same memory harvested again was
+    written a second time as `<class>/<topic>.md` beside its carried copy
+    (a drain's blind review, 2026-09-25). A claim whose heading sits in
+    the carried file lands there — same text a no-op, other text a
+    collision the owner decides there — and a copy an earlier drain left
+    in both places is dropped from the carried file, which goes when
+    empty, reported."""
+    one = {"class": "workflow", "topic": "alpha-one", "title": "One", "body": "First way.", "evidence": ["h1"]}
+    two = {"class": "workflow", "topic": "alpha-two", "title": "Two", "body": "Second way.", "evidence": ["h2"]}
+    three = {"class": "workflow", "topic": "three", "title": "Three", "body": "Third way.", "evidence": ["h3"]}
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [one])})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [two])
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert "## One" in read(proj(out, "alpha", "workflow.md")) and "## Two" in read(proj(out, "alpha", "workflow.md"))
+
+    set_claims(claims_dir, "alpha", [one, three])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    wf = proj(out, "alpha", "workflow")
+    carried = os.path.join(wf, "workflow-carried-2026-01-01.md")
+    assert sorted(os.listdir(wf)) == ["three.md", "workflow-carried-2026-01-01.md"], \
+        f"the carried claim was written again: {sorted(os.listdir(wf))}"
+    assert sum(read(os.path.join(wf, n)).count("## One") for n in os.listdir(wf)) == 1
+    before = tree(out)
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    assert tree(out) == before, "the same drain again changed the tree"
+
+    # A different text under the carried heading is asked about, and the
+    # owner's supersede replaces it in the carried file.
+    set_claims(claims_dir, "alpha", [dict(one, body="First way, revised.", evidence=["h3"])])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "alpha/workflow:workflow-carried-2026-01-01#One" in proc.stderr, proc.stderr
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions", decisions_file(
+        tmp, {"alpha/workflow:workflow-carried-2026-01-01#One": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    assert "First way, revised." in read(carried) and "First way.\n" not in read(carried), read(carried)
+    assert sorted(os.listdir(wf)) == ["three.md", "workflow-carried-2026-01-01.md"], sorted(os.listdir(wf))
+
+    # A tree an earlier drain left with each claim in both places: the
+    # carried copies go, and the emptied carried file with them.
+    front, _, _ = read(carried).partition("\n## ")
+    sections = {h: t for h, t in re.findall(r"^## (.+?)\n\n(.*?)(?=\n## |\Z)", read(carried), re.S | re.M)}
+    for topic, heading in (("alpha-one", "One"), ("alpha-two", "Two")):
+        with open(os.path.join(wf, f"{topic}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f"{front}\n## {heading}\n\n{sections[heading].strip()}\n")
+    set_claims(claims_dir, "alpha", [dict(one, body="First way, revised.", evidence=["h3"]), two])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert not os.path.exists(carried), read(carried)
+    assert sorted(os.listdir(wf)) == ["alpha-one.md", "alpha-two.md", "three.md"], sorted(os.listdir(wf))
+    migrated = json.loads(read(report_path(out)))["migrated"]
+    assert any("workflow-carried-2026-01-01.md removed" in m for m in migrated), migrated
+    assert "carried" not in read(proj(out, "alpha", "INDEX.md"))
+
+
+def test_part_one_of_a_split_topic_is_always_the_topic_file(tmp: str) -> None:
+    """A topic near its budget whose one section is superseded: the old
+    section was counted as carried text, the new one pushed to part two,
+    and the supersede then retired part one's only section and removed
+    the file — `grow.md` became `grow-2.md` and every `[[grow]]` link
+    dangled (a drain of 2026-09-25). The text being replaced is not
+    carried, and part one is `<topic>.md` whenever the topic has any
+    section; the index lists every part."""
+    big = "y " * 850
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": big, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    d = dom(out, "alpha", "domain")
+    assert sorted(n for n in os.listdir(d) if n.startswith("grow")) == ["grow.md"]
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "merge_target": "Big",
+         "body": "z " * 850, "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert parts == ["grow.md"], f"part one lost its name: {parts}"
+    assert ("z " * 850).strip() in read(os.path.join(d, "grow.md"))
+
+    # Carried text plus a new claim over the budget: two parts, the first
+    # still grow.md, and the index lists both.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert parts == ["grow-2.md", "grow.md"], parts
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert all(f"domain/{p}" in index for p in parts), index
+
+    # A part one gone from an earlier drain's tree is restored from the
+    # lowest part when the topic is next written.
+    os.replace(os.path.join(d, "grow.md"), os.path.join(d, "grow-3.md"))
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    parts = sorted(n for n in os.listdir(d) if n.startswith("grow"))
+    assert "grow.md" in parts, parts
+    texts = "".join(read(os.path.join(d, p)) for p in parts)
+    assert texts.count("## More") == 1 and texts.count("## Big") == 1, parts
+    assert any("part one restored" in m for m in json.loads(read(report_path(out)))["migrated"])
+    index = read(proj(out, "alpha", "INDEX.md"))
+    assert all(f"domain/{p}" in index for p in parts), index
+
+
+def harvest_report(drain: str, agent: str, host: str, next_watermark: int | None) -> None:
+    with open(os.path.join(drain, "harvest-report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"agent": agent, "host": host, "since_watermark": 0, "next_watermark": next_watermark,
+                   "counts": {"provisional_agent": 0, "in_scope": 1}}, fh)
+
+
+def test_the_drain_report_gathers_every_bundle_of_one_drain(tmp: str) -> None:
+    """A drain across accounts is one run per bundle into one working copy,
+    and each run rewrote the report whole: the committed report described
+    the last bundle alone, and an index-only run wrote empty watermarks
+    (a drain's blind review, 2026-09-25). Runs of one stamp merge; a new
+    stamp replaces all but the watermarks, which never move back; and no
+    path in the report is absolute."""
+    drain_a, claims_a, out = build(os.path.join(tmp, "a"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "one", "title": "Same title", "body": "First.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "one", "title": "Same title", "body": "Second.", "evidence": ["h2"]},
+        {"class": "solution", "topic": "long", "title": "A cue that runs on " * 20,
+         "body": "Seen in Springfield.", "evidence": ["h3"]},
+    ])})
+    harvest_report(drain_a, "dev-01", "hostA", 2000)
+    proc = run_assemble(drain_a, claims_a, out, *keep_both(tmp, "alpha/domain:one#Same title"))
+    assert proc.returncode == 0, proc.stderr
+    drain_b, claims_b, _ = build(os.path.join(tmp, "b"), {"beta": claims("beta", [
+        {"class": "solution", "topic": "two", "title": "Beta fact", "body": "b", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_b, "dev-02", "hostB", 3000)
+    proc = run_assemble(drain_b, claims_b, out)
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert report["roles"] == ["alpha", "beta"], f"the first bundle's roles were lost: {report['roles']}"
+    assert [d["key"] for d in report["collision_decisions"]] == ["alpha/domain:one#Same title"], \
+        report["collision_decisions"]
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 3000}, report["watermarks"]
+    assert set(report["telemetry"]) == {"alpha", "beta"}, report["telemetry"]
+    assert any("alpha/" in f for f in report["files"]) and any("beta/" in f for f in report["files"]), report["files"]
+    assert report["files_written"] == len(report["files"])
+
+    # Every path is relative: to the working copy, or to the fabric root.
+    text = read(report_path(out))
+    assert tmp not in text and os.path.realpath(tmp) not in text, "an absolute path reached the report"
+    paths = report["files"] + [e.split(":")[0] for e in report["redactions"] + report["clipped_descriptions"]]
+    assert report["redactions"] and report["clipped_descriptions"], report
+    assert all(not p.startswith(("/", "..")) for p in paths), paths
+    assert ".agent-fabric/memory/beta/solution.md" in report["files"], report["files"]
+    assert "memory/domains/alpha/domain.md" in report["files"], report["files"]
+
+    # Re-running a bundle does not count it twice.
+    admitted = report["telemetry"]["beta"]["admitted"]
+    assert run_assemble(drain_b, claims_b, out).returncode == 0
+    assert json.loads(read(report_path(out)))["telemetry"]["beta"]["admitted"] == admitted
+
+    # An index-only run (no claims, a harvest that read nothing) keeps
+    # every watermark and every earlier bundle's record.
+    drain_c, claims_c, _ = build(os.path.join(tmp, "c"), {"beta": claims("beta", [])})
+    harvest_report(drain_c, "dev-02", "hostB", None)
+    assert run_assemble(drain_c, claims_c, out).returncode == 0
+    report = json.loads(read(report_path(out)))
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 3000}, report["watermarks"]
+    assert report["roles"] == ["alpha", "beta"] and report["collision_decisions"], report
+
+    # The next drain replaces the record. A harvest sets its own store's
+    # mark, lower too — the harvester holds it below a memory it could not
+    # render, so that memory is read again — and leaves every other store's.
+    harvest_report(drain_b, "dev-02", "hostB", 2500)
+    assert run_assemble(drain_b, claims_b, out, "--stamp", "2026-01-02").returncode == 0
+    report = json.loads(read(report_path(out)))
+    assert report["stamp"] == "2026-01-02" and report["roles"] == ["beta"], report["roles"]
+    assert report["collision_decisions"] == [], report["collision_decisions"]
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 2500}, report["watermarks"]
+
+
+def test_a_claim_body_s_own_headings_never_open_a_section(tmp: str) -> None:
+    """A claim renders as one `## <heading>` section, but a memory may
+    carry `## ` headings of its own; the reader split the section at
+    them, the first part lost its dated footer, and re-running the same
+    bundle was refused as a collision with itself. Body headings are
+    demoted one level, the same claims twice give a byte-identical tree,
+    and a slice already written the old way is repaired on its next
+    write rather than refused."""
+    body = "Intro line.\n\n## Inner heading\n\nInner text.\n\n### Deeper\n\nDeep text."
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "doc", "title": "A structured memory", "body": body,
+         "evidence": ["h1"], "observed_at": "2026-09-20"},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    path = dom(out, "alpha", "domain", "doc.md")
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"the same bundle again was refused:\n{proc.stderr}"
+    assert tree(out) == before, "the same claims twice changed the tree"
+    text = read(path)
+    assert text.count("\n## ") == 1 and "### Inner heading" in text and "#### Deeper" in text, text
+    assert "*Observed 2026-09-20 (alpha)*" in text, text
+
+    # A slice written before the demotion: its body headings split it.
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text.replace("### Inner heading", "## Inner heading").replace("#### Deeper", "### Deeper"))
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"a slice written the old way was refused against itself:\n{proc.stderr}"
+    assert read(path) == text, read(path)
+    assert tree(out) == before
+
+
+def test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory(tmp: str) -> None:
+    """A flat class file holds every memory of its class until the class
+    splits. Read as the one topic of the drain, sections one agent wrote
+    for other memories made that agent's next memory a "retitle", and
+    the same-agent rule deleted every earlier memory (a drain's blind
+    review, 2026-09-26). A new memory is a new fact: A, B and C all
+    stand. In the topic's own file a retitle still supersedes, and so
+    does the agent's new text under its own heading."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A.", "evidence": ["a1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    for topic, title, h in (("topic-b", "Fact B", "a2"), ("topic-c", "Fact C", "a3")):
+        set_claims(claims_dir, "alpha", [
+            {"class": "domain", "topic": topic, "title": title, "body": title[-1] + ".", "evidence": [h]},
+        ])
+        proc = run_assemble(drain, claims_dir, out)
+        assert proc.returncode == 0, proc.stderr
+        assert "SUPERSEDED" not in proc.stderr, proc.stderr
+    flat = read(dom(out, "alpha", "domain.md"))
+    assert all(f"## Fact {x}" in flat for x in "ABC"), f"an earlier memory was deleted:\n{flat}"
+
+    # The directory shape: the topic's own file is one memory.
+    drain2, claims2, out2 = build(os.path.join(tmp, "dir"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue open", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a2"]},
+    ])})
+    with_agents(drain2, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain2, claims2, out2).returncode == 0
+    set_claims(claims2, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue merged", "body": "Merged.", "evidence": ["a3"]},
+    ])
+    proc = run_assemble(drain2, claims2, out2)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    tracker = dom(out2, "alpha", "domain", "tracker.md")
+    assert "## Issue merged" in read(tracker) and "Issue open" not in read(tracker), read(tracker)
+    set_claims(claims2, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue merged", "body": "Merged and released.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain2, claims2, out2)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    assert "Merged and released." in read(tracker) and read(tracker).count("## ") == 1, read(tracker)
+    assert "## Other" in read(dom(out2, "alpha", "domain", "other.md"))
+
+
+def test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it(tmp: str) -> None:
+    """The corpus holds "Status" (dev-01); one drain brings two claims of
+    the topic, both "Status", with different texts, both dev-01. Looked
+    for only where the corpus lacked the heading, the pair was never
+    seen: each was superseded by the same-agent rule and the later one
+    won silently (a drain's blind review, 2026-09-26). Which of the two
+    is newer is not the corpus's to say: the run stops, writing nothing."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a2"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged.", "evidence": ["a3"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+    ])
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert "alpha/domain:tracker#Status@a4" in proc.stderr and "in this drain" in proc.stderr, proc.stderr
+    assert tree(out) == before, "a refused drain must not touch the tree"
+
+    # The first of the pair equal to the corpus is still the pair's first.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "in this drain" in proc.stderr, proc.stderr
+    assert tree(out) == before
+    # …and in the other order: the claim equal to the corpus coming second
+    # passed as a no-op after the first had superseded it, and the old text
+    # came back as "Status (2)" (the re-review of #41, 2026-09-26).
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr and "SUPERSEDED, same agent" not in proc.stderr, proc.stderr
+    assert tree(out) == before
+
+
+def test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes(tmp: str) -> None:
+    """The class is still one flat file holding one agent's memories. A new
+    text under a heading that agent wrote replaces that one section: the
+    same-HEADING rule touches no other memory, so it holds in a shared file
+    where the retitle inference must not (the re-review of #41, 2026-09-26)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A.", "evidence": ["a1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    flat = dom(out, "alpha", "domain.md")
+    assert os.path.isfile(flat), "the class is one flat file"
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, updated.", "evidence": ["a2"],
+         "observed_at": "2026-09-20"},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    assert "A, updated." in read(flat) and read(flat).count("## ") == 1, read(flat)
+    # An OLDER text of the same agent (a replayed bundle) is asked about,
+    # never applied over the newer section (the review of #41, 2026-09-26).
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, stale.", "evidence": ["a2"],
+         "observed_at": "2000-01-01"},
+    ])
+    before = read(flat)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(flat) == before
+
+
+def test_the_same_agent_rule_never_replaces_newer_text(tmp: str) -> None:
+    """The rule replaces an agent's OLDER text with its newer one. A
+    supersede retires the heading's kept-both siblings "X (n)" too, and a
+    retitle every section of the topic: a claim dated before ANY of those is
+    asked about, never applied (the re-review of #41, 2026-09-26). And a
+    claim repeating the first claim of a contested heading adds nothing to
+    decide."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"],
+         "observed_at": "2026-01-01"},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a9"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01", "a9": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    # The owner keeps a newer text beside it as "Status (2)".
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged.", "evidence": ["a2"],
+         "observed_at": "2026-09-20"},
+    ])
+    assert run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:tracker#Status")).returncode == 0
+    tracker = dom(out, "alpha", "domain", "tracker.md")
+    if not os.path.exists(tracker):
+        tracker = dom(out, "alpha", "domain.md")
+    assert "## Status (2)" in read(tracker), read(tracker)
+    before = read(tracker)
+    # Older than the kept sibling: asked, not applied.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a3"],
+         "observed_at": "2026-05-01"},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(tracker) == before
+    # An older RETITLE: asked, not applied.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status, retitled", "body": "Old.", "evidence": ["a4"],
+         "observed_at": "2000-01-01"},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert "SUPERSEDED, same agent" not in proc.stderr, proc.stderr
+    assert proc.returncode == 1 and read(tracker) == before, proc.stderr
+    # A contested heading whose third claim repeats the first: only the
+    # differing text is a question.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged again.", "evidence": ["a4"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a5"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged again.", "evidence": ["a3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "tracker#Status@a5" in proc.stderr and "tracker#Status@a3" not in proc.stderr, proc.stderr
+    # …and the owner's heading-wide supersede leaves ONE section: the repeat
+    # does not slip past the decision as "Status (2)".
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:tracker#Status": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    heads = [line for line in read(tracker).splitlines() if line.startswith("## Status")]
+    assert heads == ["## Status"], read(tracker)
+    # The repeat's evidence and agent stay in the provenance: a second agent
+    # asserting the same text keeps the topic two agents' (re-review of #41).
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01",
+                        "a9": "dev-01", "b7": "dev-02"})
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Held.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Closed.", "evidence": ["a2"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Held.", "evidence": ["b7"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:tracker#Status": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    text = read(tracker)
+    assert "b7" in text and '"dev-02"' in text, "the repeat's evidence or agent left the provenance:\n" + text
+
+
+def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:
+    """Topic `grow` split by budget: `grow.md` holds "Big", `grow-2.md`
+    "More". A claim "More, corrected" with merge_target "More" is written
+    into part one, the target retired from part two — and the section
+    was written as "## More", the stale cue the correction replaced (a
+    drain's blind review, 2026-09-26). It carries its own heading."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": "y " * 850, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    d = dom(out, "alpha", "domain")
+    assert "## More" in read(os.path.join(d, "grow-2.md")) and "## Big" in read(os.path.join(d, "grow.md")), \
+        "precondition: Big in part one, More in part two"
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More, corrected", "merge_target": "More",
+         "body": "Less than thought.", "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    texts = "".join(read(os.path.join(d, n)) for n in sorted(os.listdir(d)) if n.startswith("grow"))
+    headings = re.findall(r"(?m)^## .*$", texts)
+    assert "## More, corrected\n\nLess than thought." in texts, headings
+    assert "## More" not in headings, f"the corrected section kept the stale heading: {headings}"
+    assert "m m m" not in texts and texts.count("## Big") == 1, texts
+
+
+def test_an_unresolved_merge_target_is_reported_on_every_drain(tmp: str) -> None:
+    """A correction whose merge_target names no section is written as its
+    own topic and reported. The next drain bringing it found its heading
+    in its own topic and said nothing, while the section it meant to
+    replace still stood (a drain's blind review, 2026-09-26). Every drain
+    that brings it reports it, the tree unchanged."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "orphan", "title": "An orphan correction",
+         "merge_target": "No such heading", "body": "Text.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    for stamp in ("2026-01-01", "2026-01-02"):
+        proc = run_assemble(drain, claims_dir, out, "--stamp", stamp)
+        assert proc.returncode == 0, proc.stderr
+        assert "MERGE TARGET UNRESOLVED" in proc.stderr and "No such heading" in proc.stderr, \
+            f"drain of {stamp} said nothing:\n{proc.stderr}"
+        unresolved = json.loads(read(report_path(out))).get("merge_target_unresolved") or []
+        assert any("No such heading" in u for u in unresolved), (stamp, unresolved)
+    names = sorted(os.listdir(dom(out, "alpha", "domain")))
+    assert names == ["orphan.md", "other.md"], names
+    assert read(dom(out, "alpha", "domain", "orphan.md")).count("## ") == 1
+
+
+def test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist(tmp: str) -> None:
+    """Runs of one stamp merge into one report. It kept only the last
+    bundle's harvest record, and every file any run wrote — a part a
+    later run of the stamp retired stayed listed and counted in
+    files_written (a drain's blind review, 2026-09-26). The harvest is
+    kept per source; the files are those the tree holds."""
+    drain_a, claims_a, out = build(os.path.join(tmp, "a"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": "y " * 850, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_a, "dev-01", "hostA", 2000)
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    drain_b, claims_b, _ = build(os.path.join(tmp, "b"), {"beta": claims("beta", [
+        {"class": "domain", "topic": "two", "title": "Beta fact", "body": "b", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_b, "dev-02", "hostB", 3000)
+    assert run_assemble(drain_b, claims_b, out).returncode == 0
+    report = json.loads(read(report_path(out)))
+    sources = report.get("harvest_sources") or {}
+    assert set(sources) == {"dev-01@hostA", "dev-02@hostB"}, f"a bundle's harvest record was lost: {sources}"
+    assert sources["dev-01@hostA"]["next_watermark"] == 2000 and sources["dev-02@hostB"]["next_watermark"] == 3000, sources
+
+    # A part written by one run of the stamp and removed by the next.
+    set_claims(claims_a, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    grow2 = dom(out, "alpha", "domain", "grow-2.md")
+    assert os.path.exists(grow2), "precondition: the topic split into two parts"
+    set_claims(claims_a, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More, corrected", "merge_target": "More",
+         "body": "Less.", "evidence": ["h3"]},
+    ])
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    assert not os.path.exists(grow2), "precondition: the correction removed part two"
+    report = json.loads(read(report_path(out)))
+    gone = [f for f in report["files"]
+            if not any(os.path.exists(os.path.join(root, f)) for root in (working_copy(out), out))]
+    assert not gone, f"the report lists files the tree no longer holds: {gone}"
+    assert report["files_written"] == len(report["files"]), report["files_written"]
+    assert set(report["harvest_sources"]) == {"dev-01@hostA", "dev-02@hostB"}, report["harvest_sources"]
+
+
+def test_a_topic_named_like_a_budget_part_is_its_own_memory(tmp: str) -> None:
+    """Memories `release` and `release-2` are two topics, and
+    `release-2.md` is also the name part two of `release` would get.
+    Taken for a part by its name, `release-2`'s section was `release`'s:
+    the same-agent retitle of `release` retired it and removed the file
+    (a drain's blind review, 2026-09-26). The slice names its topic in
+    its frontmatter; an older slice without one is a part unless the
+    drain or the crossref names it as a topic."""
+    release = {"class": "domain", "topic": "release", "title": "Release process", "body": "Tag, then build.",
+               "evidence": ["a1"]}
+    second = {"class": "domain", "topic": "release-2", "title": "Second release notes", "body": "Shipped twice.",
+              "evidence": ["a2"]}
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [release, second])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    d = dom(out, "alpha", "domain")
+    set_claims(claims_dir, "alpha", [dict(release, title="Release process, revised", evidence=["a3"])])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert os.path.exists(os.path.join(d, "release-2.md")), f"another memory was retired as a part: {sorted(os.listdir(d))}"
+    assert "## Second release notes" in read(os.path.join(d, "release-2.md"))
+    assert "## Release process, revised" in read(os.path.join(d, "release.md"))
+    assert 'topic: "release-2"\n' in read(os.path.join(d, "release-2.md")), read(os.path.join(d, "release-2.md"))
+
+    # Slices written before the topic was recorded: the drain naming
+    # `release-2` is the evidence, and another agent's claim of `release`
+    # under `release-2`'s heading is no rival of it.
+    for name in ("release.md", "release-2.md"):
+        path = os.path.join(d, name)
+        legacy = re.sub(r"(?m)^topic: .*\n", "", read(path))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(legacy)
+    set_claims(claims_dir, "alpha", [dict(release, title="Second release notes", body="Different.", evidence=["b1"]),
+                                     second])
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "b1": "dev-02"})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"another topic's section was read as this topic's rival:\n{proc.stderr}"
+    assert "Shipped twice." in read(os.path.join(d, "release-2.md")), sorted(os.listdir(d))
+    released = read(os.path.join(d, "release.md"))
+    assert "Different." in released and "## Release process, revised" in released, released
+
+
 def main() -> int:
     cases = [
+        test_a_topic_named_like_a_budget_part_is_its_own_memory,
+        test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist,
+        test_an_unresolved_merge_target_is_reported_on_every_drain,
+        test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
+        test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
+        test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes,
+        test_the_same_agent_rule_never_replaces_newer_text,
+        test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
+        test_a_claim_body_s_own_headings_never_open_a_section,
+        test_the_drain_report_gathers_every_bundle_of_one_drain,
+        test_part_one_of_a_split_topic_is_always_the_topic_file,
+        test_a_claim_in_the_carried_file_is_not_written_twice,
+        test_a_retitled_memory_replaces_its_own_old_section,
+        test_a_correction_naming_another_topic_s_section_replaces_it_there,
         test_places_claims_and_writes_provenance,
         test_unresolved_origin_is_stated_not_invented,
         test_index_lists_every_slice,

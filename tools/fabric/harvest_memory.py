@@ -186,19 +186,42 @@ memory_slug = layout.memory_slug
 default_memory_dir = layout.default_memory_dir
 
 
-def previous_watermark(working_copy: str, host: str) -> tuple[int, str | None]:
+def previous_watermark(working_copy: str, host: str, agent: str | None = None) -> tuple[int, str | None]:
     """The ms-epoch watermark the project's last drain recorded for this
-    host, and the report it came from — (0, None) when there is none.
-    Read from the working copy's own report (the assembler writes it
-    under .agent-fabric/memory/); keyed by host because the memory store
-    is per machine."""
+    agent on this host, and the report it came from — (0, None) when
+    there is none. Read from the working copy's own report (the assembler
+    writes it under .agent-fabric/memory/). Keyed `agent@host`: every
+    account on a host has its own memory store, and one mark per host let
+    one account's newer drain skip another's older memories (the review
+    of #41, 2026-09-26). A report keyed by host alone reads as 0 — a full
+    re-read, which merge mode makes harmless."""
     report = os.path.join(working_copy, ".agent-fabric", "memory", "last-drain-report.json")
     try:
         with open(report, encoding="utf-8") as fh:
             marks = json.load(fh).get("watermarks") or {}
-        return int(marks.get(host) or 0), report
+        return int(marks.get(f"{agent}@{host}") or 0), report
     except (OSError, ValueError, TypeError):
         return 0, None
+
+
+def scalar(value: str) -> str:
+    """A frontmatter value as YAML reads it: a double-quoted one is
+    unescaped (`\\"` is a quote, `\\\\` a backslash), a single-quoted one
+    has its doubled quote undoubled. The quotes were once only stripped,
+    and a `\\"` reached the claim, its heading and the index with the
+    backslash in it (a drain's blind review, 2026-09-25)."""
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        try:
+            return json.loads(v)
+        except ValueError:
+            # YAML admits escapes JSON does not (`\\xe9`, a raw tab); the
+            # two that matter to a cue are unescaped here rather than
+            # returned raw, which was the defect this function fixes.
+            return re.sub(r'\\(["\\])', r"\1", v[1:-1])
+    if len(v) >= 2 and v[0] == v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    return v
 
 
 def parse_memory(path: str) -> dict[str, Any] | None:
@@ -220,7 +243,7 @@ def parse_memory(path: str) -> dict[str, Any] | None:
         km = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
         if not km:
             continue
-        key, value = km.group(1), km.group(2).strip().strip('"\'')
+        key, value = km.group(1), scalar(km.group(2))
         # `metadata:` nests one level; flatten it, since `type` is the only
         # field under it that this reads.
         meta[key if section is None else f"{section}.{key}"] = value
@@ -230,6 +253,10 @@ def parse_memory(path: str) -> dict[str, Any] | None:
     return {
         "name": name,
         "description": meta.get("description", ""),
+        # The cue a memory written in another language travels under: the
+        # index line and the slice heading are English like the body, which
+        # comes from the `## English` rendering (see RENDERING_RE).
+        "description_en": (meta.get("metadata.description_en") or meta.get("description_en") or "").strip(),
         "type": meta.get("metadata.type") or meta.get("type", ""),
         "body": body,
         "roles_class": meta.get("metadata.roles_class") or meta.get("roles_class", ""),
@@ -325,7 +352,7 @@ def main() -> int:
     # newer than the last watermark for this host are in scope (all of
     # them under --all, or when there is no report yet), and the report
     # carries the max mtime read as the next watermark.
-    since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host)
+    since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host, ctx["agent"])
     next_ms = since_ms
     total = 0
     before_watermark: list[str] = []
@@ -378,6 +405,17 @@ def main() -> int:
         # A memory in another language drains through its English rendering.
         text, language = parsed["body"], None
         original, rendering = split_rendering(parsed["body"])
+        # The cue counts as much as the body: an index line in another
+        # script is read by every holder of the role, in every project. A
+        # non-Latin description needs `description_en` beside it, or the
+        # memory waits, named, like an unrendered body (a drain's blind review, 2026-09-25).
+        title = parsed["description"] or parsed["name"]
+        if is_mostly_non_latin(title):
+            if not parsed["description_en"] or is_mostly_non_latin(parsed["description_en"]):
+                needs_rendering.append(name)
+                unrendered_ms.append(parsed["mtime_ms"])
+                continue
+            title = parsed["description_en"]
         if is_mostly_non_latin(original):
             if not rendering or is_mostly_non_latin(rendering):
                 # Named in every report until rendered: the watermark does
@@ -410,7 +448,7 @@ def main() -> int:
         next_ms = max(next_ms, parsed["mtime_ms"])
         claims.append({
             "topic": parsed["name"],
-            "title": parsed["description"] or parsed["name"],
+            "title": title,
             "class": klass,
             "knowledge_scope": "full",
             "body": text,

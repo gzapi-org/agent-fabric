@@ -44,7 +44,7 @@ A conforming runtime:
 
 A conforming adapter:
 
-- can associate valid HELLO addresses with native sender identities;
+- can associate the address in a valid message's `FROM` with native sender identities (SPEC §5; HELLO is deprecated);
 - keeps native identifiers outside the core payload;
 - authenticates/allowlists through transport-native mechanisms;
 - can deliver broadcast and directed messages, or documents a bootstrap mechanism;

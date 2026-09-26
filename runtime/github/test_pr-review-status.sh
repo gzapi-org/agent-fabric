@@ -180,6 +180,12 @@ print(json.dumps([{'__typename':'User','login':sys.argv[1]}]*int(sys.argv[2])))"
       printf ']}}}}}\n'
       exit 0
     fi
+    # The unresolved-threads lookup (already filtered: the script passes
+    # --jq). state/threads_fail makes it FAIL, which must read as unknown.
+    if [[ "$*" == *reviewThreads* ]]; then
+      [[ -f "$S/threads_fail" ]] && exit 1
+      [[ -s "$S/threads" ]] && { cat "$S/threads"; exit 0; }
+    fi
     echo '[]'; exit 0 ;;
 esac
 
@@ -203,7 +209,11 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
   {
     printf '['
     first=1
-    while IFS=, read -r login commit at kind; do
+    # A fifth field is the reviewer's author_association; an account
+    # other than the author defaults to MEMBER (a trusted reviewer), the
+    # author to OWNER.
+    while IFS=, read -r login commit at kind assoc; do
+      [[ -n "$assoc" ]] || { [[ "$login" == me ]] && assoc=OWNER || assoc=MEMBER; }
       [[ -z "$login" ]] && continue
       (( first )) || printf ','
       first=0
@@ -227,8 +237,8 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
         # be counted as a blind review.
         QUOTES) body='I think the marker <!-- agent-fabric-review v1 --> should move.' ;;
       esac
-      printf '{"user":{"login":"%s"},"state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
-        "$login" "$commit" "$at" "$body"
+      printf '{"user":{"login":"%s"},"author_association":"%s","state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
+        "$login" "$assoc" "$commit" "$at" "$body"
     done < "$S/reviews"
     printf ']\n'
   }
@@ -387,7 +397,9 @@ chmod +x "$SANDBOX/bin/gh"
 run() {
     : > "$SANDBOX/state/n"
     rm -f "$SANDBOX/state/reviews_fail" "$SANDBOX/state/reviews_fail_after" \
-          "$SANDBOX/state/verdicts_fail"
+          "$SANDBOX/state/verdicts_fail" "$SANDBOX/state/threads_fail"
+    [[ "${THREADS_FAIL:-0}" == 1 ]] && touch "$SANDBOX/state/threads_fail"
+    printf '%s\n' "${THREADS:-}" > "$SANDBOX/state/threads"
     [[ "${REVIEWS_FAIL:-0}" == 1 ]] && touch "$SANDBOX/state/reviews_fail"
     [[ "${VERDICTS_FAIL:-0}" == 1 ]] && touch "$SANDBOX/state/verdicts_fail"
     [[ -n "${REVIEWS_FAIL_AFTER:-}" ]] \
@@ -431,6 +443,7 @@ run() {
         AGENT_FABRIC_VERDICT_AUTHORS="${VERDICT_AUTHORS_OVERRIDE-[\"reviewer[bot]\"]}" \
         AGENT_FABRIC_REVIEWER_REFUSAL_RE="${REFUSAL_RE_OVERRIDE-usage limit reached|no environment for this repo}" \
         AGENT_FABRIC_REVIEW_REQUEST_RE="${REQUEST_RE_OVERRIDE-@reviewer[[:space:]]+review}" \
+        AGENT_FABRIC_REVIEW_POSTERS="${REVIEW_POSTERS_OVERRIDE-[]}" \
         timeout 20 bash "$UNDER_TEST" 77 o/r "$@" >"$__o" 2>"$__e"
     RUN_RC=$?
     RUN_ERR="$(cat "$__e")"
@@ -512,12 +525,59 @@ AGENT_FABRIC_LEGACY_REVIEW_MARKERS='<!-- legacy-project-review v1 -->' \
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,STRANGER"
 assert_rc       "a marker nobody named is not coverage even with a legacy one set" 1
 
-# A marked review from ANOTHER account is a blind review, not an
-# independent reviewer. Gating the marker test on authorship let it
-# through as genuine independent coverage.
+# A marked review from ANOTHER account is neither a blind review nor an
+# independent reviewer. Gating the marker test on authorship once let it
+# through as independent coverage; counting it as blind let any account
+# on a public repository cover a head by pasting the published marker
+# (a blind review of a managed project, 2026-09-25). It is reported by
+# login, and it is not coverage.
 run "OPEN:abc123:0" "somebodyelse,abc123,2026-08-07T10:00:00Z,MARKED"
-assert_contains "a marked review is a blind review whoever posted it" "blind reviews       : 1"
-assert_contains "  and NOT an independent review"                     "independent reviews : 0"
+assert_rc       "a marked review from another account is NOT coverage" 1
+assert_contains "  not a blind review"                        "blind reviews       : 0"
+assert_contains "  and NOT an independent review"             "independent reviews : 0"
+assert_contains "  reported under its own line"               "marked, other login : 1"
+assert_contains "  with its login"                            "- somebodyelse  commit=abc123"
+REVIEW_POSTERS_OVERRIDE='["somebodyelse"]' \
+run "OPEN:abc123:0" "somebodyelse,abc123,2026-08-07T10:00:00Z,MARKED"
+assert_rc       "a poster named in AGENT_FABRIC_REVIEW_POSTERS IS coverage" 0
+assert_contains "  as a blind review, login shown"            "- somebodyelse  commit=abc123"
+run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
+assert_contains "the author's own marked review is blind, login shown" "- me  commit=abc123"
+
+# AN INDEPENDENT REVIEWER IS ONE THE REPOSITORY TRUSTS. On a public
+# repository a stranger's UNMARKED review counted as independent coverage,
+# which the poster binding of marked reviews did not close (the review of
+# #41, 2026-09-26).
+run "OPEN:abc123:0" "stranger,abc123,2026-08-07T10:00:00Z,,NONE"
+assert_rc       "a stranger's review is NOT coverage" 1
+assert_contains "  not an independent review"                 "independent reviews : 0"
+assert_contains "  listed as not trusted, with its association" "- stranger  NONE  commit=abc123"
+run "OPEN:abc123:0" "helper,abc123,2026-08-07T10:00:00Z,,COLLABORATOR"
+assert_rc       "a collaborator's review IS coverage" 0
+# A configured reviewer (an App, which GitHub lists as NONE) is trusted by
+# name: AGENT_FABRIC_VERDICT_AUTHORS already says the project trusts it.
+run "OPEN:abc123:0" "reviewer[bot],abc123,2026-08-07T10:00:00Z,,NONE"
+assert_rc       "a configured reviewer's review IS coverage whatever its association" 0
+
+# A FAILED THREADS LOOKUP IS "unknown", never 0: a caller that arms on
+# zero unresolved threads read a query error as a clean PR.
+THREADS_FAIL=1 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
+assert_contains "a failed threads lookup reads unknown" "unresolved threads  : unknown"
+THREADS='[{"isResolved":false,"isOutdated":false,"path":"a.sh"}]' run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
+assert_contains "a real unresolved thread is counted" "unresolved threads  : 1"
+
+# THE --json CONTRACT: the same answer as fields, the same exit code.
+THREADS_FAIL=1 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED
+somebodyelse,abc123,2026-08-07T10:01:00Z,MARKED" --json
+assert_rc "--json keeps the exit code" 0
+if jq -e '.head_reviewed == "yes" and .blind.count == 1 and .blind.rows[0].login == "me"
+          and .blind.rows[0].commit_sha8 == "abc123" and .marked_by_others.count == 1
+          and .unresolved_threads == null and .independent.count == 0 and (.checks.pass | type) == "number"' \
+     <<<"$(cat <<<"$RUN_OUT" | sed -n '/^{/,/^}/p')" >/dev/null 2>&1; then pass "--json carries the buckets, the login, and null for an unknown thread count"
+else fail "--json shape" "$RUN_OUT"; fi
+THREADS='[]' run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED" --json -q
+if [[ "$(jq -r '.unresolved_threads' <<<"$RUN_OUT" 2>/dev/null)" == 0 ]]; then pass "--json: a successful lookup with none is 0, not null"
+else fail "--json zero threads" "$RUN_OUT"; fi
 
 # The two must not blur: an unmarked self-authored review is still a
 # thread reply, and marking must not turn every same-account review into
@@ -540,6 +600,14 @@ echo "pr-review-status.sh — no review is coming (exit 5)"
 run "OPEN:newhead:0" "bot,oldhead,2026-08-07T10:00:00Z"
 assert_rc "reviewed then pushed, nothing requested, exits 5" 5
 assert_contains "  names the cause" "NO REVIEW COMING"
+# Under --json stdout stays ONE object on this path too, the cause a field
+# rather than a prose line after it (the review of #41, 2026-09-26).
+run "OPEN:newhead:0" "bot,oldhead,2026-08-07T10:00:00Z" --json -q
+assert_rc "--json keeps exit 5" 5
+# ONE object: -s slurps every value on stdout, so a prose line after the
+# object fails the parse (the re-review of #41: a first-value read passed it).
+if jq -e -s 'length == 1 and .[0].no_review_coming.cause == "head-moved"' <<<"$RUN_OUT" >/dev/null 2>&1; then pass "  stdout is one object, the cause in no_review_coming"
+else fail "  --json exit-5 output" "$RUN_OUT"; fi
 
 # The distinction that makes 5 worth having: a FRESH PR has had no
 # review, and the one that owns it has yet to dispatch one — so it must
@@ -599,10 +667,8 @@ RUN_OUT="$(PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
     bash "$UNDER_TEST" 77 o/r --interval 0 2>&1)"; RUN_RC=$?
 assert_rc "zero --interval exits 2" 2
 
-# The SAME duration table wait-merged.sh asserts. as_seconds is
-# duplicated across the two standalone scripts on purpose; these paired
-# assertions are what stop the copies drifting into accepting different
-# things, which is the confusion units were added to remove.
+# The duration table, asserted here alone: this suite is what stops
+# as_seconds accepting something a caller did not mean.
 for bad in "" "10sm" "m" "-1" "1x" "10 m"; do
     RUN_OUT="$(PATH="$SANDBOX/bin:$PATH" GH_MOCK_STATE="$SANDBOX/state" \
         bash "$UNDER_TEST" 77 o/r --wait "$bad" 2>&1)"; RUN_RC=$?

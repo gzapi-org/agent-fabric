@@ -327,10 +327,12 @@ def merge_reports(previous: dict[str, Any], current: dict[str, Any],
     decision per key (the later run's, as the tree now reflects it), the
     telemetry kept per source (agent@host) so re-running a bundle
     replaces its counts instead of adding them twice. A report of another
-    stamp is an earlier drain, replaced — except its watermarks: they say
-    where each host's store was read up to, which only ever moves forward,
-    so every host keeps the higher of the two and a run that read nothing
-    never lowers or empties one. `title_collisions` is read from the tree,
+    stamp is an earlier drain, replaced — except its watermarks: each says
+    where one account's store (agent@host) was read up to. A run replaces
+    only the marks of the stores it harvested, with what that harvest
+    says — lower too, since the harvester holds a mark below a memory it
+    could not render yet, so the memory is read again — and a run that
+    harvested nothing changes none. `title_collisions` is read from the tree,
     which already holds every run's result.
 
     The harvest record is kept per source too (`harvest_sources`), since
@@ -341,7 +343,7 @@ def merge_reports(previous: dict[str, Any], current: dict[str, Any],
     drain's blind review, 2026-09-26)."""
     marks = {h: v for h, v in (previous.get("watermarks") or {}).items() if isinstance(v, (int, float))}
     for host, mark in (current.get("watermarks") or {}).items():
-        marks[host] = max(mark, marks.get(host, mark))
+        marks[host] = mark
     if previous.get("stamp") != current["stamp"]:
         merged = dict(current, watermarks=marks)
         merged["files"] = [f for f in current["files"] if exists(f)]
@@ -2036,11 +2038,10 @@ def main() -> int:
             "provisional_agent": counts.get("provisional_agent", counts.get("provisional_clone")),
             "in_scope": counts.get("in_scope"),
         }
-        # Keyed by host: the store is per machine, so "the" watermark is a
-        # per-host fact. One drain contributes one key; a future multi-store
-        # cycle extends the map instead of overwriting a scalar.
+        # Keyed agent@host: each account on a host has its own store, and
+        # its harvest reads this key back (harvest_memory.previous_watermark).
         if hr.get("host") is not None and hr.get("next_watermark") is not None:
-            watermarks[hr["host"]] = hr["next_watermark"]
+            watermarks[f"{hr.get('agent') or 'unattributed'}@{hr['host']}"] = hr["next_watermark"]
 
     source = f"{hr.get('agent') or 'unattributed'}@{hr.get('host') or 'unknown'}" \
         if harvest_meta is not None else "unattributed"

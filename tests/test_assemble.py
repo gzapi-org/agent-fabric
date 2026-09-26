@@ -274,7 +274,9 @@ def test_drain_report_carries_the_watermark_forward(tmp: str) -> None:
 
     # .get throughout: a missing key must fail this test with a readable
     # message, not raise KeyError and abort the whole suite behind it.
-    assert report.get("watermarks") == {"boxA": 2500}, report.get("watermarks")
+    # Keyed agent@host: every account on a host has its own store.
+    assert list((report.get("watermarks") or {}).values()) == [2500] and \
+        all(k.endswith("@boxA") for k in report["watermarks"]), report.get("watermarks")
     harvest = report.get("harvest") or {}
     assert harvest.get("next_watermark") == 2500, harvest
     assert harvest.get("since_watermark") == 1000, harvest
@@ -1994,7 +1996,7 @@ def test_the_drain_report_gathers_every_bundle_of_one_drain(tmp: str) -> None:
     assert report["roles"] == ["alpha", "beta"], f"the first bundle's roles were lost: {report['roles']}"
     assert [d["key"] for d in report["collision_decisions"]] == ["alpha/domain:one#Same title"], \
         report["collision_decisions"]
-    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 3000}, report["watermarks"]
     assert set(report["telemetry"]) == {"alpha", "beta"}, report["telemetry"]
     assert any("alpha/" in f for f in report["files"]) and any("beta/" in f for f in report["files"]), report["files"]
     assert report["files_written"] == len(report["files"])
@@ -2019,16 +2021,18 @@ def test_the_drain_report_gathers_every_bundle_of_one_drain(tmp: str) -> None:
     harvest_report(drain_c, "dev-02", "hostB", None)
     assert run_assemble(drain_c, claims_c, out).returncode == 0
     report = json.loads(read(report_path(out)))
-    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 3000}, report["watermarks"]
     assert report["roles"] == ["alpha", "beta"] and report["collision_decisions"], report
 
-    # The next drain replaces the record, and still never lowers a mark.
+    # The next drain replaces the record. A harvest sets its own store's
+    # mark, lower too — the harvester holds it below a memory it could not
+    # render, so that memory is read again — and leaves every other store's.
     harvest_report(drain_b, "dev-02", "hostB", 2500)
     assert run_assemble(drain_b, claims_b, out, "--stamp", "2026-01-02").returncode == 0
     report = json.loads(read(report_path(out)))
     assert report["stamp"] == "2026-01-02" and report["roles"] == ["beta"], report["roles"]
     assert report["collision_decisions"] == [], report["collision_decisions"]
-    assert report["watermarks"] == {"hostA": 2000, "hostB": 3000}, report["watermarks"]
+    assert report["watermarks"] == {"dev-01@hostA": 2000, "dev-02@hostB": 2500}, report["watermarks"]
 
 
 def test_a_claim_body_s_own_headings_never_open_a_section(tmp: str) -> None:

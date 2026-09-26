@@ -186,17 +186,20 @@ memory_slug = layout.memory_slug
 default_memory_dir = layout.default_memory_dir
 
 
-def previous_watermark(working_copy: str, host: str) -> tuple[int, str | None]:
+def previous_watermark(working_copy: str, host: str, agent: str | None = None) -> tuple[int, str | None]:
     """The ms-epoch watermark the project's last drain recorded for this
-    host, and the report it came from — (0, None) when there is none.
-    Read from the working copy's own report (the assembler writes it
-    under .agent-fabric/memory/); keyed by host because the memory store
-    is per machine."""
+    agent on this host, and the report it came from — (0, None) when
+    there is none. Read from the working copy's own report (the assembler
+    writes it under .agent-fabric/memory/). Keyed `agent@host`: every
+    account on a host has its own memory store, and one mark per host let
+    one account's newer drain skip another's older memories (the review
+    of #41, 2026-09-26). A report keyed by host alone reads as 0 — a full
+    re-read, which merge mode makes harmless."""
     report = os.path.join(working_copy, ".agent-fabric", "memory", "last-drain-report.json")
     try:
         with open(report, encoding="utf-8") as fh:
             marks = json.load(fh).get("watermarks") or {}
-        return int(marks.get(host) or 0), report
+        return int(marks.get(f"{agent}@{host}") or 0), report
     except (OSError, ValueError, TypeError):
         return 0, None
 
@@ -349,7 +352,7 @@ def main() -> int:
     # newer than the last watermark for this host are in scope (all of
     # them under --all, or when there is no report yet), and the report
     # carries the max mtime read as the next watermark.
-    since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host)
+    since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host, ctx["agent"])
     next_ms = since_ms
     total = 0
     before_watermark: list[str] = []

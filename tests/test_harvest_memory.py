@@ -451,7 +451,8 @@ def test_the_watermark_round_trips_through_the_committed_report(tmp: str) -> Non
                         "--working-copy", wc, "--stamp", "2026-01-01"], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     committed = json.load(open(os.path.join(wc, ".agent-fabric", "memory", "last-drain-report.json"), encoding="utf-8"))
-    assert committed["watermarks"] == {"hostA": new_ms}, committed.get("watermarks")
+    me = json.load(open(os.path.join(out1, "harvest-report.json"), encoding="utf-8"))["agent"]
+    assert committed["watermarks"] == {f"{me}@hostA": new_ms}, committed.get("watermarks")
     assert committed["harvest"]["next_watermark"] == new_ms and committed["harvest"]["in_scope"] == 2, committed["harvest"]
     # Second drain, nothing new: an empty delta, and the watermark holds.
     out2 = os.path.join(tmp, "o14b")

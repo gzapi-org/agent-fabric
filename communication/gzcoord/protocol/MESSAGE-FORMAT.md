@@ -161,6 +161,74 @@ worked example is gzapp #875 (2026-09-18): five lanes, one PR. Every
 supplier push is a `pull_request` run on the caller's PR, so a
 supplier batches its pushes where it can.
 
+## Working on a request together
+
+Agents divide work, agree dependencies and change their minds among
+themselves; nothing here is a procedure to run for every small change,
+and nothing here makes a message authorise anything (SEMANTICS.md). It is
+what the record of the fleet's collaborations shows separating the ones
+that landed once from the ones that were done twice, stalled or redone
+(`docs/cooperating-on-requests.md` has the cases).
+
+**A request says what done looks like.** The result wanted, the artifact
+it rests on (the finding, the contract, the file and line), what is out
+of scope, and how the recipient will know it is finished. For a small ask
+that is one sentence; the supply sections above are the long form of the
+same thing. Before assigning, look for the job already in flight — the
+open PRs (`pr-gate.sh --all`) and the pushed branches with none
+(`git branch -r`), where a job waiting for a merge sits unseen: the
+fleet's most frequent rework is the same work started twice.
+
+**Receipt is not acceptance.** The recipient's `REPLY` says what it
+undertakes — all of it, part of it ("the gzapp half now; InterWeave after
+the hand-off in flight"), or none of it and whose it is — and roughly
+when, against the work it already has. Or it names what is missing: the
+decision, and who holds it; the prerequisite, and where it will come
+from. Once undertaken, the work proceeds on that agreement: asking the
+sender, or the owner, to approve each step again only delays it (a
+migration requested, checked and then held for a permission nobody had
+withheld, 2026-09-16).
+
+**Name the smallest dependency.** "Blocked on #X" usually means one of
+five things, and each is a different wait: a *decision* (who decides,
+and the question), an *agreed interface* (a contract, a schema, a
+message shape — build against it once it is agreed), an *example*, *code
+on a branch* (a pushed sha can be fetched and built on before it merges),
+or an *integrated change* (it must be on main). Ask for the smallest one
+that unblocks you, and say what you will do if it does not come ("land
+#46 first, or arm now and accept a short drift" — InterWeave #125).
+Waiting for another agent's whole task to merge is right only when a
+partial landing would be a defect — and then the pieces are one PR
+(`identities/prompt/team.md`).
+
+**Renegotiate where the agreement changes, and only there.** When
+something others built on changes — a promised result, a scope, an
+interface, text another lane copies, an order of landing — tell each
+agent that built on it, `TO` that login, what changed and what you now
+propose; each decides its own side. Work inside an unchanged agreement
+needs no one's approval. Silence is neither: an unanswered proposal is
+not agreed, and an unanswered request is not released — work another
+agent undertook stays theirs until they hand it over (`HANDOFF`) or the
+owner reassigns it, even when their session has ended.
+
+**A delivery can be checked where it lands.** The completion `REPLY`
+names the exact artifact (a pushed sha or a PR — never "folded" before
+the push), the request it satisfies (`IN-REPLY-TO`), what was checked
+(the commands, as in `VERIFIED`) and what is still uncertain. The
+recipient checks it in its own context before relying on it: that the
+sha is reachable from its branch, that its own suite passes with it —
+the sender's check covered the sender's context only.
+
+**Leave the agreement where the next session can find it.** A message
+lives in the relay and in the sessions that read it; when a session ends,
+what it undertook is invisible to whoever comes next. Work that outlives
+the session carries its agreement in the durable record: the PR body
+(what request it answers, what it depends on, what is open, the next
+step), descriptive commits, and the owning agent's `threads` memory.
+Resuming — the same agent in a new session, or another agent the work
+was handed to — starts from that record and the message ids it names
+(`--replay`), verified against the tree, not from the conversation.
+
 ## Carrying the owner's word
 
 A message never authorises anything (SEMANTICS.md), and twice in one

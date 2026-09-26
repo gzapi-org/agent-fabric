@@ -149,7 +149,9 @@ same). An addressee with no session, a control agent that did not answer
 or could not tell, an address no host places, or presence that could not
 be asked at all is named, nothing is sent, and it exits 4.
 A `TO-ROLE` passes when any holder of the role is running; a broadcast is
-not checked. Then you decide: a message to a login with no session waits
+not checked. An addressee that is planning is sent to, and you are told:
+its inbox is held until its plan is approved, so no answer comes before
+then — do not chase it or take its work. Then you decide: a message to a login with no session waits
 in the relay until one starts, which may be what you want — `--force`
 sends it anyway, and says so. A request that must be acted on now
 belongs to a running session, or to a later send.

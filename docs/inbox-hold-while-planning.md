@@ -77,3 +77,16 @@ loop, the abort, `--follow` against a fake relay, `--held`),
 `tests/test_session_start.py` (the template wires the hook on the three
 events), and the live read-back in
 `docs/live-checks/2026-09-16-inbox-hold-while-planning.md`.
+
+## What a sender sees (2026-09-26)
+
+The hold was invisible from outside: a sender's presence check read a
+planning session as "running", and a sender waiting on a reply had no way
+to know none could come until the plan was approved. Presence now carries
+`planning` (the same hold the session's watch reads), `fabric-ctl
+presence` shows `planning` in place of `running`, and `gzcoord-send`
+says, without refusing, "`<address>` is planning — its inbox is held
+until the plan is approved; the message waits in the relay, and no answer
+comes before then". A role is planning only when every running holder
+is: one that is not reads the message now. The hold itself is unchanged
+(the owner, 2026-09-26).

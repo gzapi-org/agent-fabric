@@ -436,6 +436,9 @@ test('presence: one row per account — running since when, as what; none; a fai
     reply('h/web-dev-01', { status: 'ok', online: true, sessions: 2, since: '2026-09-25T09:57:22.000Z', role: 'web-dev', project: 'gzapp' }),
     reply('h/db-admin', { status: 'ok', online: false, sessions: 0, since: null, role: 'db-admin', project: 'gzapp' }),
     reply('h/edge-hosting', { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' })])).split('\n');
+  const planning = table('presence', rows([expected[0]], [reply('h/web-dev-01', { status: 'ok', online: true, sessions: 2, since: '2026-09-25T09:57:22.000Z', role: 'web-dev', project: 'gzapp', planning: true })])).split('\n');
+  assert.match(planning[1], /^web-dev-01\s+planning ×2\s+2026-09-25/, 'a session that is planning says so');
+  assert.equal(planning[1].indexOf('2026-09-25'), planning[0].indexOf('since (UTC)'), 'and the columns stay aligned at its widest');
   assert.match(t[1], /^web-dev-01\s+running ×2\s+2026-09-25 09:57:22\s+web-dev\s+gzapp$/);
   assert.match(t[2], /^db-admin\s+none\s+-\s+db-admin\s+gzapp$/);
   assert.match(t[3], /^edge-hosting\s+unknown\s+pgrep: spawn pgrep ENOENT$/);

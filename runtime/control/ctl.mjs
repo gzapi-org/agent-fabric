@@ -158,13 +158,13 @@ export function table(op, rs) {
     return lines.join('\n');
   }
   if (op === 'presence') {
-    lines.push(`${'account'.padEnd(22)} ${'session'.padEnd(10)} ${'since (UTC)'.padEnd(20)} ${'role'.padEnd(20)} project`);
+    lines.push(`${'account'.padEnd(22)} ${'session'.padEnd(12)} ${'since (UTC)'.padEnd(20)} ${'role'.padEnd(20)} project`);
     for (const r of rs) {
       const p = r.presence;
       if (r.status !== 'ok' || !p) { lines.push(`${r.account.padEnd(22)} ${r.status}`); continue; }
-      if (p.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${'unknown'.padEnd(10)} ${p.error ?? ''}`.trimEnd()); continue; }
+      if (p.status !== 'ok') { lines.push(`${r.account.padEnd(22)} ${'unknown'.padEnd(12)} ${p.error ?? ''}`.trimEnd()); continue; }
       const since = p.since ? p.since.slice(0, 19).replace('T', ' ') : '-';
-      lines.push(`${r.account.padEnd(22)} ${(p.online ? `running${p.sessions > 1 ? ` ×${p.sessions}` : ''}` : 'none').padEnd(10)} ${since.padEnd(20)} ${String(p.role ?? '-').padEnd(20)} ${p.project ?? '-'}`.trimEnd());
+      lines.push(`${r.account.padEnd(22)} ${(p.online ? `${p.planning ? 'planning' : 'running'}${p.sessions > 1 ? ` ×${p.sessions}` : ''}` : 'none').padEnd(12)} ${since.padEnd(20)} ${String(p.role ?? '-').padEnd(20)} ${p.project ?? '-'}`.trimEnd());
     }
     return lines.join('\n');
   }

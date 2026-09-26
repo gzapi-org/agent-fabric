@@ -1073,6 +1073,15 @@ const failedRead = { status: 'failed', error: 'pgrep: spawn pgrep ENOENT' };
 const up = role => ({ status: 'ok', online: true, sessions: 1, since: '2026-09-25T09:00:00.000Z', role, project: 'gzapp' });
 const down = role => ({ status: 'ok', online: false, sessions: 0, since: null, role, project: 'gzapp' });
 
+test('an addressee that is planning: sent, and the sender told its inbox is held until the plan is approved', async () => {
+  await withPresenceRelay({ 'h/alpha': { ...up('web-dev'), planning: true } }, async (relay, posts, asked, env) => {
+    const r = await sendWith(relay, addressed('TO: h/alpha'), [], env);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /h\/alpha is planning — its inbox is held until the plan is approved; the message waits in the relay, and no answer comes before then/);
+    assert.equal(posts.length, 1, 'planning never blocks the send');
+  });
+});
+
 test('send checks presence first: a running addressee is sent to; one with no session, a silent agent or an unplaced address is refused, named, unless --force', async () => {
   await withPresenceRelay({ 'h/alpha': up('web-dev'), 'h/beta': down('web-dev') }, async (relay, posts, asked, env) => {
     const ok = await sendWith(relay, addressed('TO: h/alpha'), [], env);

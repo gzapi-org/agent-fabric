@@ -227,7 +227,7 @@ export function session(uid = process.getuid(), exec = execFileSync) {
 // carries), so a TO-ROLE the relay would deliver is never refused for a
 // holder with no role recorded (review of #38). The project is the
 // binding's: where the last session here worked.
-export function presence({ uid = process.getuid(), exec = execFileSync, proc = '/proc', self = process.pid, who = null, binding = null } = {}) {
+export function presence({ uid = process.getuid(), exec = execFileSync, proc = '/proc', self = process.pid, who = null, binding = null, hold = () => holdStatus() } = {}) {
   let pids = [];
   try { pids = String(exec('pgrep', ['-u', String(uid), '-x', 'claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim().split('\n').filter(Boolean).map(Number); }
   catch (e) { if (e?.status !== 1) return { status: 'failed', error: `pgrep: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}` }; }
@@ -240,7 +240,12 @@ export function presence({ uid = process.getuid(), exec = execFileSync, proc = '
   const b = binding ?? (readJson(me.binding) ?? {});
   let role = null;
   try { const tp = findTaxonomy(); role = gzIdentity(me, tp ? loadTaxonomy(tp) : undefined).slug ?? null; } catch { /* no catalogue: no role */ }
-  return { status: 'ok', online: live.length > 0, sessions: live.length, since: starts[0] ?? null, role, project: b.project ?? null };
+  // Planning: the account's inbox is held until the plan is approved
+  // (docs/inbox-hold-while-planning.md), so a message sent now is read
+  // then, and a sender should not wait on an answer before.
+  let planning = false;
+  try { planning = live.length > 0 && hold().held === true; } catch { /* no hold directory: not planning */ }
+  return { status: 'ok', online: live.length > 0, sessions: live.length, since: starts[0] ?? null, role, project: b.project ?? null, planning };
 }
 
 // The MACHINE this account shares — what develop-qzapp's crash of

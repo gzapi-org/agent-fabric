@@ -25,9 +25,12 @@
 #
 # WHAT COUNTS. Three buckets, reported on their own lines:
 #   independent reviews — review objects by an account other than the
-#                         PR author (every session pushes as one account,
-#                         so this is a person or another organisation
-#                         member, not another session);
+#                         PR author that the repository trusts: its
+#                         owner, an organisation member or a collaborator
+#                         (GitHub's author_association). Every session
+#                         pushes as one account, so this is a person, not
+#                         another session; anyone else's review is listed
+#                         as "not trusted" and is not coverage;
 #   blind reviews       — the review class's reviews, posted by
 #                         post-review.sh as review objects whose FIRST
 #                         LINE is REVIEW_MARKER (below), BY the account
@@ -79,7 +82,8 @@
 #                          instead of the report (the exit code is the
 #                          same): state, merge_state, head,
 #                          head_reviewed, the three buckets as
-#                          {count, rows}, marked_by_others,
+#                          {count, rows}, marked_by_others, not_trusted,
+#                          no_review_coming ({cause, reason} or null),
 #                          verdicts, unresolved_threads (null when the
 #                          lookup failed), checks {pass, other}
 #   -h, --help             this text
@@ -249,6 +253,10 @@ qual_count=0
 verdicts='[]'
 verdict_count=0
 independent='[]'; blind='[]'; marked_others='[]'; others_count=0; self_count=0
+outsiders='[]'; outsiders_count=0
+# Why no review is coming, when that is the answer (exit 5): carried as a
+# field under --json, where stdout must stay one object.
+no_coming_cause=""; no_coming_reason=""
 refusal_at=""
 refusal_current=no
 pending_others=0
@@ -306,10 +314,11 @@ probe() {
     # review carrying only inline comments. Authorship is the honest axis.
     # MARKED FIRST, then authorship. A blind review is authored by the
     # same account as everything else, so classifying by author first
-    # loses it; and a marked review from ANY account is a blind review,
-    # not an independent reviewer — gating the marker test on authorship
-    # made a marked review from another login count as a genuine
-    # independent review, silently, in the dangerous direction.
+    # loses it; and a marked review is never an independent one — gating
+    # the marker test on authorship made a marked review from another
+    # login count as genuine independent coverage, silently, in the
+    # dangerous direction. It is blind only from the author or a named
+    # poster (below), and otherwise counts as nothing.
     #
     # startswith, NOT contains. The emitter guarantees the marker is the
     # FIRST LINE; a substring test counted any review whose body merely
@@ -325,7 +334,16 @@ probe() {
     unmarked="$(jq --argjson ms "$markers_json" \
         '[.[] | select((.body // "") as $b | ($ms | map(. as $m | $b | startswith($m)) | any) | not)]' <<<"$reviews")"
 
-    independent="$(jq --arg a "$author" '[.[] | select(.user.login != $a)]' <<<"$unmarked")"
+    # AN INDEPENDENT REVIEWER IS SOMEONE THE REPOSITORY TRUSTS: its owner,
+    # a member of its organisation, or a collaborator, as GitHub's own
+    # `author_association` says. On a public repository anyone can review;
+    # binding only the MARKED review to its poster left a stranger's
+    # unmarked review counting as coverage (the review of #41, 2026-09-26).
+    # Any other account's review is reported as not coverage.
+    independent="$(jq --arg a "$author" '[.[] | select(.user.login != $a)
+        | select(.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r))]' <<<"$unmarked")"
+    outsiders="$(jq --arg a "$author" '[.[] | select(.user.login != $a)
+        | select((.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r)) | not)]' <<<"$unmarked")"
 
     # BLIND REVIEWS ARE COVERAGE, and authorship cannot see them. Every
     # session pushes as the SAME account, so the review class's review,
@@ -355,6 +373,7 @@ probe() {
     self_count="$(jq 'length' <<<"$self")"
     blind_count="$(jq 'length' <<<"$blind")"
     others_count="$(jq 'length' <<<"$marked_others")"
+    outsiders_count="$(jq 'length' <<<"$outsiders")"
 
     # VERDICT COMMENTS. Unreadable rather than empty, for the same reason
     # the reviews call is: a swallowed failure here would report a clean
@@ -800,6 +819,7 @@ render_json() {
           --arg head_reviewed "$head_reviewed" --arg unresolved "$unresolved" \
           --argjson independent "$independent" --argjson blind "$blind" \
           --argjson others "$marked_others" --argjson verdicts "$verdicts" \
+          --argjson outsiders "$outsiders" --arg ncause "$no_coming_cause" --arg nreason "$no_coming_reason" \
           --argjson self_count "$self_count" --argjson threads "$threads" \
           --arg cpass "$checks_pass" --arg cother "$checks_other" '{
         pr: ($pr | tonumber), state: $state, merge_state: $mergest, head: $head,
@@ -808,6 +828,9 @@ render_json() {
                       rows: [$independent[] | {login: .user.login, state, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
         blind: {count: ($blind | length),
                 rows: [$blind[] | {login: .user.login, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        not_trusted: {count: ($outsiders | length),
+                      rows: [$outsiders[] | {login: .user.login, association: .author_association, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
+        no_review_coming: (if $ncause == "" then null else {cause: $ncause, reason: (if $nreason == "" then null else $nreason end)} end),
         marked_by_others: {count: ($others | length),
                            rows: [$others[] | {login: .user.login, commit_sha8: .commit_id[0:8], at: .submitted_at}]},
         verdicts: {count: ($verdicts | length),
@@ -845,6 +868,10 @@ render_text() {
               || echo '' )"
     if (( blind_count > 0 )); then
         jq -r '.[] | "      - \(.user.login)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$blind"
+    fi
+    if (( outsiders_count > 0 )); then
+        printf '  not trusted         : %s   (NOT coverage — not the owner, a member or a collaborator)\n' "$outsiders_count"
+        jq -r '.[] | "      - \(.user.login)  \(.author_association)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$outsiders"
     fi
     if (( others_count > 0 )); then
         printf '  marked, other login : %s   (NOT coverage — the marker is public; only the\n' "$others_count"
@@ -929,16 +956,18 @@ while :; do
         # after whatever made it decline has passed.
         if [[ "$state" == "OPEN" && "$refusal_current" == "yes" ]]; then
             note "the reviewer declined this PR — no review will arrive without a change"
+            no_coming_cause="reviewer-declined"; no_coming_reason="$refusal_reason"
             render
-            printf 'PR #%s NO REVIEW COMING — the reviewer declined%s (exit 5)\n' "$PR" \
+            (( JSON )) || printf 'PR #%s NO REVIEW COMING — the reviewer declined%s (exit 5)\n' "$PR" \
                 "$( [[ -z "$refusal_reason" ]] || printf ': %s' "$refusal_reason" )"
             exit 5
         fi
 
         if [[ "$state" == "OPEN" ]] && no_review_coming; then
             note "head has advanced past the newest review and none is requested"
+            no_coming_cause="head-moved"
             render
-            printf 'PR #%s NO REVIEW COMING — the head moved past every review; dispatch a re-review (exit 5)\n' "$PR"
+            (( JSON )) || printf 'PR #%s NO REVIEW COMING — the head moved past every review; dispatch a re-review (exit 5)\n' "$PR"
             exit 5
         fi
     else

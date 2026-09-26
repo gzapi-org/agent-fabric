@@ -209,7 +209,11 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
   {
     printf '['
     first=1
-    while IFS=, read -r login commit at kind; do
+    # A fifth field is the reviewer's author_association; an account
+    # other than the author defaults to MEMBER (a trusted reviewer), the
+    # author to OWNER.
+    while IFS=, read -r login commit at kind assoc; do
+      [[ -n "$assoc" ]] || { [[ "$login" == me ]] && assoc=OWNER || assoc=MEMBER; }
       [[ -z "$login" ]] && continue
       (( first )) || printf ','
       first=0
@@ -233,8 +237,8 @@ if [[ "$1" == "api" && "$*" == *"/reviews"* ]]; then
         # be counted as a blind review.
         QUOTES) body='I think the marker <!-- agent-fabric-review v1 --> should move.' ;;
       esac
-      printf '{"user":{"login":"%s"},"state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
-        "$login" "$commit" "$at" "$body"
+      printf '{"user":{"login":"%s"},"author_association":"%s","state":"COMMENTED","commit_id":"%s","submitted_at":"%s","body":"%s"}' \
+        "$login" "$assoc" "$commit" "$at" "$body"
     done < "$S/reviews"
     printf ']\n'
   }
@@ -540,6 +544,17 @@ assert_contains "  as a blind review, login shown"            "- somebodyelse  c
 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
 assert_contains "the author's own marked review is blind, login shown" "- me  commit=abc123"
 
+# AN INDEPENDENT REVIEWER IS ONE THE REPOSITORY TRUSTS. On a public
+# repository a stranger's UNMARKED review counted as independent coverage,
+# which the poster binding of marked reviews did not close (the review of
+# #41, 2026-09-26).
+run "OPEN:abc123:0" "stranger,abc123,2026-08-07T10:00:00Z,,NONE"
+assert_rc       "a stranger's review is NOT coverage" 1
+assert_contains "  not an independent review"                 "independent reviews : 0"
+assert_contains "  listed as not trusted, with its association" "- stranger  NONE  commit=abc123"
+run "OPEN:abc123:0" "helper,abc123,2026-08-07T10:00:00Z,,COLLABORATOR"
+assert_rc       "a collaborator's review IS coverage" 0
+
 # A FAILED THREADS LOOKUP IS "unknown", never 0: a caller that arms on
 # zero unresolved threads read a query error as a clean PR.
 THREADS_FAIL=1 run "OPEN:abc123:0" "me,abc123,2026-08-07T10:00:00Z,MARKED"
@@ -581,6 +596,12 @@ echo "pr-review-status.sh — no review is coming (exit 5)"
 run "OPEN:newhead:0" "bot,oldhead,2026-08-07T10:00:00Z"
 assert_rc "reviewed then pushed, nothing requested, exits 5" 5
 assert_contains "  names the cause" "NO REVIEW COMING"
+# Under --json stdout stays ONE object on this path too, the cause a field
+# rather than a prose line after it (the review of #41, 2026-09-26).
+run "OPEN:newhead:0" "bot,oldhead,2026-08-07T10:00:00Z" --json -q
+assert_rc "--json keeps exit 5" 5
+if [[ "$(jq -r '.no_review_coming.cause' <<<"$RUN_OUT" 2>/dev/null)" == head-moved ]]; then pass "  stdout is one object, the cause in no_review_coming"
+else fail "  --json exit-5 output" "$RUN_OUT"; fi
 
 # The distinction that makes 5 worth having: a FRESH PR has had no
 # review, and the one that owns it has yet to dispatch one — so it must

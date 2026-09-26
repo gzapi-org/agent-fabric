@@ -66,7 +66,12 @@ Coverage now needs both: the marker, and a poster who is the PR author
 `AGENT_FABRIC_REVIEW_POSTERS`. Any other marked review is listed under
 "marked, other login", with its login, and is not coverage. Every blind
 row names its login too, so a reader checks the poster without leaving
-the report. `--json` carries the same answer as fields, for a caller
+the report. The same holds for an unmarked review: it counts as
+independent only from the repository's owner, an organisation member or
+a collaborator (GitHub's `author_association`). Anyone else's review is
+listed as "not trusted" and is not coverage. Binding only the marked
+review would have left a stranger free to cover a head by leaving the
+marker out. `--json` carries the same answer as fields, for a caller
 that arms on it.
 
 ## Why "blind" survives as a word

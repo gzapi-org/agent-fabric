@@ -1063,16 +1063,28 @@ def main() -> int:
         groups_to_check.append((None, "shared", key, group))
     def sole_author(role: str | None, klass: str, topic: str, paths: list[str]) -> str | None:
         """The one agent every section of the topic came from, or None.
-        A flat class file holding other topics' sections says nothing
-        about this topic, and an origin with no agent (a clone record,
-        an unresolved row) cannot be the same author as anyone."""
-        if not paths:
+
+        Only the topic's OWN files answer: `<class>/<topic>.md` and its
+        budget parts (or the shared `<class>-<topic>.md` and its parts),
+        which no other memory is ever written into. The flat class file
+        is shared by every memory of its class until the class splits,
+        and a carried file by every memory it moved with; one agent
+        having written all of either says nothing about which memory a
+        section was. Reading the flat file as the topic's — guarded by
+        the crossref, which names only slices whose evidence had
+        references — made a second memory of one agent a "retitle" of
+        the first, and the same-agent rule deleted the first (a drain's
+        blind review, 2026-09-26). An origin with no agent (a clone
+        record, an unresolved row) cannot be the same author as anyone."""
+        if not paths or (role is not None and is_carried(klass, topic)):
             return None
-        if role is not None:
-            flat_file = os.path.join(layout.class_home(klass, role, project), f"{CLASS_FILES[klass]}.md")
-            prior = {sid.split(":", 1)[1] for sid in crossref_slice_ids(role) if sid.startswith(f"{klass}:")}
-            if flat_file in paths and not prior <= {topic}:
-                return None
+        if role is None:
+            own_dir, stem = layout.shared_home(klass, project), f"{klass}-{topic}"
+        else:
+            own_dir, stem = os.path.join(layout.class_home(klass, role, project), CLASS_FILES[klass]), topic
+        own = re.compile(re.escape(stem) + r"(-\d+)?\.md")
+        if any(os.path.dirname(p) != own_dir or not own.fullmatch(os.path.basename(p)) for p in paths):
+            return None
         agents: set[str] = set()
         for path in paths:
             meta, _sections = read_existing_slice(path)

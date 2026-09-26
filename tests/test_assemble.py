@@ -2065,8 +2065,55 @@ def test_a_claim_body_s_own_headings_never_open_a_section(tmp: str) -> None:
     assert tree(out) == before
 
 
+def test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory(tmp: str) -> None:
+    """A flat class file holds every memory of its class until the class
+    splits. Read as the one topic of the drain, sections one agent wrote
+    for other memories made that agent's next memory a "retitle", and
+    the same-agent rule deleted every earlier memory (a drain's blind
+    review, 2026-09-26). A new memory is a new fact: A, B and C all
+    stand. In the topic's own file a retitle still supersedes, and so
+    does the agent's new text under its own heading."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A.", "evidence": ["a1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    for topic, title, h in (("topic-b", "Fact B", "a2"), ("topic-c", "Fact C", "a3")):
+        set_claims(claims_dir, "alpha", [
+            {"class": "domain", "topic": topic, "title": title, "body": title[-1] + ".", "evidence": [h]},
+        ])
+        proc = run_assemble(drain, claims_dir, out)
+        assert proc.returncode == 0, proc.stderr
+        assert "SUPERSEDED" not in proc.stderr, proc.stderr
+    flat = read(dom(out, "alpha", "domain.md"))
+    assert all(f"## Fact {x}" in flat for x in "ABC"), f"an earlier memory was deleted:\n{flat}"
+
+    # The directory shape: the topic's own file is one memory.
+    drain2, claims2, out2 = build(os.path.join(tmp, "dir"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue open", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a2"]},
+    ])})
+    with_agents(drain2, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain2, claims2, out2).returncode == 0
+    set_claims(claims2, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue merged", "body": "Merged.", "evidence": ["a3"]},
+    ])
+    proc = run_assemble(drain2, claims2, out2)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    tracker = dom(out2, "alpha", "domain", "tracker.md")
+    assert "## Issue merged" in read(tracker) and "Issue open" not in read(tracker), read(tracker)
+    set_claims(claims2, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue merged", "body": "Merged and released.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain2, claims2, out2)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    assert "Merged and released." in read(tracker) and read(tracker).count("## ") == 1, read(tracker)
+    assert "## Other" in read(dom(out2, "alpha", "domain", "other.md"))
+
+
 def main() -> int:
     cases = [
+        test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
         test_a_claim_body_s_own_headings_never_open_a_section,
         test_the_drain_report_gathers_every_bundle_of_one_drain,
         test_part_one_of_a_split_topic_is_always_the_topic_file,

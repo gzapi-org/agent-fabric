@@ -283,6 +283,13 @@ memory**: a memory's topic is its file name and its heading its
 description, so a claim bringing a new heading into a topic whose every
 section one agent wrote — that agent's own — is the same memory
 rewritten (a tracker's "OPEN" become "MERGED"), not a second fact.
+Only the topic's own file answers that — `<class>/<topic>.md` and its
+budget parts, or the shared `<class>-<topic>.md` and its parts: the
+flat `<class>.md` holds every memory of its class until the class
+splits, and a carried file every memory it moved with, so a claim
+landing there is never a retitle and never falls under the rule below
+(a drain's blind review, 2026-09-26: one agent's second memory in a
+flat file deleted its first).
 **An agent's newer text replaces its own older text without a
 question** (the owner, 2026-09-26, after 34 such pairs asked and all 34
 superseded): a retitle, or a new text under a heading of that agent's

@@ -1107,6 +1107,17 @@ def main() -> int:
             target = (claim.get("merge_target") or "").strip()
             if target and target in present:
                 continue   # the author's own supersession: authorised
+            # TWO CLAIMS OF THIS DRAIN UNDER ONE HEADING are asked about
+            # whether or not the corpus holds the heading too. Looked for
+            # only where the corpus did not, a pair under a heading the
+            # corpus held was superseded twice by the same-agent rule and
+            # the later claim won silently (a drain's blind review,
+            # 2026-09-26). Recorded before the no-op checks below, so a
+            # claim equal to the corpus still counts as the pair's first;
+            # a claim itself in the corpus (a pair the owner kept both of,
+            # re-emitted) is no question.
+            twin = seen_incoming.get(heading)
+            seen_incoming.setdefault(heading, claim)
             # Present already — under its heading or as a kept-both
             # sibling "X (n)" — is the same claim again, whatever its date.
             siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
@@ -1114,15 +1125,13 @@ def main() -> int:
                 continue
             if absorbed(present, claim):
                 continue   # itself, as a slice written before body headings were demoted split it
-            rival = present.get(heading)
-            rival_date = observed_of(rival) if rival is not None else None
-            if rival is None and heading in seen_incoming and \
-               undated(claim_block(seen_incoming[heading]).split("\n", 1)[1]) != rendered:
-                # Two claims of this drain under one heading: the earlier one
-                # is the rival, with its own date.
-                rival = undated(claim_block(seen_incoming[heading]).split("\n", 1)[1])
-                rival_date = seen_incoming[heading].get("observed_at") or "undated"
-            seen_incoming.setdefault(heading, claim)
+            in_drain = twin is not None and undated(claim_block(twin).split("\n", 1)[1]) != rendered
+            if in_drain:
+                rival = undated(claim_block(twin).split("\n", 1)[1])
+                rival_date = twin.get("observed_at") or "undated"
+            else:
+                rival = present.get(heading)
+                rival_date = observed_of(rival) if rival is not None else None
             agent = (origins.get((claim.get("evidence") or [""])[0]) or {}).get("agent", "unresolved")
             # A RETITLED MEMORY IS THE SAME MEMORY. A topic is a memory's
             # file name and its heading the memory's description; an agent
@@ -1154,7 +1163,7 @@ def main() -> int:
             # recorded like any decision. Two agents' texts still stop the
             # drain, and so do two claims of this drain under one heading,
             # where which is newer is not the corpus's to say.
-            same_agent = author is not None and agent == author and (retitled or heading in present)
+            same_agent = not in_drain and author is not None and agent == author and (retitled or heading in present)
             rule = None
             if decision is None and same_agent:
                 decision, rule = "supersede", "same-agent"
@@ -1181,7 +1190,7 @@ def main() -> int:
             else:
                 refused_collisions.append(
                     f"{claim_key}   (or {key_id} for every pair under the heading)\n"
-                    f"    {'in this drain ' if heading not in present else 'in the corpus '}(observed {rival_date}): {excerpt(rival)}\n"
+                    f"    {'in this drain ' if in_drain else 'in the corpus '}(observed {rival_date}): {excerpt(rival)}\n"
                     f"    incoming      (observed {claim.get('observed_at') or 'undated'}, {agent}): {excerpt(rendered)}"
                 )
                 continue

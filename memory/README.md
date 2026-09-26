@@ -297,8 +297,9 @@ own topic, supersedes — the old sections are retired and the new one
 takes their place — and it is printed (`SUPERSEDED, same agent`) and
 recorded in `collision_decisions` with `"rule": "same-agent"`. An
 owner's decision in `--collision-decisions` still wins. Two agents'
-texts under one heading, and two claims of one drain, still stop the
-run. A topic several agents wrote appends a new heading as before, and
+texts under one heading, and two claims of one drain under one heading
+with different texts — whether or not the corpus holds that heading
+too — still stop the run. A topic several agents wrote appends a new heading as before, and
 a memory whose `merge_target` names the old section is not asked about. An author who knows
 the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no

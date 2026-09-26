@@ -2111,8 +2111,42 @@ def test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory(t
     assert "## Other" in read(dom(out2, "alpha", "domain", "other.md"))
 
 
+def test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it(tmp: str) -> None:
+    """The corpus holds "Status" (dev-01); one drain brings two claims of
+    the topic, both "Status", with different texts, both dev-01. Looked
+    for only where the corpus lacked the heading, the pair was never
+    seen: each was superseded by the same-agent rule and the later one
+    won silently (a drain's blind review, 2026-09-26). Which of the two
+    is newer is not the corpus's to say: the run stops, writing nothing."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a2"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged.", "evidence": ["a3"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+    ])
+    before = tree(out)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert "alpha/domain:tracker#Status@a4" in proc.stderr and "in this drain" in proc.stderr, proc.stderr
+    assert tree(out) == before, "a refused drain must not touch the tree"
+
+    # The first of the pair equal to the corpus is still the pair's first.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "in this drain" in proc.stderr, proc.stderr
+    assert tree(out) == before
+
+
 def main() -> int:
     cases = [
+        test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
         test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
         test_a_claim_body_s_own_headings_never_open_a_section,
         test_the_drain_report_gathers_every_bundle_of_one_drain,

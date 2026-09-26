@@ -212,7 +212,10 @@ def scalar(value: str) -> str:
         try:
             return json.loads(v)
         except ValueError:
-            return v[1:-1]
+            # YAML admits escapes JSON does not (`\\xe9`, a raw tab); the
+            # two that matter to a cue are unescaped here rather than
+            # returned raw, which was the defect this function fixes.
+            return re.sub(r'\\(["\\])', r"\1", v[1:-1])
     if len(v) >= 2 and v[0] == v[-1] == "'":
         return v[1:-1].replace("''", "'")
     return v

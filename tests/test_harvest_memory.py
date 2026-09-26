@@ -108,6 +108,14 @@ def test_a_quoted_description_is_read_as_yaml_reads_it(tmp: str) -> None:
     assert run(mem, out).returncode == 0
     got = {c["topic"]: c["title"] for c in claims_of(out)}
     assert got == {"dq": 'a trailing `echo "exit $?"` hides it', "sq": "it's the last command"}, got
+    # A YAML escape JSON rejects (\\x, a raw tab) must not bring the quotes'
+    # backslashes back with it (the review of the fix, 2026-09-26).
+    mem2, out2 = os.path.join(tmp, "mq2"), os.path.join(tmp, "oq2")
+    os.makedirs(mem2)
+    write_memory(mem2, "yx", "project", roles_class="workflow", description='"caf\\xe9 \\"x\\"\tthere"')
+    assert run(mem2, out2).returncode == 0
+    title = claims_of(out2)[0]["title"]
+    assert '\\"' not in title and '"x"' in title, repr(title)
 
 
 def test_a_cue_in_another_script_needs_its_english(tmp: str) -> None:

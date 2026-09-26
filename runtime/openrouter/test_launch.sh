@@ -378,6 +378,19 @@ out="$(run --provider=anthropic --version 2>&1)"
 grep -q "CLAUDE-EXECCED:--model claude-opus-5-5 --effort high --append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md --version" <<<"$out" && ok "execs plain claude with the native session model and the role's prompt file" || bad "no plain-claude exec" "$out"
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
 ! grep -q -- "--disallowedTools" <<<"$out" && ok "no tool removed from a login that is not language-culture" || bad "WebSearch removed from the wrong login" "$out"
+# THE WATCH STARTS WITH THE SESSION: an interactive launch with no prompt
+# of its own opens with one that arms it; a resume too; print mode, the
+# caller's own prompt and --version add none (the owner, 2026-09-26).
+out="$(run --provider anthropic 2>&1)"
+grep -q "CLAUDE-EXECCED:.*launch-prompt.md Session start: arm your GZCoord inbox watch now, with Monitor(command: 'gzcoord-inbox --follow'" <<<"$out" && ok "a bare launch opens with the prompt that arms the watch" || bad "no opening prompt on a bare launch" "$out"
+out="$(run --provider anthropic --resume abc123 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--resume abc123 Session start: arm your GZCoord inbox watch" <<<"$out" && ok "…and a resume, after the session id" || bad "no opening prompt on a resume" "$out"
+for a in "-p hello" "--print" "do-the-thing" "--version"; do
+    out="$(run --provider anthropic $a 2>&1)"
+    ! grep -q "Session start: arm" <<<"$out" && ok "…none with: $a" || bad "opening prompt added with: $a" "$out"
+done
+out="$(AGENT_FABRIC_NO_OPENING=1 run --provider anthropic 2>&1)"
+! grep -q "Session start: arm" <<<"$out" && ok "…and none when AGENT_FABRIC_NO_OPENING is set" || bad "opening prompt despite the switch" "$out"
 # A language-culture login whose locale has a search: the harness's WebSearch is removed at exec.
 mkdir -p "$FABRIC/identities/roles/language-culture"; cp -r "$FABRIC/identities/roles/backend-dev/." "$FABRIC/identities/roles/language-culture/"   # a charter to render
 mkdir -p "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"; printf '{"timezone":"Asia/Tbilisi","brave":{"country":"ALL","tool_description":"ძიება"}}' > "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}/locale.json"

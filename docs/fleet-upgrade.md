@@ -102,8 +102,10 @@ the control plane. It is the second piece of `upgrade`:
   the control agent's unit when the unit file changed — killing the
   process running bootstrap — so under `AGENT_FABRIC_DEFER_AGENTD_RESTART`
   it leaves that to the caller. The reply carries `restart_daemon` when
-  the head moved; agentd posts it, then exits for systemd to start the new
-  code. Its source watch waits for running actions too: it used to exit
+  the head moved, or when bootstrap changed the unit on a checkout that was
+  already current (the launcher's pull brought the unit, bootstrap installs
+  it); agentd posts the reply, then exits for systemd to start the new
+  code or unit, and the row's note says which. Its source watch waits for running actions too: it used to exit
   two seconds after its own files changed, mid-action.
 
 An account whose daemon predates this piece refuses `fabric` as not one of

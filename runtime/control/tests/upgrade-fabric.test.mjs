@@ -13,7 +13,7 @@ import { upgrade, upgradeFabric, checkArgs, sessionProvider } from '../upgrade.m
 
 const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
 
-function fixture({ bootstrapFails = false } = {}) {
+function fixture({ bootstrapFails = false, unitChanged = false } = {}) {
   const base = scratch('upgrade-fabric-');
   const origin = path.join(base, 'origin.git'), seed = path.join(base, 'seed'), root = path.join(base, 'agent-fabric');
   const record = path.join(base, 'bootstrap.log');
@@ -23,7 +23,8 @@ function fixture({ bootstrapFails = false } = {}) {
   fs.writeFileSync(path.join(seed, 'runtime', 'claude-code', 'bootstrap.sh'),
     bootstrapFails
       ? 'echo "  *  settings"\necho "bootstrap: the agent files could not be written" >&2\nexit 1\n'
-      : `printf 'defer=%s provider=%s\\n' "\${AGENT_FABRIC_DEFER_AGENTD_RESTART:-}" "\${AGENT_FABRIC_LAUNCH_PROVIDER:-}" >> "${record}"\n`);
+      : `printf 'defer=%s provider=%s\\n' "\${AGENT_FABRIC_DEFER_AGENTD_RESTART:-}" "\${AGENT_FABRIC_LAUNCH_PROVIDER:-}" >> "${record}"\n`
+        + (unitChanged ? 'echo "  *  agent-fabric-agentd: unit changed; restart left to the caller"\n' : ''));
   git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'one');
   git(seed, 'remote', 'add', 'origin', origin); git(seed, 'push', '-q', 'origin', 'main');
   git(base, 'clone', '-q', origin, root);
@@ -131,4 +132,39 @@ test('upgrade() routes the fabric piece, one action at a time', async () => {
   const target = f.advance('two');
   const [a, b] = await Promise.all([upgrade(req(target), opts(f)), upgrade(req(target), opts(f))]);
   assert.equal(a.status, 'upgraded'); assert.equal(b.status, 'busy');
+});
+
+test('a current checkout whose bootstrap changed the control agent\'s unit: the daemon still restarts, and the row says so', async () => {
+  const f = fixture({ unitChanged: true });
+  const r = await upgradeFabric(req(f.head()), opts(f));
+  assert.equal(r.status, 'current');
+  assert.equal(r.restart_daemon, true);
+  assert.match(r.note, /restarts on the new unit/);
+});
+
+test('a merge-base that cannot tell (not a "no"): failed with git\'s line, not "not on origin/main"', async () => {
+  const f = fixture();
+  const real = (await import('node:child_process')).execFile;
+  const { promisify } = await import('node:util');
+  const run = promisify(real);
+  const exec = async (bin, args, o) => {
+    if (args.includes('merge-base')) { const e = new Error('Command failed'); e.code = 128; e.stderr = 'fatal: bad object'; throw e; }
+    return run(bin, args, o);
+  };
+  const r = await upgradeFabric(req(f.advance('two')), opts(f, { exec }));
+  assert.equal(r.status, 'failed'); assert.match(r.reason, /git merge-base: fatal: bad object; not moved/);
+});
+
+test('a commit the account has but not on its origin/main (a pushed branch): refused, not moved', async () => {
+  const f = fixture();
+  const seed = path.join(f.base, 'seed');
+  git(seed, 'switch', '-q', '-c', 'side');
+  fs.writeFileSync(path.join(seed, 'side.txt'), 'x'); git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'side');
+  git(seed, 'push', '-q', 'origin', 'side');
+  const side = git(seed, 'rev-parse', 'HEAD');
+  git(f.root, 'fetch', '-q', 'origin', 'side');
+  const before = f.head();
+  const r = await upgradeFabric(req(side), opts(f));
+  assert.equal(r.status, 'refused'); assert.match(r.reason, /not on this account's origin\/main/);
+  assert.equal(f.head(), before);
 });

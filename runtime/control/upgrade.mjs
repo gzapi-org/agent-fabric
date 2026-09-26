@@ -284,25 +284,40 @@ export async function upgradeFabric(request, {
   if (branch !== 'main') return { status: 'refused', piece: 'fabric', from, reason: `the checkout is on ${branch}, not main; not moved — find whose work it is before moving it` };
   try { await git('fetch', '-q', 'origin', 'main'); }
   catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `git fetch: ${e?.killed ? 'timed out' : lastLine(e).slice(0, 160)}; not moved` }; }
-  try { await git('merge-base', '--is-ancestor', target, 'origin/main'); }
+  // After the fetch, a commit this checkout does not have is not on its
+  // origin/main either: that is a "no", as is merge-base's exit 1.
+  try { await git('cat-file', '-e', `${target}^{commit}`); }
   catch { return { status: 'refused', piece: 'fabric', from, reason: `${target.slice(0, 8)} is not on this account's origin/main; not moved` }; }
+  try { await git('merge-base', '--is-ancestor', target, 'origin/main'); }
+  catch (e) {
+    // Exit 1 is git's "not an ancestor"; anything else (an unknown object,
+    // a timeout) is a failure to tell, and says git's own line.
+    if (e?.code === 1) return { status: 'refused', piece: 'fabric', from, reason: `${target.slice(0, 8)} is not on this account's origin/main; not moved` };
+    return { status: 'failed', piece: 'fabric', from, reason: `git merge-base: ${e?.killed ? 'timed out' : lastLine(e).slice(0, 160)}; not moved` };
+  }
   try { await git('merge', '--ff-only', '-q', target); }
   catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `cannot fast-forward to ${target.slice(0, 8)}: ${lastLine(e).slice(0, 160)}; not forced` }; }
-  const to = await git('rev-parse', '--short', 'HEAD');
+  let to;
+  try { to = await git('rev-parse', '--short', 'HEAD'); }
+  catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `moved, but HEAD could not be read back: ${lastLine(e).slice(0, 160)}; not bootstrapped`, restart_daemon: true }; }
   let pids = [];
   try { pids = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) }); } catch { /* the session column says unknown */ pids = null; }
   const provider = pids ? sessionProvider(pids, proc) : null;
-  let reason = null;
+  let reason = null, unitDeferred = false;
   try {
-    await exec('bash', [path.join(root, 'runtime', 'claude-code', 'bootstrap.sh')], {
+    const r = await exec('bash', [path.join(root, 'runtime', 'claude-code', 'bootstrap.sh')], {
       encoding: 'utf8', timeout: BOOTSTRAP_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'], cwd: root,
       env: { ...env, AGENT_FABRIC_DEFER_AGENTD_RESTART: '1', ...(provider && { AGENT_FABRIC_LAUNCH_PROVIDER: provider }) },
     });
+    // The one place that knows the control agent's unit changed: bootstrap
+    // installed it and left the restart to us (the line is bootstrap.sh's).
+    unitDeferred = /restart left to the caller/.test(String(typeof r === 'string' ? r : r?.stdout ?? ''));
   } catch (e) { reason = `bootstrap: ${e?.killed ? `timed out after ${BOOTSTRAP_TIMEOUT_MS / 1000} s` : lastLine(e).slice(0, 200)}`; }
   return {
     status: reason ? 'failed' : from === to ? 'current' : 'upgraded', piece: 'fabric', from, to,
     ...(provider && { provider }), ...(reason && { reason }),
     session: pids === null ? 'unknown' : pids.length ? 'running: next launch uses it' : 'none',
-    restart_daemon: from !== to,
+    restart_daemon: from !== to || unitDeferred,
+    ...((from !== to || unitDeferred) && !reason && { note: `the control agent restarts on the new ${unitDeferred ? 'unit' : 'code'} after this reply` }),
   };
 }

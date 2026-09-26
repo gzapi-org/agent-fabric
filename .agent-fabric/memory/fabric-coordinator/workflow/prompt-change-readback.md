@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "prompt-change-readback"
 description: "After changing any role's charter, brief, prompt template or the team section: run `runtime/openrouter/launch --print` as a holder of that role (hostexec --as) before pushing — lint and tests did not check the rendered total until…"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 7038080b46396681
 ---

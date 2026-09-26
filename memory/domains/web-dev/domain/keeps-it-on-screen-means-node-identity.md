@@ -1,10 +1,11 @@
 ---
 role: "web-dev"
 class: domain
-description: "A test that a surface \\\"survives\\\" a state change must assert DOM node identity — findability passes through a full remount."
+topic: "keeps-it-on-screen-means-node-identity"
+description: "A test that a surface \"survives\" a state change must assert DOM node identity — findability passes through a full remount."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "web-dev-01"
     host: "develop-qzapp"
@@ -14,7 +15,7 @@ derived_from:
   - de89da11733c88b1
 ---
 
-## A test that a surface \"survives\" a state change must assert DOM node identity — findability passes through a full remount.
+## A test that a surface "survives" a state change must assert DOM node identity — findability passes through a full remount.
 
 A component that returns `<><Notice/>{settled}</>` from one branch and
 `settled` from another gives React two different element types at the

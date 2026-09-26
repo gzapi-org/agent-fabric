@@ -1,10 +1,11 @@
 ---
 role: "p2p-network-dev"
 class: domain
+topic: "libp2p-tcp-dials-the-last-host-of-a-stacked-multiaddr"
 description: "An address-class predicate that reads only the first /ip4|/ip6 pair is bypassed by stacking a second host behind a public literal; judge the whole multiaddr shape"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "p2p-network-dev-01"
     host: "develop-qzapp"

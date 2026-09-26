@@ -1,10 +1,11 @@
 ---
 role: "p2p-network-dev"
 class: domain
+topic: "cargo-metadata-does-not-typecheck"
 description: "a guard built on `cargo metadata --locked` cannot see a pin whose source does not compile against it — only `cargo check --locked` can"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "p2p-network-dev-01"
     host: "develop-qzapp"

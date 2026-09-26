@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: solution
+topic: "claude-setup-token-facts"
 description: "What a `claude setup-token` token can and cannot do, how to tell which account it belongs to, and that CLAUDE_CODE_OAUTH_TOKEN beats a stored sign-in — measured 2026-09-24 on 2.1.281"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 056b762f847c9da3
 ---

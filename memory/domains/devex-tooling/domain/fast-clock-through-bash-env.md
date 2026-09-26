@@ -1,10 +1,11 @@
 ---
 role: "devex-tooling"
 class: domain
+topic: "fast-clock-through-bash-env"
 description: "Speed up a bash suite whose script under test naps on a wall-clock SECONDS deadline — source a sleep() through BASH_ENV that ages SECONDS, keep real latency on `command sleep`, and prove the clock is live with a control case."
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"

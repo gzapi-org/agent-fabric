@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "cross-repo-lint-window"
 description: "A fabric push that changes what a project's index must list reddens that project's queue until its index PR merges — hold the push for a quiet queue until fabric-ref is live; and never chain a commit behind a piped test run"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 5cde1d6dd05d73c9
 ---

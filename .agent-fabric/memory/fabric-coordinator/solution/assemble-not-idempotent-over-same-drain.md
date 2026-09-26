@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: solution
+topic: "assemble-not-idempotent-over-same-drain"
 description: "FIXED 2026-09-20: assemble is idempotent over the same drain — split_by_budget no longer counts a re-rendered claim twice (heading+text identity); the -2 copies of 2026-09-17 were the carried count doubling past half budget"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - d3fb6e07f8cf8607
 ---

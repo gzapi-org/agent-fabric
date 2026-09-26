@@ -1,10 +1,11 @@
 ---
 role: "flutter-dev"
 class: domain
+topic: "contract-closure-unevaluatedproperties"
 description: To tell whether a gzapp contract closes an object, check unevaluatedProperties — additionalProperties alone is wrong wherever the schema uses $ref.
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "flutter-dev-01"
     host: "develop-qzapp"
@@ -61,7 +62,7 @@ Second, smaller trap from the same check: **resolve a contract by
 
 Related: [[verify-against-the-artifact]].
 
-## The nuance that stopped me raising a false finding (2026-09-19)
+### The nuance that stopped me raising a false finding (2026-09-19)
 
 `additionalProperties: false` fails to close a schema **only when the
 properties it must judge arrive from elsewhere** — a sibling `$ref` or

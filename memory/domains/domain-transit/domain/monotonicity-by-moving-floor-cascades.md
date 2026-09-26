@@ -1,10 +1,11 @@
 ---
 role: "domain-transit"
 class: domain
+topic: "monotonicity-by-moving-floor-cascades"
 description: "enforce ordering along a line with an anchor from the construction, never by carrying the previous result forward as the next search's floor"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "domain-transit"
     host: "develop-qzapp"

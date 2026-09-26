@@ -1,15 +1,20 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "skills-no-prs-no-dates"
 description: "Writing or changing a SKILL.md: load the skill-creator skill first and follow it; never cite a PR number, an incident date or a project name inside a skill — the skill states the rule and the procedure, the docs and the commit carry the…"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
   - 4b062cd74be851b9
 ---

@@ -1,10 +1,11 @@
 ---
 role: "devex-tooling"
 class: domain
+topic: "github-runner-unprivileged-userns"
 description: "ubuntu-latest (24.04) blocks `unshare -r` via AppArmor; one sysctl lifts it, and a dummy link inside the netns needs no modprobe — measured 2026-09-25"
 tier: 2
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: "devex-tooling"
     host: "develop-qzapp"

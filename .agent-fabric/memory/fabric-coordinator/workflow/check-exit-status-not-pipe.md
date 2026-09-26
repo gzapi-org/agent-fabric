@@ -1,16 +1,22 @@
 ---
 role: "fabric-coordinator"
 class: workflow
+topic: "check-exit-status-not-pipe"
 description: "Never `check | tail -1 && git commit`: the pipe's status is tail's, so a failed lint/static/suite still commits — run the check, capture rc=$?, commit only on 0"
 tier: 1
 knowledge_scope: full
-distilled_at: "2026-09-25"
+distilled_at: "2026-09-26"
 origin:
   - agent: user
     host: "develop-qzapp"
     project: "agent-fabric"
     working_copy: "agent-fabric"
+  - agent: user
+    host: "develop-qzapp"
+    project: "agent-fabric"
+    working_copy: "fabric-na"
 derived_from:
+  - 1fa68092e771d363
   - 770bfec8bc900afd
 ---
 
@@ -33,6 +39,12 @@ but "the commit is gated on the check's own status in the same command".
 — every commit command, even a "small" one after a multi-step edit
 — or `set -o pipefail` in the same command. Show the output separately if
 it is needed. A test suite's summary line is read, not trusted by `&&`.
+
+Fourth time, 2026-09-26: `a; b; c && git commit --amend` ran the amend on
+static's status while test_fabric-status had just failed (`;`, not `&&`).
+Caught before push, and re-amended gated on `rc`. Put the commit under
+`if [ $rc -eq 0 ]` on the one check that matters, never behind a list
+of `;`-joined checks.
 
 *References: cross-repo-lint-window*
 

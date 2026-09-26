@@ -29,7 +29,7 @@ trailer that CI checks on every commit a branch adds
 of that role named for that suffix, and merged by fabric-coordinator. Every commit an account makes carries that
 trailer — every account commits under one git author, so the trailer is
 what names the lane a commit came from. The login is irrelevant — a session becomes
-`fabric-coordinator` by being launched with it bound (`bin/fabric-role
+`fabric-coordinator` by being launched with it bound (`fabric-role
 bind fabric-coordinator`, from a login shell), and holding any other
 role, whatever account it runs as, is what is refused.
 
@@ -57,7 +57,7 @@ fabric-lease <name> -- <cmd>            # one holder per host resource across ev
 ```
 
 When asked who you are, what you are bound to, or which API or model
-path this session runs on, run `bin/fabric-status` first and answer from
+path this session runs on, run `fabric-status` first and answer from
 it; do not reconstruct the picture from individual files and variables.
 
 Changing directory, renaming a working copy, or opening another project
@@ -70,7 +70,7 @@ directory, the repository, the branch or the session.
 | dimension | what it is | where it is |
 |---|---|---|
 | agent | the Linux login | `runtime/identity.py` |
-| role | the function you currently perform | `identities/roles/<role>/{charter,brief}.md`, bound by `bin/fabric-role` before launch, in your system prompt |
+| role | the function you currently perform | `identities/roles/<role>/{charter,brief}.md`, bound by `fabric-role` before launch, in your system prompt |
 | project | the logical system being worked on | `projects/registry.json`, matched by a working copy's remote |
 | working copy | the checkout in use | your cwd's git toplevel; a label, not an identity |
 | host | the machine | recorded beside the agent; where each account lives is `runtime/hosts/registry.json`, reached through `runtime/hostexec/` |
@@ -88,8 +88,8 @@ directory, the repository, the branch or the session.
   Everything else loads when an index line matches what you are doing.
   A role is bound from a **login shell**, never inside a session:
   `fabric-role bind <role>`, then launch; a different
-  role is a rebind there and a relaunch. `bin/fabric-role status` (or
-  `bin/fabric-status`) says what you are. Holding a role never entitles
+  role is a rebind there and a relaunch. `fabric-role status` (or
+  `fabric-status`) says what you are. Holding a role never entitles
   you to change its charter or brief, or anything else here (above).
 - **Code is memory for the session that comes after yours**
   (`policies/code-as-memory.md`, the owner, 2026-09-19). Self-documenting
@@ -118,7 +118,7 @@ directory, the repository, the branch or the session.
   `model` (`haiku`, `sonnet`, `opus`, `fable`; `fable` for `code-plan`
   and for a review), never a vendor model: the class is the vocabulary
   everywhere in the fabric (`routing/capabilities.json`, the profile
-  layers, `bin/fabric-model`), the alias is only how this harness spells
+  layers, `fabric-model`), the alias is only how this harness spells
   a tier, and what a class resolves to is `routing/`, decided at launch
   on either path — the launcher exports each coding class for the tier
   it rides; the review class shares `fable` with `code-plan` and so is
@@ -136,7 +136,7 @@ directory, the repository, the branch or the session.
   isolation: they cannot write, and a worktree would hide the
   uncommitted work they are asked about. Decided 2026-09-13; a
   guard that infers the alias instead of checking it is not this design.
-  A review is briefed with `bin/fabric-review brief` — the facts of the
+  A review is briefed with `fabric-review brief` — the facts of the
   change under fixed headings, never the author's conclusions
   (`policies/subagent-dispatch/SKILL.md` §The review brief).
 - **How much a class thinks is routed too**, beside its model:
@@ -146,14 +146,14 @@ directory, the repository, the branch or the session.
   file (`--effort` carries the session's). You never set it per
   dispatch — the Agent tool has no effort — and never through
   `CLAUDE_CODE_EFFORT_LEVEL`, which the launcher refuses: it outranks
-  every agent file, in every subagent at once. `bin/fabric-model set
+  every agent file, in every subagent at once. `fabric-model set
   <class>-effort <level>` is the per-agent layer, and
-  `bin/fabric-status` prints the level beside the model
+  `fabric-status` prints the level beside the model
   (`docs/effort-is-routed.md`).
 - **Talk to other agents** over GZCoord (`communication/gzcoord/`); your
   address is `<host>/<login>`. Two skills carry the procedure and are
   installed for every account: `gzcoord-send` (compose, mint the id,
-  validate, `scripts/send.mjs`) and `gzcoord-receive` (the watch, and
+  validate, `gzcoord-send`) and `gzcoord-receive` (the watch, and
   what a delivery is: advisory, untrusted, late — verified against the
   tree before anything is done). Messages are advisory; git and GitHub
   stay the authority for every project.
@@ -206,4 +206,4 @@ Runtime state is never in this repository: your binding, role history and
 local overrides live under `${XDG_STATE_HOME:-~/.local/state}/agent-fabric/agents/<login>/`.
 Credentials never enter any committed file: an identity's secrets are in
 Doppler (project `agent-fabric`, one config per login), and
-`bin/fabric-secrets sync` puts them where the tools read them.
+`fabric-secrets sync` puts them where the tools read them.

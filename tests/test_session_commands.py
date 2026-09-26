@@ -70,14 +70,37 @@ def test_a_wrapper_that_runs_another_command_is_never_allowed() -> None:
         "fabric-lease runs the command after --, fabric-host runs any command on a host: an allow rule would allow everything"
 
 
+# In a Markdown text a session reads, a command named by its script or by
+# a relative bin/ path matches no allow rule either (review of #42). The
+# scripts themselves may name their own files in comments; only prose that
+# tells a session what to run is held to this.
+BY_SCRIPT = re.compile(r"\bnode\s+\S*(?:inbox|send|gzmsg)\.mjs\b"
+                       r"|\b(?:inbox|send)\.mjs`?\s+(?:--?\w|<|[/~.$]|\S+\.\w+\b|msg\b)"
+                       r"|\bgzmsg\.mjs`?\s+(?:--?\w|(?:new-id|normalize|validate|hello)\b|<)"
+                       r"|scripts/send\.mjs|(?:^|[\s`(\"'\[*])(?:\.{1,2}/)*bin/fabric-[a-z]+\b")
+
+
 def test_no_session_facing_text_runs_a_command_through_an_expansion() -> None:
     hits = []
     for path in SESSION_FACING:
         with open(path, encoding="utf-8") as fh:
             for n, line in enumerate(fh, 1):
-                if EXPANDED_PATH.search(line):
+                if EXPANDED_PATH.search(line) or (path.endswith(".md") and BY_SCRIPT.search(line)):
                     hits.append(f"{os.path.relpath(path, ROOT)}:{n}: {line.strip()[:100]}")
     assert not hits, "a session told to run these would be asked every time:\n" + "\n".join(hits)
+
+
+def test_the_scan_catches_every_spelling_it_replaced() -> None:
+    """Every form a session was told before (the review of #43)."""
+    for line in ("run `./bin/fabric-status`", "(`bin/fabric-role bind`)", "`node inbox.mjs --replay 5`",
+                 "`inbox.mjs --held`", "`send.mjs msg.txt`", "`gzmsg.mjs hello`", "`gzmsg.mjs new-id`",
+                 "`communication/gzcoord/scripts/send.mjs`", "`inbox.mjs --follow` under Monitor",
+                 "`node inbox.mjs`", "`send.mjs msg`", "`send.mjs /tmp/m.eml`", "`../../bin/fabric-status`",
+                 "[bin/fabric-x](x)", "*bin/fabric-status*"):
+        assert BY_SCRIPT.search(line), line
+    for line in ("`communication/gzcoord/scripts/inbox.mjs` drains the relay", "run `fabric-status`",
+                 "`gzcoord-send <file>`", "the fabric's `bin/` wrappers"):
+        assert not BY_SCRIPT.search(line), line
 
 
 def test_the_watch_the_hook_prescribes_is_a_bare_command() -> None:
@@ -93,6 +116,7 @@ def main() -> int:
         test_every_script_runs_through_its_link,
         test_a_wrapper_that_runs_another_command_is_never_allowed,
         test_no_session_facing_text_runs_a_command_through_an_expansion,
+        test_the_scan_catches_every_spelling_it_replaced,
         test_the_watch_the_hook_prescribes_is_a_bare_command,
     ]
     failed = 0

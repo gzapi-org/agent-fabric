@@ -71,7 +71,7 @@ def case_header_names_agent_host_role() -> None:
         r = f.run("--print")
         assert r.returncode == 0, r.stderr
         assert f"agent `{LOGIN}`" in r.stdout and "**backend-dev**" in r.stdout, r.stdout
-        assert "bin/fabric-whoami" in r.stdout and "relaunch" in r.stdout
+        assert "`fabric-whoami`" in r.stdout and "bin/fabric-whoami" not in r.stdout and "relaunch" in r.stdout
 
 
 def case_charter_and_brief_bodies_without_frontmatter() -> None:

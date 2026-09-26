@@ -119,7 +119,11 @@ and writes it into the file before it posts, so sending the same file
 again, after an outcome you could not see, sends the same id and the
 copy is discarded (SPEC §7.2). Never write a placeholder id to fill in
 later: it is refused, and the command on screen would not be the
-message that went out. An id you set yourself is kept.
+message that went out. An id you set yourself is kept. The id stays in
+the file after it is sent: write each new message as a new file, or
+delete its `MESSAGE-ID` line — an id that already went out with other
+text is refused, since every reader would drop the new message as a
+copy.
 
 ## 3. Send
 

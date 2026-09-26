@@ -932,7 +932,8 @@ function withRelay(fn) {
 function sendWith(relay, text, extra = [], moreEnv = {}) {
   const f = path.join(scratch('send-'), 'm.txt'); fs.writeFileSync(f, text);
   // HOME is a scratch dir: the runner's own synced secrets.env must not be the token here.
-  const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan', ...moreEnv };
+  // The state dir too: send records every id it sends, and a test must never write that record into the runner's own.
+  const env = { ...process.env, HOME: path.dirname(f), AGENT_FABRIC_STATE_DIR: path.join(path.dirname(f), 'state'), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan', ...moreEnv };
   return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
     (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
 }
@@ -958,8 +959,8 @@ test('send posts a valid message as this login, to the configured channel', asyn
 // A message with no MESSAGE-ID gets one from the sender, written into the
 // file before it posts, so a retry of the same file carries the same id
 // (SPEC §7.2) — and the command on screen is the message that goes out.
-function sendFile(relay, f, extra = []) {
-  const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
+function sendFile(relay, f, extra = [], state = path.join(path.dirname(f), 'state')) {
+  const env = { ...process.env, HOME: path.dirname(f), AGENT_FABRIC_STATE_DIR: state, CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
   return new Promise(resolve => execFile('node', [SEND, f, ...extra], { env, encoding: 'utf8' },
     (e, out, err) => resolve({ code: e ? e.code : 0, out: String(out), err: String(err) })));
 }
@@ -991,7 +992,7 @@ test('a dry run mints in memory only; stdin is said to keep nothing; a present i
     assert.equal(dry.code, 0, dry.err);
     assert.equal(fs.readFileSync(f, 'utf8'), noId, 'the dry run changed nothing');
     assert.match(dry.err, /would mint one \(dry run/);
-    const env = { ...process.env, HOME: path.dirname(f), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
+    const env = { ...process.env, HOME: path.dirname(f), AGENT_FABRIC_STATE_DIR: path.join(path.dirname(f), 'state'), CLAUDE_BRIDGE_URL: relay, CLAUDE_BRIDGE_AUTH_TOKEN: 'tok-fixture', GZCOORD_CHANNEL: 'fixture:chan' };
     const piped = await new Promise(resolve => { const c = execFile('node', [SEND, '-'], { env, encoding: 'utf8' }, (e, out, err) => resolve({ code: e ? e.code : 0, out, err })); c.stdin.end(noId); });
     assert.equal(piped.code, 0, piped.err);
     assert.match(piped.err, /from stdin it is kept nowhere/);
@@ -1001,6 +1002,43 @@ test('a dry run mints in memory only; stdin is said to keep nothing; a present i
     const placeholder = await sendWith(relay, valid.replace(/^MESSAGE-ID: .*$/m, 'MESSAGE-ID: MSGID'));
     assert.equal(placeholder.code, 2);
     assert.match(placeholder.err, /MSGID.*not sent/);
+  });
+});
+
+test('an id that already went out with another message is refused — a reused file does not send its new message under the old id', async () => {
+  await withRelay(async (relay, posts) => {
+    const dir = scratch('send-reuse-'); const f = path.join(dir, 'm.txt'); const state = path.join(dir, 'state');
+    fs.writeFileSync(f, noId);
+    const first = await sendFile(relay, f, [], state);
+    assert.equal(first.code, 0, first.err);
+    const again = await sendFile(relay, f, [], state);
+    assert.equal(again.code, 0, 'the same message again is a retry, and passes');
+    fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('hello', 'a different message'));
+    const reused = await sendFile(relay, f, [], state);
+    assert.equal(reused.code, 2);
+    assert.match(reused.err, /already went out with a different message \(seq 42\).*delete the MESSAGE-ID line/);
+    assert.equal(posts.length, 2, 'the reused-id message was not posted');
+    fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(/^MESSAGE-ID: .*\n/m, ''));
+    const fresh = await sendFile(relay, f, [], state);
+    assert.equal(fresh.code, 0, fresh.err);
+    assert.notEqual(idOf(fs.readFileSync(f, 'utf8')), idOf(posts[0].body.content), 'deleting the line mints a new id');
+  });
+});
+
+test('a header send cannot parse is refused by the validator (exit 2), never a crash; a file that cannot be rewritten is refused unchanged and not posted', async () => {
+  await withRelay(async (relay, posts) => {
+    const bad = await sendWith(relay, 'GZCOORD INFO\nFROM: a/b\n\nNOTES:\nx\n');
+    assert.equal(bad.code, 2, bad.err); assert.match(bad.err, /does not validate/);
+    const dir = scratch('send-ro-'); const f = path.join(dir, 'm.txt'); fs.writeFileSync(f, noId);
+    fs.chmodSync(dir, 0o555);
+    try {
+      if (process.getuid && process.getuid() === 0) return;   // root writes anywhere: nothing to show
+      const r = await sendFile(relay, f, [], path.join(scratch('send-ro-state-'), 'state'));
+      assert.equal(r.code, 1); assert.match(r.err, /could not write the minted MESSAGE-ID/);
+      assert.equal(fs.readFileSync(f, 'utf8'), noId, 'the file is unchanged');
+      assert.deepEqual(fs.readdirSync(dir), ['m.txt'], 'no temporary left');
+      assert.equal(posts.length, 0);
+    } finally { fs.chmodSync(dir, 0o755); }
   });
 });
 

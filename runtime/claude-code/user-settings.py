@@ -46,6 +46,16 @@ an agent's session is read by the person operating the fleet, not only
 by the agent — the thinking summaries and the full tool output are what
 lets a stalled or misdirected session be seen for what it is from its
 terminal, rather than reconstructed afterwards from a transcript.
+
+`permissions.allow`: `Bash(<name> *)` for every command in
+runtime/claude-code/commands.json — the fabric's own commands, which
+bootstrap links into ~/.local/bin (the owner, 2026-09-26: no approval
+for any fabric script or executable). A narrow rule, one command name
+each — never one in its `not_allowed`, a wrapper that runs another
+command — because in auto mode a narrow Bash rule is resolved before the
+classifier while a broad one, or one naming Monitor, is set aside; a
+Monitor follows the Bash rules. Every other rule the account allows,
+denies or asks is kept as read, and an `ask` rule still wins.
 """
 from __future__ import annotations
 
@@ -58,6 +68,13 @@ USAGE = (__doc__ or "user-settings.py <settings.json> [--dry-run]").strip()
 ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 TOP_LEVEL = {"showThinkingSummaries": True, "verbose": True}
 ENV = {"DISABLE_AUTOUPDATER": "1"}
+COMMANDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands.json")
+
+
+def allow_rules() -> list[str]:
+    with open(COMMANDS, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    return [f"Bash({name} *)" for name in doc["commands"] if name not in doc.get("not_allowed", {})]
 
 
 class Unreadable(Exception):
@@ -87,9 +104,15 @@ def save(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def allowed(doc: dict) -> list:
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
+    return perms.get("allow") if isinstance(perms.get("allow"), list) else []
+
+
 def settled(doc: dict) -> bool:
     current = doc.get("attribution") if isinstance(doc.get("attribution"), dict) else {}
     return (all(current.get(k) == v for k, v in ATTRIBUTION.items())
+            and all(r in allowed(doc) for r in allow_rules())
             and "includeCoAuthoredBy" not in doc
             and all(doc.get(k) == v for k, v in TOP_LEVEL.items())
             and isinstance(doc.get("env"), dict) and all(doc["env"].get(k) == v for k, v in ENV.items()))
@@ -130,6 +153,9 @@ def main(argv: list[str]) -> int:
     doc.update(TOP_LEVEL)
     env = doc.get("env") if isinstance(doc.get("env"), dict) else {}
     doc["env"] = {**env, **ENV}
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
+    perms["allow"] = allowed(doc) + [r for r in allow_rules() if r not in allowed(doc)]
+    doc["permissions"] = perms
     save(path, doc)
     print(f"  +  {path} fabric user settings")
     return 0

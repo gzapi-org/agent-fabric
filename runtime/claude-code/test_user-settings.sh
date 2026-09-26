@@ -63,6 +63,20 @@ out="$(run --dry-run --bogus)"; rc=$?
 [[ $rc -eq 2 && ! -e "$SANDBOX/--bogus" ]] && ok "…beside --dry-run too" || bad "unknown flag with --dry-run" "rc=$rc $out"
 out="$(python3 -OO "$HERE/user-settings.py" --help 2>&1)"; rc=$?
 [[ $rc -eq 0 && "$out" == *"<settings.json>"* ]] && ok "the usage survives python3 -OO" || bad "-OO" "rc=$rc $out"
+# The fabric's commands are allowed by a narrow rule each; the account's
+# own allow, deny and ask rules stay as they were, and a wrapper that runs
+# another command is never allowed (the owner, 2026-09-26).
+mkdir -p "$(dirname "$S")"
+printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"],"ask":["Bash(gzcoord-send *)"],"deny":["Bash(rm *)"]}}' > "$S"
+run "$S" >/dev/null
+perm="$(jq -c .permissions "$S")"
+jq -e '.allow | index("Bash(ls *)") and index("Bash(gzcoord-inbox *)") and index("Bash(fabric-status *)")' <<<"$perm" >/dev/null \
+    && ok "each fabric command gets a narrow allow rule, beside the account's own" || bad "allow rules" "$perm"
+jq -e '.ask == ["Bash(gzcoord-send *)"] and .deny == ["Bash(rm *)"]' <<<"$perm" >/dev/null \
+    && ok "…the account's ask and deny rules are untouched (an ask still wins)" || bad "ask/deny changed" "$perm"
+jq -e '[.allow[] | select(. == "Bash(fabric-lease *)" or . == "Bash(fabric-host *)")] | length == 0' <<<"$perm" >/dev/null \
+    && ok "…and fabric-lease and fabric-host, which run other commands, get none" || bad "wrapper allowed" "$perm"
+out="$(run "$S")"; [[ "$out" == "  =  "* ]] && ok "…and a second run changes nothing" || bad "not idempotent" "$out"
 cd "$HERE" || exit 1
 
 echo; echo "user-settings: $PASS passed, $FAIL failed"

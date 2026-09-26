@@ -379,14 +379,19 @@ grep -q "CLAUDE-EXECCED:--model claude-opus-5-5 --effort high --append-system-pr
 grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_ROLE=backend-dev$" <<<"$out" && ok "role stamped on plain claude" || bad "no role stamp" "$out"
 ! grep -q -- "--disallowedTools" <<<"$out" && ok "no tool removed from a login that is not language-culture" || bad "WebSearch removed from the wrong login" "$out"
 # THE WATCH STARTS WITH THE SESSION: an interactive launch with no prompt
-# of its own opens with one that arms it; a resume too; print mode, the
-# caller's own prompt and --version add none (the owner, 2026-09-26).
+# of its own opens with one that arms it, after `--` and last, so no option
+# of the caller's can take it as a value; print mode, the caller's own
+# prompt, --version and a caller's own `--` add none (the owner, 2026-09-26).
 out="$(run --provider anthropic 2>&1)"
-grep -q "CLAUDE-EXECCED:.*launch-prompt.md Session start: arm your GZCoord inbox watch now, with Monitor(command: 'gzcoord-inbox --follow'" <<<"$out" && ok "a bare launch opens with the prompt that arms the watch" || bad "no opening prompt on a bare launch" "$out"
+grep -q "CLAUDE-EXECCED:.*launch-prompt.md -- Session start: arm your GZCoord inbox watch now, with Monitor(command: 'gzcoord-inbox --follow'" <<<"$out" && ok "a bare launch opens with the prompt that arms the watch, after --" || bad "no opening prompt on a bare launch" "$out"
 out="$(run --provider anthropic --resume abc123 2>&1)"
-grep -q "CLAUDE-EXECCED:.*--resume abc123 Session start: arm your GZCoord inbox watch" <<<"$out" && ok "…and a resume, after the session id" || bad "no opening prompt on a resume" "$out"
-for a in "-p hello" "--print" "do-the-thing" "--version"; do
-    out="$(run --provider anthropic $a 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--resume abc123 -- Session start: arm your GZCoord inbox watch" <<<"$out" && ok "…and a resume, after the session id" || bad "no opening prompt on a resume" "$out"
+out="$(run --provider anthropic --resume 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--resume -- Session start: arm" <<<"$out" && ok "…a bare --resume keeps its picker: the prompt is not its value" || bad "the prompt became --resume's value" "$out"
+out="$(run --provider anthropic --add-dir /x 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--add-dir /x -- Session start: arm" <<<"$out" && ok "…and a variadic option does not swallow it" || bad "a variadic option swallowed the prompt" "$out"
+for a in "-p" "do-the-thing" "--version" "-- do-it"; do
+    out="$(run --provider anthropic $a </dev/null 2>&1)"
     ! grep -q "Session start: arm" <<<"$out" && ok "…none with: $a" || bad "opening prompt added with: $a" "$out"
 done
 out="$(AGENT_FABRIC_NO_OPENING=1 run --provider anthropic 2>&1)"
@@ -397,6 +402,8 @@ mkdir -p "$FABRIC/identities/roles/language-culture/locale/${LOGIN##*-}"; printf
 printf '{"agent":"%s","host":"'"$(hostname -s)"'","role":"language-culture","updated_at":"x"}\n' "$LOGIN" > "$STATE/agents/$LOGIN/binding.json"
 outlc="$(run --provider anthropic -- --version 2>&1)"
 grep -q "CLAUDE-EXECCED:.*--version --disallowedTools WebSearch$" <<<"$outlc" && ok "a language-culture login with a locale search execs claude without WebSearch — the variadic flag last, after the caller's arguments" || bad "WebSearch not removed on the language-culture login, or not last" "$outlc"
+outlc="$(run --provider anthropic 2>&1)"
+grep -q "CLAUDE-EXECCED:.*--disallowedTools WebSearch -- Session start: arm" <<<"$outlc" && ok "…and a bare launch there: the opening after the variadic flag, behind --" || bad "the opening is not after --disallowedTools" "$outlc"
 grep -q "CLAUDE-EXECCED:.*--append-system-prompt-file $STATE/agents/$LOGIN/launch-prompt.md" <<<"$outlc" && grep -q "CLAUDE-ENV:AGENT_FABRIC_LAUNCH_CLAUDE_VERSION=$" <<<"$outlc" && ok "…with the prompt still appended and no build stamp: the locale carries no harness text" || bad "append expected without a harness translation" "$outlc"
 # The build stamp means "the prompt is replaced". Inherited from a session
 # whose prompt WAS replaced, it would say so of this child, whose prompt

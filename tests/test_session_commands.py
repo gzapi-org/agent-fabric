@@ -74,7 +74,8 @@ def test_a_wrapper_that_runs_another_command_is_never_allowed() -> None:
 # a relative bin/ path matches no allow rule either (review of #42). The
 # scripts themselves may name their own files in comments; only prose that
 # tells a session what to run is held to this.
-BY_SCRIPT = re.compile(r"inbox\.mjs\S*`? --follow|scripts/send\.mjs|gzmsg\.mjs (new-id|normalize|validate)|(?<![\w/-])bin/fabric-[a-z]+\b")
+BY_SCRIPT = re.compile(r"\b(?:inbox|send|gzmsg)\.mjs`?\s+(?:--?\w|(?:new-id|normalize|validate|hello)\b|<|\S+\.(?:txt|md|json)\b)"
+                       r"|scripts/send\.mjs|(?:^|[\s`(\"'])(?:\.{1,2}/)?bin/fabric-[a-z]+\b")
 
 
 def test_no_session_facing_text_runs_a_command_through_an_expansion() -> None:
@@ -85,6 +86,17 @@ def test_no_session_facing_text_runs_a_command_through_an_expansion() -> None:
                 if EXPANDED_PATH.search(line) or (path.endswith(".md") and BY_SCRIPT.search(line)):
                     hits.append(f"{os.path.relpath(path, ROOT)}:{n}: {line.strip()[:100]}")
     assert not hits, "a session told to run these would be asked every time:\n" + "\n".join(hits)
+
+
+def test_the_scan_catches_every_spelling_it_replaced() -> None:
+    """Every form a session was told before (the review of #43)."""
+    for line in ("run `./bin/fabric-status`", "(`bin/fabric-role bind`)", "`node inbox.mjs --replay 5`",
+                 "`inbox.mjs --held`", "`send.mjs msg.txt`", "`gzmsg.mjs hello`", "`gzmsg.mjs new-id`",
+                 "`communication/gzcoord/scripts/send.mjs`", "`inbox.mjs --follow` under Monitor"):
+        assert BY_SCRIPT.search(line), line
+    for line in ("`communication/gzcoord/scripts/inbox.mjs` drains the relay", "run `fabric-status`",
+                 "`gzcoord-send <file>`", "the fabric's `bin/` wrappers"):
+        assert not BY_SCRIPT.search(line), line
 
 
 def test_the_watch_the_hook_prescribes_is_a_bare_command() -> None:
@@ -100,6 +112,7 @@ def main() -> int:
         test_every_script_runs_through_its_link,
         test_a_wrapper_that_runs_another_command_is_never_allowed,
         test_no_session_facing_text_runs_a_command_through_an_expansion,
+        test_the_scan_catches_every_spelling_it_replaced,
         test_the_watch_the_hook_prescribes_is_a_bare_command,
     ]
     failed = 0

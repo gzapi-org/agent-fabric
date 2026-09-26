@@ -128,7 +128,7 @@ gzcoord-send <file> --dry-run  # validate, resolve, post nothing
 gzcoord-send <file> --force    # post even if the addressee has no session
 ```
 
-`send.mjs` normalizes the text (a pasted message carries terminal
+`gzcoord-send` normalizes the text (a pasted message carries terminal
 indentation), validates it as the last step before it leaves — a message
 that fails is not sent — and refuses a `FROM` that is not your address:
 the sender is the login, never a claim. It resolves the relay, the

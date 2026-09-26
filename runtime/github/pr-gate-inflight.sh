@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # runtime/github/pr-gate-inflight.sh — sourced by pr-gate.sh for
 # --in-flight and --overlap (its help says what they answer). Not
 # executable on its own: it reads pr-gate.sh's REPO, JSON, OVERLAP and
@@ -15,7 +16,8 @@ in_flight() {
     local base fetch_ok=true prs_ok=true
     if ! git fetch -q --prune origin 2>/dev/null; then
         fetch_ok=false
-        echo "pr-gate: git fetch origin failed — the rows below are what origin last showed this clone" >&2
+        local seen; seen="$(date -u -r "$(git rev-parse --git-path FETCH_HEAD)" +%Y-%m-%dT%H:%MZ 2>/dev/null || echo never)"
+        echo "pr-gate: git fetch origin failed — the rows below are what origin showed this clone at its last fetch ($seen)" >&2
     fi
     base="${AGENT_FABRIC_PR_BASE:-}"
     if [[ -z "$base" ]]; then
@@ -26,7 +28,7 @@ in_flight() {
 
     local prmap
     prmap="$(gh pr list --repo "$REPO" --state open --limit 500 --json number,headRefName 2>/dev/null)" \
-        || { prs_ok=false; prmap="[]"; echo "pr-gate: could not list pull requests — the PR column reads unknown" >&2; }
+        || { prs_ok=false; prmap="[]"; echo "pr-gate: could not list pull requests — the PR column reads unavailable, never \"no PR\"" >&2; }
 
     local rows="" ref sha when name owner pr ahead paths total
     while IFS=$'\t' read -r ref sha when; do
@@ -37,7 +39,7 @@ in_flight() {
         if [[ "$name" =~ ^([^/]+/[^/]+)/.+ ]]; then owner="${BASH_REMATCH[1]}"; else owner="unattributed"; fi
         if [[ "$prs_ok" == true ]]; then
             pr="$(jq -r --arg b "$name" '[.[] | select(.headRefName == $b) | .number][0] // "none"' <<<"$prmap")"
-        else pr="unknown"; fi
+        else pr="unavailable"; fi
         ahead="$(git rev-list --count "$base..$sha" 2>/dev/null)" || ahead=null
         paths="$(git diff --name-only "$base...$sha" 2>/dev/null)" || { echo "pr-gate: $name could not be diffed (deleted meanwhile?) — skipped" >&2; continue; }
         rows+="$(jq -cn --arg branch "$name" --arg owner "$owner" --arg pr "$pr" --arg sha "$sha" --arg when "$when" \
@@ -78,9 +80,9 @@ in_flight() {
               '{base:$base, fetched_at:$fetched_at, fetch_ok:$fetch_ok, prs_ok:$prs_ok} + (if $overlap != "" then {overlap_with:$overlap} else {} end) + {rows:$rows}'
     else
         local n; n="$(jq 'length' <<<"$all")"
-        if [[ -n "$target" ]]; then echo "in flight on $REPO sharing a path with $target (against $base): $n"
+        if [[ -n "$target" ]]; then echo "in flight on $REPO sharing a path with $target (against $base): $n — no shared path is not the same as compatible: two changes can clash in meaning without sharing a file"
         else echo "in flight on $REPO (not merged into $base): $n"; fi
-        jq -r '.[] | "\(.owner)  \(.branch)  \(if (.pr|type) == "number" then "#\(.pr)" elif .pr == "none" then "no PR" else "PR unknown" end)  ahead=\(.ahead)  last=\(.last_commit[0:16])  paths=\(.paths_total)"
+        jq -r '.[] | "\(.owner)  \(.branch)  \(if (.pr|type) == "number" then "#\(.pr)" elif .pr == "none" then "no PR" else "PR unavailable" end)  ahead=\(.ahead)  last=\(.last_commit[0:16])  paths=\(.paths_total)"
                     + (if .shared then "\n    shares \(.shared_total): \(.shared[:8] | join(", "))\(if .shared_total > 8 then ", …" else "" end)" else "" end)' <<<"$all"
     fi
     [[ "$fetch_ok" == true && "$prs_ok" == true ]] || return 2

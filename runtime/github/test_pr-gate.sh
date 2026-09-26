@@ -58,7 +58,7 @@ cat > "$SANDBOX/bin/gh" <<'GHMOCK'
 S="$MOCK_STATE"; args="$*"
 case "$args" in
   "repo view"*) echo "testorg/testrepo"; exit 0 ;;
-  "pr list"*) cat "$S/prs.json"; exit 0 ;;
+  "pr list"*) [[ -f "$S/prlist_fail" ]] && exit 1; cat "$S/prs.json"; exit 0 ;;
   "pr view"*) n="$3"; r="$(jq -c --argjson n "$n" '.[] | select(.number == $n)' "$S/prs.json" "$S/closed.json" 2>/dev/null | head -1)"; [[ -n "$r" ]] || exit 1; printf '%s\n' "$r"; exit 0 ;;
   *graphql*) [[ -f "$S/graphql_fail" ]] && exit 1; cat "$S/graphql.json"; exit 0 ;;
 esac
@@ -270,10 +270,17 @@ out="$(run --overlap no/such/branch)"; rc=$?
 [[ $rc -eq 2 ]] && grep -q 'not a branch in flight on origin' <<<"$out" && pass "an unknown branch is said, exit 2" || fail "unknown branch not refused (rc=$rc)" "$out"
 out="$(run --in-flight 42)"; rc=$?
 [[ $rc -eq 2 ]] && pass "--in-flight takes no PR numbers" || fail "numbers accepted with --in-flight (rc=$rc)" "$out"
+out="$(run --overlap develop-qzapp/other/feat/parked)"
+grep -q 'no shared path is not the same as compatible' <<<"$out" && pass "--overlap says that no shared path does not mean compatible" || fail "the overlap caveat is missing" "$out"
+touch "$STATE/prlist_fail"
+out="$(run --in-flight)"; rc=$?
+rm -f "$STATE/prlist_fail"
+[[ $rc -eq 2 ]] && grep -q 'PR unavailable' <<<"$out" && ! grep -qE '  no PR  ' <<<"$out" \
+  && pass "gh unable to list PRs: every row reads 'PR unavailable', never 'no PR'; exit 2" || fail "a gh failure read as no PR (rc=$rc)" "$out"
 (cd "$SANDBOX/repo" && git remote set-url origin "$SANDBOX/nowhere.git")
 out="$(run --in-flight --json)"; rc=$?
 (cd "$SANDBOX/repo" && git remote set-url origin "$SANDBOX/origin.git")
-[[ $rc -eq 2 ]] && grep -q 'git fetch origin failed' <<<"$out" && grep -q '"fetch_ok": false' <<<"$out" \
+[[ $rc -eq 2 ]] && grep -q 'git fetch origin failed' <<<"$out" && grep -qE 'at its last fetch \([0-9]{4}-' <<<"$out" && grep -q '"fetch_ok": false' <<<"$out" \
   && pass "a failed fetch is said first, fetch_ok false, exit 2 — the rows are marked as what origin last showed" || fail "a failed fetch was silent (rc=$rc)" "$out"
 
 echo

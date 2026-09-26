@@ -74,8 +74,10 @@ def test_a_wrapper_that_runs_another_command_is_never_allowed() -> None:
 # a relative bin/ path matches no allow rule either (review of #42). The
 # scripts themselves may name their own files in comments; only prose that
 # tells a session what to run is held to this.
-BY_SCRIPT = re.compile(r"\b(?:inbox|send|gzmsg)\.mjs`?\s+(?:--?\w|(?:new-id|normalize|validate|hello)\b|<|\S+\.(?:txt|md|json)\b)"
-                       r"|scripts/send\.mjs|(?:^|[\s`(\"'])(?:\.{1,2}/)?bin/fabric-[a-z]+\b")
+BY_SCRIPT = re.compile(r"\bnode\s+\S*(?:inbox|send|gzmsg)\.mjs\b"
+                       r"|\b(?:inbox|send)\.mjs`?\s+(?:--?\w|<|[/~.$]|\S+\.\w+\b|msg\b)"
+                       r"|\bgzmsg\.mjs`?\s+(?:--?\w|(?:new-id|normalize|validate|hello)\b|<)"
+                       r"|scripts/send\.mjs|(?:^|[\s`(\"'\[*])(?:\.{1,2}/)*bin/fabric-[a-z]+\b")
 
 
 def test_no_session_facing_text_runs_a_command_through_an_expansion() -> None:
@@ -92,7 +94,9 @@ def test_the_scan_catches_every_spelling_it_replaced() -> None:
     """Every form a session was told before (the review of #43)."""
     for line in ("run `./bin/fabric-status`", "(`bin/fabric-role bind`)", "`node inbox.mjs --replay 5`",
                  "`inbox.mjs --held`", "`send.mjs msg.txt`", "`gzmsg.mjs hello`", "`gzmsg.mjs new-id`",
-                 "`communication/gzcoord/scripts/send.mjs`", "`inbox.mjs --follow` under Monitor"):
+                 "`communication/gzcoord/scripts/send.mjs`", "`inbox.mjs --follow` under Monitor",
+                 "`node inbox.mjs`", "`send.mjs msg`", "`send.mjs /tmp/m.eml`", "`../../bin/fabric-status`",
+                 "[bin/fabric-x](x)", "*bin/fabric-status*"):
         assert BY_SCRIPT.search(line), line
     for line in ("`communication/gzcoord/scripts/inbox.mjs` drains the relay", "run `fabric-status`",
                  "`gzcoord-send <file>`", "the fabric's `bin/` wrappers"):

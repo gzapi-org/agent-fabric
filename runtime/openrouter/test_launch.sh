@@ -390,7 +390,7 @@ out="$(run --provider anthropic --resume 2>&1)"
 grep -q "CLAUDE-EXECCED:.*--resume -- Session start: arm" <<<"$out" && ok "…a bare --resume keeps its picker: the prompt is not its value" || bad "the prompt became --resume's value" "$out"
 out="$(run --provider anthropic --add-dir /x 2>&1)"
 grep -q "CLAUDE-EXECCED:.*--add-dir /x -- Session start: arm" <<<"$out" && ok "…and a variadic option does not swallow it" || bad "a variadic option swallowed the prompt" "$out"
-for a in "-p" "do-the-thing" "--version" "-- do-it"; do
+for a in "-p" "do-the-thing" "--version" "-- do-it" "--"; do
     out="$(run --provider anthropic $a </dev/null 2>&1)"
     ! grep -q "Session start: arm" <<<"$out" && ok "…none with: $a" || bad "opening prompt added with: $a" "$out"
 done

@@ -134,7 +134,11 @@ they are preserved verbatim, and
 the label is kept as it is — a record of where the slice was learned, not
 resolved to a login. An observation that resolves to no agent is reported
 **provisional**, never guessed, and the tally lands in
-`last-drain-report.json` and on stderr at assembly.
+`last-drain-report.json` and on stderr at assembly. The runs of one
+stamp — one per bundle — merge into that report: each bundle's harvest
+record is kept under `harvest_sources` (by agent@host), and `files`
+lists what the tree holds after the last run, not a file a later run
+of the stamp retired.
 
 ## The drain cycle
 

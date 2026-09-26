@@ -313,7 +313,8 @@ REPORT_LISTS = ("files", "hygiene_problems", "rejected_hygiene", "redactions", "
                 "oversized_claims", "clipped_descriptions", "migrated", "merge_target_unresolved")
 
 
-def merge_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+def merge_reports(previous: dict[str, Any], current: dict[str, Any],
+                  exists: Callable[[str], bool] = lambda _path: True) -> dict[str, Any]:
     """The drain report this run leaves, given the one already on disk.
 
     A drain across accounts is one run per bundle into the same working
@@ -330,12 +331,22 @@ def merge_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str
     where each host's store was read up to, which only ever moves forward,
     so every host keeps the higher of the two and a run that read nothing
     never lowers or empties one. `title_collisions` is read from the tree,
-    which already holds every run's result."""
+    which already holds every run's result.
+
+    The harvest record is kept per source too (`harvest_sources`), since
+    each bundle read its own host's store; `harvest` stays the latest
+    run's, for a reader of one. `files` keeps only what `exists` finds:
+    a later run of the stamp may retire or move a file an earlier run
+    wrote, and a report naming it counted it in `files_written` (a
+    drain's blind review, 2026-09-26)."""
     marks = {h: v for h, v in (previous.get("watermarks") or {}).items() if isinstance(v, (int, float))}
     for host, mark in (current.get("watermarks") or {}).items():
         marks[host] = max(mark, marks.get(host, mark))
     if previous.get("stamp") != current["stamp"]:
-        return dict(current, watermarks=marks)
+        merged = dict(current, watermarks=marks)
+        merged["files"] = [f for f in current["files"] if exists(f)]
+        merged["files_written"] = len(merged["files"])
+        return merged
     merged = dict(current, watermarks=marks)
     merged["roles"] = sorted(set(previous.get("roles") or []) | set(current["roles"]))
     merged["shared_topics"] = sorted(set(previous.get("shared_topics") or []) | set(current["shared_topics"]))
@@ -344,6 +355,7 @@ def merge_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str
         seen = list(previous.get(key) or [])
         seen += [item for item in current.get(key) or [] if item not in seen]
         merged[key] = seen
+    merged["files"] = [f for f in merged["files"] if exists(f)]
     merged["files_written"] = len(merged["files"])
     decisions = {d.get("key"): d for d in previous.get("collision_decisions") or [] if isinstance(d, dict)}
     for d in current["collision_decisions"]:
@@ -365,6 +377,9 @@ def merge_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str
     merged["telemetry"] = telemetry
     if current.get("harvest") is None:
         merged["harvest"] = previous.get("harvest")
+    harvests = dict(previous.get("harvest_sources") or {})
+    harvests.update(current.get("harvest_sources") or {})
+    merged["harvest_sources"] = harvests
     return merged
 
 
@@ -1987,6 +2002,7 @@ def main() -> int:
         "collision_decisions": applied_decisions,
         "merge_target_unresolved": unresolved_targets,
         "harvest": harvest_meta,
+        "harvest_sources": {source: harvest_meta} if harvest_meta is not None else {},
         "watermarks": watermarks,
     }
     report_path = layout.project_report_path(project)
@@ -1997,7 +2013,10 @@ def main() -> int:
             previous = {}
     except (OSError, ValueError):
         previous = {}
-    report = merge_reports(previous, report)
+    def still_there(rel: str) -> bool:
+        roots = [layout.working_copy_for(project), layout.FABRIC_ROOT]
+        return any(root and os.path.exists(os.path.join(root, rel)) for root in roots)
+    report = merge_reports(previous, report, still_there)
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)

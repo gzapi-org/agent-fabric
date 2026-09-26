@@ -2198,8 +2198,52 @@ def test_an_unresolved_merge_target_is_reported_on_every_drain(tmp: str) -> None
     assert read(dom(out, "alpha", "domain", "orphan.md")).count("## ") == 1
 
 
+def test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist(tmp: str) -> None:
+    """Runs of one stamp merge into one report. It kept only the last
+    bundle's harvest record, and every file any run wrote — a part a
+    later run of the stamp retired stayed listed and counted in
+    files_written (a drain's blind review, 2026-09-26). The harvest is
+    kept per source; the files are those the tree holds."""
+    drain_a, claims_a, out = build(os.path.join(tmp, "a"), {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": "y " * 850, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_a, "dev-01", "hostA", 2000)
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    drain_b, claims_b, _ = build(os.path.join(tmp, "b"), {"beta": claims("beta", [
+        {"class": "domain", "topic": "two", "title": "Beta fact", "body": "b", "evidence": ["h2"]},
+    ])})
+    harvest_report(drain_b, "dev-02", "hostB", 3000)
+    assert run_assemble(drain_b, claims_b, out).returncode == 0
+    report = json.loads(read(report_path(out)))
+    sources = report.get("harvest_sources") or {}
+    assert set(sources) == {"dev-01@hostA", "dev-02@hostB"}, f"a bundle's harvest record was lost: {sources}"
+    assert sources["dev-01@hostA"]["next_watermark"] == 2000 and sources["dev-02@hostB"]["next_watermark"] == 3000, sources
+
+    # A part written by one run of the stamp and removed by the next.
+    set_claims(claims_a, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    grow2 = dom(out, "alpha", "domain", "grow-2.md")
+    assert os.path.exists(grow2), "precondition: the topic split into two parts"
+    set_claims(claims_a, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More, corrected", "merge_target": "More",
+         "body": "Less.", "evidence": ["h3"]},
+    ])
+    assert run_assemble(drain_a, claims_a, out, "--budget", "500").returncode == 0
+    assert not os.path.exists(grow2), "precondition: the correction removed part two"
+    report = json.loads(read(report_path(out)))
+    gone = [f for f in report["files"]
+            if not any(os.path.exists(os.path.join(root, f)) for root in (working_copy(out), out))]
+    assert not gone, f"the report lists files the tree no longer holds: {gone}"
+    assert report["files_written"] == len(report["files"]), report["files_written"]
+    assert set(report["harvest_sources"]) == {"dev-01@hostA", "dev-02@hostB"}, report["harvest_sources"]
+
+
 def main() -> int:
     cases = [
+        test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist,
         test_an_unresolved_merge_target_is_reported_on_every_drain,
         test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
         test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,

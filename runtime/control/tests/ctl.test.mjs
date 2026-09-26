@@ -9,9 +9,9 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
-import { parseArgs, rows, table, writeBundles, manifestAgent, partKey, keygen } from '../ctl.mjs';
+import { parseArgs, rows, table, writeBundles, manifestAgent, partKey, keygen, originMain } from '../ctl.mjs';
 import { publicKeyFrom, privateKeyFrom, generateOperatorKey, verifyRequest, ACTION_TTL_MAX_S } from '../sign.mjs';
-import { pinnedVersion, UPGRADE_BUDGET_S } from '../upgrade.mjs';
+import { pinnedVersion, UPGRADE_BUDGET_S, FABRIC_UPGRADE_BUDGET_S } from '../upgrade.mjs';
 import { FABRIC_ROOT } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
 import { fileURLToPath } from 'node:url';
@@ -308,7 +308,7 @@ test('upgrade: the word after it is the piece, --version is digits, the wait is 
   assert.equal(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude', '--version=2.1.282']).version, '2.1.282');
   assert.deepEqual(parseArgs(['db-admin', 'web-dev-01', 'upgrade', 'claude']).targets, ['db-admin', 'web-dev-01'], 'the piece is not a login');
   assert.throws(() => parseArgs(['all', 'upgrade']), /upgrade takes a piece: claude/);
-  assert.throws(() => parseArgs(['all', 'upgrade', 'fabric']), /upgrade takes a piece/, 'only claude, for now');
+  assert.throws(() => parseArgs(['all', 'upgrade', 'kernel']), /upgrade takes a piece: claude, fabric/);
   assert.throws(() => parseArgs(['all', 'upgrade', 'claude', '--version', 'latest']), /digits/);
   assert.throws(() => parseArgs(['all', 'status', '--version', '2.1.282']), /with upgrade only/);
   const expected = [{ login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }, { login: 'user', host: 'h', address: 'h/user' }];
@@ -322,6 +322,23 @@ test('upgrade: the word after it is the piece, --version is digits, the wait is 
   assert.match(busy[1], /^db-admin\s+busy\s.*an upgrade is already running on this account$/, 'a busy row shows its note');
   const bare = table('upgrade', rows([expected[0]], [{ kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { from: '2.1.280', to: '2.1.281' } } }])).split('\n');
   assert.match(bare[1], /^db-admin\s+no status\s+2\.1\.280 → 2\.1\.281/, 'a reply with no status says so, never "undefined"');
+});
+
+test('upgrade fabric: no --version, its own wait; a current row names main; the commit sent is origin/main, never HEAD', () => {
+  const a = parseArgs(['all', 'upgrade', 'fabric']);
+  assert.deepEqual([a.piece, a.timeout], ['fabric', FABRIC_UPGRADE_BUDGET_S]);
+  assert.throws(() => parseArgs(['all', 'upgrade', 'fabric', '--version', '2.1.282']), /takes no --version/);
+  const expected = [{ login: 'db-admin', host: 'h', address: 'h/db-admin' }, { login: 'web-dev-01', host: 'h', address: 'h/web-dev-01' }];
+  const t = table('upgrade', rows(expected, [
+    { kind: 'reply', from: 'h/db-admin', op: 'upgrade', data: { upgrade: { status: 'current', piece: 'fabric', from: '188ed8b', to: '188ed8b', session: 'none' } } },
+    { kind: 'reply', from: 'h/web-dev-01', op: 'upgrade', data: { upgrade: { status: 'refused', piece: 'fabric', from: '057b5fc', session: 'none', reason: 'the checkout is on x, not main; not moved' } } }])).split('\n');
+  assert.match(t[1], /^db-admin\s+current\s+188ed8b \(main\)\s+none$/);
+  assert.match(t[2], /^web-dev-01\s+refused\s+057b5fc → -\s+none\s+the checkout is on x, not main; not moved$/);
+  const calls = [];
+  const exec = (bin, args) => { calls.push(args.slice(2).join(' ')); return args[2] === 'rev-parse' ? `${'c'.repeat(40)}\n` : ''; };
+  assert.equal(originMain('/fabric', exec), 'c'.repeat(40));
+  assert.deepEqual(calls, ['fetch -q origin main', 'rev-parse origin/main']);
+  assert.equal(originMain('/fabric', () => { throw new Error('offline'); }), null, 'a failed fetch sends nothing');
 });
 
 test('keygen: the private half goes to Doppler on stdin and nowhere else; the public half into this host\'s operator_key; an existing key is kept without --force', () => {

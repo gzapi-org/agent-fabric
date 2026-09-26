@@ -252,7 +252,13 @@ if (( ! DRY_RUN )); then
     if [[ -S "$XDG_RUNTIME_DIR/bus" ]] && command -v systemctl >/dev/null 2>&1 \
        && systemctl --user daemon-reload >/dev/null 2>&1; then
         systemctl --user enable --now "$UNIT_NAME" >/dev/null 2>&1 || true
-        (( changed > before )) && systemctl --user restart "$UNIT_NAME" >/dev/null 2>&1 || true
+        # Run BY the daemon (`fabric-ctl upgrade fabric`), a restart here would
+        # kill the process waiting on this script: it restarts itself after
+        # replying instead (runtime/control/upgrade.mjs).
+        if (( changed > before )); then
+            if [[ -n "${AGENT_FABRIC_DEFER_AGENTD_RESTART:-}" ]]; then echo "  *  $UNIT_NAME: unit changed; restart left to the caller"
+            else systemctl --user restart "$UNIT_NAME" >/dev/null 2>&1 || true; fi
+        fi
         echo "  *  $UNIT_NAME: $(systemctl --user is-active "$UNIT_NAME" 2>/dev/null || true) (systemctl --user status $UNIT_NAME)"
     else
         echo "  !  $UNIT_NAME: installed, not started — no user manager at $XDG_RUNTIME_DIR/bus (loginctl enable-linger $(id -un), or the next login starts it)"

@@ -54,10 +54,28 @@
 #   tools/gh/pr-gate.sh 861 877      # these PRs, whoever opened them
 #   tools/gh/pr-gate.sh --all        # every open PR in the repository
 #   tools/gh/pr-gate.sh --json       # rows as data
+#   tools/gh/pr-gate.sh --in-flight [--path <prefix>]...   # every job in flight
+#   tools/gh/pr-gate.sh --overlap <PR number | branch>     # what shares its paths
+#
+# IN FLIGHT. Before assigning a job, starting one, or relying on another
+# agent's branch, the question is what already exists; a job waiting for
+# a merge sits on a pushed branch with no PR, where the verdict rows above
+# never look (2026-09-26: an assignment withdrawn three minutes in, an
+# hour lost, the job on such a branch since 09-21; 62 of them against 3
+# open PRs that day). --in-flight lists every branch on origin not merged
+# into the base, PR or not: owner (the <host>/<login> prefix, else
+# "unattributed" -- never the GitHub author), PR number or "no PR",
+# commits ahead, last commit time, and the paths it changes against its
+# merge base with the base (what it changes, not what anyone declared).
+# --path keeps the rows changing something under a prefix; --overlap keeps
+# the rows sharing a changed path with the named PR or branch, and lists
+# the shared paths. It reserves nothing: a row says "this exists", and
+# "shares paths" is not "conflicts" -- trial-merge.sh answers that.
 #
 # Exit codes:
 #   0  listed
-#   2  gh, git or the repository could not be read
+#   2  gh, git or the repository could not be read (--in-flight/--overlap:
+#      also a failed fetch, said first -- the rows are what origin last showed)
 #
 # Environment (the self-test):
 #   AGENT_FABRIC_PR_REVIEW_STATUS   path of pr-review-status.sh (default beside this script)
@@ -70,11 +88,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=commit-class.sh
 . "$here/commit-class.sh"
 REVIEW_STATUS="${AGENT_FABRIC_PR_REVIEW_STATUS:-$here/pr-review-status.sh}"
-JSON=0; ALL=0; NUMS=()
+JSON=0; ALL=0; NUMS=(); INFLIGHT=0; OVERLAP=""; PATHS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json) JSON=1; shift ;;
         --all) ALL=1; shift ;;
+        --in-flight) INFLIGHT=1; shift ;;
+        --overlap) [[ $# -ge 2 && -n "$2" ]] || { echo "pr-gate: --overlap takes a PR number or a branch" >&2; exit 2; }; INFLIGHT=1; OVERLAP="$2"; shift 2 ;;
+        --path) [[ $# -ge 2 && -n "$2" ]] || { echo "pr-gate: --path takes a path prefix" >&2; exit 2; }; PATHS+=("$2"); shift 2 ;;
         -h|--help) sed -n '/^# >>> help/,/^# <<< help/p' "$0" | sed '1d;$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) if [[ "$1" =~ ^[0-9]+$ ]]; then NUMS+=("$1"); shift; else echo "pr-gate: unknown option '$1' (try --help)" >&2; exit 2; fi ;;
     esac
@@ -93,6 +114,14 @@ if [[ -z "$session" ]]; then
     fi
     [[ -n "$session" && "$session" != "null/null" ]] || session="$(hostname -s 2>/dev/null)/$(id -un)"
 fi
+
+if (( INFLIGHT )); then
+    (( ${#NUMS[@]} == 0 && ALL == 0 )) || { echo "pr-gate: --in-flight and --overlap take no PR numbers and no --all (they read every branch)" >&2; exit 2; }
+    # shellcheck source=pr-gate-inflight.sh
+    . "$here/pr-gate-inflight.sh"
+    in_flight; exit $?
+fi
+(( ${#PATHS[@]} == 0 )) || { echo "pr-gate: --path goes with --in-flight or --overlap" >&2; exit 2; }
 
 # The PRs to read.
 if (( ${#NUMS[@]} > 0 )); then

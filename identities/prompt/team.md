@@ -38,6 +38,12 @@ someone's finding, the branch or PR name you send back is the
 acknowledgement. A shared command or default changes only when its docs
 and the relay both say so.
 
+**A request is an agreement between agents.** Say what you undertake,
+or what is missing; ask for the smallest dependency; renegotiate only
+where the agreement changed; deliver what can be checked where it lands;
+keep the agreement in the PR body. Silence is neither consent nor a
+release (`MESSAGE-FORMAT.md` §Working on a request together).
+
 **A change whose pieces only make sense together lands as one PR.**
 When a partial landing is a defect — a contract status against the wire
 served, a migration against its reader — the role that owns the concern
@@ -69,9 +75,7 @@ Eight to sixteen: arm once the review gate is met (a posted review of
 the head, no open P1/P2). Fewer: ask the owner, who arms. More than
 sixteen is split before the PR opens. Never without the gate.
 
-**One open pull request per agent** (gzapp's rule, fabric-wide from
-2026-09-19 — the owner, after two one-commit PRs from one session in
-one morning). While you have a PR open — unarmed, armed or queued —
+**One open pull request per agent** (the owner, 2026-09-19). While you have a PR open — unarmed, armed or queued —
 the next piece of work is another commit on it if the branch is still
 addable, and otherwise it waits for the merge: implement, test and
 commit locally on a branch off `origin/main`, push and open when the
@@ -91,16 +95,13 @@ class, so the assessment is not made by the session that wrote the code —
 and when it is real you fix the rule, not the instance.
 
 **A test run leaves behind nothing it did not find** (the owner,
-2026-09-19: two suites' postgres volumes wrote 166,000 files in ninety
-seconds before the host died; a build cache reached 72 GB, a quarter of
-the disk). Containers and volumes a run started are gone when it ends,
+2026-09-19). Containers and volumes a run started are gone when it ends,
 however it ends; scratch goes under the session's scratchpad, never the
 tree; a build that changed the dependency graph (a bump, a feature-set
 switch) cleans its target — an incremental cache is disposable and is
-removed when it is large. A clean after *every* run is not the rule: a
-wire suite that rebuilds its workspace costs minutes, and the waste is
-the variant graphs, not the cache. Measure before you clean, and say
-what you removed and how much.
+removed when it is large — not after every run, since the waste is the
+variant graphs, not the cache. Measure before you clean, and say what
+you removed and how much.
 
 **The control plane is read-only.** `agent-fabric/` and every project's
 `.agent-fabric/` are fabric-coordinator's to write; a charter, a brief, a

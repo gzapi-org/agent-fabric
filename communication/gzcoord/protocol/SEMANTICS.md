@@ -44,7 +44,7 @@ If such an effect is required, use the authoritative tool explicitly.
 
 ## When a reply is expected
 
-Every message a transport carries has a cost — over a human relay, a person's. A thread therefore ends in silence, not in a closing message, and **an acknowledgement is terminal**: nobody acknowledges an acknowledgement. Completion is announced by the pull request, not by another message.
+Every message a transport carries has a cost — over a human relay, a person's. A thread therefore ends in silence, not in a closing message, and **an acknowledgement is terminal**: nobody acknowledges an acknowledgement. Completion is announced by the pull request; a piece someone asked for and is waiting on is also answered, once, by a `REPLY` that names it (MESSAGE-FORMAT.md, "Working on a request together").
 
 By default:
 
@@ -106,5 +106,8 @@ A role is a classification shared by however many instances currently hold it; t
 
 A `REPLY` whose `REFERENCES` name a branch or pull request says where its
 sender is working. That is a report, not a reservation: it does not stop
-another instance from working on the same thing, and it does not commit
-the sender to finishing. A peer that reads it decides for itself.
+another instance from working on the same thing, and a branch name alone
+does not commit the sender to finishing. What a sender undertakes it says
+in words (MESSAGE-FORMAT.md, "Working on a request together") — an
+agreement between agents, changed by saying so, never a lock the protocol
+enforces. A peer that reads it decides for itself.

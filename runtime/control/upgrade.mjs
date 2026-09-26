@@ -34,8 +34,9 @@ import { promisify } from 'node:util';
 import { claudeBin } from './ops.mjs';
 
 const execFileP = promisify(execFile);
-export const PIECES = ['claude'];
+export const PIECES = ['claude', 'fabric'];
 export const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
+export const COMMIT_RE = /^[0-9a-f]{40}$/;
 export const STOP_WAIT_MS = 90000;       // the harness's failsafe is the hook budget + 5 s
 export const VERSION_TIMEOUT_MS = 30000;
 // One install per HOST at a time, across its accounts: `fabric-ctl all
@@ -143,6 +144,12 @@ export function sessionPids({ uid = process.getuid(), self = process.pid, exec =
 export function checkArgs(args) {
   if (!args || typeof args !== 'object') return 'no arguments';
   if (!PIECES.includes(args.piece)) return `piece ${JSON.stringify(String(args.piece).slice(0, 20))} is not one of ${PIECES.join(', ')}`;
+  if (args.piece === 'fabric') {
+    if (args.version !== undefined) return 'fabric takes a commit, not a version';
+    if (!COMMIT_RE.test(String(args.commit))) return 'commit is not a full 40-hex sha';
+    return null;
+  }
+  if (args.commit !== undefined) return 'claude takes a version, not a commit';
   if (args.version !== undefined && !VERSION_RE.test(String(args.version))) return 'version is not digits.digits.digits';
   return null;
 }
@@ -161,7 +168,7 @@ export function restartInFlight(on) { syncRestarting = on; }
 export function upgrade(request, opts = {}) {
   if (running) return Promise.resolve({ status: 'busy', note: 'an upgrade is already running on this account' });
   if (syncRestarting) return Promise.resolve({ status: 'busy', note: 'a secrets-sync is restarting the session on this account' });
-  running = upgradeOnce(request, opts).finally(() => { running = null; });
+  running = (request.args?.piece === 'fabric' ? upgradeFabric : upgradeOnce)(request, opts).finally(() => { running = null; });
   return running;
 }
 
@@ -228,5 +235,93 @@ async function installHeld({ request, dir, bin, exec, kill, alive, sleep, now, s
   return {
     status: ok ? 'upgraded' : 'failed', piece: 'claude', from, to: target, ...(reason && { reason }),
     session: stop ? 'restarting' : own && pids.length ? 'yours: relaunch to use it' : pids.length ? 'running' : 'none',
+  };
+}
+
+// `upgrade fabric`: distribution after a merge as a signed action (the
+// owner, 2026-09-26: "distributing should be in control plane") in place
+// of a pull-and-bootstrap loop per login through the host executor.
+// The coordinator's origin/main travels in the request as `commit`, so
+// one command moves every account to one commit, as `upgrade claude`
+// carries one version. The checkout fast-forwards or is left alone: a
+// checkout off main, or one main cannot fast-forward, is someone's work
+// and is reported, never forced. Bootstrap runs whether or not the head
+// moved, since a checkout the launcher pulled was never bootstrapped.
+// A running session is not stopped: the fabric reaches it at its next
+// launch, as a rebind does. Bootstrap does not restart this daemon (it
+// would kill the process running it); the reply says `restart_daemon`
+// and agentd exits after posting it, for systemd to start the new code.
+export const FABRIC_GIT_TIMEOUT_MS = 60000;
+export const BOOTSTRAP_TIMEOUT_MS = 300000;
+export const FABRIC_UPGRADE_BUDGET_S = (3 * FABRIC_GIT_TIMEOUT_MS + BOOTSTRAP_TIMEOUT_MS) / 1000 + 30;
+
+// The provider a running session was launched for: bootstrap installs the
+// agent files for it, and its default (anthropic) would re-pin the review
+// class under a broker session until that session's next launch.
+export function sessionProvider(pids, proc = '/proc') {
+  for (const pid of pids) {
+    try {
+      const env = fs.readFileSync(path.join(proc, String(pid), 'environ'), 'utf8').split('\0');
+      const v = env.find(e => e.startsWith('AGENT_FABRIC_LAUNCH_PROVIDER='))?.slice('AGENT_FABRIC_LAUNCH_PROVIDER='.length);
+      if (v && /^[a-z][a-z0-9-]{0,31}$/.test(v)) return v;
+    } catch { /* gone, or not readable */ }
+  }
+  return null;
+}
+
+export async function upgradeFabric(request, {
+  home = os.homedir(), root = process.env.AGENT_FABRIC_ROOT ?? path.join(home, 'projects', 'agent-fabric'),
+  exec = execFileP, pgrep = null, sessions = null, proc = '/proc', env = process.env,
+} = {}) {
+  const args = request.args ?? {};
+  const bad = checkArgs(args);
+  if (bad) return { status: 'refused', reason: bad };
+  const target = args.commit;
+  const git = async (...a) => { const r = await exec('git', ['-C', root, ...a], { encoding: 'utf8', timeout: FABRIC_GIT_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] }); return String(typeof r === 'string' ? r : r.stdout).trim(); };
+  let from, branch;
+  try { from = await git('rev-parse', '--short', 'HEAD'); branch = await git('rev-parse', '--abbrev-ref', 'HEAD'); }
+  catch (e) { return { status: 'failed', piece: 'fabric', reason: `${root} is not a readable checkout: ${lastLine(e).slice(0, 160)}` }; }
+  if (branch !== 'main') return { status: 'refused', piece: 'fabric', from, reason: `the checkout is on ${branch}, not main; not moved — find whose work it is before moving it` };
+  try { await git('fetch', '-q', 'origin', 'main'); }
+  catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `git fetch: ${e?.killed ? 'timed out' : lastLine(e).slice(0, 160)}; not moved` }; }
+  // After the fetch, a commit this checkout does not have is not on its
+  // origin/main either: that is a "no", as is merge-base's exit 1.
+  try { await git('cat-file', '-e', `${target}^{commit}`); }
+  catch { return { status: 'refused', piece: 'fabric', from, reason: `${target.slice(0, 8)} is not on this account's origin/main; not moved` }; }
+  try { await git('merge-base', '--is-ancestor', target, 'origin/main'); }
+  catch (e) {
+    // Exit 1 is git's "not an ancestor"; anything else (an unknown object,
+    // a timeout) is a failure to tell, and says git's own line.
+    if (e?.code === 1) return { status: 'refused', piece: 'fabric', from, reason: `${target.slice(0, 8)} is not on this account's origin/main; not moved` };
+    return { status: 'failed', piece: 'fabric', from, reason: `git merge-base: ${e?.killed ? 'timed out' : lastLine(e).slice(0, 160)}; not moved` };
+  }
+  try { await git('merge', '--ff-only', '-q', target); }
+  catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `cannot fast-forward to ${target.slice(0, 8)}: ${lastLine(e).slice(0, 160)}; not forced` }; }
+  let to;
+  try { to = await git('rev-parse', '--short', 'HEAD'); }
+  catch (e) { return { status: 'failed', piece: 'fabric', from, reason: `moved, but HEAD could not be read back: ${lastLine(e).slice(0, 160)}; not bootstrapped`, restart_daemon: true }; }
+  let pids = [];
+  try { pids = sessions ?? sessionPids({ exec: pgrep ?? ((c, a) => execFileSync(c, a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) }); } catch { /* the session column says unknown */ pids = null; }
+  const provider = pids ? sessionProvider(pids, proc) : null;
+  let reason = null, unitDeferred = false;
+  try {
+    const r = await exec('bash', [path.join(root, 'runtime', 'claude-code', 'bootstrap.sh')], {
+      encoding: 'utf8', timeout: BOOTSTRAP_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'], cwd: root,
+      env: { ...env, AGENT_FABRIC_DEFER_AGENTD_RESTART: '1', ...(provider && { AGENT_FABRIC_LAUNCH_PROVIDER: provider }) },
+    });
+    // The one place that knows the control agent's unit changed: bootstrap
+    // installed it and left the restart to us (the line is bootstrap.sh's).
+    unitDeferred = /restart left to the caller/.test(String(typeof r === 'string' ? r : r?.stdout ?? ''));
+  } catch (e) {
+    // A bootstrap that installed the unit and then failed later still left
+    // the restart to us, and no rerun would see the unit change again.
+    unitDeferred = /restart left to the caller/.test(String(e?.stdout ?? ''));
+    reason = `bootstrap: ${e?.killed ? `timed out after ${BOOTSTRAP_TIMEOUT_MS / 1000} s` : lastLine(e).slice(0, 200)}`; }
+  return {
+    status: reason ? 'failed' : from === to ? 'current' : 'upgraded', piece: 'fabric', from, to,
+    ...(provider && { provider }), ...(reason && { reason }),
+    session: pids === null ? 'unknown' : pids.length ? 'running: next launch uses it' : 'none',
+    restart_daemon: from !== to || unitDeferred,
+    ...((from !== to || unitDeferred) && !reason && { note: `the control agent restarts on the new ${unitDeferred ? 'unit' : 'code'} after this reply` }),
   };
 }

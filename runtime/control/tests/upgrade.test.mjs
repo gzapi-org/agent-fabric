@@ -90,7 +90,7 @@ test('an install that fails, or lands another version, is a failure with its rea
 });
 
 test('arguments are a closed set; no pin is a refusal; --version overrides the pin; one upgrade at a time', async () => {
-  assert.match(checkArgs({ piece: 'fabric' }), /not one of claude/);
+  assert.match(checkArgs({ piece: 'kernel' }), /not one of claude, fabric/);
   assert.match(checkArgs({ piece: 'claude', version: '2.1.281; rm -rf /' }), /digits/);
   assert.match(checkArgs(null), /no arguments/);
   assert.equal(checkArgs({ piece: 'claude', version: '2.1.282' }), null);

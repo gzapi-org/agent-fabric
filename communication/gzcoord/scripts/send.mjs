@@ -21,15 +21,36 @@
 // has a session (runtime/control/presence.mjs) and names each one that
 // has none; --force sends anyway.
 //
-// Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
-// FROM is not this session; 3 no token or relay unreachable; 4 an
+// A message with no MESSAGE-ID gets one here: minted, and written into
+// the file before anything else happens, so that sending the same file
+// again — a retry after an unknown outcome — carries the same id and the
+// relay and every reader discard the second copy (SPEC §7.2). Minting
+// by hand first, then substituting a placeholder, put a command on the
+// owner's screen that showed something other than what was sent
+// (2026-09-26). A present id is kept; a placeholder is still refused
+// below. From stdin there is no file to keep it in, and that is said. A
+// dry run mints in memory only: it changes nothing.
+//
+// An id travels with the file, so a scratch file reused for the NEXT
+// message would carry the last one's id, and every reader would discard
+// the new message as a copy (review of #47, R1). Each confirmed send is
+// recorded — id and a hash of the message — in this login's state
+// directory (<state>/agents/<login>/gzcoord-sent.jsonl, beside its
+// binding; the one file send writes besides the message), and an id that
+// already went out with other content is refused, exit 2; the same
+// message again (a retry) passes. A post whose reply was lost is not
+// recorded, so an edited resend under that id is not caught.
+//
+// Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message,
+// FROM is not this session, or an id already sent with other text; 3 no token or relay unreachable; 4 an
 // addressee has no session, did not answer, could not tell, or is not
 // placed, or presence could not be asked (--force).
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint, invokedAsMain } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint, invokedAsMain, mintId } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
 import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
@@ -55,6 +76,33 @@ export function fallbackMarker(dir = process.env.AGENT_FABRIC_FALLBACK_DIR ?? pa
   return null;
 }
 
+// The id goes last in the metadata block: the block is every line after
+// the header up to the first blank line or section marker (SPEC §6).
+export function withMessageId(text, id) {
+  const lines = text.split('\n');
+  let end = 1;
+  while (end < lines.length && lines[end].trim() !== '' && /^[A-Z][A-Z0-9-]*: /.test(lines[end])) end++;
+  lines.splice(end, 0, `MESSAGE-ID: ${id}`);
+  return lines.join('\n');
+}
+
+export function sentLedgerPath(who) { return path.join(path.dirname(who.binding), 'gzcoord-sent.jsonl'); }
+export function spentElsewhere(ledger, id, sha) {
+  let lines = [];
+  try { lines = fs.readFileSync(ledger, 'utf8').split('\n'); } catch { return null; }
+  for (const l of lines) {
+    let r; try { r = JSON.parse(l); } catch { continue; }
+    if (r.id === id && r.sha256 !== sha) return r;
+  }
+  return null;
+}
+export function recordSent(ledger, entry, keep = 5000) {
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  fs.appendFileSync(ledger, JSON.stringify(entry) + '\n');
+  const lines = fs.readFileSync(ledger, 'utf8').split('\n').filter(Boolean);
+  if (lines.length > keep + 1000) fs.writeFileSync(ledger, lines.slice(-keep).join('\n') + '\n');
+}
+
 export async function main(argv = process.argv.slice(2)) {
   // The login first, before anything is printed: every line this function
   // writes is then the reader's, the usage line included — which is the
@@ -69,7 +117,26 @@ export async function main(argv = process.argv.slice(2)) {
   let raw;
   try { raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); }
   catch (e) { console.error(t('send.cannot-read', { file, detail: e.message })); return 1; }
-  const text = normalize(raw);
+  let text = normalize(raw);
+  // Only a message that parses is given an id; one that does not is left
+  // to validate(), which refuses it in the dictionary's words (exit 2).
+  let head = null;
+  try { head = parse(text).metadata ?? null; } catch { head = null; }
+  if (head && !head['MESSAGE-ID']) {
+    const minted = mintId();
+    text = withMessageId(text, minted);
+    if (dry) console.error(t('send.id-minted-dry', { id: minted }));
+    else if (file === '-') console.error(t('send.id-minted-stdin', { id: minted }));
+    else {
+      // A fresh temporary name (never followed through a link that sits
+      // there), renamed over the file only once it is complete; on any
+      // failure the file is as it was and the temporary is gone.
+      const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+      try { fs.writeFileSync(tmp, text, { flag: 'wx' }); fs.renameSync(tmp, file); }
+      catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { /* nothing to remove */ } console.error(t('send.id-not-written', { file, detail: e.message })); return 1; }
+      console.error(t('send.id-minted', { id: minted, file }));
+    }
+  }
 
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project, process.env, t);
@@ -127,6 +194,10 @@ export async function main(argv = process.argv.slice(2)) {
     at: fb.at || t('send.fallback-unknown-time'),
     topic: fb.topic || t('send.fallback-unknown-topic'),
     topic_again: fb.topic || t('send.fallback-unknown-topic-again') }));
+  const sha = crypto.createHash('sha256').update(text).digest('hex');
+  const ledger = sentLedgerPath(who);
+  const spent = id !== '(none)' ? spentElsewhere(ledger, id, sha) : null;
+  if (spent) { console.error(t('send.id-reused', { id, seq: spent.seq ?? '?' })); return 2; }
   // A dry run posts nothing, not even a presence request on the control
   // channel (review of #38): it validates and resolves, and stops here.
   if (dry) { console.error(t('send.would-post', { type: msg.type, id, address: me.address, channel, relay_url: relayUrl })); return 0; }
@@ -177,6 +248,9 @@ export async function main(argv = process.argv.slice(2)) {
     if (e.status === 401 || e.status === 403) { console.error(t('send.token-refused', { status: e.status })); return 3; }
     console.error(t('send.relay-unreachable', { relay_url: relayUrl, detail: e.message })); return 3;
   }
+  // Recorded only once the relay has it: a post that failed spent nothing.
+  try { recordSent(ledger, { id, sha256: sha, seq: res.seq ?? null, at: new Date().toISOString() }); }
+  catch (e) { console.error(t('send.ledger-not-written', { detail: e.message })); }
   console.log(t('send.sent', { seq: res.seq, type: msg.type, id, deduplicated: res.deduplicated ? t('send.deduplicated') : '' }));
   return 0;
 }

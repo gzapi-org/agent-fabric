@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { scratch } from '../../../tests/scratch.mjs';
-import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer, accountsKeeper, ACCOUNTS_KEEPALIVE_MS } from '../agentd.mjs';
+import { accept, remember, SEEN_MAX, newId, operatorAddresses, controlConfig, watchSource, answer, accountsKeeper, ACCOUNTS_KEEPALIVE_MS, leaver } from '../agentd.mjs';
 import { memorySlug } from '../ops.mjs';
 import { generateOperatorKey, signRequest } from '../sign.mjs';
 import { whoami } from '../../../communication/gzcoord/scripts/gzmsg.mjs';
@@ -384,4 +384,19 @@ test('agentd --once: an action whose ledger cannot be written is refused by name
     assert.doesNotMatch(out.stderr, /relay unreachable/);
     assert.equal(replies(r).filter(x => x.op === 'upgrade').length, 0, 'nothing ran');
   } finally { r.close(); }
+});
+
+test('leaving for new code waits for every running action to reply, then exits once', () => {
+  const inflight = new Set(['a', 'b']);
+  const exits = [], logs = [];
+  const l = leaver({ inflight, exit: c => exits.push(c), log: m => logs.push(m) });
+  assert.equal(l.settle(), false, 'nothing asked to leave: an action finishing never exits');
+  assert.equal(l.request('source changed'), false); assert.deepEqual(exits, [], 'two actions still running: not yet');
+  inflight.delete('a'); assert.equal(l.settle(), false); assert.deepEqual(exits, []);
+  assert.equal(l.request('the fabric moved (upgrade fabric)'), false);
+  inflight.delete('b'); assert.equal(l.settle(), true);
+  assert.deepEqual(exits, [0]);
+  assert.match(logs[0], /agentd: source changed; exiting/, 'the first reason is the one said');
+  const idle = leaver({ inflight: new Set(), exit: c => exits.push(c), log: () => {} });
+  assert.equal(idle.request('source changed'), true, 'nothing running: leaves at once, as at the base');
 });

@@ -68,6 +68,48 @@ never obeyed.
 The requester's own session is never stopped: it is the one waiting for
 the reply. It is installed under it and told to relaunch.
 
+## The fabric itself: `upgrade fabric`
+
+```sh
+fabric-ctl <login|all> upgrade fabric
+```
+
+Distribution after a merge — every account's `~/projects/agent-fabric`
+on the new `main`, bootstrapped — was a `hostexec` loop, one pull and one
+bootstrap per login, until 2026-09-26, when the owner said it belongs in
+the control plane. It is the second piece of `upgrade`:
+
+- **One commit.** The command fetches its own checkout and sends
+  `origin/main`'s sha (never its HEAD: a coordinator on a branch must not
+  ship the branch) in the signed request, as `upgrade claude` carries one
+  version. An account whose own fetch does not contain that commit
+  refuses rather than moving somewhere else.
+- **Fast-forward or nothing.** A checkout on a branch is someone's work
+  and is refused by name; a `main` that cannot fast-forward (a local
+  commit) fails with git's line. Neither is forced — find out whose it is.
+- **Bootstrap every time**, whether or not the head moved: the launcher
+  pulls at launch but never bootstraps, so a checkout can be current and
+  its installed files not.
+- **For the provider in use.** Bootstrap installs the agent files for
+  `AGENT_FABRIC_LAUNCH_PROVIDER`, anthropic when unset; with a session
+  running, the daemon reads the provider from that session's environment
+  and passes it on, so a broker session's review pin is not re-pinned
+  under it.
+- **No session is stopped.** The fabric reaches a running session at its
+  next launch, as a rebind does; the row says `running: next launch uses
+  it`.
+- **The daemon restarts itself, after replying.** Bootstrap would restart
+  the control agent's unit when the unit file changed — killing the
+  process running bootstrap — so under `AGENT_FABRIC_DEFER_AGENTD_RESTART`
+  it leaves that to the caller. The reply carries `restart_daemon` when
+  the head moved; agentd posts it, then exits for systemd to start the new
+  code. Its source watch waits for running actions too: it used to exit
+  two seconds after its own files changed, mid-action.
+
+An account whose daemon predates this piece refuses `fabric` as not one of
+its pieces; that account is distributed once more by hand, and from then
+on by this command.
+
 ## When the ledger is ahead
 
 An action is refused when it is dated more than a minute in the future,
@@ -113,9 +155,9 @@ only.
 
 ## Not yet
 
-- Other pieces: `fabric` (pull + bootstrap) and `ori` were left for later
-  (the owner, 2026-09-24); a piece is an entry in `runtime/control/upgrade.mjs`
-  `PIECES`, not a new op.
+- Other pieces: `ori` was left for later (the owner, 2026-09-24); a piece
+  is an entry in `runtime/control/upgrade.mjs` `PIECES`, not a new op.
+  `fabric` landed 2026-09-26 (above).
 - Signed replies: a forged reply can still show a false row.
 - A restart read back live: the first real run (2026-09-25,
   `docs/live-checks/2026-09-25-first-fleet-upgrade.md`) met no running

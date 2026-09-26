@@ -1269,7 +1269,14 @@ def main() -> int:
             # recorded like any decision. Two agents' texts still stop the
             # drain, and so do two claims of this drain under one heading,
             # where which is newer is not the corpus's to say.
-            same_agent = not open_pair and ((retitled and author is not None and agent == author)
+            # NEWER, as the rule says: a replayed or delayed bundle whose
+            # claim is dated before the section it would replace is asked
+            # about, not applied (the review of #41, 2026-09-26). An undated
+            # side cannot be compared and does not block the rule.
+            incoming_date = claim.get("observed_at") or ""
+            corpus_dates = [observed_of(present[h]) for h in ([heading] if heading in present else list(present))]
+            older = bool(incoming_date) and any(d != "undated" and incoming_date < d for d in corpus_dates)
+            same_agent = not open_pair and not older and ((retitled and author is not None and agent == author)
                                            or (heading in present and author_any is not None and agent == author_any))
             rule = None
             if decision is None and same_agent:

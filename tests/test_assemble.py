@@ -2171,11 +2171,22 @@ def test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes(tmp:
     flat = dom(out, "alpha", "domain.md")
     assert os.path.isfile(flat), "the class is one flat file"
     set_claims(claims_dir, "alpha", [
-        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, updated.", "evidence": ["a2"]},
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, updated.", "evidence": ["a2"],
+         "observed_at": "2026-09-20"},
     ])
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
     assert "A, updated." in read(flat) and read(flat).count("## ") == 1, read(flat)
+    # An OLDER text of the same agent (a replayed bundle) is asked about,
+    # never applied over the newer section (the review of #41, 2026-09-26).
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, stale.", "evidence": ["a2"],
+         "observed_at": "2000-01-01"},
+    ])
+    before = read(flat)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(flat) == before
 
 
 def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:

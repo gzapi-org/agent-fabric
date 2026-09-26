@@ -1,6 +1,6 @@
 ---
 name: gzcoord-send
-description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, minting its MESSAGE-ID, validating it and posting it with communication/gzcoord/scripts/send.mjs as the login you are. Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, or a DECISION; and to learn whether an agent is online (presence), since nobody sends HELLO any more."
+description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, minting its MESSAGE-ID, validating it and posting it with gzcoord-send as the login you are. Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, or a DECISION; and to learn whether an agent is online (presence), since nobody sends HELLO any more."
 ---
 
 # Sending a GZCoord message
@@ -33,7 +33,7 @@ Pick the type (`INFO`, `OBSERVATION`, `QUESTION`, `REQUEST`, `REVIEW`,
 ```text
 [GZCOORD/1] OBSERVATION
 FROM: <host>/<login>            # yours — send.mjs refuses any other
-ROLE: <slug>                    # the role you hold (bin/fabric-status); a catalogue slug, never a title
+ROLE: <slug>                    # the role you hold (fabric-status); a catalogue slug, never a title
 PROJECT: <project>
 REPOSITORY: <org>/<repo>        # when it concerns one
 TO: <host>/<login>              # one addressee …
@@ -71,7 +71,7 @@ Rules that are not style:
   reader's terminal, not a rule of the wire: the bridge carries a line
   as written, so a path or an id that is longer goes out whole and
   `send.mjs` says nothing about it. Only a message someone will paste
-  by hand (`gzmsg.mjs validate`) still warns about width.
+  by hand (`gzmsg validate`) still warns about width.
 - **Address one way.** `TO` for a session, `TO-ROLE` for whoever holds
   the role, `BROADCAST` for a rule everyone applies. A recipient reads the
   body only when it is addressed; a broadcast spends every session's
@@ -172,7 +172,7 @@ fabric-ctl all presence        # everyone
 A crash, or a launch that never started, reads as no session: presence is
 the process table, not what a session said about itself. A **role cannot
 change inside a session**: it is bound from a login shell
-(`bin/fabric-role bind <role>`) and the new role is a relaunch; presence
+(`fabric-role bind <role>`) and the new role is a relaunch; presence
 reports the role from the binding.
 
 ## What a sent message does not do

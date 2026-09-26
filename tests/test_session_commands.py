@@ -70,12 +70,19 @@ def test_a_wrapper_that_runs_another_command_is_never_allowed() -> None:
         "fabric-lease runs the command after --, fabric-host runs any command on a host: an allow rule would allow everything"
 
 
+# In a Markdown text a session reads, a command named by its script or by
+# a relative bin/ path matches no allow rule either (review of #42). The
+# scripts themselves may name their own files in comments; only prose that
+# tells a session what to run is held to this.
+BY_SCRIPT = re.compile(r"inbox\.mjs\S*`? --follow|scripts/send\.mjs|gzmsg\.mjs (new-id|normalize|validate)|(?<![\w/-])bin/fabric-[a-z]+\b")
+
+
 def test_no_session_facing_text_runs_a_command_through_an_expansion() -> None:
     hits = []
     for path in SESSION_FACING:
         with open(path, encoding="utf-8") as fh:
             for n, line in enumerate(fh, 1):
-                if EXPANDED_PATH.search(line):
+                if EXPANDED_PATH.search(line) or (path.endswith(".md") and BY_SCRIPT.search(line)):
                     hits.append(f"{os.path.relpath(path, ROOT)}:{n}: {line.strip()[:100]}")
     assert not hits, "a session told to run these would be asked every time:\n" + "\n".join(hits)
 

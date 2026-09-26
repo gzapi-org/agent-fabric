@@ -17,7 +17,7 @@ are `gzcoord-inbox` (`communication/gzcoord/scripts/inbox.mjs`):
 
 ## 1. Arm the watch, first turn, once
 
-The watch is `inbox.mjs --follow`: one process that blocks for the life
+The watch is `gzcoord-inbox --follow`: one process that blocks for the life
 of the session, prints each delivery as it lands, and returns nothing on
 a quiet spell — no budget, no expiry line, no shell loop, no restart.
 Run it under the Monitor tool so each printed delivery becomes a
@@ -224,7 +224,7 @@ however many times `fabric-secrets sync` runs. The inbox and `send.mjs`
 know that: they read `~/.config/agent-fabric/secrets.env` (what `sync`
 writes) before the environment, and retry a refused token once with the
 file's value if it changed underneath a long wait — so the recovery is
-`bin/fabric-secrets sync`, then re-arm the watch; no login shell, no
+`fabric-secrets sync`, then re-arm the watch; no login shell, no
 `source`, nothing pasted into a file, and no refused call per re-arm.
 Only when the synced file still holds the refused value does the inbox
 report that the relay refused the token and that it was rotated, and exit

@@ -75,7 +75,7 @@ settings: `routing/capabilities.json` binds each capability class
 concrete model per provider, `routing/shims.json` binds a model family
 to its compatibility shim, and `runtime/openrouter/launch` resolves this
 agent's layers in `routing/profiles.json` (by role, by login, and the
-login's own `model-profile.local.json` — `bin/fabric-model`), refuses a
+login's own `model-profile.local.json` — `fabric-model`), refuses a
 review model outside `routing/policies/review-grade.json`, and exports
 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL` before the exec —
 process env, which every subagent inherits — on the broker and on plain
@@ -211,7 +211,7 @@ reviewer's **constitution** is its agent file — the method, the revert
 test, the quoted hunk, the bounded re-review, the shape of a finding
 all live there and nowhere else; the **charter** is what the DISPATCH
 carries — the facts of this change; a **lens** is a named bias
-(`bin/fabric-review lenses`). The charter is where independence is won
+(`fabric-review lenses`). The charter is where independence is won
 or lost, so it is rendered, not improvised:
 
 1. Write a request in the scratchpad: `mode`, `repository`, `range`
@@ -221,7 +221,7 @@ or lost, so it is rendered, not improvised:
    FACT: what must be true. Never how the change makes it true, what
    was fixed, or where you suspect the defect — a reviewer told why the
    code is right agrees with it, and the whole value is that it does
-   not know. `bin/fabric-review brief request.yaml` refuses a
+   not know. `fabric-review brief request.yaml` refuses a
    verdict-shaped sentence and names it; rephrase as what must be true
    (`--allow-rationale` renders it flagged, for the rare fact that
    reads like a verdict).

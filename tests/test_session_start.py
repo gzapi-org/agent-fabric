@@ -196,6 +196,40 @@ def test_hook_says_when_the_session_has_no_inbox_watch(tmp: str) -> None:
     assert "NO INBOX WATCH" not in context_of(named), "the watch armed by its name on PATH was not seen:\n" + named.stdout
 
 
+def test_bootstrap_restarts_the_control_agent_unless_its_caller_is_the_control_agent(tmp: str) -> None:
+    """A changed unit is restarted by bootstrap run by hand, and left to the
+    daemon when the daemon runs it (`fabric-ctl upgrade fabric`): a restart
+    there would kill the process waiting on bootstrap."""
+    import socket
+    runtime_dir = os.path.join(tmp, "run"); os.makedirs(runtime_dir)
+    bus = socket.socket(socket.AF_UNIX); bus.bind(os.path.join(runtime_dir, "bus"))
+    bindir = os.path.join(tmp, "bin"); os.makedirs(bindir)
+    calls = os.path.join(tmp, "systemctl.log")
+    with open(os.path.join(bindir, "systemctl"), "w") as fh:
+        fh.write(f'#!/bin/sh\necho "$*" >> {calls}\n[ "$2" = is-active ] && echo active\nexit 0\n')
+    os.chmod(os.path.join(bindir, "systemctl"), 0o755)
+    try:
+        for defer in (True, False):
+            projects = os.path.join(tmp, f"projects-{defer}"); home = os.path.join(tmp, f"home-{defer}")
+            os.makedirs(projects); os.makedirs(home)
+            if os.path.exists(calls): os.unlink(calls)
+            env = {**os.environ, "HOME": home, "AGENT_FABRIC_STATE_DIR": os.path.join(tmp, f"state-{defer}"),
+                   "XDG_RUNTIME_DIR": runtime_dir, "PATH": bindir + os.pathsep + os.environ["PATH"]}
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            if defer: env["AGENT_FABRIC_DEFER_AGENTD_RESTART"] = "1"
+            else: env.pop("AGENT_FABRIC_DEFER_AGENTD_RESTART", None)
+            proc = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+            assert proc.returncode == 0, proc.stdout + proc.stderr
+            restarted = "restart agent-fabric-agentd" in open(calls).read()
+            if defer:
+                assert not restarted, "the daemon running bootstrap was restarted under it"
+                assert "agent-fabric-agentd: unit changed; restart left to the caller" in proc.stdout, proc.stdout
+            else:
+                assert restarted, "a changed unit was not restarted by a hand bootstrap"
+    finally:
+        bus.close()
+
+
 def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
     projects = os.path.join(tmp, "projects")
     home = os.path.join(tmp, "home")
@@ -320,6 +354,7 @@ def main() -> int:
              test_hook_reports_a_bad_marker_and_still_starts,
              test_hook_never_blocks, test_hook_exports_the_control_plane_into_the_session_shell,
              test_hook_says_when_the_session_has_no_inbox_watch,
+             test_bootstrap_restarts_the_control_agent_unless_its_caller_is_the_control_agent,
              test_bootstrap_writes_only_the_workspace_and_home_files]
     failures = 0
     for case in cases:

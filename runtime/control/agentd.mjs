@@ -191,6 +191,22 @@ export function watchSource(onChange, dirs = [HERE, path.join(FABRIC_ROOT, 'comm
   return dirs.map(d => { try { const w = fs.watch(d, arm); w.unref(); return w; } catch { return null; } });
 }
 
+// Leaving for new code waits for every running action: the source watch
+// fired the moment an `upgrade fabric` pulled this daemon's own code, and
+// exiting then killed the process before it posted the reply the operator
+// was waiting for. request() asks to leave; settle() is called as each
+// action finishes, and leaves once none is left.
+export function leaver({ inflight, exit = code => process.exit(code), log = m => console.error(m) }) {
+  let why = null;
+  const settle = () => {
+    if (why === null || inflight.size) return false;
+    log(`agentd: ${why}; exiting for systemd to restart on the new code`);
+    exit(0);
+    return true;
+  };
+  return { request: reason => { why = why ?? reason; return settle(); }, settle, get pending() { return why; } };
+}
+
 export function remember(seen, id) {
   seen.add(id);
   if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
@@ -261,17 +277,8 @@ export async function main(argv = process.argv.slice(2)) {
     last = up.id;
   };
   console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}; operators: ${[...operatorAddresses()].join(' ')}`);
-  // Leaving waits for every running action: the watch fired the moment an
-  // `upgrade fabric` pulled this daemon's own code, killing the process
-  // before it posted the reply the operator was waiting for.
-  let leaving = null;
-  const exitWhenIdle = why => {
-    leaving = leaving ?? why;
-    if (inflight.size) return;
-    console.error(`agentd: ${leaving}; exiting for systemd to restart on the new code`);
-    process.exit(0);
-  };
-  if (!once) watchSource(() => exitWhenIdle('source changed'));
+  const leave = leaver({ inflight });
+  if (!once) watchSource(() => leave.request('source changed'));
   if (!once) {
     // At start too: after a reboot every observed sign-in may have lapsed.
     const keep = () => { if (!accountSlugs(accountsDir()).length) return; keeper.refresh().then(r => { for (const a of r.accounts ?? []) if (a.status !== 'ok') console.error(`agentd: account ${a.slug}: ${a.status}${a.error ? ` (${a.error})` : ''}`); }).catch(e => console.error(`agentd: accounts: ${e.message}`)); };
@@ -305,7 +312,7 @@ export async function main(argv = process.argv.slice(2)) {
           let moved = false;
           const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; moved = first.data?.upgrade?.restart_daemon === true; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
             .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`))
-            .finally(() => { inflight.delete(p); if (!once && (moved || leaving)) exitWhenIdle(leaving ?? 'the fabric moved (upgrade fabric)'); });
+            .finally(() => { inflight.delete(p); if (!once) { if (moved) leave.request('the fabric moved (upgrade fabric)'); else leave.settle(); } });
           inflight.add(p);
           continue;
         }

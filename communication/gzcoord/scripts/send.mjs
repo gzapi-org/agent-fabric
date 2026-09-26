@@ -21,6 +21,16 @@
 // has a session (runtime/control/presence.mjs) and names each one that
 // has none; --force sends anyway.
 //
+// A message with no MESSAGE-ID gets one here: minted, and written into
+// the file before anything else happens, so that sending the same file
+// again — a retry after an unknown outcome — carries the same id and the
+// relay and every reader discard the second copy (SPEC §7.2). Minting
+// by hand first, then substituting a placeholder, put a command on the
+// owner's screen that showed something other than what was sent
+// (2026-09-26). A present id is kept; a placeholder is still refused
+// below. From stdin there is no file to keep it in, and that is said. A
+// dry run mints in memory only: it changes nothing.
+//
 // Exit codes: 0 sent; 1 usage or unreadable input; 2 invalid message or
 // FROM is not this session; 3 no token or relay unreachable; 4 an
 // addressee has no session, did not answer, could not tell, or is not
@@ -29,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint, invokedAsMain } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint, invokedAsMain, mintId } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
 import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
@@ -55,6 +65,16 @@ export function fallbackMarker(dir = process.env.AGENT_FABRIC_FALLBACK_DIR ?? pa
   return null;
 }
 
+// The id goes last in the metadata block: the block is every line after
+// the header up to the first blank line or section marker (SPEC §6).
+export function withMessageId(text, id) {
+  const lines = text.split('\n');
+  let end = 1;
+  while (end < lines.length && lines[end].trim() !== '' && /^[A-Z][A-Z0-9-]*: /.test(lines[end])) end++;
+  lines.splice(end, 0, `MESSAGE-ID: ${id}`);
+  return lines.join('\n');
+}
+
 export async function main(argv = process.argv.slice(2)) {
   // The login first, before anything is printed: every line this function
   // writes is then the reader's, the usage line included — which is the
@@ -69,7 +89,18 @@ export async function main(argv = process.argv.slice(2)) {
   let raw;
   try { raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); }
   catch (e) { console.error(t('send.cannot-read', { file, detail: e.message })); return 1; }
-  const text = normalize(raw);
+  let text = normalize(raw);
+  if (!parse(text).metadata?.['MESSAGE-ID']) {
+    const minted = mintId();
+    text = withMessageId(text, minted);
+    if (dry) console.error(t('send.id-minted-dry', { id: minted }));
+    else if (file === '-') console.error(t('send.id-minted-stdin', { id: minted }));
+    else {
+      try { const tmp = `${file}.tmp-${process.pid}`; fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); }
+      catch (e) { console.error(t('send.id-not-written', { file, detail: e.message })); return 1; }
+      console.error(t('send.id-minted', { id: minted, file }));
+    }
+  }
 
   const root = inboxRoot(who);
   const cfg = integrationConfig(who.project, process.env, t);

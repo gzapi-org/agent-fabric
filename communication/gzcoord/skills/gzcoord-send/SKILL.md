@@ -1,6 +1,6 @@
 ---
 name: gzcoord-send
-description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, minting its MESSAGE-ID, validating it and posting it with gzcoord-send as the login you are. Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, or a DECISION; and to learn whether an agent is online (presence), since nobody sends HELLO any more."
+description: "Send a message to another agent over GZCoord — the whole procedure, from deciding whether a message is the right instrument (never for what belongs in a PR, a review or a commit) to composing it in the GZCOORD/1 shape, validating it and posting it with gzcoord-send as the login you are (it mints the MESSAGE-ID). Load it before writing any message to another agent: a REPLY when you start acting on someone's finding, an OBSERVATION when you find something in another role's lane, a REQUEST, or a DECISION; and to learn whether an agent is online (presence), since nobody sends HELLO any more."
 ---
 
 # Sending a GZCoord message
@@ -41,7 +41,7 @@ TO-ROLE: <slug>                 #   … or the role that owns the decision …
 BROADCAST: true                 #   … or everyone; exactly one of the three
 IN-REPLY-TO: <message-id>       # when answering
 REPLY-EXPECTED: yes|no
-MESSAGE-ID: <uuidv7>            # gzmsg new-id
+                                # MESSAGE-ID: leave it out — gzcoord-send mints it
 SUBJECT: one line, short
 
 OBSERVATION:
@@ -114,11 +114,12 @@ Rules that are not style:
   sessions do the same job and meet in a merge conflict.
 
 Write it to a file in your scratchpad (never in the tree; a message is
-never committed). Mint the id first:
-
-```sh
-gzmsg new-id
-```
+never committed), without a `MESSAGE-ID` line: `gzcoord-send` mints one
+and writes it into the file before it posts, so sending the same file
+again, after an outcome you could not see, sends the same id and the
+copy is discarded (SPEC §7.2). Never write a placeholder id to fill in
+later: it is refused, and the command on screen would not be the
+message that went out. An id you set yourself is kept.
 
 ## 3. Send
 
@@ -134,8 +135,8 @@ that fails is not sent — and refuses a `FROM` that is not your address:
 the sender is the login, never a claim. It resolves the relay, the
 channel and the token exactly as the inbox does (your project's
 integration; the token from the environment `fabric-secrets sync`
-populated). It prints `sent seq <n> <TYPE> <id>` and nothing else. Keep
-the id: a reply names it in `IN-REPLY-TO`.
+populated). It prints `sent seq <n> <TYPE> <id>` and nothing else — the
+id it minted, or yours. Keep the id: a reply names it in `IN-REPLY-TO`.
 
 **Before a `TO` or `TO-ROLE` message leaves, `send.mjs` asks whether the
 addressee has a session running** — the control plane answers from each

@@ -228,5 +228,53 @@ out="$(run --json)"; rc=$?
   && pass "the chain adds one work (B stands) and two netted; the earlier pair still netted" \
   || fail "chain over- or under-netted (rc=$rc; before: $before_work work)" "$out"
 
+echo "pr-gate --in-flight / --overlap: every branch on origin, PR or not; what shares its paths"
+(
+  cd "$SANDBOX/repo" || exit 1
+  # A job waiting for a merge: pushed, no PR, sharing f.txt with the PR branch.
+  git checkout -q -b develop-qzapp/other/feat/parked main
+  printf 'parked\n' >> f.txt; mkdir -p api; printf 'x\n' > api/stop.py; git add -A; git commit -q -m "parked work"
+  git push -q origin develop-qzapp/other/feat/parked
+  # Unrelated work: a path nobody else touches.
+  git checkout -q -b develop-qzapp/third/docs/readme main
+  printf 'r\n' > README.md; git add -A; git commit -q -m "readme"; git push -q origin develop-qzapp/third/docs/readme
+  # Off the naming convention.
+  git checkout -q -b hotfix main; printf 'h\n' > h.txt; git add -A; git commit -q -m "hotfix"; git push -q origin hotfix
+  # Merged already: not in flight.
+  git checkout -q -b develop-qzapp/me/done main; printf 'd\n' > d.txt; git add -A; git commit -q -m "done"
+  git checkout -q main; git merge -q --ff-only develop-qzapp/me/done; git push -q origin main develop-qzapp/me/done
+  git checkout -q develop-qzapp/me/feat/thing
+)
+prs "$(jq -nc --arg h "$(git -C "$SANDBOX/repo" rev-parse develop-qzapp/me/feat/thing)" '[{number:42,title:"the thing",headRefName:"develop-qzapp/me/feat/thing",headRefOid:$h,baseRefName:"main",state:"OPEN"}]')"
+snap() { (cd "$SANDBOX/repo" && git rev-parse HEAD && git status --porcelain && git for-each-ref --format='%(refname) %(objectname)' refs/heads); }
+before="$(snap)"
+out="$(run --in-flight)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q '^develop-qzapp/other  develop-qzapp/other/feat/parked  no PR  ahead=1' <<<"$out" \
+  && pass "a pushed branch with no PR is a row: owner from its prefix, no PR, commits ahead" || fail "the PR-less branch is missing (rc=$rc)" "$out"
+grep -q '^develop-qzapp/me  develop-qzapp/me/feat/thing  #42' <<<"$out" && pass "…a branch with a PR carries its number" || fail "the PR's row is missing" "$out"
+! grep -q 'develop-qzapp/me/done' <<<"$out" && pass "…a branch merged into the base is not in flight" || fail "a merged branch was listed" "$out"
+grep -q '^unattributed  hotfix  no PR' <<<"$out" && pass "…a branch off the convention reads unattributed, never guessed" || fail "the off-convention branch was attributed" "$out"
+[[ "$before" == "$(snap)" ]] && pass "…and the clone's HEAD, working tree and branches are untouched" || fail "the clone changed under a listing"
+
+out="$(run --overlap develop-qzapp/other/feat/parked)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'develop-qzapp/me/feat/thing  #42' <<<"$out" && grep -q 'shares 1: f.txt' <<<"$out" \
+  && ! grep -q 'docs/readme' <<<"$out" && ! grep -q '  hotfix  ' <<<"$out" \
+  && pass "--overlap lists the PR sharing a path, with the path, and omits the branches sharing none" || fail "overlap wrong (rc=$rc)" "$out"
+out="$(run --overlap 42 --json)"; rc=$?
+[[ $rc -eq 0 ]] && [[ "$(jq -r '.overlap_with, (.rows | map(.branch) | join(",")), .rows[0].shared[0], .fetch_ok' <<<"$out" | paste -sd' ')" == "develop-qzapp/me/feat/thing develop-qzapp/other/feat/parked f.txt true" ]] \
+  && pass "…by PR number too, and as data: overlap_with, shared, fetch_ok" || fail "overlap by number or its JSON wrong (rc=$rc)" "$out"
+out="$(run --in-flight --path api/)"; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'feat/parked' <<<"$out" && ! grep -q 'feat/thing' <<<"$out" \
+  && pass "--path keeps only the rows changing something under the prefix" || fail "--path filter wrong (rc=$rc)" "$out"
+out="$(run --overlap no/such/branch)"; rc=$?
+[[ $rc -eq 2 ]] && grep -q 'not a branch in flight on origin' <<<"$out" && pass "an unknown branch is said, exit 2" || fail "unknown branch not refused (rc=$rc)" "$out"
+out="$(run --in-flight 42)"; rc=$?
+[[ $rc -eq 2 ]] && pass "--in-flight takes no PR numbers" || fail "numbers accepted with --in-flight (rc=$rc)" "$out"
+(cd "$SANDBOX/repo" && git remote set-url origin "$SANDBOX/nowhere.git")
+out="$(run --in-flight --json)"; rc=$?
+(cd "$SANDBOX/repo" && git remote set-url origin "$SANDBOX/origin.git")
+[[ $rc -eq 2 ]] && grep -q 'git fetch origin failed' <<<"$out" && grep -q '"fetch_ok": false' <<<"$out" \
+  && pass "a failed fetch is said first, fetch_ok false, exit 2 — the rows are marked as what origin last showed" || fail "a failed fetch was silent (rc=$rc)" "$out"
+
 echo
 if [[ $failures -eq 0 ]]; then echo "test_pr-gate: OK — all assertions passed."; else echo "test_pr-gate: FAILED — $failures assertion(s)."; exit 1; fi

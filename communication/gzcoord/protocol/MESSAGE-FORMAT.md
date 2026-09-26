@@ -175,9 +175,11 @@ it rests on (the finding, the contract, the file and line), what is out
 of scope, and how the recipient will know it is finished. For a small ask
 that is one sentence; the supply sections above are the long form of the
 same thing. Before assigning, look for the job already in flight — the
-open PRs (`pr-gate.sh --all`) and the pushed branches with none
-(`git branch -r`), where a job waiting for a merge sits unseen: the
-fleet's most frequent rework is the same work started twice.
+open PRs and the pushed branches with none, where a job waiting for a
+merge sits unseen (`pr-gate.sh --in-flight`, and `--overlap` for what
+shares paths with a branch): the fleet's most frequent rework is the
+same work started twice. Before relying on another agent's branch,
+`trial-merge.sh` says whether the two combine.
 
 **Receipt is not acceptance.** The recipient's `REPLY` says what it
 undertakes — all of it, part of it ("the gzapp half now; InterWeave after

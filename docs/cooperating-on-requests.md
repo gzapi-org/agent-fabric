@@ -135,10 +135,10 @@ Measured from the committed record and from message metadata (type,
   there is no way to see a request and every `REPLY` to it, which is
   what a resuming session needs first. (The coordinator's own queue
   records this as `--history`, not built.)
-- **What is in flight, branches included.** `pr-gate.sh --all` lists open
-  PRs; a job parked on a pushed branch with no PR — the normal state of a
-  second piece of work under one-open-PR — shows nowhere but
-  `git branch -r`, and the assigner on 2026-09-26 did not look there.
+- **What is in flight, branches included** — built the same day, on the
+  owner's acceptance: `pr-gate.sh --in-flight` and `--overlap` list every
+  pushed branch, PR or not, and what shares its paths; `trial-merge.sh`
+  says whether named branches combine (`docs/live-checks/2026-09-26-in-flight-and-trial-merge.md`).
 - **Owed requests across sessions.** Nothing lists the `REPLY-EXPECTED:
   yes` requests addressed to a login that no `REPLY` has answered, so a
   new session cannot see what its predecessor owed.

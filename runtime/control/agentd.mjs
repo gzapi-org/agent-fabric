@@ -261,7 +261,17 @@ export async function main(argv = process.argv.slice(2)) {
     last = up.id;
   };
   console.error(`agentd: ${me.address} on ${cfg.channel} at ${cfg.relay_url}; operators: ${[...operatorAddresses()].join(' ')}`);
-  if (!once) watchSource(() => { console.error('agentd: source changed; exiting for systemd to restart on the new code'); process.exit(0); });
+  // Leaving waits for every running action: the watch fired the moment an
+  // `upgrade fabric` pulled this daemon's own code, killing the process
+  // before it posted the reply the operator was waiting for.
+  let leaving = null;
+  const exitWhenIdle = why => {
+    leaving = leaving ?? why;
+    if (inflight.size) return;
+    console.error(`agentd: ${leaving}; exiting for systemd to restart on the new code`);
+    process.exit(0);
+  };
+  if (!once) watchSource(() => exitWhenIdle('source changed'));
   if (!once) {
     // At start too: after a reboot every observed sign-in may have lapsed.
     const keep = () => { if (!accountSlugs(accountsDir()).length) return; keeper.refresh().then(r => { for (const a of r.accounts ?? []) if (a.status !== 'ok') console.error(`agentd: account ${a.slug}: ${a.status}${a.error ? ` (${a.error})` : ''}`); }).catch(e => console.error(`agentd: accounts: ${e.message}`)); };
@@ -292,9 +302,10 @@ export async function main(argv = process.argv.slice(2)) {
           try { ledger.record(from, a.ts); }
           catch (e) { console.error(`agentd: ${op} for ${from} refused: the action ledger could not be written (${e.code ?? e.message})`); continue; }
           console.error(`agentd: started ${op} for ${from} (${id.slice(0, 8)})`);
-          const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
+          let moved = false;
+          const p = answer(a.request, ctx).then(async reply => { const { _followups, ...first } = reply; moved = first.data?.upgrade?.restart_daemon === true; await post(first); console.error(`agentd: answered ${op} for ${from} (${id.slice(0, 8)}): ${first.data?.[op]?.status ?? '?'}`); })
             .catch(e => console.error(`agentd: ${op} for ${from} failed to answer: ${e.message}`))
-            .finally(() => inflight.delete(p));
+            .finally(() => { inflight.delete(p); if (!once && (moved || leaving)) exitWhenIdle(leaving ?? 'the fabric moved (upgrade fabric)'); });
           inflight.add(p);
           continue;
         }

@@ -2175,8 +2175,32 @@ def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: st
     assert "m m m" not in texts and texts.count("## Big") == 1, texts
 
 
+def test_an_unresolved_merge_target_is_reported_on_every_drain(tmp: str) -> None:
+    """A correction whose merge_target names no section is written as its
+    own topic and reported. The next drain bringing it found its heading
+    in its own topic and said nothing, while the section it meant to
+    replace still stood (a drain's blind review, 2026-09-26). Every drain
+    that brings it reports it, the tree unchanged."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "orphan", "title": "An orphan correction",
+         "merge_target": "No such heading", "body": "Text.", "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    for stamp in ("2026-01-01", "2026-01-02"):
+        proc = run_assemble(drain, claims_dir, out, "--stamp", stamp)
+        assert proc.returncode == 0, proc.stderr
+        assert "MERGE TARGET UNRESOLVED" in proc.stderr and "No such heading" in proc.stderr, \
+            f"drain of {stamp} said nothing:\n{proc.stderr}"
+        unresolved = json.loads(read(report_path(out))).get("merge_target_unresolved") or []
+        assert any("No such heading" in u for u in unresolved), (stamp, unresolved)
+    names = sorted(os.listdir(dom(out, "alpha", "domain")))
+    assert names == ["orphan.md", "other.md"], names
+    assert read(dom(out, "alpha", "domain", "orphan.md")).count("## ") == 1
+
+
 def main() -> int:
     cases = [
+        test_an_unresolved_merge_target_is_reported_on_every_drain,
         test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
         test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
         test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,

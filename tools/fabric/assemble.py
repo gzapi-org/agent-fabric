@@ -1017,14 +1017,24 @@ def main() -> int:
                     ambiguous_targets.append(f"{where}: merge_target {target!r} is a section of "
                                              + ", ".join(f"{klass}:{t}" for t in holders))
                     continue
-                if not holders and heading not in own:
+                if not holders and heading in own:
+                    # Written as its own topic by an earlier drain, the
+                    # claim is reported on every drain that brings it: the
+                    # section it meant to replace still stands, and going
+                    # quiet after the first report hid that (a drain's
+                    # blind review, 2026-09-26). A correction applied in
+                    # place inside its own topic looks the same from the
+                    # tree; its merge_target names nothing either, so the
+                    # report asks for the same fix.
+                    unresolved_targets.append(f"{where}: merge_target {target!r} names no section "
+                                              f"of {label}/{klass}; the claim stands as its own topic")
+                    continue
+                if not holders:
                     holders = sorted(t for t, sections in on_disk.items() if heading in sections and t != topic)
                     if len(holders) != 1:
                         unresolved_targets.append(f"{where}: merge_target {target!r} names no section "
                                                   f"of {label}/{klass}; written as its own topic")
                         continue
-                if not holders:
-                    continue
                 # claim["topic"] stays the memory's: an untitled claim's
                 # heading is derived from it.
                 group.remove(claim)

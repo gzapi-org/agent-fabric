@@ -314,7 +314,8 @@ its own, so its file name is never the stale slice's. A heading held by
 two topics refuses the run (`MERGE TARGET AMBIGUOUS`, nothing written);
 a heading held by none is written as its own topic and named on stderr
 and under `merge_target_unresolved` in the report, because whatever it
-meant to replace still stands.
+meant to replace still stands — on every drain that brings the memory,
+not only the first, until its `merge_target` is fixed.
 
 **Every section is dated.** A claim carries `observed_at` — the
 memory's own `modified` stamp, else the file's mtime — and the section

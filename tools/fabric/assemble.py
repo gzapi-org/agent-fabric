@@ -1083,6 +1083,7 @@ def main() -> int:
                 agents.add(agent)
         return agents.pop() if len(agents) == 1 else None
 
+    same_agent_supersedes: list[str] = []
     for role, label, (klass, topic), group in groups_to_check:
         candidates = slice_candidates(role, klass, topic)
         present = existing_sections(candidates)
@@ -1132,6 +1133,20 @@ def main() -> int:
             # is the default for every pair under it.
             claim_key = f"{key_id}@{(claim.get('evidence') or ['?'])[0][:12]}"
             decision = decisions.get(claim_key) or decisions.get(key_id)
+            # AN AGENT'S NEWER TEXT REPLACES ITS OWN OLDER TEXT (the owner,
+            # 2026-09-26). Every same-agent pair the owner was asked about
+            # was the author's later version — a tracker closed, a count
+            # updated — and was superseded, 34 times out of 34. So a
+            # collision whose every corpus section the incoming claim's own
+            # agent wrote supersedes without asking; it is printed and
+            # recorded like any decision. Two agents' texts still stop the
+            # drain, and so do two claims of this drain under one heading,
+            # where which is newer is not the corpus's to say.
+            same_agent = author is not None and agent == author and (retitled or heading in present)
+            rule = None
+            if decision is None and same_agent:
+                decision, rule = "supersede", "same-agent"
+                same_agent_supersedes.append(f"{key_id}  ({agent})")
             if decision == "supersede" and retitled:
                 # The new title wins: every section of the topic is retired
                 # and the claim takes the first one's place.
@@ -1159,7 +1174,13 @@ def main() -> int:
                 )
                 continue
             applied_decisions.append({"key": claim_key if claim_key in decisions else key_id, "decision": decision,
-                                      "agent": agent, "observed_at": claim.get("observed_at") or ""})
+                                      "agent": agent, "observed_at": claim.get("observed_at") or "",
+                                      **({"rule": rule} if rule else {})})
+    if same_agent_supersedes and not refused_collisions:
+        print("SUPERSEDED, same agent (an agent's newer text replaces its own older text; the owner, 2026-09-26):",
+              file=sys.stderr)
+        for note in same_agent_supersedes:
+            print(f"  {note}", file=sys.stderr)
     if refused_collisions:
         print("SUPERSEDING? — a claim disagrees with a section already in the corpus; the owner decides "
               "which is true. This run wrote NOTHING and exits 1.", file=sys.stderr)
@@ -1296,8 +1317,16 @@ def main() -> int:
                 authorised = True
                 resolved.append(target)
             if authorised:
-                # Replacement is opt-in, and this is the opt-in.
-                heading = target
+                # Replacement is opt-in, and this is the opt-in. The claim's
+                # own heading takes the target's place: keeping the target's
+                # left a corrected section under its stale cue ("#851 is
+                # merged" over "Released."), disagreeing with the slice's own
+                # description (a drain's review, 2026-09-26).
+                if heading != target and target in blocks and heading not in blocks:
+                    blocks[heading] = blocks.pop(target)
+                    order[order.index(target)] = heading
+                else:
+                    heading = target
                 # CONSOLIDATION RETIRES THE SUFFIXED SIBLINGS.
                 #
                 # A collision leaves "X" and "X (2)" side by side and

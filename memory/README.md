@@ -282,15 +282,22 @@ one drain under one heading collide the same way. So does a **retitled
 memory**: a memory's topic is its file name and its heading its
 description, so a claim bringing a new heading into a topic whose every
 section one agent wrote — that agent's own — is the same memory
-rewritten (a tracker's "OPEN" become "MERGED"), not a second fact. The
-run stops on it like any collision, keyed by the new heading;
-`supersede` retires the topic's old sections and puts the new one in
-their place. A topic several agents wrote appends as before, and a
-memory whose `merge_target` names the old section is not asked about. An author who knows
+rewritten (a tracker's "OPEN" become "MERGED"), not a second fact.
+**An agent's newer text replaces its own older text without a
+question** (the owner, 2026-09-26, after 34 such pairs asked and all 34
+superseded): a retitle, or a new text under a heading of that agent's
+own topic, supersedes — the old sections are retired and the new one
+takes their place — and it is printed (`SUPERSEDED, same agent`) and
+recorded in `collision_decisions` with `"rule": "same-agent"`. An
+owner's decision in `--collision-decisions` still wins. Two agents'
+texts under one heading, and two claims of one drain, still stop the
+run. A topic several agents wrote appends a new heading as before, and
+a memory whose `merge_target` names the old section is not asked about. An author who knows
 the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no
 question is asked: the harvest carries the field to the claim and the
-assembler replaces the section and retires its siblings. The heading is
+assembler replaces the section and retires its siblings; the section
+then carries the correcting memory's own heading, not the stale one. The heading is
 found wherever it lives in the role's class (or the shared class), not
 only in the correcting memory's own topic — a correction is a memory of
 its own, so its file name is never the stale slice's. A heading held by

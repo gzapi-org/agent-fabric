@@ -1783,36 +1783,34 @@ def with_agents(drain: str, rows: dict[str, str]) -> None:
             fh.write(json.dumps({"content_hash": h, "agent": agent, "host": "hostA"}) + "\n")
 
 
-def test_a_retitled_memory_is_asked_about_not_appended(tmp: str) -> None:
+def test_a_retitled_memory_replaces_its_own_old_section(tmp: str) -> None:
     """A memory's topic is its file name and its heading its description.
     An agent that rewrites a tracker with a new description brings a new
     heading into a topic whose every section it wrote; appending it left
     the stale "open" section standing beside the "merged" one (a drain's
-    blind review, 2026-09-25). It is a collision the owner decides; a
-    topic several agents wrote keeps appending, and a merge_target naming
-    the old section is the author's own supersede."""
+    blind review, 2026-09-25). The agent's newer text supersedes its own
+    older text without a question, recorded as the same-agent rule (the
+    owner, 2026-09-26); an owner's decision still wins; a topic several
+    agents wrote keeps appending, and a collision between two agents'
+    texts still stops the drain."""
     drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
         {"class": "domain", "topic": "tracker", "title": "Issue 851 is open",
          "body": "Waiting on review.", "evidence": ["a1"], "observed_at": "2026-09-20"},
         {"class": "domain", "topic": "joint", "title": "First view", "body": "One.", "evidence": ["a2"]},
         {"class": "domain", "topic": "joint", "title": "Second view", "body": "Two.", "evidence": ["b1"]},
     ])})
-    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "b1": "dev-02"})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "b1": "dev-02", "b2": "dev-02"})
     assert run_assemble(drain, claims_dir, out).returncode == 0
     retitle = {"class": "domain", "topic": "tracker", "title": "Issue 851 is merged",
                "body": "Merged on 2026-09-24.", "evidence": ["a3"], "observed_at": "2026-09-24"}
     set_claims(claims_dir, "alpha", [retitle])
     tracker = dom(out, "alpha", "domain", "tracker.md")
-    before = read(tracker)
     proc = run_assemble(drain, claims_dir, out)
-    assert proc.returncode == 1, "a retitled memory was appended beside its old section:\n" + read(tracker)
-    assert "alpha/domain:tracker#Issue 851 is merged" in proc.stderr and "retitled?" in proc.stderr, proc.stderr
-    assert "'Issue 851 is open'" in proc.stderr and "Waiting on review." in proc.stderr, proc.stderr
-    assert read(tracker) == before, "a refused drain must not touch the slice"
-
-    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
-                        decisions_file(tmp, {"alpha/domain:tracker#Issue 851 is merged": "supersede"}))
     assert proc.returncode == 0, proc.stderr
+    assert "SUPERSEDED, same agent" in proc.stderr and "alpha/domain:tracker#Issue 851 is merged  (dev-01)" in proc.stderr, proc.stderr
+    report = json.loads(read(report_path(out)))
+    assert any(d.get("rule") == "same-agent" and d["decision"] == "supersede"
+               and d["key"].endswith("tracker#Issue 851 is merged") for d in report["collision_decisions"]), report["collision_decisions"]
     text = read(tracker)
     assert "## Issue 851 is merged" in text and "Issue 851 is open" not in text and "Waiting" not in text, text
     assert "description: Issue 851 is merged" in text, text
@@ -1827,6 +1825,8 @@ def test_a_retitled_memory_is_asked_about_not_appended(tmp: str) -> None:
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 0, proc.stderr
     assert "Released." in read(tracker) and read(tracker).count("## ") == 1, read(tracker)
+    assert "## Issue 851 is released" in read(tracker) and "is merged" not in read(tracker), \
+        "the corrected section kept its stale heading:\n" + read(tracker)
 
     # A topic two agents wrote is two memories: a new heading appends.
     set_claims(claims_dir, "alpha", [
@@ -1836,6 +1836,16 @@ def test_a_retitled_memory_is_asked_about_not_appended(tmp: str) -> None:
     assert proc.returncode == 0, proc.stderr
     joint = read(dom(out, "alpha", "domain", "joint.md"))
     assert all(h in joint for h in ("## First view", "## Second view", "## Third view")), joint
+
+    # Another agent's text under a heading this agent wrote is still asked.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Issue 851 is released",
+         "body": "Not released yet.", "evidence": ["b2"]},
+    ])
+    before = read(tracker)
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(tracker) == before, "a refused drain must not touch the slice"
 
 
 def test_a_claim_in_the_carried_file_is_not_written_twice(tmp: str) -> None:
@@ -2061,7 +2071,7 @@ def main() -> int:
         test_the_drain_report_gathers_every_bundle_of_one_drain,
         test_part_one_of_a_split_topic_is_always_the_topic_file,
         test_a_claim_in_the_carried_file_is_not_written_twice,
-        test_a_retitled_memory_is_asked_about_not_appended,
+        test_a_retitled_memory_replaces_its_own_old_section,
         test_a_correction_naming_another_topic_s_section_replaces_it_there,
         test_places_claims_and_writes_provenance,
         test_unresolved_origin_is_stated_not_invented,

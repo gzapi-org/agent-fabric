@@ -56,6 +56,11 @@ command — because in auto mode a narrow Bash rule is resolved before the
 classifier while a broad one, or one naming Monitor, is set aside; a
 Monitor follows the Bash rules. Every other rule the account allows,
 denies or asks is kept as read, and an `ask` rule still wins.
+
+`permissions.defaultMode` "auto" (the owner, 2026-09-26): every agent's
+session starts in auto mode. Eight accounts provisioned by hand had no
+mode and started in the default one, asking for what the classifier
+would allow; the allow rules above assume auto.
 """
 from __future__ import annotations
 
@@ -111,7 +116,9 @@ def allowed(doc: dict) -> list:
 
 def settled(doc: dict) -> bool:
     current = doc.get("attribution") if isinstance(doc.get("attribution"), dict) else {}
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
     return (all(current.get(k) == v for k, v in ATTRIBUTION.items())
+            and perms.get("defaultMode") == "auto"
             and all(r in allowed(doc) for r in allow_rules())
             and "includeCoAuthoredBy" not in doc
             and all(doc.get(k) == v for k, v in TOP_LEVEL.items())
@@ -155,6 +162,7 @@ def main(argv: list[str]) -> int:
     doc["env"] = {**env, **ENV}
     perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
     perms["allow"] = allowed(doc) + [r for r in allow_rules() if r not in allowed(doc)]
+    perms["defaultMode"] = "auto"
     doc["permissions"] = perms
     save(path, doc)
     print(f"  +  {path} fabric user settings")

@@ -84,6 +84,12 @@ jq 'del(.permissions)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
 out="$(run "$S")"
 [[ "$out" == "  +  "* ]] && jq -e '.permissions.allow | index("Bash(gzcoord-inbox *)")' "$S" >/dev/null \
     && ok "a settings file settled but for the allow rules gets them" || bad "settled file left without rules" "$out"
+# Every session starts in auto mode (the owner, 2026-09-26): a file
+# settled in every other key but the mode is written.
+jq 'del(.permissions.defaultMode)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
+out="$(run "$S")"
+[[ "$out" == "  +  "* && "$(jq -r .permissions.defaultMode "$S")" == auto ]] \
+    && ok "a missing permission mode is set to auto" || bad "mode not set" "$out $(jq -c .permissions "$S")"
 cd "$HERE" || exit 1
 
 echo; echo "user-settings: $PASS passed, $FAIL failed"

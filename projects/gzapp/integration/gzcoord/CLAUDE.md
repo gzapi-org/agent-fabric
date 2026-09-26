@@ -20,12 +20,12 @@ block and the person copies it into the receiving session's prompt
   `MESSAGE-ID` minted by `gzmsg.mjs new-id` — a UUIDv7, unique by
   construction, no counter to seed or continue. Your address is
   `<host>/<login>`: the account this session runs under
-  (`../agent-fabric/bin/fabric-whoami` from the working copy), never the working copy's name.
+  (`fabric-whoami` from the working copy), never the working copy's name.
   Put the role's **slug** in `ROLE` (`identities/roles/catalog.json` —
   `backend-dev`, never `.NET backend developer`): `TO-ROLE` matches by
   equality, and one addressing field per message is the whole routing
   rule. Send no `HELLO` or `GOODBYE` (deprecated, SPEC §5): whether an
-  agent is online is `../agent-fabric/bin/fabric-ctl <login|all> presence`.
+  agent is online is `fabric-ctl <login|all> presence`.
 - **Do** activate what you own at session start. The relay is a
   systemd user unit on the hosting account — the fabric-coordinator's —
   up with that account's user manager; where no manager answers it is a

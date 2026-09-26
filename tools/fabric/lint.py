@@ -1362,8 +1362,9 @@ def lint_slices(base: str, where_prefix: str, template_schema: dict[str, Any] | 
             # are what every holder of the role reads before choosing a
             # slice. The Italian check above missed a whole drain of Russian
             # and Georgian cues (a drain's blind review, 2026-09-25).
+            prose = re.sub(r"^```.*?^```", "", body, flags=re.MULTILINE | re.DOTALL)   # a fenced block is quoted text
             cues = [("description", meta.get("description"))] + \
-                   [("heading", h) for h in re.findall(r"^## (.+)$", body, re.MULTILINE)]
+                   [("heading", h) for h in re.findall(r"^#{1,6} (.+)$", prose, re.MULTILINE)]
             for kind, cue in cues:
                 if isinstance(cue, str) and _is_mostly_non_latin(cue):
                     findings.append(f"{rel}: {kind} is not English ({cue[:60]!r}); "

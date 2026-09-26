@@ -14,13 +14,17 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOC = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "commands.json"), encoding="utf-8"))
 # An expansion used as a path: `$AGENT_FABRIC_ROOT/...` or `${AGENT_FABRIC_ROOT}/...`.
 # A sentence that warns against it names the variable without a path after it.
-EXPANDED_PATH = re.compile(r"\$\{?AGENT_FABRIC_ROOT\}?/")
+EXPANDED_PATH = re.compile(r"\$\{?AGENT_FABRIC_ROOT\}?/|(?:\.\./)?agent-fabric/bin/fabric-")
+# ...or by a path to the fabric's bin/: no `Bash(<name> *)` rule matches a
+# path, so the session is asked anyway (review of #42, 2026-09-26).
 
 # The texts a session reads and runs commands from.
 SESSION_FACING = (
@@ -29,6 +33,10 @@ SESSION_FACING = (
     + glob.glob(os.path.join(ROOT, "projects", "*", "integration", "gzcoord", "CLAUDE*.md"))
     + glob.glob(os.path.join(ROOT, "identities", "prompt", "*.md"))
     + [os.path.join(ROOT, "CLAUDE.md")]
+    # What the scripts PRINT into a session's context (the replay hint of a
+    # delivery over the notification cap, the start drain's lines).
+    + glob.glob(os.path.join(ROOT, "communication", "gzcoord", "scripts", "*.mjs"))
+    + glob.glob(os.path.join(ROOT, "communication", "gzcoord", "i18n", "*.json"))
 )
 
 
@@ -39,6 +47,21 @@ def test_every_command_is_an_executable_with_a_shebang() -> None:
         assert os.access(path, os.X_OK), f"{rel} is not executable; `{name}` on PATH would not run"
         with open(path, "rb") as fh:
             assert fh.read(2) == b"#!", f"{rel} has no shebang; `{name}` on PATH would not run"
+
+
+def test_every_script_runs_through_its_link() -> None:
+    """bootstrap links each command into ~/.local/bin, so it runs with argv[1]
+    the LINK. A main-module guard comparing argv[1] with the file's own path
+    as a string made every node command a silent no-op that exited 0 (review
+    of #42, 2026-09-26)."""
+    probes = {"gzmsg": (["new-id"], r"^[0-9a-f]{8}-"), "gzcoord-send": (["--help"], r"usage"),
+              "gzcoord-inbox": (["--held"], r"\S")}
+    with tempfile.TemporaryDirectory() as d:
+        for name, (args, expect) in probes.items():
+            link = os.path.join(d, name)
+            os.symlink(os.path.join(ROOT, DOC["commands"][name]), link)
+            out = subprocess.run([link, *args], capture_output=True, text=True, timeout=60)
+            assert re.search(expect, out.stdout + out.stderr), f"{name} {' '.join(args)} through its link printed nothing: {out}"
 
 
 def test_a_wrapper_that_runs_another_command_is_never_allowed() -> None:
@@ -67,6 +90,7 @@ def test_the_watch_the_hook_prescribes_is_a_bare_command() -> None:
 def main() -> int:
     cases = [
         test_every_command_is_an_executable_with_a_shebang,
+        test_every_script_runs_through_its_link,
         test_a_wrapper_that_runs_another_command_is_never_allowed,
         test_no_session_facing_text_runs_a_command_through_an_expansion,
         test_the_watch_the_hook_prescribes_is_a_bare_command,

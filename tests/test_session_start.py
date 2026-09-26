@@ -184,6 +184,7 @@ def test_hook_says_when_the_session_has_no_inbox_watch(tmp: str) -> None:
         fh.write("#!/bin/bash\n"  # not env: env re-execs bash and the process is no longer named claude
                  
                  "if [ \"$1\" = watch ]; then (exec -a 'node inbox.mjs --follow' sleep 20) & w=$!; sleep 0.3; fi\n"
+                 "if [ \"$1\" = named ]; then (exec -a 'node /home/x/.local/bin/gzcoord-inbox --follow' sleep 20) & w=$!; sleep 0.3; fi\n"
                  f"bash {HOOK} < {payload}\n"
                  "[ -n \"${w:-}\" ] && kill $w\n")
     os.chmod(fake, 0o755)
@@ -191,6 +192,8 @@ def test_hook_says_when_the_session_has_no_inbox_watch(tmp: str) -> None:
     assert "NO INBOX WATCH is running for this session (resume)" in context_of(bare), bare.stdout
     armed = subprocess.run([fake, "watch"], capture_output=True, text=True, env=env)
     assert "NO INBOX WATCH" not in context_of(armed), armed.stdout
+    named = subprocess.run([fake, "named"], capture_output=True, text=True, env=env)
+    assert "NO INBOX WATCH" not in context_of(named), "the watch armed by its name on PATH was not seen:\n" + named.stdout
 
 
 def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:

@@ -143,7 +143,10 @@ def watch_running(proc: str = "/proc", pid: int | None = None) -> bool | None:
                 cmd = fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
         except OSError:
             continue
-        if "inbox.mjs" not in cmd or "--follow" not in cmd:
+        # The script by its file, or by the name bootstrap links it under
+        # (the watch the message below prescribes): missing the name told an
+        # armed session to arm a second consumer (review of #42).
+        if not ("inbox.mjs" in cmd or "gzcoord-inbox" in cmd) or "--follow" not in cmd:
             continue
         a = d
         for _ in range(64):

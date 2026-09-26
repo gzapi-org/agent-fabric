@@ -41,7 +41,7 @@ TO-ROLE: <slug>                 #   … or the role that owns the decision …
 BROADCAST: true                 #   … or everyone; exactly one of the three
 IN-REPLY-TO: <message-id>       # when answering
 REPLY-EXPECTED: yes|no
-MESSAGE-ID: <uuidv7>            # node communication/gzcoord/scripts/gzmsg.mjs new-id
+MESSAGE-ID: <uuidv7>            # gzmsg new-id
 SUBJECT: one line, short
 
 OBSERVATION:

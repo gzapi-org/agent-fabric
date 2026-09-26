@@ -488,7 +488,17 @@ export function parseArgs(argv, spec) {
 let ARGS = { flags: {}, positional: [] };
 function arg(name) { return ARGS.flags[name]; }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run as a command, not imported. Compared by REAL path: bootstrap links
+// the scripts into ~/.local/bin by name, argv[1] is then the link while
+// import.meta.url is the file node resolved, and a string comparison made
+// every command a silent no-op that exited 0 (review of #42, 2026-09-26).
+export function invokedAsMain(url) {
+  if (!process.argv[1]) return false;
+  try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url)); }
+  catch { return false; }
+}
+
+if (invokedAsMain(import.meta.url)) {
   const cmd = process.argv[2];
   if (cmd in FLAGS) {
     try { ARGS = parseArgs(process.argv.slice(3), FLAGS[cmd]); }

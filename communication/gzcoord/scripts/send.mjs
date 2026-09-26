@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, whoami, idComplaint, invokedAsMain } from './gzmsg.mjs';
 import { identity, inboxRoot, integrationConfig, token, api, syncedToken, assertNotControlChannel } from './inbox.mjs';
 import { dictionary, printer } from './i18n.mjs';
 import { checkAddressees, PRESENCE_WAIT_MS } from '../../../runtime/control/presence.mjs';
@@ -181,7 +181,7 @@ export async function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+if (invokedAsMain(import.meta.url))
   // NOT through the dictionary: what failed may BE the dictionary, and a
   // throw inside this handler is an unhandled rejection (blind review F1).
   main().then(code => process.exit(code), e => { console.error(`send: ${e?.message ?? e}`); process.exit(1); });

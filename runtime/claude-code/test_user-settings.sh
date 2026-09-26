@@ -77,6 +77,13 @@ jq -e '.ask == ["Bash(gzcoord-send *)"] and .deny == ["Bash(rm *)"]' <<<"$perm" 
 jq -e '[.allow[] | select(. == "Bash(fabric-lease *)" or . == "Bash(fabric-host *)")] | length == 0' <<<"$perm" >/dev/null \
     && ok "…and fabric-lease and fabric-host, which run other commands, get none" || bad "wrapper allowed" "$perm"
 out="$(run "$S")"; [[ "$out" == "  =  "* ]] && ok "…and a second run changes nothing" || bad "not idempotent" "$out"
+# An account the earlier bootstrap already settled — every other key in
+# place, no allow rule yet — still gets the rules: a check that ignored
+# them would print "=" and never write them (review of #42).
+jq 'del(.permissions)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
+out="$(run "$S")"
+[[ "$out" == "  +  "* ]] && jq -e '.permissions.allow | index("Bash(gzcoord-inbox *)")' "$S" >/dev/null \
+    && ok "a settings file settled but for the allow rules gets them" || bad "settled file left without rules" "$out"
 cd "$HERE" || exit 1
 
 echo; echo "user-settings: $PASS passed, $FAIL failed"

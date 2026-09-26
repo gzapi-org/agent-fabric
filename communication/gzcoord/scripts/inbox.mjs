@@ -83,7 +83,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT } from './gzmsg.mjs';
+import { parse, validate, normalize, loadTaxonomy, findTaxonomy, slugOf, recordedRole, whoami, FABRIC_ROOT, invokedAsMain } from './gzmsg.mjs';
 import { defaultDictionaryOrEmpty, dictionary, localeReminder, printer } from './i18n.mjs';
 
 // Every line below is printed through `t`, the catalogue of the login
@@ -518,7 +518,9 @@ export async function waitLoop({ fetchPage, ack, waitTotal, forMeFn = forMe, key
 // "truncated". The drain (SessionStart hook context) is not a
 // notification and is rendered whole.
 export const NOTIFICATION_CAP = 2800;
-export const REPLAY_CMD = 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay';
+// The name on PATH, never a path through an expansion: a session told to
+// run it is not asked for approval (runtime/claude-code/commands.json).
+export const REPLAY_CMD = 'gzcoord-inbox --replay';
 function cutAtLine(text, max) {
   // Always at a line boundary: a body whose first line alone is longer
   // than the budget keeps nothing of it (the notice says where to read).
@@ -722,7 +724,7 @@ export async function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().then(c => process.exit(c)).catch(e => {
+if (invokedAsMain(import.meta.url)) main().then(c => process.exit(c)).catch(e => {
   // NOT through the dictionary: what failed may BE the dictionary, and a
   // throw inside this handler is an unhandled rejection — a stack trace
   // and exit 1 on a path whose whole contract is one line and exit 0

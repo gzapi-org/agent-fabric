@@ -295,8 +295,12 @@ def case_a_cue_in_another_script_is_refused() -> None:
         write(dom(fabric, "domain", "ru.md"), ru_desc)
         write(dom(fabric, "domain", "ka.md"), ka_head)
         write(dom(fabric, "domain", "good.md"), SLICE)
+        write(dom(fabric, "domain", "h3.md"), SLICE.replace("A claim with provenance.", "### Русский подзаголовок\n\nA claim with provenance."))
+        write(dom(fabric, "domain", "fenced.md"), SLICE.replace("A claim with provenance.", "```\n# Русский комментарий в коде\n```\n\nA claim with provenance."))
         code, out = run_lint(fabric)
         assert code == 1, out
+        assert "h3.md: heading is not English" in out, "a ### heading escaped the check:\n" + out
+        assert "fenced.md" not in out, "a fenced code line was read as a heading:\n" + out
         assert "ru.md: description is not English" in out, out
         assert "ka.md: heading is not English" in out, out
         assert "good.md: description" not in out and "good.md: heading" not in out, out

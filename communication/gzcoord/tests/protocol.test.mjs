@@ -1275,7 +1275,7 @@ test('inbox --follow bounds a long delivery to one notification and names the re
   assert.ok(out.length <= NOTIFICATION_CAP + 1, `the event is bounded: ${out.length}`);
   assert.ok(out.includes('SUBJECT: long\n\nNOTES:\nline 0 LONG-BODY'), 'metadata and the body head are there');
   assert.ok(!out.includes('THE-END'), 'the tail is not');
-  assert.ok(out.includes('[gzcoord: body cut here to fit one notification — the whole message: node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay 77]'));
+  assert.ok(out.includes('[gzcoord: body cut here to fit one notification — the whole message: gzcoord-inbox --replay 77]'));
 });
 
 // The hold: while the session plans, the watch polls nothing.
@@ -1439,7 +1439,7 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   assert.ok(long.length <= NOTIFICATION_CAP, `over the cap: ${long.length}`);
   assert.ok(long.includes('SUBJECT: subject 05\n\nOBSERVATION:\nline 0 of a long body\n'), 'metadata whole, body from its first line');
   assert.ok(!long.includes('the ask at the very end'), 'the tail was cut');
-  assert.match(long, /\nline \d+ of a long body\n\n\[gzcoord: body cut here to fit one notification — the whole message: node "\$AGENT_FABRIC_ROOT\/communication\/gzcoord\/scripts\/inbox\.mjs" --replay 405\]\n```/, 'cut at a line boundary; the replay command names the seq');
+  assert.match(long, /\nline \d+ of a long body\n\n\[gzcoord: body cut here to fit one notification — the whole message: gzcoord-inbox --replay 405\]\n```/, 'cut at a line boundary; the replay command names the seq');
   assert.match(long, /Not addressed to you — listed, bodies not read \(SPEC §17\):\n  01a0a9dd-e876-73e2-a329-c5b7cf28ba406  OBSERVATION  TO develop-qzapp\/z  subject 406\n  01a0a9dd-e876-73e2-a329-c5b7cf28ba407/, 'others keep their metadata lines while they fit');
   // others fall back to a count naming their seqs only when even their lines do not fit
   const crowded = render({ classified: [mine(405, meta('05') + '\n\n' + longBody), ...Array.from({ length: 40 }, (_, i) => other(600 + i))] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
@@ -1470,7 +1470,7 @@ test('render under a cap: metadata whole, body cut at a line, the replay command
   assert.ok(oneLine.length <= NOTIFICATION_CAP);
   assert.ok(!oneLine.includes('zzzzzzzz'), 'no mid-line slice');
   assert.ok(oneLine.includes('SUBJECT: subject 50\n\nNOTES:\n\n[gzcoord: body cut here'), 'metadata, the section marker that fits, then the notice');
-  assert.equal(REPLAY_CMD, 'node "$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs" --replay');
+  assert.equal(REPLAY_CMD, 'gzcoord-inbox --replay');
   // two long messages share the budget; each carries its own replay line
   const two = render({ classified: [mine(410, meta('10') + '\n\n' + longBody), mine(411, meta('11') + '\n\n' + longBody)] }, me, 'c', undefined, { cap: NOTIFICATION_CAP });
   assert.ok(two.length <= NOTIFICATION_CAP);

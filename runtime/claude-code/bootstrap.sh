@@ -179,6 +179,12 @@ put "$CLAUDE_HOME/skills/gzcoord-receive/SKILL.md" "$FABRIC_ROOT/communication/g
 # refreshed; anything else at that name is the account's and is refused,
 # never replaced.
 LOCAL_BIN="${AGENT_FABRIC_LOCAL_BIN:-$HOME/.local/bin}"
+# Read first, then loop: a list that cannot be read inside a process
+# substitution linked nothing and reported success (review of #42).
+if ! commands="$(python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1]))["commands"].items()]' \
+                   "$FABRIC_ROOT/runtime/claude-code/commands.json")"; then
+    echo "  !  runtime/claude-code/commands.json unreadable — no command linked" >&2; failed=$((failed+1)); commands=""
+fi
 while IFS=$'\t' read -r name rel; do
     [[ -n "$name" ]] || continue
     target="$FABRIC_ROOT/$rel"; link="$LOCAL_BIN/$name"
@@ -192,8 +198,7 @@ while IFS=$'\t' read -r name rel; do
     if (( DRY_RUN )); then echo "  +  $link -> $target (would link)"; continue; fi
     mkdir -p "$LOCAL_BIN" && ln -sfn "$target" "$link" && { echo "  +  $link -> $target"; changed=$((changed+1)); } \
         || { echo "  !  $link: could not link" >&2; failed=$((failed+1)); }
-done < <(python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1]))["commands"].items()]' \
-            "$FABRIC_ROOT/runtime/claude-code/commands.json")
+done <<<"$commands"
 
 # 4. The agent-fabric checkout this runs from enforces its own git
 #    discipline at commit time (policies/githooks/commit-msg). A repo

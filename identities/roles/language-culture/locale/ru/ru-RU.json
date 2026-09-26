@@ -55,6 +55,7 @@
   "send.presence-unavailable": "send: запущена ли сессия у адресата, неизвестно ({detail})",
   "send.presence-skipped": "send: сессия адресата не проверена — релей отверг токен; примет ли релей, покажет сама отправка",
   "send.presence-not-sent": "send: не отправлено — чтобы отправить всё равно, укажите --force",
+  "send.presence-planning": "send: {address} в режиме планирования — inbox удерживается, пока план не одобрен; сообщение будет прочитано после одобрения, а до тех пор ответа не будет",
   "send.presence-forced": "send: всё равно отправляю (--force)",
   "send.warning": "send: предупреждение: {detail}",
   "send.error": "send: {detail}",

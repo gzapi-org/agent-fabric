@@ -340,10 +340,11 @@ probe() {
     # binding only the MARKED review to its poster left a stranger's
     # unmarked review counting as coverage (the review of #41, 2026-09-26).
     # Any other account's review is reported as not coverage.
-    independent="$(jq --arg a "$author" '[.[] | select(.user.login != $a)
-        | select(.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r))]' <<<"$unmarked")"
-    outsiders="$(jq --arg a "$author" '[.[] | select(.user.login != $a)
-        | select((.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r)) | not)]' <<<"$unmarked")"
+    # A configured reviewer (AGENT_FABRIC_VERDICT_AUTHORS) is trusted by
+    # name: a GitHub App's review carries the association NONE.
+    trusted='(.author_association as $r | ["OWNER","MEMBER","COLLABORATOR"] | index($r)) or (.user.login as $l | $bots | index($l))'
+    independent="$(jq --arg a "$author" --argjson bots "$VERDICT_AUTHORS" "[.[] | select(.user.login != \$a) | select($trusted)]" <<<"$unmarked")"
+    outsiders="$(jq --arg a "$author" --argjson bots "$VERDICT_AUTHORS" "[.[] | select(.user.login != \$a) | select(($trusted) | not)]" <<<"$unmarked")"
 
     # BLIND REVIEWS ARE COVERAGE, and authorship cannot see them. Every
     # session pushes as the SAME account, so the review class's review,

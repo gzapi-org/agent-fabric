@@ -554,6 +554,10 @@ assert_contains "  not an independent review"                 "independent revie
 assert_contains "  listed as not trusted, with its association" "- stranger  NONE  commit=abc123"
 run "OPEN:abc123:0" "helper,abc123,2026-08-07T10:00:00Z,,COLLABORATOR"
 assert_rc       "a collaborator's review IS coverage" 0
+# A configured reviewer (an App, which GitHub lists as NONE) is trusted by
+# name: AGENT_FABRIC_VERDICT_AUTHORS already says the project trusts it.
+run "OPEN:abc123:0" "reviewer[bot],abc123,2026-08-07T10:00:00Z,,NONE"
+assert_rc       "a configured reviewer's review IS coverage whatever its association" 0
 
 # A FAILED THREADS LOOKUP IS "unknown", never 0: a caller that arms on
 # zero unresolved threads read a query error as a clean PR.
@@ -600,7 +604,9 @@ assert_contains "  names the cause" "NO REVIEW COMING"
 # rather than a prose line after it (the review of #41, 2026-09-26).
 run "OPEN:newhead:0" "bot,oldhead,2026-08-07T10:00:00Z" --json -q
 assert_rc "--json keeps exit 5" 5
-if [[ "$(jq -r '.no_review_coming.cause' <<<"$RUN_OUT" 2>/dev/null)" == head-moved ]]; then pass "  stdout is one object, the cause in no_review_coming"
+# ONE object: -s slurps every value on stdout, so a prose line after the
+# object fails the parse (the re-review of #41: a first-value read passed it).
+if jq -e -s 'length == 1 and .[0].no_review_coming.cause == "head-moved"' <<<"$RUN_OUT" >/dev/null 2>&1; then pass "  stdout is one object, the cause in no_review_coming"
 else fail "  --json exit-5 output" "$RUN_OUT"; fi
 
 # The distinction that makes 5 worth having: a FRESH PR has had no

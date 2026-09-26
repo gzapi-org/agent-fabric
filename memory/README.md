@@ -325,9 +325,11 @@ only in the correcting memory's own topic — a correction is a memory of
 its own, so its file name is never the stale slice's. A heading held by
 two topics refuses the run (`MERGE TARGET AMBIGUOUS`, nothing written);
 a heading held by none is written as its own topic and named on stderr
-and under `merge_target_unresolved` in the report, because whatever it
-meant to replace still stands — on every drain that brings the memory,
-not only the first, until its `merge_target` is fixed.
+and under `merge_target_unresolved` in the report — on every drain that
+brings the memory, not only the first. The tree cannot tell a target
+that never matched from one an earlier drain already replaced, so the
+author reads the line and either retargets the memory, if a stale section
+remains, or drops the `merge_target`, if it was applied.
 
 **Every section is dated.** A claim carries `observed_at` — the
 memory's own `modified` stamp, else the file's mtime — and the section

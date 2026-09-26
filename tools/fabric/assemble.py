@@ -1089,10 +1089,13 @@ def main() -> int:
                     # quiet after the first report hid that (a drain's
                     # blind review, 2026-09-26). A correction applied in
                     # place inside its own topic looks the same from the
-                    # tree; its merge_target names nothing either, so the
-                    # report asks for the same fix.
+                    # tree; its merge_target names nothing either. So this
+                    # line says only what the tree shows, and asks the
+                    # author to drop a target already applied (the
+                    # re-review of #41, 2026-09-26).
                     unresolved_targets.append(f"{where}: merge_target {target!r} names no section "
-                                              f"of {label}/{klass}; the claim stands as its own topic")
+                                              f"of {label}/{klass}; the claim stands in its own topic — "
+                                              "if it replaced that section before, drop the merge_target")
                     continue
                 if not holders:
                     holders = sorted(t for t, sections in on_disk.items() if heading in sections and t != topic)
@@ -1136,7 +1139,7 @@ def main() -> int:
             groups_to_check.append((role, role, key, group))
     for key, group in shared.items():
         groups_to_check.append((None, "shared", key, group))
-    def sole_author(role: str | None, klass: str, topic: str, paths: list[str]) -> str | None:
+    def sole_author(role: str | None, klass: str, topic: str, paths: list[str], own_only: bool = True) -> str | None:
         """The one agent every section of the topic came from, or None.
 
         Only the topic's OWN files answer: `<class>/<topic>.md` and its
@@ -1150,15 +1153,23 @@ def main() -> int:
         references — made a second memory of one agent a "retitle" of
         the first, and the same-agent rule deleted the first (a drain's
         blind review, 2026-09-26). An origin with no agent (a clone
-        record, an unresolved row) cannot be the same author as anyone."""
-        if not paths or (role is not None and is_carried(klass, topic)):
+        record, an unresolved row) cannot be the same author as anyone.
+
+        `own_only=False` answers for a file shared by several memories: it
+        serves the same-HEADING supersede, which replaces one section and
+        cannot touch another memory's — only the retitle inference, which
+        retires every section it reads, needs the topic's own files (the
+        re-review of #41, 2026-09-26)."""
+        if not paths:
+            return None
+        if own_only and role is not None and is_carried(klass, topic):
             return None
         if role is None:
             own_dir, stem = layout.shared_home(klass, project), f"{klass}-{topic}"
         else:
             own_dir, stem = os.path.join(layout.class_home(klass, role, project), CLASS_FILES[klass]), topic
         own = re.compile(re.escape(stem) + r"(-\d+)?\.md")
-        if any(os.path.dirname(p) != own_dir or not own.fullmatch(os.path.basename(p)) for p in paths):
+        if own_only and any(os.path.dirname(p) != own_dir or not own.fullmatch(os.path.basename(p)) for p in paths):
             return None
         agents: set[str] = set()
         for path in paths:
@@ -1175,7 +1186,19 @@ def main() -> int:
         candidates = slice_candidates(role, klass, topic)
         present = existing_sections(candidates)
         author = sole_author(role, klass, topic, candidates) if present else None
+        author_any = sole_author(role, klass, topic, candidates, own_only=False) if present else None
         seen_incoming: dict[str, dict[str, Any]] = {}
+        # A HEADING TWO CLAIMS OF THIS DRAIN DISAGREE UNDER is contested
+        # whichever comes first: judged claim by claim, a pair whose second
+        # claim equalled the corpus passed as a no-op after the first had
+        # superseded it, and the old text came back as "X (2)" (the
+        # re-review of #41, 2026-09-26).
+        texts_by_heading: dict[str, list[str]] = defaultdict(list)
+        for c in group:
+            t = undated(claim_block(c).split("\n", 1)[1])
+            if t not in texts_by_heading[claim_heading(c)]:
+                texts_by_heading[claim_heading(c)].append(t)
+        contested = {h for h, ts in texts_by_heading.items() if len(ts) > 1}
         for claim in list(group):
             heading = claim_heading(claim)
             rendered = undated(claim_block(claim).split("\n", 1)[1])
@@ -1191,19 +1214,27 @@ def main() -> int:
             # claim equal to the corpus still counts as the pair's first;
             # a claim itself in the corpus (a pair the owner kept both of,
             # re-emitted) is no question.
-            twin = seen_incoming.get(heading)
+
             seen_incoming.setdefault(heading, claim)
             # Present already — under its heading or as a kept-both
             # sibling "X (n)" — is the same claim again, whatever its date.
             siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
-            if any(undated(present[k]) == rendered for k in siblings if k in present):
+            standing = {undated(present[k]) for k in siblings if k in present}
+            # A pair whose every text already stands (kept both, re-emitted)
+            # is no question; otherwise the first claim under the heading is
+            # judged against the corpus WITHOUT the same-agent shortcut, and
+            # every later one against the first.
+            open_pair = heading in contested and not set(texts_by_heading[heading]) <= standing
+            first_of_pair = open_pair and next(c for c in group if claim_heading(c) == heading) is claim
+            in_drain = open_pair and not first_of_pair
+            if not in_drain and rendered in standing:
                 continue
-            if absorbed(present, claim):
+            if not in_drain and absorbed(present, claim):
                 continue   # itself, as a slice written before body headings were demoted split it
-            in_drain = twin is not None and undated(claim_block(twin).split("\n", 1)[1]) != rendered
             if in_drain:
-                rival = undated(claim_block(twin).split("\n", 1)[1])
-                rival_date = twin.get("observed_at") or "undated"
+                other = next(c for c in group if claim_heading(c) == heading)
+                rival = undated(claim_block(other).split("\n", 1)[1])
+                rival_date = other.get("observed_at") or "undated"
             else:
                 rival = present.get(heading)
                 rival_date = observed_of(rival) if rival is not None else None
@@ -1238,7 +1269,8 @@ def main() -> int:
             # recorded like any decision. Two agents' texts still stop the
             # drain, and so do two claims of this drain under one heading,
             # where which is newer is not the corpus's to say.
-            same_agent = not in_drain and author is not None and agent == author and (retitled or heading in present)
+            same_agent = not open_pair and ((retitled and author is not None and agent == author)
+                                           or (heading in present and author_any is not None and agent == author_any))
             rule = None
             if decision is None and same_agent:
                 decision, rule = "supersede", "same-agent"
@@ -2123,8 +2155,9 @@ def main() -> int:
         # Loud because the author meant to replace something: the stale
         # section it named, if it exists under another heading, still
         # stands beside the correction until someone retargets the memory.
-        print("\nMERGE TARGET UNRESOLVED (the correction names no section; it was written as its own topic "
-              "and whatever it meant to replace still stands — fix the memory's merge_target):", file=sys.stderr)
+        print("\nMERGE TARGET UNRESOLVED (the correction names no section of its class; the claim stands as "
+              "it is — retarget the memory if a stale section remains, drop the target if it was applied):",
+              file=sys.stderr)
         for note in unresolved_targets:
             print(f"  {note}", file=sys.stderr)
     if collisions:

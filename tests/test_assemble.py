@@ -2146,6 +2146,36 @@ def test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it(
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 1 and "in this drain" in proc.stderr, proc.stderr
     assert tree(out) == before
+    # …and in the other order: the claim equal to the corpus coming second
+    # passed as a no-op after the first had superseded it, and the old text
+    # came back as "Status (2)" (the re-review of #41, 2026-09-26).
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a4"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr and "SUPERSEDED, same agent" not in proc.stderr, proc.stderr
+    assert tree(out) == before
+
+
+def test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes(tmp: str) -> None:
+    """The class is still one flat file holding one agent's memories. A new
+    text under a heading that agent wrote replaces that one section: the
+    same-HEADING rule touches no other memory, so it holds in a shared file
+    where the retitle inference must not (the re-review of #41, 2026-09-26)."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A.", "evidence": ["a1"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    flat = dom(out, "alpha", "domain.md")
+    assert os.path.isfile(flat), "the class is one flat file"
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "topic-a", "title": "Fact A", "body": "A, updated.", "evidence": ["a2"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0 and "SUPERSEDED, same agent" in proc.stderr, proc.stderr
+    assert "A, updated." in read(flat) and read(flat).count("## ") == 1, read(flat)
 
 
 def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:
@@ -2294,6 +2324,7 @@ def main() -> int:
         test_an_unresolved_merge_target_is_reported_on_every_drain,
         test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
         test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
+        test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes,
         test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
         test_a_claim_body_s_own_headings_never_open_a_section,
         test_the_drain_report_gathers_every_bundle_of_one_drain,

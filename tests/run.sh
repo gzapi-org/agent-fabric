@@ -94,6 +94,7 @@ if [[ "$what" == all || "$what" == bash ]]; then
     run "github pr-review-status" bash runtime/github/test_pr-review-status.sh
     run "github post-review" bash runtime/github/test_post-review.sh
     run "github pr-gate (the count rule, the verdict)" bash runtime/github/test_pr-gate.sh
+    run "github trial-merge (combine, conflict, the check, nothing left)" bash runtime/github/test_trial-merge.sh
 fi
 
 echo

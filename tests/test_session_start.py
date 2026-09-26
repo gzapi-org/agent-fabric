@@ -228,6 +228,23 @@ def test_bootstrap_writes_only_the_workspace_and_home_files(tmp: str) -> None:
         assert "\nmodel: opus\n" in fh.read(), "an unpinned class keeps its alias"
     for skill in ("subagent-dispatch", "gzcoord-send", "gzcoord-receive"):
         assert os.path.isfile(os.path.join(home, ".claude", "skills", skill, "SKILL.md")), skill
+    # Every command a session is told to run is on PATH by name and allowed
+    # by a narrow rule — never a wrapper that runs another command (the
+    # owner, 2026-09-26: no approval for any fabric script or executable).
+    cmds = json.load(open(os.path.join(ROOT, "runtime", "claude-code", "commands.json"), encoding="utf-8"))
+    for name, rel in cmds["commands"].items():
+        link = os.path.join(home, ".local", "bin", name)
+        assert os.path.islink(link) and os.readlink(link) == os.path.join(ROOT, rel), (name, link)
+    allow = json.load(open(os.path.join(home, ".claude", "settings.json"), encoding="utf-8"))["permissions"]["allow"]
+    assert "Bash(gzcoord-inbox *)" in allow and "Bash(fabric-status *)" in allow, allow
+    assert not any(f"Bash({n} *)" in allow for n in cmds["not_allowed"]), allow
+    # A file at a command's name that the fabric did not make is the
+    # account's: refused, named, never replaced.
+    foreign = os.path.join(home, ".local", "bin", "gzmsg")
+    os.remove(foreign); open(foreign, "w").write("mine\n")
+    again = subprocess.run(["bash", BOOTSTRAP, "--projects", projects], capture_output=True, text=True, env=env)
+    assert "is not a link this fabric made" in again.stderr and open(foreign).read() == "mine\n", again.stderr
+    os.remove(foreign)
     for f in ("code-low.md", "code-medium.md", "code-high.md"):
         assert os.path.isfile(os.path.join(home, ".claude", "agents", f))
     assert not os.path.exists(os.path.join(projects, ".git")), "projects/ must not become a repository"

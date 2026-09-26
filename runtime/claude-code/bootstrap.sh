@@ -24,6 +24,8 @@
 #   ~/.claude/skills/subagent-dispatch/SKILL.md
 #   ~/.claude/skills/gzcoord-send/SKILL.md, gzcoord-receive/SKILL.md
 #                                      the dispatch policy as a loadable skill, from policies/
+#   ~/.local/bin/<name>                every command a session runs, by name
+#                                      (runtime/claude-code/commands.json)
 #   ~/.config/systemd/user/agent-fabric-agentd.service
 #                                      the control agent (runtime/control/), enabled and started
 #                                      in this account's user manager when one is running
@@ -169,6 +171,29 @@ put "$CLAUDE_HOME/skills/subagent-dispatch/SKILL.md" "$FABRIC_ROOT/policies/suba
 # sending a message, and receiving one (the watch, and what a delivery is).
 put "$CLAUDE_HOME/skills/gzcoord-send/SKILL.md" "$FABRIC_ROOT/communication/gzcoord/skills/gzcoord-send/SKILL.md"
 put "$CLAUDE_HOME/skills/gzcoord-receive/SKILL.md" "$FABRIC_ROOT/communication/gzcoord/skills/gzcoord-receive/SKILL.md"
+# Every command a session is told to run, on PATH under its own name
+# (runtime/claude-code/commands.json): a skill says `gzcoord-send <file>`,
+# never `node "$AGENT_FABRIC_ROOT/…"`, because the harness asks before any
+# command carrying a shell expansion (the owner, 2026-09-26). A link this
+# fabric made — to this checkout or another one's same path — is
+# refreshed; anything else at that name is the account's and is refused,
+# never replaced.
+LOCAL_BIN="${AGENT_FABRIC_LOCAL_BIN:-$HOME/.local/bin}"
+while IFS=$'\t' read -r name rel; do
+    [[ -n "$name" ]] || continue
+    target="$FABRIC_ROOT/$rel"; link="$LOCAL_BIN/$name"
+    if [[ -L "$link" && "$(readlink "$link")" == "$target" ]]; then
+        echo "  =  $link"; same=$((same+1)); continue
+    fi
+    if [[ -e "$link" || -L "$link" ]] && ! { [[ -L "$link" ]] && [[ "$(readlink "$link")" == */"$rel" ]]; }; then
+        echo "  !  $link is not a link this fabric made — left alone; $name is not on PATH" >&2
+        failed=$((failed+1)); continue
+    fi
+    if (( DRY_RUN )); then echo "  +  $link -> $target (would link)"; continue; fi
+    mkdir -p "$LOCAL_BIN" && ln -sfn "$target" "$link" && { echo "  +  $link -> $target"; changed=$((changed+1)); } \
+        || { echo "  !  $link: could not link" >&2; failed=$((failed+1)); }
+done < <(python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1]))["commands"].items()]' \
+            "$FABRIC_ROOT/runtime/claude-code/commands.json")
 
 # 4. The agent-fabric checkout this runs from enforces its own git
 #    discipline at commit time (policies/githooks/commit-msg). A repo

@@ -98,8 +98,12 @@ def main() -> int:
 # (devex-tooling and architect-cto-01 after their restarts, 2026-09-25).
 # The skill said to re-arm; a resumed session did not reread it. A hook
 # cannot start a Monitor, so it says so here, at the moment it is true.
+# The command is the name on PATH, never `$AGENT_FABRIC_ROOT/…`: the
+# harness asks before any command carrying an expansion, and a watch
+# re-armed every thirty minutes asked every time (the owner, 2026-09-26;
+# runtime/claude-code/commands.json).
 WATCH_MISSING = ("agent-fabric: NO INBOX WATCH is running for this session ({source}) — arm it now, "
-                 "as your first action: Monitor(command: 'node \"$AGENT_FABRIC_ROOT/communication/gzcoord/scripts/inbox.mjs\" --follow', "
+                 "as your first action: Monitor(command: 'gzcoord-inbox --follow', "
                  "description: 'gzcoord inbox watch', persistent: true, timeout_ms: 1800000), and re-arm it at each expiry notice "
                  "(gzcoord-receive §1). One watch per session: never a second.")
 

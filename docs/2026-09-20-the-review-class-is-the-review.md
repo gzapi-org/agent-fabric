@@ -68,7 +68,8 @@ Coverage now needs both: the marker, and a poster who is the PR author
 row names its login too, so a reader checks the poster without leaving
 the report. The same holds for an unmarked review: it counts as
 independent only from the repository's owner, an organisation member or
-a collaborator (GitHub's `author_association`). Anyone else's review is
+a collaborator (GitHub's `author_association`), or from a reviewer the
+project names in `AGENT_FABRIC_VERDICT_AUTHORS`. Anyone else's review is
 listed as "not trusted" and is not coverage. Binding only the marked
 review would have left a stranger free to cover a head by leaving the
 marker out. `--json` carries the same answer as fields, for a caller

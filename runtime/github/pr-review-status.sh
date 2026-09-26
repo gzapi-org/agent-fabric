@@ -27,7 +27,9 @@
 #   independent reviews — review objects by an account other than the
 #                         PR author that the repository trusts: its
 #                         owner, an organisation member or a collaborator
-#                         (GitHub's author_association). Every session
+#                         (GitHub's author_association), or a login named
+#                         in AGENT_FABRIC_VERDICT_AUTHORS (an App's review
+#                         carries the association NONE). Every session
 #                         pushes as one account, so this is a person, not
 #                         another session; anyone else's review is listed
 #                         as "not trusted" and is not coverage;
@@ -48,7 +50,8 @@
 #
 # An AUTOMATED REVIEWER is not assumed. A project that runs one names
 # its accounts in AGENT_FABRIC_VERDICT_AUTHORS (a JSON array); then a
-# comment from one of them naming `Reviewed commit: <sha>` counts as a
+# review object from one of them is independent coverage whatever its
+# association, a comment from one of them naming `Reviewed commit: <sha>` counts as a
 # verdict on that sha, the phrases in AGENT_FABRIC_REVIEWER_REFUSAL_RE
 # read as that reviewer declining (exit 5, the cause named), and a
 # comment matching AGENT_FABRIC_REVIEW_REQUEST_RE reads as a pending
@@ -871,7 +874,7 @@ render_text() {
         jq -r '.[] | "      - \(.user.login)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$blind"
     fi
     if (( outsiders_count > 0 )); then
-        printf '  not trusted         : %s   (NOT coverage — not the owner, a member or a collaborator)\n' "$outsiders_count"
+        printf '  not trusted         : %s   (NOT coverage — not the owner, a member, a collaborator or a configured reviewer)\n' "$outsiders_count"
         jq -r '.[] | "      - \(.user.login)  \(.author_association)  commit=\(.commit_id[0:8])  \(.submitted_at)"' <<<"$outsiders"
     fi
     if (( others_count > 0 )); then

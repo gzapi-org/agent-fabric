@@ -1233,7 +1233,13 @@ def main() -> int:
                 rival = undated(claim_block(other).split("\n", 1)[1])
                 rival_date = other.get("observed_at") or "undated"
                 if rival == rendered:
-                    continue   # the first claim's text again: nothing to decide
+                    # The first claim's text again: nothing to decide, and
+                    # nothing to write — that claim carries it and the
+                    # owner's decision on it governs. Left in the group,
+                    # it escaped the decision and came back as "X (2)"
+                    # (the re-review of #41, 2026-09-26).
+                    group.remove(claim)
+                    continue
             else:
                 rival = present.get(heading)
                 rival_date = observed_of(rival) if rival is not None else None

@@ -2229,6 +2229,7 @@ def test_the_same_agent_rule_never_replaces_newer_text(tmp: str) -> None:
     ])
     proc = run_assemble(drain, claims_dir, out)
     assert "SUPERSEDED, same agent" not in proc.stderr, proc.stderr
+    assert proc.returncode == 1 and read(tracker) == before, proc.stderr
     # A contested heading whose third claim repeats the first: only the
     # differing text is a question.
     set_claims(claims_dir, "alpha", [
@@ -2238,6 +2239,13 @@ def test_the_same_agent_rule_never_replaces_newer_text(tmp: str) -> None:
     ])
     proc = run_assemble(drain, claims_dir, out)
     assert proc.returncode == 1 and "tracker#Status@a5" in proc.stderr and "tracker#Status@a3" not in proc.stderr, proc.stderr
+    # …and the owner's heading-wide supersede leaves ONE section: the repeat
+    # does not slip past the decision as "Status (2)".
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:tracker#Status": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    heads = [line for line in read(tracker).splitlines() if line.startswith("## Status")]
+    assert heads == ["## Status"], read(tracker)
 
 
 def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:

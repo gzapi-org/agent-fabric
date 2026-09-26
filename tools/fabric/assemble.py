@@ -237,7 +237,7 @@ def render_origin(item: dict[str, Any]) -> list[str]:
 
 def render_frontmatter(meta: dict[str, Any]) -> str:
     lines = ["---"]
-    for key in ("role", "class", "description", "tier", "knowledge_scope",
+    for key in ("role", "class", "topic", "description", "tier", "knowledge_scope",
                 "shared_with", "token_budget", "corpus", "distilled_at",
                 "collisions", "origin", "derived_from"):
         if key not in meta:
@@ -427,7 +427,9 @@ def decode_scalar(text: str) -> str:
 
 
 def retire_in_siblings(directory: str, filename: str, target: str,
-                       clip: Callable[[str, str], str] = lambda d, _where: d) -> list[tuple[str, str]]:
+                       clip: Callable[[str, str], str] = lambda d, _where: d,
+                       stem: str | None = None,
+                       is_part: Callable[[str], bool] | None = None) -> list[tuple[str, str]]:
     """Remove the section `target` (and its "(n)" siblings) from every
     OTHER budget part of the same topic in `directory`. `filename` is the
     part being written: `<topic>.md`, `<topic>-<n>.md`,
@@ -440,13 +442,22 @@ def retire_in_siblings(directory: str, filename: str, target: str,
     reads every scalar as a string, and a round trip wrote `tier: "2"`,
     which the schema refuses (review, 2026-09-20). A part left with no
     section is removed; the index sweep then stops pointing at an empty
-    file whose cue named the section that moved."""
-    stem = re.sub(r"(-\d+)?\.md$", "", filename)
+    file whose cue named the section that moved.
+
+    `stem` and `is_part`, when the caller knows the topic, say which
+    files are its parts: read off the file name alone, a separate topic
+    named `<topic>-2` is a part of `<topic>`, and `<topic>-2.md` as that
+    topic's part one is a part of `<topic>` too."""
+    if stem is None:
+        stem = re.sub(r"(-\d+)?\.md$", "", filename)
+    if is_part is None:
+        def is_part(path: str) -> bool:
+            return bool(re.fullmatch(re.escape(stem) + r"-\d+\.md", os.path.basename(path)))
     touched: list[tuple[str, str]] = []
     for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
         if name == filename or not name.endswith(".md"):
             continue
-        if re.sub(r"(-\d+)?\.md$", "", name) != stem:
+        if name != f"{stem}.md" and not is_part(os.path.join(directory, name)):
             continue
         path = os.path.join(directory, name)
         _meta, sections = read_existing_slice(path)
@@ -918,11 +929,49 @@ def main() -> int:
                     flat_topic = f"{CLASS_FILES[klass]}-carried-{stamp}"
             class_plan[(role, klass)] = {"split": split, "flat_topic": flat_topic}
 
+    # The topics each class of this drain arrived with, before any claim
+    # moves between topics: evidence that a `<topic>-<n>.md` is that
+    # memory's own file and not a budget part of `<topic>`.
+    arrived: dict[tuple[str | None, str], set[str]] = defaultdict(set)
+    for role, topics in per_role.items():
+        for (klass, topic) in topics:
+            arrived[(role, klass)].add(topic)
+    for (klass, topic) in shared:
+        arrived[(None, klass)].add(topic)
+
+    def is_budget_part(role: str | None, klass: str, path: str, topic: str) -> bool:
+        """Whether `path` is a budget part (`<stem>-<n>.md`) of `topic`.
+
+        The file name cannot say: a memory named `release-2` is written
+        as `release-2.md`, exactly the name part two of `release` gets,
+        and read as `release`'s part its sections were `release`'s rivals
+        and, under the same-agent rule, retired with it (a drain's blind
+        review, 2026-09-26). A slice written since then names its topic
+        in its frontmatter, which decides. An older file without one is a
+        part only when `<stem>.md` exists (a topic named for a date ends
+        in digits too) and neither this drain nor the role's crossref
+        names `<topic>-<n>` as a topic of its own; with no such evidence
+        the older reading stands."""
+        stem = f"{klass}-{topic}" if role is None else topic
+        name = os.path.basename(path)
+        m = re.fullmatch(re.escape(stem) + r"-(\d+)\.md", name)
+        if not m or not os.path.exists(path):
+            return False
+        recorded = read_existing_slice(path)[0].get("topic")
+        if recorded:
+            return recorded == topic
+        if not os.path.exists(os.path.join(os.path.dirname(path), f"{stem}.md")):
+            return False
+        own = f"{topic}-{m.group(1)}"
+        if own in arrived.get((role, klass), set()):
+            return False
+        return role is None or f"{klass}:{own}" not in crossref_slice_ids(role)
+
     def slice_candidates(role: str | None, klass: str, topic: str) -> list[str]:
         """Every file the topic's sections may sit in — the pre-pass reads
         exactly what the write phase will write into. The topic file and
-        its budget parts (`<topic>-<n>.md`, digits only — a sibling topic
-        named `<topic>-2026-09-17` is another topic); and the flat class
+        its budget parts (is_budget_part: a sibling topic named
+        `<topic>-2026-09-17` or `<topic>-2` is another topic); and the flat class
         file when the plan gives its sections to this topic (it stays and
         this is the drain's one topic, or it moves to this topic's file).
         Read as this topic's regardless, another topic's section under a
@@ -939,14 +988,13 @@ def main() -> int:
             flat_file = os.path.join(base, f"{CLASS_FILES[klass]}.md")
             plan = class_plan.get((role, klass)) or {}
             flat = [flat_file] if plan.get("flat_topic") == topic else []
-        parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if re.fullmatch(r".*-\d+\.md", p))
+        parts = [f"{stem}.md"] + sorted(p for p in glob.glob(f"{stem}-*.md") if is_budget_part(role, klass, p, topic))
         return [p for p in flat + parts if os.path.exists(p)]
 
     def topics_on_disk(role: str | None, klass: str) -> dict[str, list[str]]:
         """Every topic of the role's class (or of the shared class) on
-        disk, with the files its sections sit in. A `<stem>-<n>.md` is a
-        budget part of `<stem>` only when `<stem>.md` exists: a topic
-        named for a date ends in digits too."""
+        disk, with the files its sections sit in; a `<stem>-<n>.md` is
+        grouped under `<stem>` only when is_budget_part says so."""
         if role is None:
             base = layout.shared_home(klass, project)
             prefix = f"{klass}-"
@@ -963,7 +1011,7 @@ def main() -> int:
         for name in names:
             stem = name[len(prefix):-3]
             m = re.fullmatch(r"(.+)-\d+", stem)
-            if m and f"{prefix}{m.group(1)}.md" in names:
+            if m and is_budget_part(role, klass, os.path.join(directory, name), m.group(1)):
                 stem = m.group(1)
             found[stem].append(os.path.join(directory, name))
         if role is not None:
@@ -1261,8 +1309,11 @@ def main() -> int:
 
     def write_slice(
         directory: str, filename: str, role: str, klass: str, claims: list[dict[str, Any]],
-        description: str, shared_with: list[str] | None = None,
+        description: str, shared_with: list[str] | None = None, topic: str | None = None,
     ) -> None:
+        """`topic` is recorded in the frontmatter of every file that is one
+        topic's (is_budget_part reads it); the flat class file, which holds
+        several memories, is written without one."""
         os.makedirs(directory, exist_ok=True)
         description = clip_description(description, os.path.join(directory, filename))
         evidence = sorted({h for c in claims for h in c.get("evidence", [])})
@@ -1285,6 +1336,8 @@ def main() -> int:
         }
         if shared_with:
             meta["shared_with"] = sorted(shared_with)
+        if topic is not None:
+            meta["topic"] = topic
         path = os.path.join(directory, filename)
 
         # MERGE MODE. A drain renders only what it admitted this cycle, so
@@ -1306,7 +1359,14 @@ def main() -> int:
             the part being written exited 0 with both texts standing in
             two files (connected reviewer, 2026-09-20). Every sibling
             touched is written and reported."""
-            touched = retire_in_siblings(directory, filename, target, clip=clip_description)
+            if topic is None:
+                touched = retire_in_siblings(directory, filename, target, clip=clip_description)
+            else:
+                owner = None if role == "shared" else role
+                touched = retire_in_siblings(
+                    directory, filename, target, clip=clip_description,
+                    stem=f"{klass}-{topic}" if owner is None else topic,
+                    is_part=lambda p: is_budget_part(owner, klass, p, topic))
             for tpath, what in touched:
                 retired_in.append(f"{in_report(tpath)}: '{target}' {what}")
                 # `written` counts files on disk once: a rewritten
@@ -1520,19 +1580,22 @@ def main() -> int:
             | {h for c in claims for h in c.get("_retire") or []}
         return lambda path: bool(names & set(read_existing_slice(path)[1]))
 
-    def restore_part_one(directory: str, stem: str, role: str, eligible: Callable[[str], bool]) -> None:
+    def restore_part_one(directory: str, stem: str, topic: str, role: str,
+                         eligible: Callable[[str], bool]) -> None:
         """PART ONE IS ALWAYS `<stem>.md` while the topic has any section:
         it is the name every `[[topic]]` link and cue points at. A part
         one removed by a retire (or lost by an earlier drain) is restored
         by moving the lowest remaining part into its place, reported.
         Only a part `eligible` says is this topic's moves: `<stem>-<n>.md`
         may as well be another memory whose name ends in a number, and
-        renaming it would take that topic's file away."""
+        renaming it would take that topic's file away; a part whose
+        frontmatter names another topic is that topic's, whatever it says."""
         first = os.path.join(directory, f"{stem}.md")
         if os.path.exists(first) or not os.path.isdir(directory):
             return
         parts = sorted((int(m.group(1)), n) for n in os.listdir(directory)
                        if (m := re.fullmatch(re.escape(stem) + r"-(\d+)\.md", n))
+                       and read_existing_slice(os.path.join(directory, n))[0].get("topic") in (None, topic)
                        and eligible(os.path.join(directory, n)))
         if not parts:
             return
@@ -1631,7 +1694,7 @@ def main() -> int:
             continue   # every claim dropped by the owner: the slice stays as it was
         owners = sorted(shared_owners[(klass, topic)])
         shared_dir = layout.shared_home(klass, project)
-        restore_part_one(shared_dir, f"{klass}-{topic}", "shared", holds_one_of(claims))
+        restore_part_one(shared_dir, f"{klass}-{topic}", topic, "shared", holds_one_of(claims))
         prior = carried_chars(claims, os.path.join(shared_dir, f"{klass}-{topic}.md"))
         for part, group in enumerate(split_by_budget(claims, prior), start=1):
             suffix = "" if part == 1 else f"-{part}"
@@ -1640,13 +1703,13 @@ def main() -> int:
                 (group[0].get("title") if group else None)
                 or f"{topic.replace('-', ' ')} ({klass})",
                 os.path.join(shared_dir, filename))
-            write_slice(shared_dir, filename, "shared", klass, group, description, owners)
+            write_slice(shared_dir, filename, "shared", klass, group, description, owners, topic=topic)
             for owner in owners:
                 shared_index[owner].append(
                     {"path": layout.link_rel(os.path.join(shared_dir, filename), project),
                      "description": description, "class": klass}
                 )
-        restore_part_one(shared_dir, f"{klass}-{topic}", "shared", lambda p: p in written)
+        restore_part_one(shared_dir, f"{klass}-{topic}", topic, "shared", lambda p: p in written)
 
     # Every role that owns anything gets a project directory and an index —
     # including one whose claims all live in shared slices, which would
@@ -1691,7 +1754,7 @@ def main() -> int:
                 if not claims:
                     continue   # every claim dropped by the owner: the slice stays as it was
                 if multi:
-                    restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, role, holds_one_of(claims))
+                    restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, topic, role, holds_one_of(claims))
                 # Both candidate layouts, because only the tree knows whether
                 # this topic has split before.
                 prior = carried_chars(
@@ -1731,12 +1794,13 @@ def main() -> int:
                         # The carried file's cue is the one it moved with:
                         # it names several topics, never one claim's title.
                         description = described(os.path.join(directory, filename), description)
-                    write_slice(directory, filename, role, klass, group, description)
+                    write_slice(directory, filename, role, klass, group, description,
+                                topic=topic if directory != base else None)
                     index_entries[role].append(
                         {"path": layout.link_rel(os.path.join(directory, filename), project),
                          "description": description, "class": klass}
                     )
-                restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, role, lambda p: p in written)
+                restore_part_one(os.path.join(base, CLASS_FILES[klass]), topic, topic, role, lambda p: p in written)
                 if multi and not is_carried(klass, topic):
                     drop_carried_copies(role, klass, os.path.join(base, CLASS_FILES[klass]), topic)
 

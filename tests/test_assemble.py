@@ -2241,8 +2241,51 @@ def test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist(tmp
     assert set(report["harvest_sources"]) == {"dev-01@hostA", "dev-02@hostB"}, report["harvest_sources"]
 
 
+def test_a_topic_named_like_a_budget_part_is_its_own_memory(tmp: str) -> None:
+    """Memories `release` and `release-2` are two topics, and
+    `release-2.md` is also the name part two of `release` would get.
+    Taken for a part by its name, `release-2`'s section was `release`'s:
+    the same-agent retitle of `release` retired it and removed the file
+    (a drain's blind review, 2026-09-26). The slice names its topic in
+    its frontmatter; an older slice without one is a part unless the
+    drain or the crossref names it as a topic."""
+    release = {"class": "domain", "topic": "release", "title": "Release process", "body": "Tag, then build.",
+               "evidence": ["a1"]}
+    second = {"class": "domain", "topic": "release-2", "title": "Second release notes", "body": "Shipped twice.",
+              "evidence": ["a2"]}
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [release, second])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    d = dom(out, "alpha", "domain")
+    set_claims(claims_dir, "alpha", [dict(release, title="Release process, revised", evidence=["a3"])])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, proc.stderr
+    assert os.path.exists(os.path.join(d, "release-2.md")), f"another memory was retired as a part: {sorted(os.listdir(d))}"
+    assert "## Second release notes" in read(os.path.join(d, "release-2.md"))
+    assert "## Release process, revised" in read(os.path.join(d, "release.md"))
+    assert 'topic: "release-2"\n' in read(os.path.join(d, "release-2.md")), read(os.path.join(d, "release-2.md"))
+
+    # Slices written before the topic was recorded: the drain naming
+    # `release-2` is the evidence, and another agent's claim of `release`
+    # under `release-2`'s heading is no rival of it.
+    for name in ("release.md", "release-2.md"):
+        path = os.path.join(d, name)
+        legacy = re.sub(r"(?m)^topic: .*\n", "", read(path))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(legacy)
+    set_claims(claims_dir, "alpha", [dict(release, title="Second release notes", body="Different.", evidence=["b1"]),
+                                     second])
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "b1": "dev-02"})
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 0, f"another topic's section was read as this topic's rival:\n{proc.stderr}"
+    assert "Shipped twice." in read(os.path.join(d, "release-2.md")), sorted(os.listdir(d))
+    released = read(os.path.join(d, "release.md"))
+    assert "Different." in released and "## Release process, revised" in released, released
+
+
 def main() -> int:
     cases = [
+        test_a_topic_named_like_a_budget_part_is_its_own_memory,
         test_a_merged_drain_report_keeps_every_harvest_and_only_files_that_exist,
         test_an_unresolved_merge_target_is_reported_on_every_drain,
         test_a_correction_of_a_section_in_another_part_takes_its_own_heading,

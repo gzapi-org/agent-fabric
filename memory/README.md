@@ -126,7 +126,14 @@ origin:
 derived_from:                    # observation content hashes
   - 42bc0c9685ab878c
 distilled_at: "2026-09-05"       # when
+topic: release                   # the memory this file is (not on a flat <class>.md)
 ```
+
+`topic` is what tells a budget part from a memory named like one: part
+two of `release` is `release-2.md`, and so is a memory named `release-2`
+(a drain's blind review, 2026-09-26). A slice written before the field
+existed is read as a part when `release.md` exists and neither the drain
+nor the role's crossref names `release-2` as a topic.
 
 Agent, host, project and working copy are four separate facts. Slices
 written before the identity migration carry `clone_id` instead of `agent`;

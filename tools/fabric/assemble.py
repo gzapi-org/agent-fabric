@@ -1343,9 +1343,16 @@ def main() -> int:
                 # left a corrected section under its stale cue ("#851 is
                 # merged" over "Released."), disagreeing with the slice's own
                 # description (a drain's review, 2026-09-26).
-                if heading != target and target in blocks and heading not in blocks:
-                    blocks[heading] = blocks.pop(target)
-                    order[order.index(target)] = heading
+                # A target retired from another part leaves nothing here to
+                # rename: the claim's heading is appended under its own
+                # name (writing it as the target put the stale cue back,
+                # a drain's blind review, 2026-09-26). The target's name
+                # is kept only where the claim's own heading already holds
+                # another section of this part, which it must not overwrite.
+                if heading != target and heading not in blocks:
+                    if target in blocks:
+                        blocks[heading] = blocks.pop(target)
+                        order[order.index(target)] = heading
                 else:
                     heading = target
                 # CONSOLIDATION RETIRES THE SUFFIXED SIBLINGS.

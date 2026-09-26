@@ -2144,8 +2144,40 @@ def test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it(
     assert tree(out) == before
 
 
+def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:
+    """Topic `grow` split by budget: `grow.md` holds "Big", `grow-2.md`
+    "More". A claim "More, corrected" with merge_target "More" is written
+    into part one, the target retired from part two — and the section
+    was written as "## More", the stale cue the correction replaced (a
+    drain's blind review, 2026-09-26). It carries its own heading."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "grow", "title": "Big", "body": "y " * 850, "evidence": ["h1"]},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "o", "evidence": ["h2"]},
+    ])})
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More", "body": "m " * 850, "evidence": ["h1"]},
+    ])
+    assert run_assemble(drain, claims_dir, out, "--budget", "500").returncode == 0
+    d = dom(out, "alpha", "domain")
+    assert "## More" in read(os.path.join(d, "grow-2.md")) and "## Big" in read(os.path.join(d, "grow.md")), \
+        "precondition: Big in part one, More in part two"
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "grow", "title": "More, corrected", "merge_target": "More",
+         "body": "Less than thought.", "evidence": ["h3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--budget", "500")
+    assert proc.returncode == 0, proc.stderr
+    texts = "".join(read(os.path.join(d, n)) for n in sorted(os.listdir(d)) if n.startswith("grow"))
+    headings = re.findall(r"(?m)^## .*$", texts)
+    assert "## More, corrected\n\nLess than thought." in texts, headings
+    assert "## More" not in headings, f"the corrected section kept the stale heading: {headings}"
+    assert "m m m" not in texts and texts.count("## Big") == 1, texts
+
+
 def main() -> int:
     cases = [
+        test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
         test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
         test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
         test_a_claim_body_s_own_headings_never_open_a_section,

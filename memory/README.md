@@ -305,7 +305,9 @@ the older text is superseded says so in the memory itself — in its
 `metadata:` block, `merge_target: "<the section's heading>"` — and no
 question is asked: the harvest carries the field to the claim and the
 assembler replaces the section and retires its siblings; the section
-then carries the correcting memory's own heading, not the stale one. The heading is
+then carries the correcting memory's own heading, not the stale one —
+also when the stale section sat in another budget part of the topic
+and was retired there. The heading is
 found wherever it lives in the role's class (or the shared class), not
 only in the correcting memory's own topic — a correction is a memory of
 its own, so its file name is never the stale slice's. A heading held by

@@ -18,10 +18,15 @@
 # WHAT IT SAYS
 #   combines           every ref merged; the resulting tree hash is given
 #   conflicts          <ref> did not merge, and the conflicted paths
+#   could not merge    <ref> failed for another reason (git's line is given):
+#                      unrelated histories, a missing object — never read
+#                      as a conflict. The clone's hooks are not run: this
+#                      merge is never committed anywhere.
 #   check passed       (--check) the project's check passed on the result
 #   check failed       (--check) it ran and failed; its last lines are shown
 #   check unavailable  (--check) it could not say: timed out, not found,
-#                      or its verdict line missing — never read as a pass
+#                      its lease still held, or its verdict line missing —
+#                      never read as a pass
 #   check not run      the refs do not combine, so there is nothing to check
 #   The shas tried are printed: a result is true for those shas only, and
 #   says nothing of branches not named or of the base after it moves.
@@ -48,7 +53,8 @@
 #   0  combines (and, with --check, the check passed)
 #   1  conflicts, or the check failed
 #   2  could not try (a failed fetch, a ref not on origin, no room, bad
-#      usage), or the check was unavailable
+#      usage, a merge that failed without a conflict), or the check was
+#      unavailable
 #
 # Environment (the self-test):
 #   AGENT_FABRIC_TRIAL_CONFIG   path of the trial.json to use instead of the project's
@@ -123,27 +129,33 @@ free_kb="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
 for d in "$scratch"/trial-merge.*; do
     [[ -d "$d" && -f "$d.pid" ]] || continue
     kill -0 "$(cat "$d.pid" 2>/dev/null)" 2>/dev/null && continue
-    git worktree remove --force "$d" >/dev/null 2>&1; rm -rf "$d" "$d.pid"
+    git worktree remove --force "$d" >/dev/null 2>&1; rm -rf "$d" "$d.pid" "$d.out"
 done
 git worktree prune 2>/dev/null
 
 wt="$(mktemp -d "$scratch/trial-merge.XXXXXX")" || { echo "trial-merge: cannot make a worktree directory under $scratch" >&2; exit 2; }
-echo $$ > "$wt.pid"
+# Written whole under another name, then moved: a concurrent run's sweep
+# never reads an empty pid and takes this live worktree for a dead one.
+echo $$ > "$wt.pid.tmp" && mv -f "$wt.pid.tmp" "$wt.pid"
 # The check runs in its own process group so that a killed run takes the
 # whole check with it; an orphaned build would outlive the worktree.
+# The group is killed at the end even when the check exited on its own:
+# whatever it started in the background (a server, a build daemon) would
+# otherwise outlive the worktree it runs in.
 cpid=""
 cleanup() { [[ -n "$cpid" ]] && kill -TERM -- "-$cpid" 2>/dev/null; git -C "$top" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt" "$wt.pid" "$wt.out"; git -C "$top" worktree prune 2>/dev/null; }
 trap cleanup EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git worktree add -q --detach "$wt" "$base_sha" 2>/dev/null || { echo "trial-merge: git worktree add failed; nothing tried" >&2; exit 2; }
 
-result="combines"; failed_ref=""; conflicted=(); tree=""
+result="combines"; failed_ref=""; conflicted=(); tree=""; merge_err=""
 start=$SECONDS
 for i in "${!names[@]}"; do
-    if ! git -C "$wt" -c user.name=trial-merge -c user.email=trial-merge@invalid -c commit.gpgsign=false \
-            merge -q --no-ff --no-edit "${shas[$i]}" >/dev/null 2>&1; then
-        result="conflicts"; failed_ref="${names[$i]}"
+    if ! merge_err="$(git -C "$wt" -c user.name=trial-merge -c user.email=trial-merge@invalid -c commit.gpgsign=false \
+            merge -q --no-ff --no-edit --no-verify "${shas[$i]}" 2>&1 >/dev/null)"; then
+        failed_ref="${names[$i]}"
         mapfile -t conflicted < <(git -C "$wt" diff --name-only --diff-filter=U)
+        if (( ${#conflicted[@]} > 0 )); then result="conflicts"; else result="could not merge"; fi
         git -C "$wt" merge --abort >/dev/null 2>&1
         break
     fi
@@ -151,7 +163,7 @@ done
 [[ "$result" == combines ]] && tree="$(git -C "$wt" rev-parse 'HEAD^{tree}')"
 
 check_rc=""; check_tail=""
-[[ "$result" == conflicts && "$check_state" == pending ]] && check_state="not run: conflicts"
+[[ "$result" != combines && "$check_state" == pending ]] && check_state="not run: conflicts"
 if [[ "$result" == combines && "$check_state" == pending ]]; then
     runner=(timeout --kill-after=30 "$check_timeout")
     if [[ -n "$check_lease" ]]; then
@@ -160,12 +172,14 @@ if [[ "$result" == combines && "$check_state" == pending ]]; then
     fi
     (cd "$wt" && exec setsid "${runner[@]}" "${check_argv[@]}") > "$wt.out" 2>&1 &
     cpid=$!
-    wait "$cpid"; check_rc=$?; cpid=""
+    wait "$cpid"; check_rc=$?
     out="$(cat "$wt.out")"
     check_tail="$(tail -n 20 <<<"$out")"
     # Only a pass reads as a pass: a timeout, a command that is not there,
     # or a declared verdict line that never came is unavailable.
-    if (( check_rc == 124 || check_rc == 137 || check_rc == 126 || check_rc == 127 )); then check_state="unavailable"
+    # 124/137 timed out, 125 timeout itself failed, 126/127 no such command,
+    # 75 the lease stayed held (fabric-lease's EX_TEMPFAIL).
+    if (( check_rc == 124 || check_rc == 125 || check_rc == 137 || check_rc == 126 || check_rc == 127 || check_rc == 75 )); then check_state="unavailable"
     elif [[ -n "$check_verdict" ]]; then
         v="$(grep -oE "$check_verdict" <<<"$out" | tail -n 1 | grep -oE 'PASS|FAIL|UNAVAILABLE' | tail -n 1)"
         case "$v" in PASS) check_state="passed" ;; FAIL) check_state="failed" ;; *) check_state="unavailable" ;; esac
@@ -176,6 +190,7 @@ elapsed=$(( SECONDS - start ))
 
 rc=0
 [[ "$result" == conflicts ]] && rc=1
+[[ "$result" == "could not merge" ]] && rc=2
 [[ "$check_state" == failed ]] && rc=1
 [[ "$check_state" == unavailable && $rc -eq 0 ]] && rc=2
 
@@ -183,19 +198,20 @@ if (( JSON )); then
     refs_json="$(for i in "${!names[@]}"; do jq -cn --arg b "${names[$i]}" --arg s "${shas[$i]}" '{branch:$b, sha:$s}'; done | jq -s .)"
     jq -n --arg base "$BASE" --arg base_sha "$base_sha" --argjson refs "$refs_json" --arg result "$result" \
           --arg failed "$failed_ref" --argjson conflicted "$(printf '%s\n' "${conflicted[@]}" | jq -R . | jq -s 'map(select(length > 0))')" \
-          --arg tree "$tree" --arg check "$check_state" --arg check_rc "$check_rc" --arg tail "$check_tail" --argjson secs "$elapsed" \
+          --arg tree "$tree" --arg merr "$(tail -n 3 <<<"$merge_err")" --arg check "$check_state" --arg check_rc "$check_rc" --arg tail "$check_tail" --argjson secs "$elapsed" \
           '{base:$base, base_sha:$base_sha, refs:$refs, result:$result}
-           + (if $result == "conflicts" then {failed_ref:$failed, conflicted:$conflicted} else {tree:$tree} end)
+           + (if $result == "combines" then {tree:$tree} else {failed_ref:$failed, conflicted:$conflicted, git:$merr} end)
            + {check:$check} + (if $check_rc != "" then {check_exit:($check_rc|tonumber), check_tail:$tail} else {} end)
            + {seconds:$secs}'
 else
     echo "trial-merge onto $BASE (${base_sha:0:8}):"
     for i in "${!names[@]}"; do echo "  ${names[$i]} @ ${shas[$i]:0:8}"; done
     if [[ "$result" == combines ]]; then echo "combines — tree ${tree:0:12}"
-    else echo "conflicts — ${failed_ref} did not merge:"; printf '    %s\n' "${conflicted[@]}"; fi
+    elif [[ "$result" == conflicts ]]; then echo "conflicts — ${failed_ref} did not merge:"; printf '    %s\n' "${conflicted[@]}"
+    else echo "could not merge ${failed_ref} (not a conflict):"; tail -n 3 <<<"$merge_err" | sed 's/^/    /'; fi
     case "$check_state" in
         "not asked") ;;
-        "not run: conflicts") echo "check: not run — the refs do not combine" ;;
+        "not run: conflicts") echo "check: not run — the refs did not combine" ;;
         "none declared") echo "check: none declared for this project (projects/<id>/integration/gh/trial.json); merge only" ;;
         *) echo "check ${check_state} (exit ${check_rc})"; [[ "$check_state" == passed ]] || sed 's/^/    /' <<<"$check_tail" ;;
     esac

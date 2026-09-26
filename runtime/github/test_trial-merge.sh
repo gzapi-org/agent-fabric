@@ -86,7 +86,7 @@ cfg "{\"check\": [\"sh\", \"-c\", \"echo make: no rule to make target; exit 0\"]
 out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one --check)"; rc=$?
 [[ $rc -eq 2 ]] && grep -q 'check unavailable' <<<"$out" && pass "…a declared verdict that never appears is unavailable, even on exit 0" || fail "missing verdict read as a pass (rc=$rc)" "$out"
 out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one h/c/clash --check)"; rc=$?
-[[ $rc -eq 1 ]] && grep -q 'check: not run — the refs do not combine' <<<"$out" && pass "…not run on refs that conflict, and said" || fail "check on a conflict wrong (rc=$rc)" "$out"
+[[ $rc -eq 1 ]] && grep -q 'check: not run — the refs did not combine' <<<"$out" && pass "…not run on refs that conflict, and said" || fail "check on a conflict wrong (rc=$rc)" "$out"
 cfg '{}'
 out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one --check)"; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'none declared' <<<"$out" && pass "…a project that declares none: merge only, and said" || fail "no-check wrong (rc=$rc)" "$out"
@@ -127,6 +127,37 @@ out="$(cd "$SANDBOX/repo" && TMPDIR="$SCRATCH" AGENT_FABRIC_TRIAL_MIN_FREE_KB=99
 [[ $rc -eq 2 ]] && grep -q 'nothing tried' <<<"$out" && grep -q 'KB free' <<<"$out" && pass "too little free space: refused before starting" || fail "space check wrong (rc=$rc)" "$out"
 out="$(run)"; rc=$?
 [[ $rc -eq 2 ]] && pass "no ref named: a usage error" || fail "no refs accepted (rc=$rc)" "$out"
+
+echo "trial-merge: the review of #47's cases"
+# A clone whose hooks refuse every commit (every managed clone runs hooks):
+# the trial merge is never committed anywhere, so the hooks are not run.
+mkdir -p "$SANDBOX/hooks"; printf '#!/bin/sh\necho "hook: refused" >&2\nexit 1\n' > "$SANDBOX/hooks/commit-msg"; cp "$SANDBOX/hooks/commit-msg" "$SANDBOX/hooks/pre-merge-commit"; chmod +x "$SANDBOX/hooks/"*
+git -C "$SANDBOX/repo" config core.hooksPath "$SANDBOX/hooks"
+out="$(run h/a/one h/b/two)"; rc=$?
+git -C "$SANDBOX/repo" config --unset core.hooksPath
+[[ $rc -eq 0 ]] && grep -q '^combines' <<<"$out" && pass "a clone whose hooks refuse commits: the refs still combine — no hook runs on a trial merge" || fail "a hook turned a clean merge into a failure (rc=$rc)" "$out"
+before="$(snap)"   # the hooksPath round trip is config, not the clone's state under test
+# A branch with no history in common: not a conflict, and never said to be one.
+( cd "$SANDBOX/repo" && git checkout -q --orphan h/d/alien && git rm -rfq . && printf 'x\n' > alien.txt && git add -A && git commit -q -m alien && git push -q origin h/d/alien && git checkout -q local-work 2>/dev/null || git checkout -q -f local-work )
+printf 'dirty\n' >> "$SANDBOX/repo/f.txt" 2>/dev/null; git -C "$SANDBOX/repo" checkout -q local-work 2>/dev/null
+before="$(snap)"
+out="$(run h/a/one h/d/alien --json)"; rc=$?
+[[ $rc -eq 2 && "$(jq -r .result <<<"$out")" == "could not merge" && "$(jq -r '.conflicted | length' <<<"$out")" == 0 ]] && grep -q 'unrelated histories' <<<"$(jq -r .git <<<"$out")" \
+  && pass "unrelated histories: 'could not merge' with git's line, exit 2 — never 'conflicts'" || fail "a non-conflict failure read as a conflict (rc=$rc)" "$out"
+clean && pass "…and nothing left behind" || fail "leftovers after a failed merge"
+# A check that starts something in the background and exits 0.
+cfg '{"check": ["sh", "-c", "sleep 41.75 & exit 0"]}'
+out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one --check)"; rc=$?; sleep 0.3
+! pgrep -u "$(id -u)" -fx "sleep 41.75" >/dev/null && pass "a check that left a process behind and exited: its whole group is gone too" \
+  || { fail "a background process of the check outlived the run" "$(pgrep -a -u "$(id -u)" -fx 'sleep 41.75')"; pkill -u "$(id -u)" -fx "sleep 41.75"; }
+# A held lease (fabric-lease's exit 75) is unavailable, never a failure.
+cfg '{"check": ["sh", "-c", "exit 75"]}'
+out="$(AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" run h/a/one --check)"; rc=$?
+[[ $rc -eq 2 ]] && grep -q 'check unavailable' <<<"$out" && pass "a lease still held (75): unavailable" || fail "a held lease read otherwise (rc=$rc)" "$out"
+# A dead run's leftovers — its worktree, pid and output files — are swept by the next run.
+mkdir -p "$SCRATCH/trial-merge.DEAD01"; echo 999999 > "$SCRATCH/trial-merge.DEAD01.pid"; echo old > "$SCRATCH/trial-merge.DEAD01.out"
+run h/a/one >/dev/null
+[[ -z "$(ls -A "$SCRATCH")" ]] && pass "a dead run's worktree, pid and output file are swept by the next run" || fail "a dead run's files survived" "$(ls -A "$SCRATCH")"
 
 echo
 if [[ $failures -eq 0 ]]; then echo "test_trial-merge: OK — all assertions passed."; else echo "test_trial-merge: FAILED — $failures assertion(s)."; exit 1; fi

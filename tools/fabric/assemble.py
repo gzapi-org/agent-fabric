@@ -1187,7 +1187,6 @@ def main() -> int:
         present = existing_sections(candidates)
         author = sole_author(role, klass, topic, candidates) if present else None
         author_any = sole_author(role, klass, topic, candidates, own_only=False) if present else None
-        seen_incoming: dict[str, dict[str, Any]] = {}
         # A HEADING TWO CLAIMS OF THIS DRAIN DISAGREE UNDER is contested
         # whichever comes first: judged claim by claim, a pair whose second
         # claim equalled the corpus passed as a no-op after the first had
@@ -1210,12 +1209,10 @@ def main() -> int:
             # only where the corpus did not, a pair under a heading the
             # corpus held was superseded twice by the same-agent rule and
             # the later claim won silently (a drain's blind review,
-            # 2026-09-26). Recorded before the no-op checks below, so a
-            # claim equal to the corpus still counts as the pair's first;
-            # a claim itself in the corpus (a pair the owner kept both of,
-            # re-emitted) is no question.
-
-            seen_incoming.setdefault(heading, claim)
+            # 2026-09-26). The pair is found over the whole group
+            # (`contested`, above), so its order does not matter; a pair
+            # whose texts all stand already (kept both, re-emitted) is no
+            # question.
             # Present already — under its heading or as a kept-both
             # sibling "X (n)" — is the same claim again, whatever its date.
             siblings = [heading] + [k for k in present if re.fullmatch(re.escape(heading) + r" \(\d+\)", k)]
@@ -1235,6 +1232,8 @@ def main() -> int:
                 other = next(c for c in group if claim_heading(c) == heading)
                 rival = undated(claim_block(other).split("\n", 1)[1])
                 rival_date = other.get("observed_at") or "undated"
+                if rival == rendered:
+                    continue   # the first claim's text again: nothing to decide
             else:
                 rival = present.get(heading)
                 rival_date = observed_of(rival) if rival is not None else None
@@ -1274,7 +1273,11 @@ def main() -> int:
             # about, not applied (the review of #41, 2026-09-26). An undated
             # side cannot be compared and does not block the rule.
             incoming_date = claim.get("observed_at") or ""
-            corpus_dates = [observed_of(present[h]) for h in ([heading] if heading in present else list(present))]
+            # Every section the supersede would remove: the heading and its
+            # kept-both siblings "X (n)", which the replace retires too; a
+            # retitle retires the whole topic (the re-review of #41).
+            replaced = [k for k in siblings if k in present] if heading in present else list(present)
+            corpus_dates = [observed_of(present[h]) for h in replaced]
             older = bool(incoming_date) and any(d != "undated" and incoming_date < d for d in corpus_dates)
             same_agent = not open_pair and not older and ((retitled and author is not None and agent == author)
                                            or (heading in present and author_any is not None and agent == author_any))
@@ -1489,9 +1492,10 @@ def main() -> int:
                 # stayed in the body forever and the recorded collision
                 # was unioned forward on every later drain, so the
                 # remedy the report prescribes could never clear the
-                # report. Only an explicit merge_target reaches here, so
-                # retiring the siblings is the author's instruction
-                # rather than an inference.
+                # report. An explicit merge_target, an owner's supersede or
+                # the same-agent rule reaches here — each an instruction to
+                # replace the heading, and the rule only for text no older
+                # than any sibling it retires.
                 sibling = 2
                 while f"{target} ({sibling})" in blocks:
                     stale = f"{target} ({sibling})"

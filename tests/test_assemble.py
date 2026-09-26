@@ -2189,6 +2189,57 @@ def test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes(tmp:
     assert read(flat) == before
 
 
+def test_the_same_agent_rule_never_replaces_newer_text(tmp: str) -> None:
+    """The rule replaces an agent's OLDER text with its newer one. A
+    supersede retires the heading's kept-both siblings "X (n)" too, and a
+    retitle every section of the topic: a claim dated before ANY of those is
+    asked about, never applied (the re-review of #41, 2026-09-26). And a
+    claim repeating the first claim of a contested heading adds nothing to
+    decide."""
+    drain, claims_dir, out = build(tmp, {"alpha": claims("alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Open.", "evidence": ["a1"],
+         "observed_at": "2026-01-01"},
+        {"class": "domain", "topic": "other", "title": "Other", "body": "O.", "evidence": ["a9"]},
+    ])})
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01", "a9": "dev-01"})
+    assert run_assemble(drain, claims_dir, out).returncode == 0
+    # The owner keeps a newer text beside it as "Status (2)".
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged.", "evidence": ["a2"],
+         "observed_at": "2026-09-20"},
+    ])
+    assert run_assemble(drain, claims_dir, out, *keep_both(tmp, "alpha/domain:tracker#Status")).returncode == 0
+    tracker = dom(out, "alpha", "domain", "tracker.md")
+    if not os.path.exists(tracker):
+        tracker = dom(out, "alpha", "domain.md")
+    assert "## Status (2)" in read(tracker), read(tracker)
+    before = read(tracker)
+    # Older than the kept sibling: asked, not applied.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a3"],
+         "observed_at": "2026-05-01"},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "SUPERSEDING?" in proc.stderr, proc.stderr
+    assert read(tracker) == before
+    # An older RETITLE: asked, not applied.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status, retitled", "body": "Old.", "evidence": ["a4"],
+         "observed_at": "2000-01-01"},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert "SUPERSEDED, same agent" not in proc.stderr, proc.stderr
+    # A contested heading whose third claim repeats the first: only the
+    # differing text is a question.
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged again.", "evidence": ["a4"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Reverted.", "evidence": ["a5"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Merged again.", "evidence": ["a3"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out)
+    assert proc.returncode == 1 and "tracker#Status@a5" in proc.stderr and "tracker#Status@a3" not in proc.stderr, proc.stderr
+
+
 def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:
     """Topic `grow` split by budget: `grow.md` holds "Big", `grow-2.md`
     "More". A claim "More, corrected" with merge_target "More" is written
@@ -2336,6 +2387,7 @@ def main() -> int:
         test_a_correction_of_a_section_in_another_part_takes_its_own_heading,
         test_two_claims_of_one_drain_under_a_heading_the_corpus_holds_still_stop_it,
         test_an_agents_new_text_under_its_own_heading_in_a_flat_file_supersedes,
+        test_the_same_agent_rule_never_replaces_newer_text,
         test_one_agent_s_memories_in_a_flat_class_file_are_not_one_retitled_memory,
         test_a_claim_body_s_own_headings_never_open_a_section,
         test_the_drain_report_gathers_every_bundle_of_one_drain,

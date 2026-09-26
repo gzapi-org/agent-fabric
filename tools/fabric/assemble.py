@@ -1237,7 +1237,13 @@ def main() -> int:
                     # nothing to write — that claim carries it and the
                     # owner's decision on it governs. Left in the group,
                     # it escaped the decision and came back as "X (2)"
-                    # (the re-review of #41, 2026-09-26).
+                    # (the re-review of #41, 2026-09-26). Its EVIDENCE is
+                    # not a repeat: folded into the first claim's (after
+                    # its first hash, which keys it), so the slice still
+                    # records every agent that asserted the text and a
+                    # later drain does not read a two-agent topic as one's.
+                    other["evidence"] = list(other.get("evidence") or []) + [
+                        e for e in (claim.get("evidence") or []) if e not in (other.get("evidence") or [])]
                     group.remove(claim)
                     continue
             else:

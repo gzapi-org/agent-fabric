@@ -2246,6 +2246,20 @@ def test_the_same_agent_rule_never_replaces_newer_text(tmp: str) -> None:
     assert proc.returncode == 0, proc.stderr
     heads = [line for line in read(tracker).splitlines() if line.startswith("## Status")]
     assert heads == ["## Status"], read(tracker)
+    # The repeat's evidence and agent stay in the provenance: a second agent
+    # asserting the same text keeps the topic two agents' (re-review of #41).
+    with_agents(drain, {"a1": "dev-01", "a2": "dev-01", "a3": "dev-01", "a4": "dev-01", "a5": "dev-01",
+                        "a9": "dev-01", "b7": "dev-02"})
+    set_claims(claims_dir, "alpha", [
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Held.", "evidence": ["a1"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Closed.", "evidence": ["a2"]},
+        {"class": "domain", "topic": "tracker", "title": "Status", "body": "Held.", "evidence": ["b7"]},
+    ])
+    proc = run_assemble(drain, claims_dir, out, "--collision-decisions",
+                        decisions_file(tmp, {"alpha/domain:tracker#Status": "supersede"}))
+    assert proc.returncode == 0, proc.stderr
+    text = read(tracker)
+    assert "b7" in text and '"dev-02"' in text, "the repeat's evidence or agent left the provenance:\n" + text
 
 
 def test_a_correction_of_a_section_in_another_part_takes_its_own_heading(tmp: str) -> None:

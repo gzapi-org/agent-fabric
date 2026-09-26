@@ -170,7 +170,7 @@ set -m; "$@" & child=$!; set +m
 wait "$child"
 LEASE
 chmod +x "$SANDBOX/leasebin/fabric-lease"
-cfg '{"check": ["sh", "-c", "sleep 43.5 & exit 0"], "lease": "trial"}'
+cfg '{"check": ["sh", "-c", "cd / && sleep 43.5 & exit 0"], "lease": "trial"}'   # it leaves the worktree, too
 out="$(cd "$SANDBOX/repo" && PATH="$SANDBOX/leasebin:$PATH" TMPDIR="$SCRATCH" AGENT_FABRIC_TRIAL_MIN_FREE_KB=0 AGENT_FABRIC_TRIAL_CONFIG="$SANDBOX/trial.json" bash "$UNDER_TEST" h/a/one --check 2>&1)"; rc=$?; sleep 0.3
 [[ $rc -eq 0 ]] && grep -q 'check passed' <<<"$out" && pass "…a check under a declared lease runs and passes" || fail "the leased check did not run (rc=$rc)" "$out"
 ! pgrep -u "$(id -u)" -fx "sleep 43.5" >/dev/null && pass "…and what it left running in its own group under the lease is ended too" \

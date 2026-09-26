@@ -126,8 +126,9 @@ free_kb="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
 
 # A worktree of a run that died is this tool's to clear, and only when its
 # owner is gone: a concurrent run's is left alone.
-# A run killed before it wrote its pid leaves none: such a worktree is
-# taken for dead once it is an hour old, longer than any check may run.
+# A run writes its pid right after making its worktree, so a worktree
+# with none is from a run killed in that gap: dead within seconds. The
+# hour is a generous margin, not a bound on how long a check may run.
 for d in "$scratch"/trial-merge.*; do
     [[ -d "$d" ]] || continue
     if [[ -f "$d.pid" ]]; then kill -0 "$(cat "$d.pid" 2>/dev/null)" 2>/dev/null && continue
@@ -146,13 +147,20 @@ echo $$ > "$wt.pid.tmp" && mv -f "$wt.pid.tmp" "$wt.pid"
 # whatever it started in the background (a server, a build daemon) would
 # otherwise outlive the worktree it runs in.
 # The group is not always the whole check: a declared lease runs it in a
-# group of its own (fabric-lease), so whatever of this login still runs
-# with its working directory inside the worktree is taken as the check's
-# too, and ended before the worktree goes.
+# process group of its own (fabric-lease's set -m). It stays in the
+# SESSION setsid gave the check, though, wherever it moves, so every
+# process of that session is the check's and is ended with it; anything
+# of this login still working inside the worktree is too, as a backstop
+# (a process can leave the session only by making its own, as a daemon
+# does on purpose).
 worktree_procs() {
-    local p cwd me; me="$(id -u)"
+    local p cwd sid me; me="$(id -u)"
     for p in /proc/[0-9]*; do
         [[ "$(stat -c %u "$p" 2>/dev/null)" == "$me" ]] || continue
+        if [[ -n "$cpid" ]]; then
+            sid="$(sed 's/^.*) //' "$p/stat" 2>/dev/null | awk '{print $4}')"
+            [[ "$sid" == "$cpid" ]] && { echo "${p#/proc/}"; continue; }
+        fi
         cwd="$(readlink "$p/cwd" 2>/dev/null)" || continue
         [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && echo "${p#/proc/}"
     done

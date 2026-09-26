@@ -71,9 +71,11 @@ export async function checkAddressees(metadata, { from, token, placed, operators
   const holders = Object.entries(all).filter(([, p]) => p?.status === 'ok' && p.role === role);
   const online = holders.filter(([, p]) => p.online);
   // A role is planning only when every running holder is: one that is
-  // not will read the message now.
+  // not will read the message now — and an account that did not answer
+  // may be such a holder, so any silence withholds the note.
+  const unknown = Object.values(all).some(p => p === null || p?.status !== 'ok');
   if (online.length) return { checked: true, problems: [],
-    notes: online.every(([, p]) => p.planning) ? online.map(([a]) => ({ kind: 'planning', address: a })) : [] };
+    notes: !unknown && online.every(([, p]) => p.planning) ? online.map(([a]) => ({ kind: 'planning', address: a })) : [] };
   // No answer, or an answer that could not read its process table: either
   // may hide a running holder, and both are said as such.
   const silent = Object.entries(all).filter(([, p]) => p === null || p.status !== 'ok').map(([a]) => a);

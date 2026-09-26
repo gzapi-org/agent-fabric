@@ -9,6 +9,9 @@ import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { scratch } from '../../../tests/scratch.mjs';
 import { identity, usage, keys, fabric, session, host, script, recall, recallKind, scriptCounts, notesDir, workerTranscripts, languages, langidCmd, memoryDirs, memorySlug, memory, tokens, equivalent, TOKEN_RATIOS, collect, KEY_NAMES, OPS, MEMORY_PART_BYTES, accounts, readAccount, parseUsageReport, accountsDir, accountSlugs, takeReadLock, presence } from '../ops.mjs';
+// A fence for any presence() a test forgets to give a hold: never the
+// runner's own ~/.cache/agent-fabric/hold (review of #49).
+process.env.AGENT_FABRIC_HOLD_DIR = scratch('ops-hold-');
 
 const SECRETS = { OPENROUTER_API_KEY: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789', GH_TOKEN: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', CLAUDE_BRIDGE_AUTH_TOKEN: 'bridge-token-value-1234567890' };
 const ACCESS = 'oauth-access-token-value-XYZ';
@@ -579,7 +582,7 @@ test('presence: a session is a claude process that is not the daemon\'s own chil
   assert.deepEqual(r, { status: 'ok', online: true, sessions: 2, since: new Date((1790000000 + 10) * 1000).toISOString(), role: 'web-dev', project: 'gzapp', planning: false },
     'the daemon\'s child (200) is not a session; the earliest start is the since');
   // A login with no role recorded is its name's slug, as the inbox's delivery reads it (review of #38).
-  const unbound = presence({ proc, self: 999, exec: () => '100\n', who: { agent: 'web-dev-02', host: 'h', role: undefined, binding: '/nonexistent' }, binding: {} });
+  const unbound = presence({ proc, self: 999, exec: () => '100\n', who: { agent: 'web-dev-02', host: 'h', role: undefined, binding: '/nonexistent' }, binding: {}, hold: notHeld });
   assert.equal(unbound.role, 'web-dev', 'no binding role: the slug the login carries');
   const none = presence({ proc, self: 999, exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; }, who, binding });
   assert.deepEqual([none.online, none.sessions, none.since], [false, 0, null], 'pgrep finding nothing is offline');

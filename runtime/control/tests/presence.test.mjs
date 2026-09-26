@@ -79,6 +79,7 @@ test('a session that is planning is said as a note, never a problem: TO; TO-ROLE
   assert.deepEqual(to, { checked: true, problems: [], notes: [{ kind: 'planning', address: 'h/web-dev-01' }] });
   const role = answers => checkAddressees({ 'TO-ROLE': 'web-dev' }, { from: 'h/user', token: 't', placed, ask: asker(answers) });
   assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': on() })).notes, [], 'a holder that is not planning reads it now');
-  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off() })).notes, [{ kind: 'planning', address: 'h/web-dev-01' }]);
+  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off(), 'h/db-admin': on('db-admin') })).notes, [{ kind: 'planning', address: 'h/web-dev-01' }]);
+  assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off() })).notes, [], 'an account that did not answer may be a holder reading it now: no note');
   assert.deepEqual((await role({ 'h/web-dev-01': planning(), 'h/web-dev-02': off() })).problems, [], 'planning never blocks the send');
 });

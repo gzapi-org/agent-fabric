@@ -391,6 +391,36 @@ class Install(Case):
         self.assertEqual(json.load(open(record))["pid"], 7, "a record is renamed back, never removed")
         self.assertEqual(sorted(os.listdir(self.state)), ["gateway-install.json", "gateway.json"], "no file left aside")
 
+    def test_a_running_sessions_record_is_never_moved_by_an_install(self):
+        """Its end must find it where it is, and readers must keep seeing it."""
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 7}, fh)
+        real_rename = os.rename
+        moved = []
+        with unittest.mock.patch.object(gw.os, "rename", side_effect=lambda a, b: (moved.append(a), real_rename(a, b))):
+            gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertNotIn(record, moved, "the record was renamed aside")
+
+    def test_a_launch_racing_the_migration_keeps_its_newer_record(self):
+        os.makedirs(self.state)
+        path = os.path.join(self.state, "gateway.json")
+        with open(path, "w") as fh:
+            json.dump({"version": VERSION, "installed_sha256": "ab"}, fh)
+        real_rename = os.rename
+
+        def rename_then_launch(a, b):
+            real_rename(a, b)
+            with open(b, "w") as fh:          # the marker aside becomes a record (the judge reads a pid)
+                json.dump({"pid": 7}, fh)
+            with open(path, "w") as fh:       # and a newer launch has written its own
+                json.dump({"pid": 999}, fh)
+        with unittest.mock.patch.object(gw.os, "rename", side_effect=rename_then_launch):
+            gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertEqual(json.load(open(path))["pid"], 999, "the newer record is never overwritten")
+        self.assertEqual(sorted(os.listdir(self.state)), ["gateway-install.json", "gateway.json"], "nothing left aside")
+
     def test_a_marker_that_cannot_be_written_leaves_no_temporary_file(self):
         os.makedirs(self.state)
         with unittest.mock.patch.object(gw.json, "dumps", side_effect=ValueError("bad")), self.assertRaises(ValueError):

@@ -181,35 +181,39 @@ def read_marker(state: str) -> dict | None:
     if isinstance(d, dict):
         return d
     old = util.read_json(os.path.join(state, LEGACY_MARKER))
-    return old if isinstance(old, dict) and "installed_sha256" in old and "pid" not in old else None
+    return old if _is_install_marker(old) else None
+
+
+def _is_install_marker(d: Any) -> bool:
+    return isinstance(d, dict) and "installed_sha256" in d and "pid" not in d
 
 
 def _drop_legacy_marker(state: str) -> None:
-    """A marker left at the old name would make check 7 see a running session;
-    a launcher's record there (it has a pid) is left alone. The file is first
-    renamed aside and judged there, so a launch that writes its record between
-    a read and an unlink cannot lose it: a record is renamed back."""
+    """A marker left at the old name would make check 7 see a running session.
+    The launcher's record lives there too (it has a pid), so the file is judged
+    where it is and a record is never moved: a running session stays visible
+    and its end can still remove it. Only a marker is renamed aside and judged
+    again; if a launch replaced it in between, the record goes back by link,
+    which refuses rather than overwrite a newer record."""
     path = os.path.join(state, LEGACY_MARKER)
+    if not _is_install_marker(util.read_json(path)):
+        return
     aside = os.path.join(state, f".{LEGACY_MARKER}.{os.getpid()}.judge")
     try:
         os.rename(path, aside)
     except OSError:
         return
-    old = util.read_json(aside)
-    if isinstance(old, dict) and "installed_sha256" in old and "pid" not in old:
+    try:
+        if not _is_install_marker(util.read_json(aside)):
+            try:
+                os.link(aside, path)
+            except FileExistsError:
+                pass                      # a newer record landed: it wins
+    finally:
         try:
             os.unlink(aside)
         except OSError:
             pass
-        return
-    try:
-        if os.path.exists(path):
-            # A launch wrote a newer record meanwhile: it wins; ours is older.
-            os.unlink(aside)
-        else:
-            os.rename(aside, path)
-    except OSError:
-        pass
 
 
 def write_marker(state: str, marker: dict) -> None:

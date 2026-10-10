@@ -11,7 +11,7 @@ from memory_mcp import marks
 
 DEFAULT_LIMIT, MAX_LIMIT = 8, 20
 FIND_TOKENS, READ_TOKENS, MAX_TOKENS = 200, 1500, 8000
-MIN_TOKENS = 40         # a reply smaller than this cannot hold one hit line or the marker that says it was cut
+MIN_TOKENS = 100        # a reply smaller than this cannot hold one hit line (a clipped heading and a long id, ~65 tokens), the weak notice and the tail
 RELATED = 2
 MAX_TRY_WORDS, MAX_TRY_LEN = 8, 40
 WEAK_NOTICE = "weak match: read only if the cue fits"

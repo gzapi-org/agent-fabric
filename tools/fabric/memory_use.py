@@ -7,13 +7,19 @@ reads another account's state, so the harvest (harvest_memory.py) carries both i
 counts over the calls. Query text is never in either file and never here.
 
 CONTRACT
-  read(state_dir, since_ms)  rows whose time is after since_ms (a ms epoch, the store's watermark; 0 reads all):
-      marks   [{"t", "id", "verdict", "note"}], file order; a row that is not a mark of the server's shape is dropped
-              and counted
-      use     {"since_ms", "until_ms", "calls": {tool: n}, "zero_hit_finds", "finds_followed_by_read",
-               "ids_read": {id: n}, "marks": n, "unreadable_lines", "notes_withheld"}
+  read(state_dir, since_ms, credential_hits, *, project, until_ms)  -> (marks, use)
+      the rows of the window (after since_ms, up to until_ms: a row after the moment the harvest began scanning waits for the
+      next drain) written by sessions of `project` (a row names it; the log is the login's, which works in several)
+      marks   [{"t", "id", "verdict", "note"}], file order; a row in the window that is not a mark of the server's shape is
+              dropped and counted in `unreadable_lines`
+      use     {"since_ms", "until_ms", "calls": {tool: n}, "zero_hit_finds", "finds_followed_by_read", "ids_read": {id: n},
+               "marks": n, "errors", "unreadable_lines", "unattributed_lines", "notes_withheld"}, or None when the window holds
+              no mark, call, refused call, malformed row or withheld note: a drain of a login that never ran the server is
+              the drain it was. `errors` are calls the caller got wrong (never counted as a find that found nothing).
+              `unattributed_lines` are lines that are not JSON or carry no time: they belong to no window and no project, are
+              reported once a drain has something else to report, and never make a drain non-empty alone
       until_ms the latest row time read (>= since_ms): the watermark covers these rows like memories
-  A missing file is no rows, not an error; an unreadable one is the same, said in `unreadable_lines`.
+  A missing file is no rows, not an error; an unreadable one is the same.
   A note that carries a credential by shape (the caller's screen) is withheld, the mark kept."""
 from __future__ import annotations
 
@@ -70,17 +76,21 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
     it waits for the next drain, so the watermark never passes a memory the scan did not see."""
     marks: list[dict] = []
     use: dict = {"since_ms": since_ms, "until_ms": since_ms, "calls": {}, "zero_hit_finds": 0, "finds_followed_by_read": 0,
-                 "ids_read": {}, "marks": 0, "errors": 0, "unreadable_lines": 0, "notes_withheld": 0}
+                 "ids_read": {}, "marks": 0, "errors": 0, "unreadable_lines": 0, "unattributed_lines": 0,
+                 "notes_withheld": 0}
     until = since_ms
     rows, bad = _rows(os.path.join(state_dir, MARKS))
-    use["unreadable_lines"] += bad
+    use["unattributed_lines"] += bad          # not JSON: no time, no project, so it belongs to no window
     for row in rows:
         at = _ms(row.get("t"))
-        ident, verdict, note = row.get("id"), row.get("verdict"), row.get("note", "")
-        if at is None or not isinstance(ident, str) or not ID_RE.fullmatch(ident) or verdict not in VERDICTS or not isinstance(note, str):
-            use["unreadable_lines"] += 1
+        if at is None:
+            use["unattributed_lines"] += 1       # no time, so no window and no project to hold it against
             continue
         if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
+            continue
+        ident, verdict, note = row.get("id"), row.get("verdict"), row.get("note", "")
+        if not isinstance(ident, str) or not ID_RE.fullmatch(ident) or verdict not in VERDICTS or not isinstance(note, str):
+            use["unreadable_lines"] += 1
             continue
         note = " ".join(note.split())[:NOTE_CLIP]
         if note and credential_hits(note):
@@ -90,14 +100,17 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
         until = max(until, at)
     use["marks"] = len(marks)
     rows, bad = _rows(os.path.join(state_dir, CALLS))
-    use["unreadable_lines"] += bad
+    use["unattributed_lines"] += bad
     pending = False       # a find not yet followed by a read of one of its ids
     for row in rows:
         at, tool = _ms(row.get("t")), row.get("tool")
-        if at is None or not isinstance(tool, str):
-            use["unreadable_lines"] += 1
+        if at is None:
+            use["unattributed_lines"] += 1
             continue
         if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
+            continue
+        if not isinstance(tool, str):
+            use["unreadable_lines"] += 1
             continue
         until = max(until, at)
         if row.get("error") is True:

@@ -579,8 +579,9 @@ def test_a_missing_or_damaged_log_is_no_rows_and_no_error(tmp: str) -> None:
     r, members, _ = _bundle(tmp, "m3", None)
     use = json.loads(members["harvest-report.json"])["memory_use"]
     assert r.returncode == 0 and members["marks.jsonl"] == b"", r.stderr
-    # Three marks that are not the server's, and two broken lines in each of the two files.
-    assert use["unreadable_lines"] == 3 + 2 + 2 and use["ids_read"] == {"f:a/b#1": 1}, use
+    # Two marks of this window that are not the server's (a path as an id, a verdict nobody gave); lines that are not JSON, an
+    # array and a time that is no time belong to no window and are counted apart.
+    assert use["unreadable_lines"] == 2 and use["unattributed_lines"] == 1 + 4 and use["ids_read"] == {"f:a/b#1": 1}, use
 
 
 def test_a_drain_carries_the_rows_of_its_own_project_alone(tmp: str) -> None:
@@ -600,6 +601,18 @@ def test_a_drain_carries_the_rows_of_its_own_project_alone(tmp: str) -> None:
     r, members, _ = _bundle(tmp, "m8b", None, "--project", "other")
     got = [json.loads(ln) for ln in members["marks.jsonl"].decode().splitlines()]
     assert [x["note"] for x in got] == ["theirs"] and json.loads(members["harvest-report.json"])["memory_use"]["calls"] == {"memory_find": 2}, got
+
+
+def test_a_malformed_row_of_another_project_or_no_project_makes_no_drain(tmp: str) -> None:
+    """A row that is not the server's shape, in another project's window, and a line that is not JSON, are nobody's business
+    in this drain: it stays the drain it was, with no marks.jsonl and no memory_use."""
+    _state(marks=[{"t": "2026-10-10T07:00:00Z", "id": "f:a/b#1", "verdict": "bogus", "note": "", "project": "other"}],
+           calls=[{"t": "2026-10-10T07:00:00Z", "tool": 5, "hits": 0, "ids": [], "project": "other"}], raw="{broken\n")
+    r, members, _ = _bundle(tmp, "m11", None)
+    assert r.returncode == 0 and "marks.jsonl" not in members and "memory_use" not in json.loads(members["harvest-report.json"]), members.keys()
+    r, members, _ = _bundle(tmp, "m11b", None, "--project", "other")
+    use = json.loads(members["harvest-report.json"])["memory_use"]
+    assert use["unreadable_lines"] == 2 and use["unattributed_lines"] == 2, use
 
 
 def test_rows_after_the_scan_began_wait_and_the_watermark_stays_behind_them(tmp: str) -> None:
@@ -850,6 +863,7 @@ def main() -> int:
         test_marks_and_counts_after_the_watermark_enter_the_bundle_and_earlier_ones_do_not,
         test_a_missing_or_damaged_log_is_no_rows_and_no_error,
         test_a_drain_carries_the_rows_of_its_own_project_alone,
+        test_a_malformed_row_of_another_project_or_no_project_makes_no_drain,
         test_rows_after_the_scan_began_wait_and_the_watermark_stays_behind_them,
         test_a_call_the_caller_got_wrong_is_counted_apart,
         test_an_id_with_a_trailing_newline_is_not_an_id,

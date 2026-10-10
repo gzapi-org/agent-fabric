@@ -14,7 +14,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools", "fabric"))
@@ -236,11 +235,18 @@ def main() -> int:
         check("band: a dead heat on a partial match is not strong; on a near-full match it is",
               B.band(30, 0.6, 1.0) == "weak" and B.band(30, 0.8, 1.0) == "strong")
 
-        slow = time.monotonic()
+        # The query is the model's: only its first MAX_QUERY_TOKENS words are the question, so a long one costs a bounded search.
+        buried = " ".join(["zzzzq"] * memory_index.MAX_QUERY_TOKENS + ["subprocess"])
+        check("a query is read to its first words only: the word past the cap finds nothing, the same word inside it does",
+              corpus.find(buried, "python-dev", "agent-fabric") == [] and corpus.find("zzzzq subprocess", "python-dev", "agent-fabric") != [])
         long_miss = tools.find(corpus, sess, {"query": " ".join(f"zzzzq{n}x" * 4 for n in range(40000))})[0]
-        check("a very long query that matches nothing is answered at once, with a pointer, not after a long search for near words",
-              time.monotonic() - slow < 1.0 and long_miss.startswith("no sections match; try: "), f"{time.monotonic() - slow:.1f}s")
+        check("a very long query that matches nothing is answered with a pointer", long_miss.startswith("no sections match; try: "), long_miss[:60])
 
+        # A root git cannot give is said to the model in every reply, not only on stderr (which never reaches it).
+        with contextlib.redirect_stderr(io.StringIO()):
+            half = memory_index.build(f"{bare}/memory", None)
+        said = srv.Server(half, sess, f"{t}/state-unread").call("memory_find", {"query": "seen"})["content"][0]["text"]
+        check("a reply from a server whose root was not served says so, and names the root", said.startswith("NOT SERVED (ask the owner): the fabric's memory/") and "not in a git" in said.lower() or "NOT SERVED" in said, said[:140])
         print("memory_read")
         ref = "p:python-dev/solution/launcher-pin"
         listing = tools.read(corpus, sess, {"ids": [ref]})[0]
@@ -259,7 +265,12 @@ def main() -> int:
         check("max_tokens cuts the reply and says so, and the marker is inside the budget", cut.endswith(f"[cut at max_tokens {tools.MIN_TOKENS}]")
               and len(cut) * tools.TOKENS_PER_CHAR <= tools.MIN_TOKENS + 1, f"{len(cut)} chars: {cut}")
         tiny = tools.find(corpus, sess, {"query": "subprocess timeouts", "max_tokens": 1})[0]
-        check("a max_tokens below the floor is the floor, so one hit line always fits", len(tiny) * tools.TOKENS_PER_CHAR <= tools.MIN_TOKENS + 15, tiny)
+        check("a max_tokens below the floor is the floor, and the reply is inside it (no allowance)", len(tiny) * tools.TOKENS_PER_CHAR <= tools.MIN_TOKENS, f"{len(tiny) * tools.TOKENS_PER_CHAR:.0f} tokens: {tiny}")
+        worst = tools._hit_line(memory_index.Hit(memory_index.Section(slice_id=".agent-fabric/memory/python-dev/workflow/" + "a-long-topic-name-" * 4 + "end.md",
+                                                                   heading="h" * 200, cue="c", kind="solution", scope="project", role="python-dev", title="t",
+                                                                   position=12, shared_with=(), projects=(), observed="2026-10-10", text="x" * 4000), 99.9, 1.0, "weak"))
+        check("the floor holds the worst hit line the formatter can write, with the weak notice and the tail",
+              (len(worst) + len(tools.WEAK_NOTICE)) * tools.TOKENS_PER_CHAR + tools.TAIL_TOKENS <= tools.MIN_TOKENS, f"{len(worst)} chars: {worst[:80]}")
         for bad in ("../../etc/passwd", "/etc/passwd", "f:../../../outside", "f:domains/python-dev/domain/link-out", "p:../../x", "nope"):
             try:
                 out = tools.read(corpus, sess, {"ids": [bad]})[0]

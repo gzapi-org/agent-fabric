@@ -58,13 +58,14 @@ class Bm25:
         # The +1 inside the log keeps a term found in every document from scoring below zero.
         self.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
 
-    def score(self, query: list[str], doc: int) -> float:
+    def score(self, terms: set[str], doc: int) -> float:
         tf, norm = self.tf[doc], K1 * (1 - B + B * self.len[doc] / (self.avg or 1.0))
-        return sum(self.idf.get(t, 0.0) * tf[t] * (K1 + 1) / (tf[t] + norm) for t in set(query) if t in tf)
+        return sum(self.idf.get(t, 0.0) * tf[t] * (K1 + 1) / (tf[t] + norm) for t in terms if t in tf)
 
     def ranked(self, query: list[str]) -> list[tuple[int, float]]:
         """(document, score) for every document that matches at least one term, best first; ties keep corpus order."""
-        hits = [(i, s) for i in range(len(self.tf)) if (s := self.score(query, i)) > 0]
+        terms = set(query)           # once: a set built per document made a long query cost sections times its length
+        hits = [(i, s) for i in range(len(self.tf)) if (s := self.score(terms, i)) > 0]
         return sorted(hits, key=lambda h: (-h[1], h[0]))
 
 
@@ -72,6 +73,7 @@ KINDS = ("domain", "solution", "intersection", "rationale", "workflow", "threads
 # Not slices: the generated map, the READMEs and the drain's records.
 SKIP = {"INDEX.md", "README.md", "RUBRIC.md"}
 TOKENS_PER_CHAR = 0.25
+MAX_QUERY_TOKENS = 64
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,7 @@ class Index:
             by_role = not role or s.role == role or role in s.shared_with
             by_project = not project or not s.projects or project in s.projects
             return int(not by_role) + int(not by_project)
-        words = tokens(query)
+        words = tokens(query)[:MAX_QUERY_TOKENS]       # the query is the model's: the first words are the question
         found = [(i, score) for i, score in self._model().ranked(words)]
         found.sort(key=lambda h: (tier(self.sections[h[0]]), -h[1]))
         picked: list[tuple[int, float]] = []

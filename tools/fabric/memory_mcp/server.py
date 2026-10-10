@@ -75,7 +75,13 @@ class Server:
         elif name == "memory_read":
             after_find = bool(self.last_find & set(ids))
         calls.record(self.state_dir, name, ids, after_find, self.session.project)
-        return _result(text)
+        return _result(self._unread_notice() + text)
+
+    def _unread_notice(self) -> str:
+        """A root git could not give is not served; the model must not read that as a corpus with nothing in it (stderr never reaches it)."""
+        if not self.corpus.unread:
+            return ""
+        return "NOT SERVED (ask the owner): " + "; ".join(self.corpus.unread) + "\n"
 
     def handle(self, message: object) -> dict | None:
         """The answer to one message, or None when it needs none."""

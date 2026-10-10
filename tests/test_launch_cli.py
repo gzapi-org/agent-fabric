@@ -521,6 +521,15 @@ def main() -> int:
         out = out_of("--provider", "anthropic", "--resume", "abc123")
         check("…and a resume, after the session id",
               has(r"CLAUDE-EXECCED:.*--resume abc123 -- Session start: arm your GZCoord inbox watch", out), out)
+        # An upgrade's restart resumed the whole fleet into "wait for
+        # instructions" and every agent went idle (2026-10-10).
+        check("…a resumed session is told to carry on, and both to take the next job",
+              has(r"CLAUDE-EXECCED:.*--resume abc123 -- .*This session was resumed after a restart: carry on", out)
+              and has(r"CLAUDE-EXECCED:.*run fabric-jobs next", out), out)
+        out = out_of("--provider", "anthropic")
+        check("…a fresh launch takes the next job and is not told it was resumed",
+              has(r"CLAUDE-EXECCED:.*Then run fabric-jobs next and start the job", out)
+              and "This session was resumed" not in out, out)
         out = out_of("--provider", "anthropic", "--resume")
         check("…a bare --resume keeps its picker: the prompt is not its value",
               has(r"CLAUDE-EXECCED:.*--resume -- Session start: arm", out), out)
@@ -990,7 +999,7 @@ def main() -> int:
               rc == 0 and has(rf"^RUN2:pwd={re.escape(other)}:", out) and f"starting job j1 in {other}" in out, f"rc={rc}\n{out}")
         check("…and the opening prompt carries the job in place of waiting for instructions",
               has(r"^RUN2:.*It is for your job j1, ship the other thing \([^)]*topic routing\): read it in full with fabric-jobs show j1",
-                  out) and not has(r"^RUN2:.*Then wait for instructions", out), grep("RUN2", out))
+                  out) and not has(r"^RUN2:.*Then run fabric-jobs next", out), grep("RUN2", out))
         # Started by a relative path, as the README runs it from projects/:
         # the relaunch changes directory first, and must still find itself —
         # and a relative path argument must still name its file.

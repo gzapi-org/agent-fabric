@@ -63,10 +63,21 @@ RESTART_WAIT_S = 600
 OPENING = ("Session start: arm your GZCoord inbox watch now, exactly as the session-start context's "
            "NO INBOX WATCH line gives it (with no such line, as the gzcoord-receive skill says); "
            "run it again after each delivery or when its timeout stopped it, and on any other exit "
-           "read the reason instead of running it again. Then wait for instructions.")
+           "read the reason instead of running it again. Then run fabric-jobs next and start the job it "
+           "gives you; wait for instructions only when nothing is queued.")
 
 
-WAIT_TAIL = " Then wait for instructions."
+# A session never stops idle while a job is queued (agent-fabric ADR-037 rule
+# 10): "wait for instructions" alone sent the whole fleet idle when an upgrade
+# restarted it (the owner, 2026-10-10), so the tail names the job list first.
+WAIT_TAIL = (" Then run fabric-jobs next and start the job it gives you; wait for instructions only when "
+             "nothing is queued.")
+
+
+# A resumed session (an upgrade or a secrets-sync restart brought it back) was
+# in the middle of something: it carries on with that before anything else.
+RESUMED = (" This session was resumed after a restart: carry on with what it was doing before; if it was idle, "
+           "answer any REQUEST in your inbox and run fabric-jobs next.")
 
 
 BROKER_ENV = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS",

@@ -646,7 +646,7 @@ def launch(argv: list[str]) -> int:
     # twice, 2026-09-29. The exact call is the session-start hook's
     # NO INBOX WATCH line, which is context, never argv, and which it gives
     # exactly when no watch runs; hooks/self-kill-guard.py refuses the kill.
-    text = opening_prompt(fabric_root)
+    text = opening_prompt(fabric_root, resumed=any(a in ("--resume", "-r", "--continue", "-c") or a.startswith("--resume=") for a in args))
     opening = wants_opening(args)
     if opening:
         cmd += ["--", text]

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import traceback
-from fabric_launcher.base import INSTALL_TIMEOUT_S, RESTART_WAIT_S, OPENING, WAIT_TAIL, die, say, helper, stripped, env_with
+from fabric_launcher.base import INSTALL_TIMEOUT_S, RESTART_WAIT_S, OPENING, RESUMED, WAIT_TAIL, die, say, helper, stripped, env_with
 
 
 def require_files(*paths: str) -> None:
@@ -192,8 +192,8 @@ def session_command(provider: str, session: str, caller_model: bool, session_eff
     return cmd + [prompt_flag, prompt_file, *args]
 
 
-def opening_prompt(fabric_root: str) -> str:
-    text = OPENING
+def opening_prompt(fabric_root: str, resumed: bool = False) -> str:
+    text = OPENING + (RESUMED if resumed else "")
     # A session that ended its own job (bin/fabric-fresh) left a note for this
     # one: said in the opening prompt, then dropped from the environment.
     if "AGENT_FABRIC_FRESH_NOTE" in os.environ:

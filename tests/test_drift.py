@@ -179,6 +179,12 @@ class Inbox(unittest.TestCase):
         d, _ = self.read([m])
         self.assertEqual((d["lagging"], d["oldest_unread_at"]), (True, m["timestamp"]))
 
+    def test_each_time_field_alone_and_a_null_one_that_must_not_hide_the_next(self):
+        old = iso(NOW - 2 * 86400.0)
+        for fields in ({"ts": old}, {"ts_full": old}, {"timestamp": old}, {"ts_full": None, "timestamp": old}, {"ts_full": 7, "ts": old}):
+            d, _ = self.read([{"seq": 3, **fields}])
+            self.assertEqual((d["lagging"], d["oldest_unread_at"]), (True, old), repr(fields))
+
     def test_a_message_without_a_seq_or_an_answer_without_a_list_raises_not_guesses(self):
         for bad in ([{"id": "x", "timestamp": iso(NOW)}], [{"seq": True, "timestamp": iso(NOW)}], [{"seq": "7"}]):
             with self.assertRaises(ValueError):

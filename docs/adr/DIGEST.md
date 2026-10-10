@@ -54,6 +54,7 @@ its record disagree, the record wins. Look it up, never read it whole:
 | signed store commits; trusted base; trust-base; a refused store | ADR-042 |
 | Claude Code mods; managed settings; where the guards live; the fleet's own mods | ADR-043 |
 | the operator over ssh; sshd; enter-ssh; host keys; known_hosts; fabric-ssh-hosts | ADR-048 |
+| a stale slice; anchors; memory_check; a flag for the role's holder; review horizons; a lesson, not a record | ADR-050 |
 
 ### ADR-000 — The enduring organization (Accepted)
 
@@ -309,15 +310,16 @@ its record disagree, the record wins. Look it up, never read it whole:
 - Hygiene substitutes names and secrets and names each hit; domain-only
   evidence supports only `domain` (§5 rules 9–10). Merge mode, per-store
   watermarks, a wrong slice corrected by a memory (§5 rules 11–13).
-- A 2026-09-28 — a session is given the charter, brief, remit and index pointer;
-  workflow slices are cued, read before the work they govern (§7).
-- A 2026-09-28 — a wrong slice is corrected at its source memory or with
-  `merge_target` (rule 12, ADR-014 rule 7).
-- A 2026-09-28 — a drain-bound memory is judged when written: a user-scope hook
-  says what the drain would refuse or hold (rule 14).
+- A 2026-09-28 — a session is given charter, brief, remit and index pointer;
+  workflow slices are cued (§7).
+- A 2026-09-28 — a wrong slice is corrected at its source or with
+  `merge_target` (rule 12).
+- A 2026-09-28 — a drain-bound memory is judged when written, by a
+  user-scope hook (rule 14).
+- A 2026-10-10 — the role's holder judges truth: ADR-050 (rules 11, 12, 14, 15).
 - Keywords: memory, knowledge, slice, drain, harvest, assemble, roles_class,
-  domain, solution, rationale, workflow, threads, INDEX, provenance,
-  watermark, bundle, hygiene, redacted, tier.
+  solution, rationale, workflow, threads, INDEX, provenance, watermark,
+  bundle, hygiene, tier.
 
 ### ADR-014 — The memory assembler's rules: contested claims, same-agent retitle, corrections (Accepted)
 
@@ -334,6 +336,8 @@ its record disagree, the record wins. Look it up, never read it whole:
 - `merge_target` replaces the named section wherever it lives in the
   class; ambiguous refuses the run, unresolved is reported every drain;
   the correction keeps its own heading (§5 rules 7–8).
+- A 2026-10-10 — a retitle replaces only the section it names; a body-less
+  `merge_target` retires a section (rules 4, 7, ADR-050).
 - Keywords: collision, SUPERSEDING, supersede, keep-both, drop,
   --collision-decisions, same-agent, retitle, merge_target, correction,
   observed, idempotent, budget part.
@@ -1043,3 +1047,27 @@ its record disagree, the record wins. Look it up, never read it whole:
 - Keywords: memory, retrieval, MCP, fabric-memory, memory_find, memory_read,
   memory_index, memory_mark, BM25, cue, INDEX, slice, corpus, mark, recall,
   claude.json, harvest bundle.
+
+### ADR-050 — Keeping wisdom true: judgement where the knowledge lives (Proposed)
+
+- Truth is judged by the role that holds the knowledge, not centrally; the
+  drain flags and routes, and applies nothing (§2).
+- A `solution` or `workflow` memory may carry `anchors: [path::symbol]`;
+  `memory_check.py` and a lint warning sort a section stale-hard,
+  maybe-stale (anchor changed since *Observed*) or fresh (§5 rules 1-2).
+- Each flag is a job for the origin agent if it holds the role, else the
+  running holder, else the lowest-numbered; one REQUEST per agent per drain;
+  the agent corrects or confirms by `merge_target`. A `memory_mark` of stale
+  or wrong is routed alike (§5 rules 3-5).
+- An advisory model hint per maybe-stale section; never applied (§5 rule 6).
+- Rubric test 6, a lesson, not a record; a lesson a test, lint rule or hook
+  can hold becomes one; a body-less `merge_target` retires a section (§5
+  rule 7).
+- Review horizons (30 days solution, 90 workflow, 8 weeks unretrieved) are
+  listed, never expired (§5 rule 8).
+- Shared corrections name `shared_with`; authors retire corrected memories;
+  a retitle replaces only what it names; hygiene gains private addresses and
+  home paths; the drain runs per project; nothing crosses hosts by a local
+  read (§5 rules 9-14). Amends ADR-013 and ADR-014.
+- Keywords: stale, anchors, memory_check, maybe-stale, stale-hard, flag,
+  memory_mark, horizon, lesson, record, retire, shared_with, drain report.

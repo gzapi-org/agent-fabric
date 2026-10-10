@@ -45,3 +45,18 @@ account wherever its session started; a workspace-template hook would ask
 every managed project to mirror it. The rules are imported from the
 harvester and lint, not copied. A usage measurement of slices and skills,
 the comparison's idea 1, is kept for later.
+
+### Amendment 2026-10-10 — Truth is judged where it lives: anchors, flags, horizons
+
+ADR-050 makes the holder of a role the judge of whether its slices are
+still true. Four rules here change to carry it: rule 11's drain report
+lists flags, helpful marks, applied corrections, same-agent retitles and
+the sections past a review horizon; rule 12 asks a correction into a
+`shared/` slice to name `shared_with` and its author to retire the memory
+it replaces and the applied correction; rule 14's write-time check gains
+the event-shaped description warning and the anchors hint; rule 15 is the
+routing itself. Evidence: on 2026-10-10, 32 of agent-fabric's 69 slices
+were stale (17 citing a gone path, 19 records of an event) and 325
+sessions in 24 hours read no slice; the same day's drain also left applied
+corrections standing beside the text they replaced. The owner chose
+distributed judgement with a central assist over central evaluation.

@@ -132,6 +132,16 @@ def main() -> int:
         check("the member, not the archive, is placed", r["status"] == "installed" and open(os.path.join(home, ".local", "bin", "faketool"), "rb").read() == SCRIPT
               and listing(home) == ["faketool"], (r, listing(home)))
 
+        print("installed — a member one directory down, as release tarballs keep it")
+        body = tgz({"faketool-1.0.0/faketool": SCRIPT, "faketool-1.0.0/README.md": b"x"})
+        home = account("pa")
+        r = run(home, registry(("pa", entry(body, member="faketool-1.0.0/faketool", url=URL + ".tar.gz"))), serving(body))
+        check("a nested member is placed under the tool's own name", r["status"] == "installed"
+              and open(os.path.join(home, ".local", "bin", "faketool"), "rb").read() == SCRIPT and listing(home) == ["faketool"], (r, listing(home)))
+        for odd in ("a/../faketool", "/faketool", "a//faketool", "./faketool", "a/"):
+            r = run(home, registry(("pa", entry(body, member=odd, url=URL + ".tar.gz"))), serving(body))
+            check(f"member {odd!r} is refused before any fetch", r["status"] == "refused", r)
+
         print("installed — an older version is replaced")
         home = account("pa", old=OLD)
         r = run(home, reg, serving(SCRIPT))

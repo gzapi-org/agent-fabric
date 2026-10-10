@@ -28,7 +28,7 @@ such records must never land.
 
 ## 2. Decision
 
-**Every account runs a control agent** — `runtime/control/agentd.mjs`,
+**Every account runs a control agent** — `tools/fabric/control/agentd.py`,
 a daemon under a systemd user unit, alive whether or not a Claude session
 is. It reads requests on a control channel of the relay the fleet's
 GZCoord traffic already rides, answers what it can say about its own
@@ -46,8 +46,8 @@ sudo are in the loop.
   long-polls after it, so a restart never replays history, and a request
   posted while a daemon was down is not answered.
 - **Reads and actions.** A closed set of read ops reports the account;
-  actions change it (`sign.mjs` `ACTION_OPS`, the six rows marked
-  *action* below) and are answered only when signed by the operator's
+  actions change it (`tools/fabric/control/sign.py` `ACTION_OPS`, the
+  eight rows marked *action* below) and are answered only when signed by the operator's
   key. One unsigned write exists, a pool claim (rule 4).
 
 | op | what the account answers |
@@ -77,6 +77,8 @@ sudo are in the loop.
 | `local-prune` | *action*: per-clone settings entries that duplicate a synced secret, removed (rule 15) |
 | `secrets-selftest` | *action*: a canary through the account's store and back (rule 17) |
 | `tools-install` | *action*: the one tool named, installed from the release its project pins (`projects/registry.json` `install`: version, https url, sha256), hash checked before a byte is unpacked; skipped on an account with no working copy of a project that declares it (`tools/fabric/tools_install.py`) |
+| `gateway` | read: the installed agent-fabric-gateway's version and runtime contract as the binary reports them, and the release digest its install marker recorded (not compared with `runtime/gateway.json`: after the pin moves, `gateway-install` is what brings an account to it) |
+| `gateway-install` | *action*: the pinned gateway release (`runtime/gateway.json`), its SHA-256 checked before anything is extracted, the one pinned member only, run with `--version --json` and required to match the pin before it is renamed into `~/.local/bin` (`tools/fabric/control/gateway.py`) |
 | `pool-add` | *action*, on the pool's holder only: a job on a role's pool (ADR-037 rule 9) |
 | `status` | identity, usage, keys, fabric and session together |
 
@@ -123,7 +125,7 @@ claimant (rule 4).
 
 ## 5. Binding Rules
 
-1. Every placed account runs `runtime/control/agentd.mjs` under the user
+1. Every placed account runs `tools/fabric/control/agentd.py` under the user
    unit `agent-fabric-agentd.service` (`Restart=always`), installed and
    started by `bootstrap.sh`. The account lingers, so the unit runs from
    boot with no login and no session.
@@ -131,13 +133,14 @@ claimant (rule 4).
    in `:control`; `gzcoord-inbox` and `gzcoord-send` refuse such a channel with
    exit 2 before any request reaches the relay. Control records are never
    GZCOORD/1 messages.
-3. The op set is closed (`ops.mjs` `OPS`). No field of a request ever
+3. The op set is closed (`tools/fabric/control/ops/__init__.py`). No field of a request ever
    reaches a shell. A read op takes no argument but `tokens`'s `days`, a
    number capped at 90, `pool-list`'s role and `pool-claim`'s pool id
-   (`pool.mjs`); an action takes only its own closed set of
-   arguments (`upgrade.mjs`, `secrets.mjs` and `jobs.mjs` `checkArgs`,
-   `checkJobArgs`, `pool.mjs` `checkPoolArgs` for `pool-add`, and
-   `tools.mjs` `toolsInstall`'s one `tool`, matched by `TOOL_NAME`).
+   (`pool.py`); an action takes only its own closed set of
+   arguments (`upgrade.py` and `secrets.py` `check_args`, `jobs.py`
+   `check_job_args`, `pool.py` `check_pool_args` for `pool-add`, and
+   `tools.py` `tools_install`'s one `tool`, matched by `TOOL_NAME`, and
+   `gateway-install`'s one `version`, a key of `runtime/gateway.json`).
 4. A daemon answers a request only when its `from` is a host operator's
    address as `runtime/hosts/registry.json` places it — re-read for every
    record — or, for a public op (`PUBLIC_OPS`: `presence`, `pool-list` and
@@ -151,7 +154,7 @@ claimant (rule 4).
    reorders no job; a forged claim takes a job off the pool for a role's
    holder. `pool-list` shows unclaimed jobs only, so the claim and its
    claimant are seen in the pool holder's `pool.json`.
-5. An action (`sign.mjs` `ACTION_OPS`) is answered only when it carries
+5. An action (`sign.py` `ACTION_OPS`) is answered only when it carries
    an Ed25519 signature over its canonical form by the key the operator's
    host commits as `operator_key`; it lives at most 600 s, is refused
    when dated more than a minute ahead of the account's clock, and must
@@ -186,12 +189,14 @@ claimant (rule 4).
     that arrives meanwhile is still answered; one action of a kind runs
     per account at a time, and a second upgrade or `secrets-sync` sent
     while one runs is answered `busy`, as is an upgrade sent while a
-    `secrets-sync` is restarting the session. `fabric-ctl` waits for an
-    answer as long as the operation's own budget (`runtime/control/ctl.mjs`):
+    `secrets-sync` is restarting the session; a second `gateway-install`
+    is answered `refused` by the install's own lock. `fabric-ctl` waits for an
+    answer as long as the operation's own budget (`tools/fabric/control/ctl.py`):
     20 s by default, 5 s for `ping`, 60 s for `tokens`, 120 s for a drain,
     200 s for `disk`, 240 s for `secrets-sync`, 300 s for `accounts`,
     330 s for `tools-install` (past the account's own 300 s bound, so a
-    hung fetch is its verdict, not a silence), 480 s for
+    hung fetch is its verdict, not a silence), 300 s for `gateway-install`
+    (its 240 s download bound, two 10 s version bounds and 40 s of margin), 480 s for
     `secrets-selftest`, and an upgrade's
     computed budget; `--timeout` overrides it (A 2026-09-27).
 13. `jobs` is an operator's read of an account's open jobs, and
@@ -216,7 +221,7 @@ with Doppler (ADR-038 §5 rule 8).
 16. A session's state — working, blocked on a person, or idle — is
     kept by the harness hook `session-state.py` in the account's own
     state directory, and the account's control agent posts it as a
-    `state` record (`sessions.mjs`) when what it would say changes, and
+    `state` record (`sessions.py`) when what it would say changes, and
     every ten minutes, on a state channel of its own (`config.json`
     `state_channel`, ending in `:control`), so a burst of replies on the
     control channel never buries it. The record names each live session's id, state
@@ -232,7 +237,7 @@ with Doppler (ADR-038 §5 rule 8).
     accounts (A 2026-10-07).
 17. `secrets-selftest` is an action that proves the account can add,
     use and delete a secret of its own: it runs `fabric-secrets selftest
-    --json` as the login (`selftest.mjs`), which sets a canary name in
+    --json` as the login (`selftest.py`), which sets a canary name in
     the account's own store, reads it through `fabric-secret-run`, and
     removes it — two signed commits pushed to the store's remote. It
     takes no arguments; the reply is the verdict (`pass` or `fail`) and
@@ -274,15 +279,15 @@ actions are in use on every placed account.
 
 ## References
 
-- `runtime/control/agentd.mjs` (`accept`, `answer`, `actionLedger`,
-  `watchSource`), `runtime/control/sessions.mjs`,
-  `runtime/claude-code/hooks/session-state.py`, `runtime/control/ops.mjs` (`OPS`, `PUBLIC_OPS`),
-  `runtime/control/sign.mjs` (`ACTION_OPS`), `runtime/control/ctl.mjs`,
-  `runtime/control/upgrade.mjs`, `runtime/control/config.json`,
-  `runtime/control/agent-fabric-agentd.service`, `runtime/control/tests/`.
+- `tools/fabric/control/` (Python since ADR-040's Wave 8; the Node
+  control plane was deleted in #170): `agentd.py`, `sessions.py`,
+  `ops/` (the op set and the public ops), `sign.py` (`ACTION_OPS`),
+  `ctl.py`, `upgrade.py`, `gateway.py`, `tools.py`; with
+  `runtime/claude-code/hooks/session-state.py`,
+  `runtime/control/config.json`, `runtime/control/agent-fabric-agentd.service`.
 - `bin/fabric-ctl`, `bin/fabric-usage`, `bin/fabric-host`.
-- `communication/gzcoord/scripts/inbox.mjs` (`assertNotControlChannel`),
-  `send.mjs`.
+- `tools/fabric/gzcoord/inbox_parts/config.py` (`assert_not_control_channel`),
+  `tools/fabric/gzcoord/send.py`.
 - `runtime/claude-code/bootstrap.sh` (the unit),
   `runtime/provisioning/persist-accounts.sh`,
   `runtime/provisioning/platform/qubes/agent-fabric-accounts.rc`.
@@ -310,4 +315,5 @@ The body above reads current; each change's full note is in [history/ADR-029-ame
 | 2026-10-09 | pool-add's checker named; a forged claim is seen in the holder's pool file | §5 rule 3 names `checkPoolArgs`; rule 4: `pool-list` shows unclaimed jobs only, so a claim is seen in the holder's `pool.json`; the Scope line names pool.mjs, tools.mjs and sessions.mjs |
 | 2026-10-09 | Scope: all of runtime/control/, and its Python package from Wave 8 | Scope line: the directory as a whole rather than a list that lagged it; tools/fabric/control/ from its creation; the unit's installation in bootstrap.py; local_settings.py and session-state.py, which rules 15 and 16 name |
 | 2026-10-09 | tools-install installs a pinned account tool | §2 table: the `tools-install` row; §5 rule 3: its one argument, checked by `TOOL_NAME`; rule 12: the `disk` and `tools-install` budgets |
+| 2026-10-10 | The gateway is installed and read through the control plane | §2 table: `gateway` and `gateway-install`; §5 rule 3: its one `version` argument; rule 12: its budget |
 | 2026-10-09 | Fleet views read through fleet.py, with two Stage 1 bridges | §2: the host executor's read of closed jobs is a named fallback for the fleet views until `jobs --all` exists (ADR-046) |

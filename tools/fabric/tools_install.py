@@ -50,7 +50,9 @@ import workingcopy
 
 TOOL_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-MEMBER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # a file name: no path, so no traversal
+# A relative path whose every part is a plain name: a release tarball may keep
+# its binary one directory down, and no part can be "..", empty or absolute.
+MEMBER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*")
 MAX_ASSET_BYTES = 128 * 1024 * 1024
 FETCH_TIMEOUT_S = 120
 
@@ -123,7 +125,7 @@ def check_pin(pin: object) -> str | None:
     if not isinstance(digest, str) or not SHA256.fullmatch(digest):
         return "the install pin's sha256 is not 64 lowercase hex digits"
     if member is not None and (not isinstance(member, str) or not MEMBER.fullmatch(member)):
-        return "the install pin's member is not a plain file name"
+        return "the install pin's member is not a relative path of plain names"
     extra = sorted(set(pin) - {"version", "url", "sha256", "member"})
     if extra:
         return f"the install pin has fields this installer does not know: {', '.join(extra)}"

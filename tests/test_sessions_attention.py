@@ -102,13 +102,23 @@ class Context(Account):
             self.sample({"sessions": {"s-one-aaaa": bad}})
             self.assertNotIn("context", self.row(), repr(bad))
 
-    def test_the_sample_is_read_beside_the_state_file_given_not_beside_another(self):
+    def test_the_sample_is_read_beside_the_state_file_not_in_its_parent_or_the_working_directory(self):
         self.state()
-        other = tempfile.mkdtemp(prefix="sessions-attention-other-")
-        self.addCleanup(shutil.rmtree, other, True)
-        with open(os.path.join(other, sessions.CONTEXT_FILE), "w") as fh:
-            json.dump({"sessions": {"s-one-aaaa": {"pct": 77, "at": AT}}}, fh)
+        sample = {"sessions": {"s-one-aaaa": {"pct": 77, "at": AT}}}
+        for wrong in (os.path.dirname(self.dir), os.getcwd()):
+            path = os.path.join(wrong, sessions.CONTEXT_FILE)
+            if os.path.exists(path):
+                self.skipTest(f"{path} exists on this machine")
+            with open(path, "w") as fh:
+                json.dump(sample, fh)
+            self.addCleanup(os.remove, path)
         self.assertNotIn("context", self.row())
+
+    def test_a_sample_time_in_a_form_fleet_would_drop_is_left_out_here_too(self):
+        self.state()
+        for at in ("2027-01-15", "2027-01-15T07:56:00+01:00", "2027-01-15T07:56:00", "２０２７-01-15T07:56:00Z"):
+            self.write(sessions.CONTEXT_FILE, {"sessions": {"s-one-aaaa": {"pct": 5, "at": at}}})
+            self.assertNotIn("context", self.row(), at)
 
 
 class Activity(Account):
@@ -188,17 +198,45 @@ class Ctl(unittest.TestCase):
         self.assertNotIn("reason", row)
         self.assertNotIn("activity", row)
 
+    def follow(self, as_json: bool) -> list:
+        """The lines `states --follow` prints for a snapshot and then a record that differs only in `activity` and `context`."""
+        class Stop(BaseException):
+            pass
+
+        def rec(id_: str, **extra) -> dict:
+            body = {"v": 1, "kind": "state", "from": "h/a", "ts": iso(NOW_MS), "sessions": [{**self.S, "state": "working", **extra}]}
+            return {"id": id_, "content": json.dumps(body)}
+        script = iter([{"messages": [rec("1", activity="recent")]}, {"messages": [rec("2", activity="quiet", context={"pct": 50, "at": AT})]}])
+
+        def call(_path, **_kw):
+            try:
+                return next(script)
+            except StopIteration:
+                raise Stop() from None
+        out: list = []
+        with self.assertRaises(Stop):
+            ctl.states({"json": as_json, "follow": True}, [{"address": "h/a"}], call=call,
+                       cfg={"channel": "c", "state_channel": "c:state", "relay_url": "x"}, out=out.append, err=lambda _m: None,
+                       now=lambda: NOW_MS, sleep=lambda _s: None)
+        return out
+
+    def test_text_follow_prints_no_second_line_for_what_it_does_not_show_and_json_prints_it(self):
+        self.assertEqual(len(self.follow(False)), 1)
+        self.assertEqual(len(self.follow(True)), 2)
+
     def checked(self, session: dict):
         rec = {"v": 1, "kind": "state", "from": "h/a", "ts": iso(NOW_MS), "sessions": [{**self.S, "state": "blocked", **session}]}
         return ctl.state_record_of({"content": json.dumps(rec)}, {"h/a"})
 
     def test_the_record_check_takes_the_shapes_agentd_writes(self):
-        for good in ({}, {"reason": "permission"}, {"activity": "recent"}, {"context": {"pct": 0, "at": AT}}, {"context": {"pct": 100, "at": AT}}):
+        for good in ({}, {"reason": "permission"}, {"activity": "recent"}, {"context": {"pct": 0, "at": AT}}, {"context": {"pct": 100, "at": AT}},
+                      {"reason": None}, {"activity": None}, {"context": None}):
             self.assertIsNotNone(self.checked(good), good)
 
     def test_the_record_check_refuses_a_forged_shape(self):
         for bad in ({"reason": "stuck"}, {"reason": 7}, {"activity": "busy"}, {"context": 62}, {"context": {"pct": 101, "at": AT}},
-                    {"context": {"pct": True, "at": AT}}, {"context": {"pct": 62}}, {"context": {"pct": 62, "at": 7}}):
+                    {"context": {"pct": True, "at": AT}}, {"context": {"pct": 62}}, {"context": {"pct": 62, "at": 7}},
+                    {"context": {"pct": 62, "at": "2027-01-15"}}, {"context": {"pct": 62, "at": "2027-01-15T07:56:00+01:00"}}):
             self.assertIsNone(self.checked(bad), bad)
 
 

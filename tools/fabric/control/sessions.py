@@ -22,6 +22,8 @@ way, would refuse every activation of the account. The hook's file is
 never rewritten here; the hook owns it.
 
 What leaves the account is the session id, its state and since when,
+and for a session that has them its `reason` (permission or question, blocked only), `context` (an integer
+percentage with its sample time) and `activity` (recent or quiet), never the transcript's path,
 the binding's role and project, its last session's id with whether its
 transcript is here (resumable), and `waits_on`, the GZCoord message ids
 this login's blocked jobs wait on (ADR-037 rule 8): no path, no process
@@ -81,11 +83,14 @@ STATE_HEARTBEAT_MS = 10 * 60 * 1000
 # record (ctl.mjs STATES_STALE_MS). resume.py's NO_PROCESS_FRESH_S is the same.
 NO_PROCESS_FRESH_MS = 2 * STATE_HEARTBEAT_MS
 STATES = ("working", "blocked", "idle")
-# fleet-deck-attention s3: what the hook records of a blocked session (why it waits on a person) and what the
-# status line records beside the state file (the context window's use). Each is optional on the wire and
-# absent where unknown: a view never reads a missing sample as 0 % or a missing reason as "permission".
+# fleet-deck-attention s3: what the session-state hook records of a blocked session (why it waits on a person)
+# and what the status line records beside the state file (the context window's use): both producers are
+# hooks/session-state.py and hooks/context-sample.py, and until they are installed none of it is there. Each
+# is optional on the wire and absent where unknown: a view never reads a missing sample as 0 % or a missing reason as "permission".
 REASONS = ("permission", "question")
 CONTEXT_FILE = "session-context.json"
+# The one time form the producer writes and fleet's attention_time accepts; any other would pass here and be null there.
+SAMPLE_TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", re.ASCII)
 # The transcript is written when a message completes, not while one streams: "recent" means a message landed
 # within this window, and "quiet" means none did, which a long single response also looks like. Its mtime is
 # the only thing read; the entry format is the harness's internal one.
@@ -248,7 +253,7 @@ def read_contexts(file: str) -> dict:
     for sid, c in sessions.items():
         pct = c.get("pct") if isinstance(c, dict) else None
         at = c.get("at") if isinstance(c, dict) else None
-        if isinstance(pct, int) and not isinstance(pct, bool) and 0 <= pct <= 100 and math.isfinite(date_parse(at)):
+        if isinstance(pct, int) and not isinstance(pct, bool) and 0 <= pct <= 100 and isinstance(at, str) and SAMPLE_TIME.fullmatch(at):
             out[sid] = {"pct": pct, "at": at}
     return out
 

@@ -92,8 +92,9 @@ ATTENTION  `attention` (Fleet Deck's "needs you" views) is told from the `states
              the first listed among equals), whatever the level; each null where unknown, never 0 or "quiet":
     context_pct  integer 0..100, the share of the context window in use at the last status-line sample
                  the account saw, and context_at that sample's time (the view decides what is too old;
-                 the sample is refreshed every five points of change or five minutes while the session draws
-                 its status line, so a session that has not is as old as context_at says)
+                 the status line's helper refreshes it every five points of change or five minutes while the session
+                 draws its status line, so a session that has not is as old as context_at says; null until that
+                 helper is installed)
     output       "recent" when the session's transcript was written in the last 30 s, "quiet" when not: a
                  long single response writes nothing until it completes, so quiet is "no message landed",
                  not "idle"; null when the transcript cannot be told

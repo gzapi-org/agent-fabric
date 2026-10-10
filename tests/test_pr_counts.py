@@ -314,6 +314,9 @@ def main() -> int:
     r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [mixed])}}))[0]
     check("a trailer block that git reads and the gate's reader rejects is unreadable, not a guessed work",
           not r["ok"] and "mixes Kind:" in r["line"], r)
+    spaced = commit("s" * 40, "small change\n\nbody\n\nKind : review-fix")
+    r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [spaced])}}))[0]
+    check("a key written 'Kind :' is one git reads and the gate's reader does not: unreadable", not r["ok"] and "mixes Kind:" in r["line"], r)
     clean = commit("c" * 40, "small change\n\nbody\n\nKind: review-fix\nAnswers: F1")
     r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [clean])}}))[0]
     check("…while a pure block reads: the same shape without the extra line is a fix", r["ok"] and (r["work"], r["fix"]) == (0, 1), r)
@@ -338,10 +341,10 @@ def main() -> int:
         check("a merged one: a head already in the merge's first parent was folded earlier: the follow-up is work",
               r["ok"] and (r["work"], r["fix"]) == (1, 0), r)
         no_parent = pr_doc(1, [folds], head=head, state="MERGED", merged=True)
-        no_parent["mergeCommit"] = None
+        no_parent["mergeCommit"] = {"parents": {"nodes": [{"oid": "b" * 40}]}}   # a squash: one parent
         r = run_counts(["1"], Hub({"o/this": {1: no_parent}}, rest=rest))[0]
-        check("a merged one whose first parent GitHub does not list is unreadable, not read against no base",
-              not r["ok"] and "first parent" in r["line"], r)
+        check("a merged one that is no merge commit of its head (a squash) is unreadable, not read against no base",
+              not r["ok"] and "not by a merge commit" in r["line"], r)
         r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [folds], head=head)}}))[0]
         check("a fold the compare cannot answer: counted as work, and the line says so",
               r["ok"] and r["work"] == 1 and r["unread_folds"] == ["12"] and "#12 could not be read" in r["line"], r)

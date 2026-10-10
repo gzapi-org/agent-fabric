@@ -215,7 +215,7 @@ def split_message(message: str) -> tuple[str, str]:
     paragraph with its lines joined by a space, the body what follows the
     blank line after it."""
     parts = re.split(r"\n[ \t]*\n", message.strip("\n"), maxsplit=1)
-    return " ".join(parts[0].split("\n")), (parts[1].strip("\n") if len(parts) > 1 else "")
+    return " ".join(ln.rstrip() for ln in parts[0].split("\n")), (parts[1].strip("\n") if len(parts) > 1 else "")
 
 
 def check_trailers(sha: str, body: str) -> None:
@@ -227,7 +227,7 @@ def check_trailers(sha: str, body: str) -> None:
     if not paragraphs:
         return
     for key in ("Kind", "Answers"):
-        named = any(re.match(rf"{key}:", ln, re.I) for ln in paragraphs[-1].split("\n"))
+        named = any(re.match(rf"{key}[ \t]*:", ln, re.I) for ln in paragraphs[-1].split("\n"))
         if named and not commit_class.trailer_values(body, key):
             raise Unreadable(f"commit {sha[:10]}'s trailer block mixes {key}: with other lines, which git and the "
                              "gate may read differently; read it with fabric-pr gate")
@@ -300,10 +300,11 @@ def merge_base_of(pr: dict) -> str:
     """The first parent of a merged pull request's merge commit: the base the
     gate's merged split uses (<merge>^1)."""
     nodes = (((pr.get("mergeCommit") or {}).get("parents") or {}).get("nodes")) or []
-    oid = nodes[0].get("oid") if nodes and isinstance(nodes[0], dict) else None
-    if not isinstance(oid, str) or not oid:
-        raise Unreadable("it is merged, but GitHub does not list its merge commit's first parent")
-    return oid
+    oids = [n.get("oid") if isinstance(n, dict) else None for n in nodes]
+    if len(oids) != 2 or not all(isinstance(o, str) and o for o in oids) or oids[1] != pr.get("headRefOid"):
+        # A squash or rebase merge has one parent: the gate has no merged split for it either (pr_split.merged_commits).
+        raise Unreadable("it is merged, but not by a merge commit of its head, so its range is not known")
+    return oids[0]
 
 
 def describe(label: str, repo: str, pid: str | None, number: int, pr: dict, budget: Budget) -> dict:

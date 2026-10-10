@@ -557,6 +557,20 @@ def main() -> int:
         out = out_of("--provider", "anthropic", "--resume", "abc123")
         check("…and a resume, after the session id",
               has(r"CLAUDE-EXECCED:.*--resume abc123 -- Session start: arm your GZCoord inbox watch", out), out)
+        # An upgrade's restart resumed the whole fleet into "wait for
+        # instructions" and every agent went idle (2026-10-10).
+        check("…a resumed session is told to carry on, in place of the next-job tail",
+              has(r"CLAUDE-EXECCED:.*--resume abc123 -- .*This session was resumed: carry on", out)
+              and "wait for instructions only when nothing is queued" not in grep("CLAUDE-EXECCED:", out), out)
+        # ADR-022 §5 rule 1: the prompt stays in argv, so it names no command.
+        check("…and the opening names no fabric command", "fabric-jobs" not in grep("CLAUDE-EXECCED:", out), out)
+        for spelling in (("-c",), ("--continue",), ("-r", "abc"), ("--resume=abc",), ("--from-pr", "12"), ("--teleport",)):
+            out = out_of("--provider", "anthropic", *spelling)
+            check(f"…{spelling[0]} is a resume", has(r"CLAUDE-EXECCED:.*This session was resumed: carry on", out), out)
+        out = out_of("--provider", "anthropic")
+        check("…a fresh launch takes the next job and is not told it was resumed",
+              has(r"CLAUDE-EXECCED:.*Then take your next job as the session-start context's jobs line says", out)
+              and "This session was resumed" not in out, out)
         out = out_of("--provider", "anthropic", "--resume")
         check("…a bare --resume keeps its picker: the prompt is not its value",
               has(r"CLAUDE-EXECCED:.*--resume -- Session start: arm", out), out)
@@ -952,6 +966,9 @@ def main() -> int:
         check("…resumed by the stopped session's id; the caller's own --resume replaced, the rest passed on",
               has(r"^RUN2:.*--model x", out) and has(r"^RUN2:.*--resume sess-123", out) and not has(r"^RUN2:.*old-id", out),
               grep("RUN2", out))
+        # The fleet went idle after this very path (2026-10-10): the relaunch
+        # must say the session was resumed, not wait for instructions.
+        check("…and the relaunch's opening says it was resumed", has(r"^RUN2:.*This session was resumed: carry on", out), grep("RUN2", out))
         check("…and the marker is consumed", not os.path.exists(f"{agent_dir}/restart.json"))
         check("…and a stop and resume announce nothing either", not read(alog), read(alog))
         upgrade_session("failed", utc(5))
@@ -1025,8 +1042,8 @@ def main() -> int:
         check("the relaunch starts in the job's working copy, and says so",
               rc == 0 and has(rf"^RUN2:pwd={re.escape(other)}:", out) and f"starting job j1 in {other}" in out, f"rc={rc}\n{out}")
         check("…and the opening prompt carries the job in place of waiting for instructions",
-              has(r"^RUN2:.*It is for your job j1, ship the other thing \([^)]*topic routing\): read it in full with fabric-jobs show j1",
-                  out) and not has(r"^RUN2:.*Then wait for instructions", out), grep("RUN2", out))
+              has(r"^RUN2:.*It is for your job j1, ship the other thing \([^)]*topic routing\): read job j1 in full from your job list",
+                  out) and not has(r"^RUN2:.*Then take your next job", out), grep("RUN2", out))
         # Started by a relative path, as the README runs it from projects/:
         # the relaunch changes directory first, and must still find itself —
         # and a relative path argument must still name its file.

@@ -405,6 +405,9 @@ def main() -> int:
                   and refused(launch.refuse_cli_settings, ["--settings", "absent.json"], pin_dir, "l") is None)
         finally:
             shutil.rmtree(pin_dir, ignore_errors=True)
+        check("…and --from-pr and --teleport, with or without a value, are resume flags too",
+              launch.without_resume(["--from-pr", "12", "--teleport", "--model", "m", "--from-pr=3", "--teleport=x", "y"])
+              == ["--model", "m", "y"])
         check("only path options' values are made absolute; JSON and absolute paths are left",
               launch.absolute_path_options(["--add-dir", "d", "--settings", "{}", "--mcp-config=/m", "--model", "f",
                                             "--settings=s"], "/w")

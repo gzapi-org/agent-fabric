@@ -89,18 +89,26 @@ def wants_opening(args: list[str]) -> bool:
     return opening
 
 
+def resumes(args: list[str]) -> bool:
+    """Whether a launch resumes a session, by any spelling claude takes."""
+    from fabric_launcher.base import RESUME_FLAGS
+    return any(a in RESUME_FLAGS or any(a.startswith(f + "=") for f in RESUME_FLAGS if f.startswith("--"))
+               for a in args)
+
+
 def without_resume(orig_args: list[str]) -> list[str]:
     """The caller's own resume flags are replaced by the one that names the
     session just stopped; everything else is passed on as given."""
+    from fabric_launcher.base import RESUME_BARE, RESUME_VALUED
     nxt, skip = [], False
     for a in orig_args:
         if skip:
             skip = False
             if not a.startswith("-"):
                 continue
-        if a in ("--continue", "-c", "--resume=") or a.startswith("--resume="):
+        if a in RESUME_BARE or a.startswith(tuple(f + "=" for f in RESUME_VALUED if f.startswith("--"))):
             continue
-        if a in ("--resume", "-r"):
+        if a in RESUME_VALUED:
             skip = True
             continue
         nxt.append(a)

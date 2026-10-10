@@ -193,7 +193,7 @@ def session_command(provider: str, session: str, caller_model: bool, session_eff
 
 
 def opening_prompt(fabric_root: str, resumed: bool = False) -> str:
-    text = OPENING + (RESUMED if resumed else "")
+    text = OPENING
     # A session that ended its own job (bin/fabric-fresh) left a note for this
     # one: said in the opening prompt, then dropped from the environment.
     if "AGENT_FABRIC_FRESH_NOTE" in os.environ:
@@ -210,6 +210,8 @@ def opening_prompt(fabric_root: str, resumed: bool = False) -> str:
             text = (text.removesuffix(WAIT_TAIL) + f" It is for your job {line}: read it in full with "
                     f"fabric-jobs show {job}, and start on it.")
         del os.environ["AGENT_FABRIC_FRESH_JOB"]
+    if resumed and text.endswith(WAIT_TAIL):
+        text = text.removesuffix(WAIT_TAIL) + RESUMED
     return text
 
 

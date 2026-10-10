@@ -63,21 +63,28 @@ RESTART_WAIT_S = 600
 OPENING = ("Session start: arm your GZCoord inbox watch now, exactly as the session-start context's "
            "NO INBOX WATCH line gives it (with no such line, as the gzcoord-receive skill says); "
            "run it again after each delivery or when its timeout stopped it, and on any other exit "
-           "read the reason instead of running it again. Then run fabric-jobs next and start the job it "
-           "gives you; wait for instructions only when nothing is queued.")
+           "read the reason instead of running it again. Then take your next job as the session-start "
+           "context's jobs line says; wait for instructions only when nothing is queued.")
 
 
 # A session never stops idle while a job is queued (agent-fabric ADR-037 rule
 # 10): "wait for instructions" alone sent the whole fleet idle when an upgrade
-# restarted it (the owner, 2026-10-10), so the tail names the job list first.
-WAIT_TAIL = (" Then run fabric-jobs next and start the job it gives you; wait for instructions only when "
-             "nothing is queued.")
+# restarted it (the owner, 2026-10-10). The tail names no command (ADR-022 §5
+# rule 1: the prompt stays in argv): the session-start context's jobs line does.
+WAIT_TAIL = (" Then take your next job as the session-start context's jobs line says; wait for "
+             "instructions only when nothing is queued.")
 
 
-# A resumed session (an upgrade or a secrets-sync restart brought it back) was
-# in the middle of something: it carries on with that before anything else.
-RESUMED = (" This session was resumed after a restart: carry on with what it was doing before; if it was idle, "
-           "answer any REQUEST in your inbox and run fabric-jobs next.")
+# A resumed session was in the middle of something: it carries on with that,
+# and only an idle one takes the next job. It replaces WAIT_TAIL, last, so a
+# fresh session's note or job (which strip WAIT_TAIL) never meets it.
+RESUMED = (" This session was resumed: carry on with what it was doing before; if it was idle, answer any "
+           "REQUEST in your inbox and take your next job as the session-start context's jobs line says.")
+
+
+# Every spelling with which claude resumes a session: the opening's resume
+# detection and without_resume (argv.py) read the same set.
+RESUME_FLAGS = ("--resume", "-r", "--continue", "-c", "--from-pr", "--teleport")
 
 
 BROKER_ENV = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS",
@@ -93,7 +100,7 @@ PROMPT_FLAGS = ("--system-prompt", "--system-prompt-file", "--append-system-prom
 
 
 # The options of claude's that take a value, for the opening scan (argv.wants_opening).
-VALUE_OPTIONS = ("--model", "--effort", "--resume", "-r", "--permission-mode", "--session-id", "--add-dir",
+VALUE_OPTIONS = ("--model", "--effort", "--resume", "-r", "--from-pr", "--teleport", "--permission-mode", "--session-id", "--add-dir",
                  "--settings", "--mcp-config", "--fallback-model", "--agents", "--allowedTools",
                  "--disallowedTools", "--output-format", "--input-format")
 

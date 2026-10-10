@@ -241,7 +241,7 @@ from fabric_launcher.base import OPENING, WAIT_TAIL, BROKER_ENV, SETUP_TOKEN, PR
 from fabric_launcher.base import VALUE_OPTIONS, PATH_OPTIONS, Refused, die, say  # noqa: E402, F401
 from fabric_launcher.base import logical_cwd, helper, stripped, env_with  # noqa: E402, F401
 from fabric_launcher.argv import parse_argv, refuse_passthrough, asks_help, wants_opening  # noqa: E402, F401
-from fabric_launcher.argv import without_resume, absolute_path_options  # noqa: E402, F401
+from fabric_launcher.argv import without_resume, resumes, absolute_path_options  # noqa: E402, F401
 from fabric_launcher.currency import git_status_ok, git_text, behind_count, pull_ff  # noqa: E402, F401
 from fabric_launcher.currency import keep_working_copy_current, toplevel  # noqa: E402, F401
 from fabric_launcher.settings import settings_scopes, settings_pins, refuse_pins  # noqa: E402, F401
@@ -646,7 +646,7 @@ def launch(argv: list[str]) -> int:
     # twice, 2026-09-29. The exact call is the session-start hook's
     # NO INBOX WATCH line, which is context, never argv, and which it gives
     # exactly when no watch runs; hooks/self-kill-guard.py refuses the kill.
-    text = opening_prompt(fabric_root, resumed=any(a in ("--resume", "-r", "--continue", "-c") or a.startswith("--resume=") for a in args))
+    text = opening_prompt(fabric_root, resumed=resumes(args))
     opening = wants_opening(args)
     if opening:
         cmd += ["--", text]

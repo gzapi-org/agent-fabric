@@ -345,6 +345,15 @@ def main() -> int:
         out = [json.loads(ln) for ln in r.stdout.decode().splitlines()]
         check("a CRLF-ended message is read; bytes that are not UTF-8 are one parse error and the next message is answered",
               r.returncode == 0 and [o.get("result", o.get("error", {}).get("code")) for o in out] == [{}, -32700, {}], r.stdout.decode() + r.stderr.decode())
+        absent = dict(penv, AGENT_FABRIC_PYTHON=os.path.join(t, "no-such-python"))
+        r = subprocess.run([BIN], input=b"", env=absent, capture_output=True, timeout=60)
+        check("a host without the pinned Python: exit 127 and one line that says how to install it, nothing on stdout (the risk of the re-install)",
+              r.returncode == 127 and r.stdout == b"" and b"fleet's pinned Python is not installed" in r.stderr and b"python_pin.py install" in r.stderr
+              and r.stderr.count(b"\n") == 1, r.stderr.decode())
+        link = os.path.join(t, "linked-websearch")
+        os.symlink(BIN, link)
+        r = subprocess.run([link], input=(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n").encode(), env=penv, capture_output=True, timeout=60)
+        check("started through a symlink, it still finds its module", r.returncode == 0 and json.loads(r.stdout) == {"jsonrpc": "2.0", "id": 1, "result": {}}, r.stderr.decode())
         for label, content, want in (("unset", None, "WEBSEARCH_LOCALE_FILE is not set"), ("not JSON", "{ nope", "stdio-bad.json")):
             e2 = dict(penv)
             if content is None:

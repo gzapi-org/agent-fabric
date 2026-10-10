@@ -1536,6 +1536,27 @@ def cmd_env(**extra: str) -> dict:
     return env
 
 
+@case("a command case owns its state directory: the runner's AGENT_FABRIC_STATE_DIR and XDG_STATE_HOME are not the case's")
+def _():
+    # The inbox journals what it prints (episodic.db under the state directory); a case that kept the
+    # runner's wrote its rows there (review of #181, F1). The case holds the environment, not a run.
+    saved = {k: os.environ.get(k) for k in ("AGENT_FABRIC_STATE_DIR", "XDG_STATE_HOME")}
+    os.environ["AGENT_FABRIC_STATE_DIR"] = "/runner/state"
+    os.environ["XDG_STATE_HOME"] = "/runner/xdg"
+    try:
+        env = cmd_env()
+        ok(env["AGENT_FABRIC_STATE_DIR"] != "/runner/state" and os.path.isdir(os.path.dirname(env["AGENT_FABRIC_STATE_DIR"])), env["AGENT_FABRIC_STATE_DIR"])
+        ok("XDG_STATE_HOME" not in env)
+        eq(cmd_env(AGENT_FABRIC_STATE_DIR="/case/state")["AGENT_FABRIC_STATE_DIR"], "/case/state", "a case that names its own keeps it")
+        ok(gzmsg_cli("new-id").returncode == 0)   # gzmsg_cli runs under a scratch HOME and state directory of its own
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 @case("normalize CLI prints the normalised message for validate to read")
 def _():
     f = scratch_file("  [GZCOORD/1] INFO\n  FROM: develop-gzapp/gzapp\n  ROLE: Tester\n  PROJECT: gzapp\nMESSAGE-ID: test-0001\n"

@@ -312,6 +312,8 @@ def main() -> int:
     check("subject and body are split as git's %s and %b", (subj, body) == ("add parser for the review findings", "body\n\nKind: work"), (subj, body))
     check("trailing space on a subject line is dropped, as git's %s drops it",
           pr_counts.split_message("add parser \nfor x\t\n\nbody")[0] == "add parser for x", pr_counts.split_message("add parser \nfor x\t\n\nbody"))
+    check("only git's blanks are trimmed: a form feed and a no-break space stay (git log --format=%s keeps both)",
+          pr_counts.split_message("a\f\nb\u00a0\nc")[0] == "a\f b\u00a0 c", pr_counts.split_message("a\f\nb\u00a0\nc"))
     mixed = commit("m" * 40, "small change\n\n(cherry picked from commit abcdef1)\nKind: review-fix")
     r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [mixed])}}))[0]
     check("a trailer block that git reads and the gate's reader rejects is unreadable, not a guessed work",

@@ -42,6 +42,10 @@ def settings_pins(path: str) -> list[str] | None:
             d = json.load(fh) or {}
     except Exception:
         return []
+    return pins_of(d)
+
+
+def pins_of(d: object) -> list[str] | None:
     if not isinstance(d, dict):
         return None
     bad = []
@@ -105,3 +109,40 @@ def refuse_pins(scopes: list[str], local_override: str) -> None:
         die(f"CLAUDE_CODE_EFFORT_LEVEL is set to '{os.environ['CLAUDE_CODE_EFFORT_LEVEL']}'; it outranks every "
             "per-class effort the fabric writes, in every subagent. Unset it (routing/effort.json is where a "
             "level is decided).")
+
+
+def cli_settings_values(args: list[str]) -> list[str]:
+    """The values of every `--settings X` / `--settings=X` before a bare `--`."""
+    out: list[str] = []
+    for i, a in enumerate(args):
+        if a == "--":
+            break
+        if a == "--settings" and i + 1 < len(args):
+            out.append(args[i + 1])
+        elif a.startswith("--settings="):
+            out.append(a.split("=", 1)[1])
+    return out
+
+
+def refuse_cli_settings(args: list[str], cwd: str, local_override: str) -> None:
+    """A `--settings` the caller passes is one more settings scope, and the
+    harness loads it above the files fenced by refuse_pins: it gets the same
+    pin test, on a file or on the JSON the value is. Only for the providers that
+    have no ori fence of their own to override (see argv.refuse_passthrough);
+    a value the harness cannot read is the harness's refusal, not evidence of pins."""
+    for value in cli_settings_values(args):
+        if value.lstrip().startswith("{"):
+            try:
+                pins, where = pins_of(json.loads(value) or {}), "the --settings value"
+            except ValueError:
+                continue
+        else:
+            where = value if os.path.isabs(value) else os.path.join(cwd, value)
+            if not os.path.isfile(where):
+                continue
+            pins = settings_pins(where)
+        if pins is None:
+            say(f"launch: {where} is not a JSON object; not read for model pins.")
+        elif pins:
+            die(f"{where} carries model pins ({' '.join(pins)}), which would silently outrank the profile. "
+                f"Remove them; per-agent tiers go through {local_override}.")

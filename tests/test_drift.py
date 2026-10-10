@@ -110,9 +110,15 @@ class Harness(unittest.TestCase):
         self.assertEqual(drift.VERSION_RE.pattern, upgrade.VERSION_RE.pattern)
 
 
+def stamps(ts) -> dict:
+    """The time as /api/wait lists it (ts and ts_full, no timestamp: measured on the live relay, 2026-10-10)."""
+    t = iso(ts) if isinstance(ts, float) else ts
+    return {} if t is None else {"ts": t, "ts_full": t}
+
+
 def message(seq: int, ts: float | str | None) -> dict:
     return {"seq": seq, "id": f"id-{seq}", "channel": "c", "sender": "x/y", "content": "z",
-            "timestamp": iso(ts) if isinstance(ts, float) else ts}
+            **stamps(ts)}
 
 
 class Inbox(unittest.TestCase):
@@ -167,6 +173,11 @@ class Inbox(unittest.TestCase):
         for ts in (None, "yesterday", 7, "2026-10-09T12:00:00"):
             d, _ = self.read([message(1, ts)])
             self.assertEqual((d["status"], d["lag_s"], d["lagging"]), ("ok", None, None), repr(ts))
+
+    def test_the_older_timestamp_field_of_the_messages_listing_is_read_too(self):
+        m = {"seq": 3, "timestamp": iso(NOW - 2 * 86400.0)}
+        d, _ = self.read([m])
+        self.assertEqual((d["lagging"], d["oldest_unread_at"]), (True, m["timestamp"]))
 
     def test_a_message_without_a_seq_or_an_answer_without_a_list_raises_not_guesses(self):
         for bad in ([{"id": "x", "timestamp": iso(NOW)}], [{"seq": True, "timestamp": iso(NOW)}], [{"seq": "7"}]):
@@ -324,6 +335,8 @@ class FabricStatus(unittest.TestCase):
         self.assertEqual(self.inbox([], tok=None)[0]["status"], "unknown")
         self.assertIn("no relay token", self.inbox([], tok=None)[0]["detail"])
         self.assertEqual(self.inbox([], pairs=[])[0]["status"], "none")
+        s, calls = self.inbox([], pairs=[("http://relay", "")])
+        self.assertEqual((s["status"], calls), ("none", []), "an empty channel is no channel, not a KeyError")
         self.assertEqual(self.inbox([message(1, "yesterday")])[0]["status"], "unknown")
         s, _ = self.inbox([], project=None)
         self.assertEqual(s["status"], "none", "no project: no channel to read")

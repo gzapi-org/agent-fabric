@@ -16,7 +16,8 @@ unknown version is never read as the pinned one.
 
 inbox: the relay keeps one cursor per consumer (the account's address), moved only by an
 acknowledgement; `GET /api/wait?...&timeout_seconds=0` lists what is past that cursor without
-moving it (measured 2026-10-10: the same two messages twice). So the position is read from the
+moving it (measured 2026-10-10: the same two messages twice; a caught-up cursor answers at once, 0.07 s,
+not after a long poll). So the position is read from the
 oldest message the account has not acknowledged:
   {"status": "ok", "channel", "unread", "capped", "oldest_unread_seq", "oldest_unread_at",
    "lag_s", "lagging", "newest_seq"}
@@ -95,6 +96,12 @@ def _seq(m: dict) -> int:
     return s
 
 
+def _stamp(m: dict) -> str | None:
+    # /api/wait lists a message's time as ts and ts_full; /api/messages (and the oldest history) as timestamp.
+    # Measured on the live relay 2026-10-10: reading only timestamp left every listed age unknown.
+    return next((s for s in (m.get("ts_full"), m.get("timestamp"), m.get("ts")) if isinstance(s, str)), None)
+
+
 def _age_s(stamp: Any, now: float) -> int | None:
     if not isinstance(stamp, str):
         return None
@@ -119,8 +126,8 @@ def inbox(api: Callable[..., Any], channel: str | None, me: str, now: float | No
                            "oldest_unread_seq": None, "oldest_unread_at": None, "lag_s": 0, "lagging": False, "newest_seq": newest_seq}
     if unread:
         oldest = min(unread, key=_seq)
-        at = oldest.get("timestamp")
+        at = _stamp(oldest)
         lag = _age_s(at, now)
-        out.update(oldest_unread_seq=_seq(oldest), oldest_unread_at=at if isinstance(at, str) else None, lag_s=lag,
+        out.update(oldest_unread_seq=_seq(oldest), oldest_unread_at=at, lag_s=lag,
                    lagging=None if lag is None else lag > LAG_S)
     return out

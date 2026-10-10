@@ -542,6 +542,8 @@ def inbox_state(drift, root, ctx, relay=None, home=None):
         d = drift.inbox(lambda path: relay.call(url, tok, path), channel, f"{ctx['host']}/{ctx['agent']}")
     except Exception as e:  # noqa: BLE001 — a status line, never a traceback; the relay's errors name no token
         return {"status": "unknown", "detail": str(e)[:200]}
+    if d["status"] == "none":
+        return {"status": "none", "detail": d["reason"]}
     if not d["unread"]:
         return {**d, "status": "ok", "detail": "nothing unread"}
     if d["lagging"] is None:

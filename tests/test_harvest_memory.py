@@ -555,6 +555,17 @@ def test_marks_and_counts_after_the_watermark_enter_the_bundle_and_earlier_ones_
     assert members["marks.jsonl"] == b"" and json.loads(members["harvest-report.json"])["memory_use"]["calls"] == {}, members["marks.jsonl"]
 
 
+def test_an_id_with_a_trailing_newline_is_not_an_id(tmp: str) -> None:
+    """A "$"-anchored pattern also matches before a final newline: an id that carries one would pass as a corpus id."""
+    _state(marks=[{"t": "2026-10-10T07:00:00Z", "id": "f:a/b#1\n", "verdict": "stale", "note": ""},
+                  {"t": "2026-10-10T07:00:01Z", "id": "f:a/b#1", "verdict": "stale", "note": ""}],
+           calls=[{"t": "2026-10-10T07:00:00Z", "tool": "memory_read", "hits": 2, "ids": ["f:a/b#1\n", "f:a/b#1"]}])
+    r, members, _ = _bundle(tmp, "m7", None)
+    rows = [json.loads(ln) for ln in members["marks.jsonl"].decode().splitlines()]
+    use = json.loads(members["harvest-report.json"])["memory_use"]
+    assert r.returncode == 0 and [x["id"] for x in rows] == ["f:a/b#1"] and use["ids_read"] == {"f:a/b#1": 1} and use["unreadable_lines"] == 1, (rows, use)
+
+
 def test_a_missing_or_damaged_log_is_no_rows_and_no_error(tmp: str) -> None:
     _state()
     r, members, _ = _bundle(tmp, "m2", None)
@@ -798,6 +809,7 @@ def main() -> int:
         test_a_co_owner_that_is_not_a_slug_refuses_the_drain,
         test_marks_and_counts_after_the_watermark_enter_the_bundle_and_earlier_ones_do_not,
         test_a_missing_or_damaged_log_is_no_rows_and_no_error,
+        test_an_id_with_a_trailing_newline_is_not_an_id,
         test_a_note_with_a_credential_is_withheld_and_a_query_is_never_carried,
         test_a_second_store_of_the_login_carries_no_marks,
         test_the_marks_reach_the_committed_report_through_the_assembler,

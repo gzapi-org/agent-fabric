@@ -279,4 +279,4 @@ def build(memory_dir: str, working_copy: str | None) -> Index:
     return corpus
 
 
-INDEX_LINE = re.compile(r"^- \[`([^`]+)`\]\([^)]*\) — (.*)$")
+INDEX_LINE = re.compile(r"- \[`([^`]+)`\]\([^)]*\) — (.*)")      # used with fullmatch

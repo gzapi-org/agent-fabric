@@ -165,7 +165,7 @@ def index(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
     known = {s.slice_id: s for s in index.sections}
     out, seen = [], set()
     for line in text.splitlines():
-        m = INDEX_LINE.match(line)
+        m = INDEX_LINE.fullmatch(line)
         if not m or m.group(1) in seen:
             continue
         seen.add(m.group(1))

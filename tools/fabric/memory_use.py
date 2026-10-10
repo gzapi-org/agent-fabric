@@ -27,7 +27,7 @@ MARKS, CALLS = "memory-marks.jsonl", "memory-calls.jsonl"
 VERDICTS = ("helpful", "wrong", "stale")
 NOTE_CLIP = 300
 # The ids memory_find returns: f:/p: and a path, then #position for a section. Anything else is not a corpus id.
-ID_RE = re.compile(r"^[fp]:[A-Za-z0-9._/-]+(#[0-9]+)?$")
+ID_RE = re.compile(r"[fp]:[A-Za-z0-9._/-]+(#[0-9]+)?")      # used with fullmatch: a "$" would also pass one trailing newline
 
 
 def _ms(stamp: object) -> int | None:
@@ -72,7 +72,7 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
     for row in rows:
         at = _ms(row.get("t"))
         ident, verdict, note = row.get("id"), row.get("verdict"), row.get("note", "")
-        if at is None or not isinstance(ident, str) or not ID_RE.match(ident) or verdict not in VERDICTS or not isinstance(note, str):
+        if at is None or not isinstance(ident, str) or not ID_RE.fullmatch(ident) or verdict not in VERDICTS or not isinstance(note, str):
             use["unreadable_lines"] += 1
             continue
         if at <= since_ms:
@@ -96,7 +96,7 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
             continue
         until = max(until, at)
         use["calls"][tool] = use["calls"].get(tool, 0) + 1
-        ids = [i for i in row.get("ids") or [] if isinstance(i, str) and ID_RE.match(i)] if isinstance(row.get("ids"), list) else []
+        ids = [i for i in row.get("ids") or [] if isinstance(i, str) and ID_RE.fullmatch(i)] if isinstance(row.get("ids"), list) else []
         if tool == "memory_find":
             use["zero_hit_finds"] += not row.get("hits")
             pending = True

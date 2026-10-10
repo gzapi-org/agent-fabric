@@ -761,6 +761,12 @@ def main(argv: list[str] | None = None) -> int:
                     body=js.stringify({"channel": cfg["channel"], "sender": me["address"], "content": js.stringify(content)}))
     # A claimant's role is what its own control agent last said on the state channel.
     ctx["pool_opts"] = {"role_of": role_from_stream(call=call, cfg=cfg)}
+    # The account's GZCoord inbox is the project's channel on the relay this daemon already reaches
+    # (status says its read position: tools/fabric/drift.py); a project with none says so.
+    # `call` reaches the control relay; the project's channel may sit on another one, reached with the same token.
+    inbox_api = call if gz.get("relay_url") in (None, cfg["relay_url"]) else (
+        lambda path, **init: gzcoord.api(token_box[0], path, relay_url=gz["relay_url"], **init))
+    ctx["inbox_opts"] = {"api": inbox_api, "me": me["address"], "channel": gz.get("channel") if gz.get("configured") else None}
 
     state = {"last": None, "down": False}
 

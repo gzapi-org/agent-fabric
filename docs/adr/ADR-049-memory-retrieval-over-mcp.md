@@ -152,8 +152,8 @@ meaning.
 ## 7. Future Evolution
 
 - Aliases on a slice, written by the drain, indexed as their own field.
-- Anchors on a `solution` section, "verify: path::symbol", to come with
-  the record that makes them.
+- Anchors on a `solution` or `workflow` section, "verify: path::symbol":
+  made by ADR-050 (rules 1 and 2).
 - An action-time recall hook, after a week of measured use.
 - An embedding or model re-rank, only if the counts show misses that
   better cues cannot close.

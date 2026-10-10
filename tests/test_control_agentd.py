@@ -872,6 +872,26 @@ class Actions(Daemon):
         return json.dumps(sign.sign_request(request_body(**{"from": SELF, "op": "upgrade", "args": {"piece": "claude", "version": "9.9.9"},
                                                             "ttl_s": 60, **over}), key["privateKeySpec"]))
 
+    def test_once_a_signed_status_answers_with_the_harness_and_the_inbox_the_daemon_reads_through_its_own_relay(self):
+        k = sign.generate_operator_key()
+        reg = self.signed_registry(k)
+        home = self.home()
+        os.makedirs(os.path.join(home, ".local", "bin"))
+        executable(os.path.join(home, ".local", "bin", "claude"), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n')
+        over = {"HOME": home, "AGENT_FABRIC_HOSTS_REGISTRY": reg, "AGENT_FABRIC_STATE_DIR": os.path.join(home, "state"),
+                "GZCOORD_CHANNEL": "fixture:chan"}
+        r = self.with_relay()
+        signed = json.dumps(sign.sign_request(request_body(**{"from": SELF, "op": "status", "ttl_s": 60}), k["privateKeySpec"]))
+        out = self.once_after_wait(r, [(SELF, signed)], **over)
+        self.assertEqual(out.status, 0, out.stderr)
+        rs = [x for x in r.replies() if x["op"] == "status"]
+        self.assertEqual(len(rs), 1, out.stderr)
+        data = rs[0]["data"]
+        self.assertEqual((data["harness"]["status"], data["harness"]["installed"]), ("ok", "9.9.9"))
+        self.assertEqual((data["inbox"]["status"], data["inbox"]["channel"]), ("ok", "fixture:chan"),
+                         "main() handed the status op the relay it reads with and the project's channel")
+        self.assertGreaterEqual(data["inbox"]["unread"], 1, "the fake relay lists what it holds")
+
     def test_once_a_signed_upgrade_already_started_is_waited_for_its_reply_is_posted_before_the_process_exits(self):
         k = sign.generate_operator_key()
         reg = self.signed_registry(k)

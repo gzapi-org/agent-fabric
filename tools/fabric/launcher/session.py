@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import traceback
-from fabric_launcher.base import INSTALL_TIMEOUT_S, RESTART_WAIT_S, OPENING, WAIT_TAIL, die, say, helper, stripped, env_with
+from fabric_launcher.base import INSTALL_TIMEOUT_S, RESTART_WAIT_S, OPENING, RESUMED, WAIT_TAIL, die, say, helper, stripped, env_with
 
 
 def require_files(*paths: str) -> None:
@@ -192,7 +192,7 @@ def session_command(provider: str, session: str, caller_model: bool, session_eff
     return cmd + [prompt_flag, prompt_file, *args]
 
 
-def opening_prompt(fabric_root: str) -> str:
+def opening_prompt(fabric_root: str, resumed: bool = False) -> str:
     text = OPENING
     # A session that ended its own job (bin/fabric-fresh) left a note for this
     # one: said in the opening prompt, then dropped from the environment.
@@ -207,9 +207,11 @@ def opening_prompt(fabric_root: str) -> str:
         line = stripped(helper([sys.executable, f"{fabric_root}/tools/fabric/jobs.py", "show", job, "--line"],
                                env=env_with(AGENT_FABRIC_ROOT=fabric_root), quiet=True))
         if line:
-            text = (text.removesuffix(WAIT_TAIL) + f" It is for your job {line}: read it in full with "
-                    f"fabric-jobs show {job}, and start on it.")
+            text = (text.removesuffix(WAIT_TAIL) + f" It is for your job {line}: read job {job} in full "
+                    f"from your job list, and start on it.")
         del os.environ["AGENT_FABRIC_FRESH_JOB"]
+    if resumed and text.endswith(WAIT_TAIL):
+        text = text.removesuffix(WAIT_TAIL) + RESUMED
     return text
 
 

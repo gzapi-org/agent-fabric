@@ -28,7 +28,7 @@ such records must never land.
 
 ## 2. Decision
 
-**Every account runs a control agent** — `runtime/control/agentd.mjs`,
+**Every account runs a control agent** — `tools/fabric/control/agentd.py`,
 a daemon under a systemd user unit, alive whether or not a Claude session
 is. It reads requests on a control channel of the relay the fleet's
 GZCoord traffic already rides, answers what it can say about its own
@@ -125,7 +125,7 @@ claimant (rule 4).
 
 ## 5. Binding Rules
 
-1. Every placed account runs `runtime/control/agentd.mjs` under the user
+1. Every placed account runs `tools/fabric/control/agentd.py` under the user
    unit `agent-fabric-agentd.service` (`Restart=always`), installed and
    started by `bootstrap.sh`. The account lingers, so the unit runs from
    boot with no login and no session.
@@ -136,10 +136,10 @@ claimant (rule 4).
 3. The op set is closed (`tools/fabric/control/ops/__init__.py`). No field of a request ever
    reaches a shell. A read op takes no argument but `tokens`'s `days`, a
    number capped at 90, `pool-list`'s role and `pool-claim`'s pool id
-   (`pool.mjs`); an action takes only its own closed set of
-   arguments (`upgrade.mjs`, `secrets.mjs` and `jobs.mjs` `checkArgs`,
-   `checkJobArgs`, `pool.mjs` `checkPoolArgs` for `pool-add`, and
-   `tools.mjs` `toolsInstall`'s one `tool`, matched by `TOOL_NAME`, and
+   (`pool.py`); an action takes only its own closed set of
+   arguments (`upgrade.py` and `secrets.py` `check_args`, `jobs.py`
+   `check_job_args`, `pool.py` `check_pool_args` for `pool-add`, and
+   `tools.py` `tools_install`'s one `tool`, matched by `TOOL_NAME`, and
    `gateway-install`'s one `version`, a key of `runtime/gateway.json`).
 4. A daemon answers a request only when its `from` is a host operator's
    address as `runtime/hosts/registry.json` places it — re-read for every
@@ -154,7 +154,7 @@ claimant (rule 4).
    reorders no job; a forged claim takes a job off the pool for a role's
    holder. `pool-list` shows unclaimed jobs only, so the claim and its
    claimant are seen in the pool holder's `pool.json`.
-5. An action (`sign.mjs` `ACTION_OPS`) is answered only when it carries
+5. An action (`sign.py` `ACTION_OPS`) is answered only when it carries
    an Ed25519 signature over its canonical form by the key the operator's
    host commits as `operator_key`; it lives at most 600 s, is refused
    when dated more than a minute ahead of the account's clock, and must
@@ -221,7 +221,7 @@ with Doppler (ADR-038 §5 rule 8).
 16. A session's state — working, blocked on a person, or idle — is
     kept by the harness hook `session-state.py` in the account's own
     state directory, and the account's control agent posts it as a
-    `state` record (`sessions.mjs`) when what it would say changes, and
+    `state` record (`sessions.py`) when what it would say changes, and
     every ten minutes, on a state channel of its own (`config.json`
     `state_channel`, ending in `:control`), so a burst of replies on the
     control channel never buries it. The record names each live session's id, state
@@ -237,7 +237,7 @@ with Doppler (ADR-038 §5 rule 8).
     accounts (A 2026-10-07).
 17. `secrets-selftest` is an action that proves the account can add,
     use and delete a secret of its own: it runs `fabric-secrets selftest
-    --json` as the login (`selftest.mjs`), which sets a canary name in
+    --json` as the login (`selftest.py`), which sets a canary name in
     the account's own store, reads it through `fabric-secret-run`, and
     removes it — two signed commits pushed to the store's remote. It
     takes no arguments; the reply is the verdict (`pass` or `fail`) and
@@ -286,8 +286,8 @@ actions are in use on every placed account.
   `runtime/claude-code/hooks/session-state.py`,
   `runtime/control/config.json`, `runtime/control/agent-fabric-agentd.service`.
 - `bin/fabric-ctl`, `bin/fabric-usage`, `bin/fabric-host`.
-- `communication/gzcoord/scripts/inbox.mjs` (`assertNotControlChannel`),
-  `send.mjs`.
+- `tools/fabric/gzcoord/inbox_parts/config.py` (`assert_not_control_channel`),
+  `tools/fabric/gzcoord/send.py`.
 - `runtime/claude-code/bootstrap.sh` (the unit),
   `runtime/provisioning/persist-accounts.sh`,
   `runtime/provisioning/platform/qubes/agent-fabric-accounts.rc`.

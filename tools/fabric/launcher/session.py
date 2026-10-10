@@ -207,8 +207,8 @@ def opening_prompt(fabric_root: str, resumed: bool = False) -> str:
         line = stripped(helper([sys.executable, f"{fabric_root}/tools/fabric/jobs.py", "show", job, "--line"],
                                env=env_with(AGENT_FABRIC_ROOT=fabric_root), quiet=True))
         if line:
-            text = (text.removesuffix(WAIT_TAIL) + f" It is for your job {line}: read it in full with "
-                    f"fabric-jobs show {job}, and start on it.")
+            text = (text.removesuffix(WAIT_TAIL) + f" It is for your job {line}: read job {job} in full "
+                    f"from your job list, and start on it.")
         del os.environ["AGENT_FABRIC_FRESH_JOB"]
     if resumed and text.endswith(WAIT_TAIL):
         text = text.removesuffix(WAIT_TAIL) + RESUMED

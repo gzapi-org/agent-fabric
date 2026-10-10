@@ -84,7 +84,9 @@ RESUMED = (" This session was resumed: carry on with what it was doing before; i
 
 # Every spelling with which claude resumes a session: the opening's resume
 # detection and without_resume (argv.py) read the same set.
-RESUME_FLAGS = ("--resume", "-r", "--continue", "-c", "--from-pr", "--teleport")
+RESUME_BARE = ("--continue", "-c")                              # take no value
+RESUME_VALUED = ("--resume", "-r", "--from-pr", "--teleport")  # take an optional value
+RESUME_FLAGS = RESUME_BARE + RESUME_VALUED
 
 
 BROKER_ENV = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS",

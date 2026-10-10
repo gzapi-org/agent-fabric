@@ -95,15 +95,16 @@ def resumes(args: list[str]) -> bool:
 def without_resume(orig_args: list[str]) -> list[str]:
     """The caller's own resume flags are replaced by the one that names the
     session just stopped; everything else is passed on as given."""
+    from fabric_launcher.base import RESUME_BARE, RESUME_VALUED
     nxt, skip = [], False
     for a in orig_args:
         if skip:
             skip = False
             if not a.startswith("-"):
                 continue
-        if a in ("--continue", "-c") or a.startswith(("--resume=", "--from-pr=", "--teleport=")):
+        if a in RESUME_BARE or a.startswith(tuple(f + "=" for f in RESUME_VALUED if f.startswith("--"))):
             continue
-        if a in ("--resume", "-r", "--from-pr", "--teleport"):
+        if a in RESUME_VALUED:
             skip = True
             continue
         nxt.append(a)

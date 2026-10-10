@@ -1006,7 +1006,7 @@ def main() -> int:
         check("the relaunch starts in the job's working copy, and says so",
               rc == 0 and has(rf"^RUN2:pwd={re.escape(other)}:", out) and f"starting job j1 in {other}" in out, f"rc={rc}\n{out}")
         check("…and the opening prompt carries the job in place of waiting for instructions",
-              has(r"^RUN2:.*It is for your job j1, ship the other thing \([^)]*topic routing\): read it in full with fabric-jobs show j1",
+              has(r"^RUN2:.*It is for your job j1, ship the other thing \([^)]*topic routing\): read job j1 in full from your job list",
                   out) and not has(r"^RUN2:.*Then take your next job", out), grep("RUN2", out))
         # Started by a relative path, as the README runs it from projects/:
         # the relaunch changes directory first, and must still find itself —

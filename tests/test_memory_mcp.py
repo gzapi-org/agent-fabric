@@ -5,12 +5,16 @@ paths outside the roots, a call counted without its query), and the real server 
 Code runs it: initialize, tools/list, tools/call. Plain script: prints ok/FAIL, exit 1 on any failure."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools", "fabric"))
@@ -38,6 +42,20 @@ def slice_text(role: str, kind: str, topic: str, description: str, sections: dic
     front = (f"---\nrole: \"{role}\"\nclass: {kind}\ntopic: \"{topic}\"\ndescription: \"{description}\"\ntier: 2\n"
              f"knowledge_scope: full\n{shared}distilled_at: \"2026-10-05\"\n{origin}---\n\n")
     return front + "".join(f"## {h}\n\n{t}\n\n*Observed 2026-10-0{n + 1} (a-agent)*\n\n" for n, (h, t) in enumerate(sections.items()))
+
+
+def git(directory: str, *args: str) -> None:
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": directory, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e"}
+    subprocess.run(["git", "-C", directory, *args], env=env, check=True, capture_output=True, timeout=60)
+
+
+def commit_all(directory: str) -> None:
+    """A repository of its own around the fixture, everything committed: the server reads git's committed tree."""
+    if not os.path.isdir(os.path.join(directory, ".git")):
+        git(directory, "init", "-q", "-b", "main")
+    git(directory, "add", "-A")
+    git(directory, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture", "--allow-empty")
 
 
 def put(path: str, text: str) -> None:
@@ -96,6 +114,8 @@ def main() -> int:
             "- [`identities/roles/python-dev/charter.md`](x) — not a slice\n")
         os.symlink(outside, f"{mem}/domains/python-dev/domain/link-out.md")
 
+        commit_all(f"{t}/op")
+        commit_all(wc)
         corpus = memory_index.build(mem, wc)
         sess = tools.Session(role="python-dev", project="agent-fabric", working_copy=wc, state_dir=state)
 
@@ -104,6 +124,51 @@ def main() -> int:
 
         def find(query: str, session: tools.Session = sess, **kw) -> str:
             return hit_text(tools.find(corpus, session, {"query": query, **kw})[0])
+
+        print("git's committed tree (ADR-049 rule 6)")
+        new_slice = f"{wc}/.agent-fabric/memory/python-dev/workflow/uncommitted-note.md"
+        put(new_slice, slice_text("python-dev", "workflow", "uncommitted-note", "an uncommitted note", {"uncommitted heading xylophone": "xylophone body"}))
+        launcher_file = f"{wc}/.agent-fabric/memory/python-dev/solution/launcher-pin.md"
+        original = open(launcher_file).read()
+        with open(launcher_file, "a") as fh:
+            fh.write("\nUNCOMMITTED-EDIT-MARKER\n")
+        live = memory_index.build(mem, wc)
+        check("a slice nobody committed is not served", not any("xylophone" in s_.heading for s_ in live.sections))
+        check("an uncommitted edit of a committed slice is not served: the committed text is", all("UNCOMMITTED-EDIT-MARKER" not in s_.text for s_ in live.sections)
+              and any(s_.slice_id.endswith("launcher-pin.md") for s_ in live.sections))
+        git(wc, "add", "-A")
+        git(wc, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "now committed")
+        check("…and once committed it is", any("xylophone" in s_.heading for s_ in memory_index.build(mem, wc).sections))
+        with open(launcher_file, "w") as fh:
+            fh.write(original)
+        os.unlink(new_slice)
+        git(wc, "add", "-A")
+        git(wc, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "put back")
+        outside_index = f"{t}/outside-index.md"
+        put(outside_index, "- [`.agent-fabric/memory/python-dev/solution/launcher-pin.md`](x) — LEAKED-INDEX-LINE\n")
+        linked_role = f"{wc}/.agent-fabric/memory/linked-role"
+        os.makedirs(linked_role)
+        os.symlink(outside_index, f"{linked_role}/INDEX.md")
+        commit_all(wc)
+        check("an INDEX.md that is a committed symlink is not read (git has no path to follow)", "linked-role" not in memory_index.build(mem, wc).indexes)
+        shutil.rmtree(linked_role)
+        commit_all(wc)
+        bare = f"{t}/not-a-repo"
+        os.makedirs(f"{bare}/memory")
+        put(f"{bare}/memory/domains/x/domain/a.md", slice_text("x", "domain", "a", "a", {"seen": "seen"}))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            nogit = memory_index.build(f"{bare}/memory", None)
+        check("a root that is not in a git repository is not served, and says so (an empty corpus would look like one with nothing in it)",
+              nogit.sections == [] and len(nogit.unread) == 1 and "is not served" in err.getvalue(), f"{nogit.unread} {err.getvalue()}")
+        elsewhere = f"{t}/elsewhere-wc"
+        os.makedirs(f"{elsewhere}/.agent-fabric")
+        commit_all(elsewhere)
+        os.symlink(f"{wc}/.agent-fabric/memory", f"{elsewhere}/.agent-fabric/memory")
+        with contextlib.redirect_stderr(io.StringIO()):
+            linked_root = memory_index.build(mem, elsewhere)
+        check("a corpus root that is itself a link is refused, though it points at a real corpus", not any(s_.scope == "project" for s_ in linked_root.sections)
+              and any("is a link" in u for u in linked_root.unread), str(linked_root.unread))
 
         print("memory_find")
         first = find("subprocess timeouts").splitlines()[0]
@@ -170,6 +235,11 @@ def main() -> int:
               and B.band(30, 0.54, 2.0) == "weak" and B.band(30, 0.29, 2.0) == "none")
         check("band: a dead heat on a partial match is not strong; on a near-full match it is",
               B.band(30, 0.6, 1.0) == "weak" and B.band(30, 0.8, 1.0) == "strong")
+
+        slow = time.monotonic()
+        long_miss = tools.find(corpus, sess, {"query": " ".join(f"zzzzq{n}x" * 4 for n in range(40000))})[0]
+        check("a very long query that matches nothing is answered at once, with a pointer, not after a long search for near words",
+              time.monotonic() - slow < 1.0 and long_miss.startswith("no sections match; try: "), f"{time.monotonic() - slow:.1f}s")
 
         print("memory_read")
         ref = "p:python-dev/solution/launcher-pin"

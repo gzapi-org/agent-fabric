@@ -268,7 +268,12 @@ def read_existing_slice(path: str) -> tuple[dict[str, Any], dict[str, str]]:
     if not os.path.exists(path):
         return {}, {}
     with open(path, encoding="utf-8") as fh:
-        text = fh.read()
+        return parse_slice(fh.read())
+
+
+def parse_slice(text: str) -> tuple[dict[str, Any], dict[str, str]]:
+    """(frontmatter, {heading: section-text}) of a slice's text: the one parser of a slice, for a file on disk
+    (read_existing_slice) and for a blob read from git (the memory server, which reads the committed tree)."""
     meta: dict[str, Any] = {}
     match = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     body = text

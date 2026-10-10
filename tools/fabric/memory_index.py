@@ -6,15 +6,17 @@ far a hit can be trusted.
 
 CONTRACT
   build(memory_dir, working_copy)  reads exactly two roots: the fabric's memory/ and the working copy's
-                                   .agent-fabric/memory/. Nothing else is opened, nothing is written, no network,
-                                   no model. A link leading out of a root is not followed.
+                                   .agent-fabric/memory/, from git's COMMITTED tree (committed_tree.py): an uncommitted
+                                   slice, which no lint has seen, is not served, and a link has no path to follow. A root
+                                   git cannot give is not served, said on stderr and in Index.unread. Nothing is written,
+                                   no network, no model.
   Index.find(query, role, project) the matching sections, best first: the asker's role and project before the
                                    rest, BM25 within; one best section per slice; a cue shown once. Each is a Hit
                                    with its score, its coverage of the query and its band.
   slice ids                        "memory/…" for the fabric's, ".agent-fabric/memory/…" for the working copy's;
                                    a caller's id is looked up among those loaded and never joined to a path.
   What a merge_target correction replaced is gone from the files at drain time (assembler.slices), so serving
-  what is on disk never returns it."""
+  what is committed never returns it."""
 from __future__ import annotations
 
 import math
@@ -25,7 +27,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from assembler.slices import OBSERVED_RE, read_existing_slice  # noqa: E402
+import committed_tree  # noqa: E402
+from assembler.slices import OBSERVED_RE, parse_slice  # noqa: E402
 
 K1, B = 1.5, 0.75
 WORD = re.compile(r"[a-z0-9_]+")
@@ -139,6 +142,7 @@ def slice_id_of(ref: str) -> str | None:
 class Index:
     sections: list[Section] = field(default_factory=list)
     indexes: dict[str, str] = field(default_factory=dict)       # "<role>" -> INDEX.md text of the working copy
+    unread: list[str] = field(default_factory=list)             # roots git could not give: not served, said
     _bm25: Bm25 | None = None
 
     @staticmethod
@@ -228,25 +232,15 @@ def _as_list(value: object) -> tuple[str, ...]:
     return tuple(str(v) for v in value) if isinstance(value, list) else ()
 
 
-def _slices(root: str, prefix: str):
-    """(slice id, absolute path) of every file under root, in a fixed order; a link out of root is not followed."""
-    real_root = os.path.realpath(root)
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        for name in sorted(filenames):
-            path = os.path.join(dirpath, name)
-            if not name.endswith(".md") or name in SKIP:
-                continue
-            if os.path.commonpath([real_root, os.path.realpath(path)]) != real_root:
-                continue
-            yield f"{prefix}/{os.path.relpath(path, root)}", path
-
-
-def _load_root(corpus: Index, root: str, prefix: str) -> None:
-    for slice_id, path in _slices(root, prefix):
+def _load_root(corpus: Index, files: dict[str, bytes], prefix: str) -> None:
+    """The slices among a root's committed files (path relative to the root -> bytes), in a fixed order."""
+    for rel in sorted(files):
+        if not rel.endswith(".md") or os.path.basename(rel) in SKIP:
+            continue
+        slice_id = f"{prefix}/{rel}"
         try:
-            meta, sections = read_existing_slice(path)
-        except (OSError, UnicodeDecodeError):
+            meta, sections = parse_slice(files[rel].decode("utf-8"))
+        except UnicodeDecodeError:
             continue
         kind = str(meta.get("class", ""))
         if kind not in KINDS:
@@ -262,20 +256,38 @@ def _load_root(corpus: Index, root: str, prefix: str) -> None:
                 observed=found.group(1) if found else "", text=text))
 
 
+def _committed(corpus: Index, directory: str, what: str) -> dict[str, bytes] | None:
+    """The committed files under a root, or None, said once on stderr and in corpus.unread: a root that cannot be read from git
+    is not served (an empty corpus would look like one with nothing in it)."""
+    try:
+        return committed_tree.read(directory)
+    except committed_tree.CommittedTreeError as e:
+        corpus.unread.append(f"{what}: {e}")
+        print(f"fabric-memory: {what} is not served: {e}", file=sys.stderr)
+        return None
+
+
 def build(memory_dir: str, working_copy: str | None) -> Index:
-    """memory_dir is the fabric's memory/ (roots.memory_dir()); working_copy the session's checkout, or None."""
+    """memory_dir is the fabric's memory/ (roots.memory_dir()); working_copy the session's checkout, or None. Both are read
+    from git's committed tree (ADR-049 rule 6), never from the working tree."""
     corpus = Index()
     if os.path.isdir(memory_dir):
-        _load_root(corpus, memory_dir, "memory")
+        files = _committed(corpus, memory_dir, "the fabric's memory/")
+        if files is not None:
+            _load_root(corpus, files, "memory")
     if working_copy:
         wc_memory = os.path.join(working_copy, ".agent-fabric", "memory")
         if os.path.isdir(wc_memory):
-            _load_root(corpus, wc_memory, ".agent-fabric/memory")
-            for name in sorted(os.listdir(wc_memory)):
-                index = os.path.join(wc_memory, name, "INDEX.md")
-                if os.path.isfile(index):
-                    with open(index, encoding="utf-8") as fh:
-                        corpus.indexes[name] = fh.read()
+            files = _committed(corpus, wc_memory, "the working copy's .agent-fabric/memory/")
+            if files is not None:
+                _load_root(corpus, files, ".agent-fabric/memory")
+                for rel in sorted(files):
+                    role, _, name = rel.partition("/")
+                    if name == "INDEX.md":
+                        try:
+                            corpus.indexes[role] = files[rel].decode("utf-8")
+                        except UnicodeDecodeError:
+                            continue
     return corpus
 
 

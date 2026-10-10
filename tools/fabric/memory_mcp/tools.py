@@ -13,6 +13,7 @@ DEFAULT_LIMIT, MAX_LIMIT = 8, 20
 FIND_TOKENS, READ_TOKENS, MAX_TOKENS = 200, 1500, 8000
 MIN_TOKENS = 40         # a reply smaller than this cannot hold one hit line or the marker that says it was cut
 RELATED = 2
+MAX_TRY_WORDS, MAX_TRY_LEN = 8, 40
 WEAK_NOTICE = "weak match: read only if the cue fits"
 TAIL_TOKENS = 15       # the "+N more" line: counted in the budget, or a reply of the budget's size overruns it
 HEADING_CLIP, CUE_CLIP = 60, 110
@@ -75,7 +76,9 @@ def _try(index: Index, query: str) -> str:
     """What a query that found nothing is pointed at: the cue words nearest to its own, else the most used ones."""
     vocab = index.vocabulary()
     near: list[str] = []
-    for word in mi.tokens(query):
+    # The query is the model's: a long one that matches nothing must not hold the one-message-at-a-time server in difflib.
+    for word in mi.tokens(query)[:MAX_TRY_WORDS]:
+        word = word[:MAX_TRY_LEN]
         for close in difflib.get_close_matches(word, vocab[:2000], n=2, cutoff=0.75):
             if close != word and close not in near:
                 near.append(close)

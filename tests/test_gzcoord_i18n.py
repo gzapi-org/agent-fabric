@@ -501,8 +501,11 @@ def broken_tree(contents: str | None) -> str:
 for _what, _contents in (("unparsable", "{ not json"), ("absent", None)):
     def _degrades(what: str = _what, contents: str | None = _contents) -> None:
         entry = broken_tree(contents)
-        r = subprocess.run([entry, "--held"], env={**os.environ, "AGENT_FABRIC_ROOT": HERE}, capture_output=True, text=True,
-                           timeout=120, stdin=subprocess.DEVNULL)
+        home = scratch("i18n-home-")
+        env = {**os.environ, "AGENT_FABRIC_ROOT": HERE, "HOME": home, "AGENT_FABRIC_STATE_DIR": os.path.join(home, "state"),
+               "AGENT_FABRIC_SECRET_STORE": scratch("i18n-store-")}
+        env.pop("XDG_STATE_HOME", None)
+        r = subprocess.run([entry, "--held"], env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
         # Never a stack trace, and never silence: the tool says which file it could not read and
         # what that costs, then finishes its job with every line printed as its own key.
         ok(not re.search(r"^\s+at ", r.stderr, re.M) and "Traceback" not in r.stderr, f"a stack trace reached the session:\n{r.stderr}")

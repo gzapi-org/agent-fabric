@@ -257,8 +257,12 @@ def _():
 
 def gzmsg_cli(*args: str) -> "subprocess.CompletedProcess[str]":
     """The command at its contract's path: bin/gzmsg, the name everything inside the fabric uses."""
+    home = tempfile.mkdtemp(prefix="gzmsg-home-")
+    SCRATCH.append(home)
+    env = {**os.environ, "HOME": home, "AGENT_FABRIC_STATE_DIR": os.path.join(home, "state")}
+    env.pop("XDG_STATE_HOME", None)
     return subprocess.run([os.path.join(os.path.dirname(os.path.dirname(GZCOORD)), "bin", "gzmsg"), *args], capture_output=True,
-                          text=True, timeout=120, stdin=subprocess.DEVNULL)
+                          text=True, timeout=120, stdin=subprocess.DEVNULL, env=env)
 
 
 def scratch_file(text: str) -> str:
@@ -1524,8 +1528,12 @@ def cmd_env(**extra: str) -> dict:
     # workspace whose agent-fabric is the checkout, by a link.
     ws = scratch("ws-")
     os.symlink(HERE, os.path.join(ws, "agent-fabric"))
-    return {**os.environ, "HOME": scratch("home-"), "AGENT_FABRIC_SECRET_STORE": id_store(),
-            "AGENT_FABRIC_ROOT": os.path.join(ws, "agent-fabric"), **extra}
+    env = {**os.environ, "HOME": scratch("home-"), "AGENT_FABRIC_SECRET_STORE": id_store(),
+           "AGENT_FABRIC_STATE_DIR": os.path.join(scratch("state-"), "state"), "AGENT_FABRIC_ROOT": os.path.join(ws, "agent-fabric"), **extra}
+    # The inbox journals what it prints (episodic.db under the state directory): a case run with the
+    # runner's AGENT_FABRIC_STATE_DIR or XDG_STATE_HOME wrote its row into the runner's own.
+    env.pop("XDG_STATE_HOME", None)
+    return env
 
 
 @case("normalize CLI prints the normalised message for validate to read")
@@ -1862,8 +1870,9 @@ class Relay:
             self.hits.append(f"{method} {path.split('?')[0]}")
             if self.status != 200:
                 return self.status, "{}"
-            if method == "POST":
-                self.posts.append({"url": path, "auth": h.headers.get("authorization"), "body": json.loads(body or "{}")})
+            # Every request, whatever the method, as the Node stub counted them: a send that asked
+            # the relay anything else first (a /status probe) is not "one post".
+            self.posts.append({"url": path, "auth": h.headers.get("authorization"), "body": json.loads(body or "{}")})
             return 200, json.dumps({"seq": 42, "id": "relay-id", "deduplicated": False})
         self.stub = Stub(answer)
         self.url = self.stub.url
@@ -1911,6 +1920,11 @@ def journaled_send(relay_url: str, text: str = VALID) -> tuple[Ran, str, str]:
     base = scratch("send-journal-")
     state, store = os.path.join(base, "state"), id_store()
     return send_with(relay_url, text, AGENT_FABRIC_STATE_DIR=state, AGENT_FABRIC_SECRET_STORE=store), state, store
+
+
+def starts(pattern: str, text: str, msg: str = "") -> None:
+    """Node's /^…/ without the m flag: the start of the whole output, not of any line."""
+    ok(re.match(pattern, text), msg or f"{pattern!r} does not start {text!r}")
 
 
 def has(pattern: str, text: str, msg: str = "") -> None:
@@ -1985,7 +1999,7 @@ def _():
     try:
         r = send_with(relay.url, VALID)
         eq(r.code, 0, r.err)
-        has(r"^sent seq 42 INFO 01a09fc1-0000-7000-8000-000000000001", r.out)
+        starts(r"sent seq 42 INFO 01a09fc1-0000-7000-8000-000000000001", r.out)
         eq(len(relay.posts), 1)
         p = relay.posts[0]
         eq(p["url"], "/api/send")
@@ -2110,7 +2124,7 @@ def _():
         eq(r.code, 0, r.err)
         mid = id_of(read_file(f))
         ok(mid and re.fullmatch(UUID7, mid), f"a UUIDv7, the deployment's own shape: {mid}")
-        has(rf"^sent seq 42 INFO {mid}", r.out)
+        starts(rf"sent seq 42 INFO {mid}", r.out)
         has(r"minted .* and wrote it into", r.err)
         eq(id_of(relay.posts[0]["body"]["content"]), mid, "the posted message carries the id the file now holds")
         content = relay.posts[0]["body"]["content"]
@@ -2160,7 +2174,7 @@ def _():
         write_file(f, read_file(f).replace("hello", "a different message"))
         reused = send_file(relay.url, f, state=state)
         eq(reused.code, 2)
-        has(r"already went out with a different message \(seq 42\)[\s\S]*delete the MESSAGE-ID line", reused.err)
+        has(r"already went out with a different message \(seq 42\).*delete the MESSAGE-ID line", reused.err)
         eq(len(relay.posts), 2, "the reused-id message was not posted")
         write_file(f, re.sub(r"^MESSAGE-ID: .*\n", "", read_file(f), flags=re.M))
         fresh = send_file(relay.url, f, state=state)

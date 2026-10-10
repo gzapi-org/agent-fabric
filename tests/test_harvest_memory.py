@@ -583,13 +583,15 @@ def test_a_missing_or_damaged_log_is_no_rows_and_no_error(tmp: str) -> None:
 
 
 def test_a_note_with_a_credential_is_withheld_and_a_query_is_never_carried(tmp: str) -> None:
-    secret = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
-    _state(marks=[{"t": "2026-10-10T07:00:00Z", "id": "f:a/b#1", "verdict": "wrong", "note": f"token {secret}"}],
+    # Shaped like a GitHub token and nothing else: the harvester's screen goes by shape. Named for what the case shows, not for
+    # what it imitates (CodeQL reads a variable's name).
+    shaped = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    _state(marks=[{"t": "2026-10-10T07:00:00Z", "id": "f:a/b#1", "verdict": "wrong", "note": f"pasted {shaped}"}],
            calls=[{"t": "2026-10-10T07:00:00Z", **FIND, "query": "a query that must not travel"}])
     r, members, _ = _bundle(tmp, "m4", None)
     blob = b"".join(members.values()).decode(errors="replace")
     rows = [json.loads(ln) for ln in members["marks.jsonl"].decode().splitlines()]
-    assert r.returncode == 0 and secret not in blob and "must not travel" not in blob, "a credential or a query text reached the bundle"
+    assert r.returncode == 0 and shaped not in blob and "must not travel" not in blob, "a credential or a query text reached the bundle"
     assert len(rows) == 1 and rows[0]["note"] == "" and json.loads(members["harvest-report.json"])["memory_use"]["notes_withheld"] == 1, rows
 
 

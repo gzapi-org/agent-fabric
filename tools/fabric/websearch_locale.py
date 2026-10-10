@@ -459,6 +459,7 @@ def serve(locale: Mapping[str, Any], stdin=None, stdout=None, secrets: Mapping[s
 
 def main() -> int:
     # UTF-8 whatever the locale of the login, and a lone surrogate from a JSON string is a ?, not a crash mid-run.
+    # CPython opens a POSIX pipe with newline="\n": a message ends at a line feed alone, as Node split on it.
     sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:

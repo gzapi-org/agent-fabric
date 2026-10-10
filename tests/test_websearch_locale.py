@@ -334,6 +334,15 @@ def main() -> int:
               and out[2]["result"]["isError"] is True and "no SERPAPI_API_KEY" in out[2]["result"]["content"][0]["text"]
               and "brave: no BRAVE_SEARCH_API_KEY" in out[2]["result"]["content"][0]["text"] and out[3]["error"]["code"] == -32700 and out[3]["id"] is None, str(out))
         check("nothing of the secrets file on stdout or stderr", b"decoy-gh-value" not in r.stdout + r.stderr and r.stderr == b"")
+        ping = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        r = subprocess.run([BIN], input=(ping + "\r" + ping + "\n").encode(), env=penv, capture_output=True, timeout=60)
+        out = [json.loads(ln) for ln in r.stdout.decode().splitlines()]
+        check("a lone carriage return does not end a message (Node split on the line feed alone): one line, one parse error",
+              len(out) == 1 and out[0]["error"]["code"] == -32700, r.stdout.decode())
+        r = subprocess.run([BIN], input=(ping + "\r\n").encode() + b"\xff\xfe\n" + (ping + "\n").encode(), env=penv, capture_output=True, timeout=60)
+        out = [json.loads(ln) for ln in r.stdout.decode().splitlines()]
+        check("a CRLF-ended message is read; bytes that are not UTF-8 are one parse error and the next message is answered",
+              r.returncode == 0 and [o.get("result", o.get("error", {}).get("code")) for o in out] == [{}, -32700, {}], r.stdout.decode() + r.stderr.decode())
         for label, content, want in (("unset", None, "WEBSEARCH_LOCALE_FILE is not set"), ("not JSON", "{ nope", "stdio-bad.json")):
             e2 = dict(penv)
             if content is None:

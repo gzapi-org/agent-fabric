@@ -381,12 +381,25 @@ def main() -> int:
               and "env.ANTHROPIC_BASE_URL" in (refused(launch.refuse_cli_settings, ["--settings",
                                                '{"env":{"ANTHROPIC_BASE_URL":"u"}}'], "/w", "local.json") or "")
               and "modelOverrides" in (refused(launch.refuse_cli_settings, ["--settings={\"modelOverrides\":{}}"], "/w", "l") or ""))
-        check("a --settings after a bare -- is the caller's prompt, not a flag",
-              refused(launch.refuse_cli_settings, ["--", "--settings", '{"modelOverrides":{}}'], "/w", "l") is None)
+        pin = '{"modelOverrides":{"a":"b"}}'
+        check("a --settings is tested wherever it stands: after a `--` that is an option's value, claude still parses it",
+              all("modelOverrides" in (refused(launch.refuse_cli_settings, args, "/w", "l") or "")
+                  for args in (["-n", "--", "--settings", pin], ["--model", "--", "--settings=" + pin],
+                               ["--add-dir", "--", "--settings", pin])))
+        check("a value claude reads as JSON is read as JSON here: a BOM in front, a no-break space behind",
+              all("modelOverrides" in (refused(launch.refuse_cli_settings, ["--settings", v], "/w", "l") or "")
+                  for v in ("\ufeff" + pin, pin + "\u00a0", "\u2028" + pin + "\u2028")))
         pin_dir = tempfile.mkdtemp(prefix="test_launch.")
         try:
             with open(f"{pin_dir}/pin.json", "w", encoding="utf-8") as fh:
                 fh.write('{"maxEffortLevel":"low"}')
+            with open(f"{pin_dir}/{{x", "w", encoding="utf-8") as fh:
+                fh.write('{"modelOverrides":{}}')
+            with open(f"{pin_dir}/bom.json", "w", encoding="utf-8-sig") as fh:
+                fh.write('{"modelOverrides":{}}')
+            check("a name that starts with a brace but is no JSON is a file claude reads; a BOM does not hide a pin",
+                  all("modelOverrides" in (refused(launch.refuse_cli_settings, ["--settings", n], pin_dir, "l") or "")
+                      for n in ("{x", "bom.json")))
             check("a --settings file is read relative to the launch directory; a missing one is the harness's refusal",
                   "maxEffortLevel" in (refused(launch.refuse_cli_settings, ["--settings", "pin.json"], pin_dir, "l") or "")
                   and refused(launch.refuse_cli_settings, ["--settings", "absent.json"], pin_dir, "l") is None)

@@ -711,7 +711,10 @@ class Collect(Base):
             raise OSError("boom")
         ctx = {"home": h, "who": WHO, "fetch": lambda *a, **k: usage_mod.Response(200, {}, b"{}"), "root": "/r", "run": run, "uid": 1}
         allr = ops.collect("status", ctx)
-        self.assertEqual(sorted(allr), ["fabric", "identity", "keys", "session", "usage"])
+        # harness and inbox (tools/fabric/drift.py) ride with status since j113: Claude Code against the pin, and the read position.
+        self.assertEqual(sorted(allr), ["fabric", "harness", "identity", "inbox", "keys", "session", "usage"])
+        self.assertEqual(allr["harness"]["status"], "failed", "run raises: claude --version could not run")
+        self.assertEqual(allr["inbox"], {"status": "none", "reason": "no relay reader in this context"}, "no relay in a bare context")
         self.assertEqual(allr["fabric"]["status"], "not-a-checkout")
         self.assertEqual(allr["session"]["claude_processes"], 0)
         self.assert_no_secret(allr)

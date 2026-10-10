@@ -70,6 +70,23 @@ OPS = ["ping", "identity", "usage", "keys", "fabric", "session", "script", "reca
 PUBLIC_OPS = ["presence", "pool-list", "pool-claim"]
 
 
+def _harness(ctx: Mapping[str, Any]) -> Any:
+    import drift
+    return drift.harness(ctx.get("home"), ctx.get("root"), **_run_kw(ctx))
+
+
+def _inbox(ctx: Mapping[str, Any]) -> Any:
+    """The account's GZCoord read position against the relay's newest message (tools/fabric/drift.py). The
+    daemon hands in its own relay reader, the channel of its project and its address (`inbox_opts`); a
+    context without them (a `--self` status, a test) has no relay to ask and says so: no token chain is
+    read here, so no test reaches the real relay through the checkout's own settings."""
+    import drift
+    opts = ctx.get("inbox_opts")
+    if opts is None:
+        return {"status": "none", "reason": "no relay reader in this context"}
+    return drift.inbox(opts["api"], opts["channel"], opts["me"])
+
+
 def _jobs(ctx: Mapping[str, Any]) -> Any:
     from control.jobs import jobs   # python-dev-01's port; until it lands the section says it failed
     return jobs(home=ctx.get("home"), root=ctx.get("root"), **(ctx.get("jobs_opts") or {}))
@@ -124,6 +141,8 @@ SECTIONS: dict[str, Callable[[Mapping[str, Any]], Any]] = {
     "disk": lambda c: c["disk_cached"]() if c.get("disk_cached") else disk(c.get("home"), **(c.get("disk_opts") or {})),
     "local": _local,
     "jobs": _jobs,
+    "harness": _harness,
+    "inbox": _inbox,
     "tools": _tools,
     "gateway": _gateway,
     "accounts": lambda c: c["accounts_cached"]() if c.get("accounts_cached") else accounts(c.get("home"), **(c.get("accounts_opts") or {})),
@@ -132,7 +151,7 @@ SECTIONS: dict[str, Callable[[Mapping[str, Any]], Any]] = {
 
 def _wants(op: str) -> list[str]:
     if op == "status":
-        return ["identity", "usage", "keys", "fabric", "session"]
+        return ["identity", "usage", "keys", "fabric", "session", "harness", "inbox"]
     if op == "tokens":
         return ["identity", "tokens"]
     return [op]

@@ -346,6 +346,30 @@ class Install(Case):
             os.chmod(self.target, 0o000)      # a binary this account cannot read is not shown to be the release
             self.assertEqual(self.install()["status"], "installed")
 
+    def test_the_marker_is_not_the_launchers_session_record(self):
+        """Both lived at <state>/gateway.json: a launch overwrote the marker,
+        its end removed it, and live check 7 read the marker as a running
+        session. The marker has its own name; the record is left alone."""
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 4242, "plan_digest": "d"}, fh)
+        self.assertIsNone(gw.read_marker(self.state), "a launcher record is never read as the marker")
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "ab"})
+        self.assertEqual(json.load(open(record))["pid"], 4242, "writing the marker leaves the launcher record alone")
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "ab")
+        self.assertTrue(os.path.exists(os.path.join(self.state, "gateway-install.json")))
+
+    def test_a_marker_at_the_old_name_is_read_then_moved(self):
+        os.makedirs(self.state)
+        old = os.path.join(self.state, "gateway.json")
+        with open(old, "w") as fh:
+            json.dump({"version": VERSION, "installed_sha256": "cd"}, fh)
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "cd", "an install before the rename still reads")
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "ef"})
+        self.assertFalse(os.path.exists(old), "the old-name marker is gone, so check 7 sees no session")
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "ef")
+
     def test_a_marker_that_cannot_be_written_leaves_no_temporary_file(self):
         os.makedirs(self.state)
         with unittest.mock.patch.object(gw.json, "dumps", side_effect=ValueError("bad")), self.assertRaises(ValueError):

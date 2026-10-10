@@ -1633,6 +1633,10 @@ def state_row(address: str, rec: Any, now: float | None = None) -> dict:
             top = s
     row = {"address": address, "ts": rec["ts"], "role": nullish(rec.get("role"), None), "project": nullish(rec.get("project"), None), "sessions": sessions,
            "state": "unknown" if stale or unreadable else top["state"] if top is not None else "none", "since": nullish(dig(top, "since"), None)}
+    # What the top session adds (fleet-deck-attention s3), each only where agentd said it.
+    for key in ("reason", "context", "activity"):
+        if not (stale or unreadable) and top is not None and dig(top, key) is not UNDEFINED and dig(top, key) is not None:
+            row[key] = top[key]
     # What the deck resumes (docs/fleet-deck/session-recovery.md): carried as
     # agentd wrote it, absent when it wrote none.
     if T(rec.get("last_session")):
@@ -1691,7 +1695,23 @@ def state_record_of(rec: Any, want: set) -> dict | None:
     for s in sessions:
         if not (isinstance(s, dict) and _str(s.get("session")) and _str(s.get("state")) and (s.get("since") is None or _str(s.get("since")))):
             return None
+        if not _session_extras_ok(s):
+            return None
     return r
+
+
+def _session_extras_ok(s: dict) -> bool:
+    """The optional fields of a session (fleet-deck-attention s3) have the shape agentd writes, or are absent."""
+    if "reason" in s and s["reason"] not in ("permission", "question"):
+        return False
+    if "activity" in s and s["activity"] not in ("recent", "quiet"):
+        return False
+    if "context" in s:
+        c = s["context"]
+        if not (isinstance(c, dict) and isinstance(c.get("pct"), int) and not isinstance(c.get("pct"), bool)
+                and 0 <= c["pct"] <= 100 and _str(c.get("at"))):
+            return False
+    return True
 
 
 _PRINTABLE = re.compile("[\u0000-\u001f\u007f-\u009f]")

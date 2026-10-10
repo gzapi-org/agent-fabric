@@ -81,6 +81,15 @@ STATE_HEARTBEAT_MS = 10 * 60 * 1000
 # record (ctl.mjs STATES_STALE_MS). resume.py's NO_PROCESS_FRESH_S is the same.
 NO_PROCESS_FRESH_MS = 2 * STATE_HEARTBEAT_MS
 STATES = ("working", "blocked", "idle")
+# fleet-deck-attention s3: what the hook records of a blocked session (why it waits on a person) and what the
+# status line records beside the state file (the context window's use). Each is optional on the wire and
+# absent where unknown: a view never reads a missing sample as 0 % or a missing reason as "permission".
+REASONS = ("permission", "question")
+CONTEXT_FILE = "session-context.json"
+# The transcript is written when a message completes, not while one streams: "recent" means a message landed
+# within this window, and "quiet" means none did, which a long single response also looks like. Its mtime is
+# the only thing read; the entry format is the harness's internal one.
+ACTIVITY_RECENT_MS = 30_000
 # What a state record's `sessions` says when the account cannot read its own session state: a string where it
 # has always been a list (j68). ctl's reader knows it; control/ctl.py repeats the word.
 UNREADABLE = "unreadable"
@@ -202,17 +211,60 @@ def read_sessions(file: str, *, proc: str = "/proc", now_ms: float | None = None
         return None
     if not isinstance(doc, dict) or not isinstance(doc.get("sessions"), dict):
         return None
+    contexts = read_contexts(os.path.join(os.path.dirname(file), CONTEXT_FILE))
     out = []
     for sid, s in doc["sessions"].items():
         if not isinstance(s, dict) or s.get("state") not in STATES or not isinstance(s.get("state"), str):
             continue
         if alive(s.get("pid"), s.get("start"), proc, since=s.get("since"), now_ms=now_ms):
             since = s.get("since")
-            out.append({"session": sid, "state": s["state"], "since": js.string("" if since is None else since)})
+            row = {"session": sid, "state": s["state"], "since": js.string("" if since is None else since)}
+            if s["state"] == "blocked" and s.get("reason") in REASONS:
+                row["reason"] = s["reason"]
+            if sid in contexts:
+                row["context"] = contexts[sid]
+            seen = activity(s.get("transcript"), now_ms)
+            if seen:
+                row["activity"] = seen
+            out.append(row)
         elif not _is_integer(s.get("pid")):
             on_stale(sid)
     # JavaScript's < on strings: UTF-16 code units.
     return sorted(out, key=lambda r: r["session"].encode("utf-16-be", "surrogatepass"))
+
+
+def read_contexts(file: str) -> dict:
+    """session id -> {"pct", "at"} from the status line's sample file; {} when it is absent or unreadable, an
+    entry that is not an integer percentage in 0..100 with a time is left out: unknown, never a number."""
+    try:
+        with open(file, encoding="utf-8") as fh:
+            doc = js.json_parse(fh.read())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {}
+    sessions = doc.get("sessions") if isinstance(doc, dict) else None
+    if not isinstance(sessions, dict):
+        return {}
+    out = {}
+    for sid, c in sessions.items():
+        pct = c.get("pct") if isinstance(c, dict) else None
+        at = c.get("at") if isinstance(c, dict) else None
+        if isinstance(pct, int) and not isinstance(pct, bool) and 0 <= pct <= 100 and math.isfinite(date_parse(at)):
+            out[sid] = {"pct": pct, "at": at}
+    return out
+
+
+def activity(transcript, now_ms: float) -> str | None:
+    """"recent" when the session's transcript was written within ACTIVITY_RECENT_MS, "quiet" when not, None when
+    it cannot be told (no path, not absolute, no such file, a modification time in the future)."""
+    if not isinstance(transcript, str) or not os.path.isabs(transcript) or "\0" in transcript:
+        return None
+    try:
+        age = now_ms - os.stat(transcript).st_mtime * 1000
+    except (OSError, ValueError):
+        return None
+    if age < -ACTIVITY_RECENT_MS:
+        return None
+    return "recent" if age <= ACTIVITY_RECENT_MS else "quiet"
 
 
 def waits_on(file: str | None) -> list | None:

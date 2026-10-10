@@ -38,7 +38,8 @@ CONTRACT
   secrets  never in a URL but SerpAPI's own, a log line, a result or an error; a key that cannot be a header value
            (a control character) is refused without being quoted.
   network  https only to the two API hosts, no environment proxy (a credential would go through it), a redirect
-           followed only within its own origin (httpsafe.py); 20 s a request.
+           followed only within its own origin (httpsafe.py); 20 s per socket operation (connect, each read), not for the whole
+           request as Node's AbortSignal.timeout was: a reply that trickles keeps the one message waiting.
 """
 from __future__ import annotations
 
@@ -158,6 +159,9 @@ def _count(value: object) -> str:
         n = _js_number(value)
     elif value is None:
         n = 0.0
+    elif isinstance(value, list) and len(value) <= 1:
+        # Number([]) is 0 and Number([x]) is Number(String(x)): one element is read as the string JavaScript would make of it.
+        return _count(_js(value[0])) if value else _count(0)
     else:
         n = float("nan")
     if n != n or n == 0:
@@ -289,7 +293,10 @@ def _js_number_text(value: object) -> str:
     exponent beyond, written 1e+21 and 1e-7. Anything else JSON can hold is dumped as JSON."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return json.dumps(value, ensure_ascii=False)
-    x = float(value) if not isinstance(value, int) or abs(value) < 10 ** 300 else float("inf")
+    try:
+        x = float(value)
+    except OverflowError:
+        x = float("inf") if value > 0 else float("-inf")
     if x != x or x in (float("inf"), float("-inf")):
         return "null" if x != x else ("Infinity" if x > 0 else "-Infinity")
     if x == 0:
@@ -398,7 +405,8 @@ def search_with_fallback(engines: list[str], query: str, locale: Mapping[str, An
 
     def label(e: str) -> str:
         block = locale.get(e)
-        return (block.get("label") if isinstance(block, dict) else None) or e
+        text = block.get("label") if isinstance(block, dict) else None
+        return _js(text) if _truthy(text) else e          # JavaScript's `label || key`, the label worded as a template literal
     for engine in engines:
         r = search(engine, query, locale, None if secrets is None else (secrets.get(engine) or {}), fetch, count)
         if not r["isError"]:
@@ -460,7 +468,7 @@ def handle(msg: object, locale: Mapping[str, Any], secrets: Mapping[str, Any] | 
         else:
             engines = []
         if not engines:
-            return error(-32602, f"unknown tool {_js(name) if name is not None else 'undefined'}")
+            return error(-32602, f"unknown tool {'undefined' if 'name' not in params else 'null' if name is None else _js(name)}")
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         q = arguments.get("query")
         if not isinstance(q, str) or _units(q) < 2:
@@ -468,6 +476,23 @@ def handle(msg: object, locale: Mapping[str, Any], secrets: Mapping[str, Any] | 
         r = search_with_fallback(engines, q, locale, secrets, fetch, arguments.get("count"))
         return reply({"content": [{"type": "text", "text": r["text"]}], "isError": r["isError"]})
     return error(-32601, f"method not found: {method}")
+
+
+def _dump(out: object) -> str:
+    """One compact JSON line. A number outside the float range (the client's id 1e400 parses to Infinity) is null, as
+    JSON.stringify wrote it: Python would write Infinity, which is not JSON."""
+    try:
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except ValueError:
+        pending: list[object] = [out]
+        while pending:                       # iterative: the client chose how deep its value nests
+            node = pending.pop()
+            for key, item in (node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()):
+                if isinstance(item, float) and (item != item or item in (float("inf"), float("-inf"))):
+                    node[key] = None
+                elif isinstance(item, (dict, list)):
+                    pending.append(item)
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def _no_constant(name: str) -> object:
@@ -495,7 +520,7 @@ def serve(locale: Mapping[str, Any], stdin=None, stdout=None, secrets: Mapping[s
                 out = {"jsonrpc": "2.0", "id": ident if isinstance(ident, (str, int, float)) and not isinstance(ident, bool) else None,
                        "error": {"code": -32603, "message": "internal error"}}
         if out is not None:
-            stdout.write(_LONE_SURROGATE.sub("\ufffd", json.dumps(out, ensure_ascii=False, separators=(",", ":"))) + "\n")
+            stdout.write(_LONE_SURROGATE.sub("\ufffd", _dump(out)) + "\n")
             stdout.flush()
     return 0
 

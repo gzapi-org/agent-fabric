@@ -239,8 +239,8 @@ def main() -> int:
             url = one_shot(reply)
             r = ws.search("brave", "ab", LOCALE, B, lambda _u, h, url=url: ws.http_fetch(url, h))
             check(f"{label}: a tool error that says unreachable, not an exception out of the server", r == {"isError": True, "text": "search failed: unreachable"}, str(r))
-        check("an integer too large for a float is clamped like Infinity, and a dict or a list is NaN (the default)",
-              ws._count(10 ** 400) == "20" and ws._count(-(10 ** 400)) == "1" and ws._count({"a": 1}) == "10" and ws._count([5]) == "10"
+        check("an integer too large for a float is clamped like Infinity, and a dict is NaN (the default)",
+              ws._count(10 ** 400) == "20" and ws._count(-(10 ** 400)) == "1" and ws._count({"a": 1}) == "10"
               and ws._count(None) == "10" and ws._count("7") == "7" and ws._count(True) == "1")
         # What Node's Number() made of a count that arrives as a string, recorded from node: Python's float() reads more.
         node_counts = {"7": "7", " 7 ": "7", "1_0": "10", "inf": "10", "Infinity": "20", "-Infinity": "1", "+Infinity": "20", "0x10": "16",
@@ -285,6 +285,25 @@ def main() -> int:
         check("a count with a long run of spaces inside it is read in linear time (a regex trim took seconds)", time.monotonic() - slow < 1.0)
         check("a count that is a hexadecimal, octal or binary integer too large for a float is Infinity, clamped (Node: 20)",
               ws._count("0x" + "f" * 300) == "20" and ws._count("0b" + "1" * 1100) == "20" and ws._count("0o" + "7" * 400) == "20")
+        # Recorded from node: Number([5]) is 5, Number(["7"]) 7, Number([[5]]) 5, Number([]) 0 (default 10), Number([1,2]) NaN (default 10).
+        check("a count given as an array of one is read as Number() reads it; an empty or longer one is the default",
+              (ws._count([5]), ws._count(["7"]), ws._count([[5]]), ws._count([]), ws._count([1, 2]), ws._count([100])) == ("5", "7", "5", "10", "10", "20"))
+        check("an integer between 1e300 and the float range is written 1e+305, as Node wrote it, not Infinity", ws._js(10 ** 305) == "1e+305"
+              and ws._js(-(10 ** 305)) == "-1e+305" and ws._js(10 ** 400) == "Infinity" and ws._js(-(10 ** 400)) == "-Infinity")
+        lab = {"serpapi": {**LOCALE["serpapi"], "label": True}, "brave": {**LOCALE["brave"], "label": []}}
+        ok_serp = (200, json.dumps({"organic_results": [{"title": "t", "link": "l", "snippet": "s"}]}))
+        got = ws.search_with_fallback(["serpapi"], "ab", lab, {"serpapi": G}, lambda _u, _h: ok_serp)
+        check("a label that is not a string is worded as a template literal would word it (true), and an empty array is truthy (empty text)",
+              got["text"].endswith("\n\n— true") and ws.search_with_fallback(["brave"], "ab", lab, {"brave": B}, lambda _u, _h: (200, json.dumps({"web": {"results": [{"title": "t", "url": "u"}]}})))["text"].endswith("\n\n— "),
+              got["text"])
+        sink4 = io.StringIO()
+        ws.serve(LOCALE, io.StringIO('{"jsonrpc":"2.0","id":1e400,"method":"ping"}\n{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":[1e400]}}\n'
+                                     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":null}}\n{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{}}\n'), sink4)
+        answers = [json.loads(x) for x in sink4.getvalue().splitlines()]
+        check("an id or a protocolVersion out of the float range is null on the wire (valid JSON), a tool name of null is worded null and a missing one undefined",
+              answers[0] == {"jsonrpc": "2.0", "id": None, "result": {}} and answers[1]["result"]["protocolVersion"] == [None]
+              and answers[2]["error"]["message"] == "unknown tool null" and answers[3]["error"]["message"] == "unknown tool undefined" and "Infinity" not in sink4.getvalue(),
+              sink4.getvalue())
         sink3 = io.StringIO()
         ws.serve(LOCALE, io.StringIO("\ufeff" + json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\u00a0\n"
                                      + "\x1c" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"), sink3)

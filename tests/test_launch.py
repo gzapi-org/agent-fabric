@@ -361,6 +361,9 @@ def main() -> int:
         check("the caller's resume flags are replaced, a bare -r keeps the option after it",
               launch.without_resume(["-c", "--resume=a", "-r", "--model", "m", "--continue", "x"])
               == ["--model", "m", "x"])
+        check("…and --from-pr and --teleport, with or without a value, are resume flags too",
+              launch.without_resume(["--from-pr", "12", "--teleport", "--model", "m", "--from-pr=3", "--teleport=x", "y"])
+              == ["--model", "m", "y"])
         check("only path options' values are made absolute; JSON and absolute paths are left",
               launch.absolute_path_options(["--add-dir", "d", "--settings", "{}", "--mcp-config=/m", "--model", "f",
                                             "--settings=s"], "/w")

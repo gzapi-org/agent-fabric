@@ -215,7 +215,7 @@ def split_message(message: str) -> tuple[str, str]:
     paragraph with its lines joined by a space, the body what follows the
     blank line after it."""
     parts = re.split(r"\n[ \t]*\n", message.strip("\n"), maxsplit=1)
-    return " ".join(ln.rstrip() for ln in parts[0].split("\n")), (parts[1].strip("\n") if len(parts) > 1 else "")
+    return " ".join(ln.rstrip(" \t\r\f\v") for ln in parts[0].split("\n")), (parts[1].strip("\n") if len(parts) > 1 else "")
 
 
 def check_trailers(sha: str, body: str) -> None:

@@ -310,6 +310,8 @@ def main() -> int:
           r["ok"] and (r["work"], r["fix"]) == (0, 1), r)
     subj, body = pr_counts.split_message("add parser\nfor the review findings\n\nbody\n\nKind: work\n")
     check("subject and body are split as git's %s and %b", (subj, body) == ("add parser for the review findings", "body\n\nKind: work"), (subj, body))
+    check("trailing space on a subject line is dropped, as git's %s drops it",
+          pr_counts.split_message("add parser \nfor x\t\n\nbody")[0] == "add parser for x", pr_counts.split_message("add parser \nfor x\t\n\nbody"))
     mixed = commit("m" * 40, "small change\n\n(cherry picked from commit abcdef1)\nKind: review-fix")
     r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [mixed])}}))[0]
     check("a trailer block that git reads and the gate's reader rejects is unreadable, not a guessed work",
@@ -342,6 +344,10 @@ def main() -> int:
               r["ok"] and (r["work"], r["fix"]) == (1, 0), r)
         no_parent = pr_doc(1, [folds], head=head, state="MERGED", merged=True)
         no_parent["mergeCommit"] = {"parents": {"nodes": [{"oid": "b" * 40}]}}   # a squash: one parent
+        other = pr_doc(1, [folds], head=head, state="MERGED", merged=True)
+        other["mergeCommit"] = {"parents": {"nodes": [{"oid": "b" * 40}, {"oid": "e" * 40}]}}   # two parents, the second not the head
+        r = run_counts(["1"], Hub({"o/this": {1: other}}, rest=rest))[0]
+        check("a merge commit whose second parent is not the head is unreadable too", not r["ok"] and "not by a merge commit" in r["line"], r)
         r = run_counts(["1"], Hub({"o/this": {1: no_parent}}, rest=rest))[0]
         check("a merged one that is no merge commit of its head (a squash) is unreadable, not read against no base",
               not r["ok"] and "not by a merge commit" in r["line"], r)

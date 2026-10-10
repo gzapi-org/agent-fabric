@@ -4,13 +4,13 @@ pull request, across repositories.
 
     fabric-pr counts <ref>… [--json] [--timeout S]
 
-A ref is `167` (a pull request of this checkout's repository), `gzapp#1075`
+A ref is `167` (a pull request of this checkout's repository), `myproject#1075`
 (a project id, or the name of a project's repository, from
 projects/registry.json) or `owner/repo#N`; a leading `#` is allowed. One line
 per ref, in the order given:
 
     #167 (9 work, 2 fix) open, armed, checks pending, head reviewed
-    gzapp#1075 (4 work, 3 fix) open, unarmed, checks red, review not on head
+    myproject#1075 (4 work, 3 fix) open, unarmed, checks red, review not on head
     #164 (1 work, 4 fix) merged
 
 The first token is what the Stop hook (runtime/claude-code/hooks/pr-counts.py)

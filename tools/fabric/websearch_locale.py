@@ -254,7 +254,18 @@ def _js(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, str):
         return value
+    if isinstance(value, dict):
+        return "[object Object]"
+    if isinstance(value, list):
+        return ",".join(_js(x) for x in value)      # Array.prototype.toString: null is empty, nested arrays flatten
     return json.dumps(value, ensure_ascii=False)
+
+
+def _truthy(value: object) -> bool:
+    """JavaScript's truthiness of a parsed JSON value: an empty object or array is true, null, false, 0 and "" are not."""
+    if isinstance(value, (dict, list)):
+        return True
+    return bool(value)
 
 
 def strip_tags(text: object) -> str:
@@ -309,7 +320,7 @@ def search(engine: str, query: str, locale: Mapping[str, Any], secrets: Mapping[
     except OSError:
         return {"isError": True, "text": "search failed: unreachable"}
     try:
-        j: object = json.loads(body)
+        j: object = json.loads(body.removeprefix("\ufeff"))      # fetch's json() reads UTF-8 and drops a leading mark
         parsed = True
     except ValueError:
         j, parsed = None, False
@@ -319,10 +330,10 @@ def search(engine: str, query: str, locale: Mapping[str, Any], secrets: Mapping[
             err = _get(j, "error")
             why = err if isinstance(err, str) else next((v for v in (_get(j, "message"), _get(err, "message"), _get(err, "detail"))
                                                         if v is not None), "")
-        return {"isError": True, "text": f"search refused: HTTP {status}" + (f" — {_clip(_js(why), 200)}" if why else "")}
+        return {"isError": True, "text": f"search refused: HTTP {status}" + (f" — {_clip(_js(why), 200)}" if _truthy(why) else "")}
     if not parsed:
         return {"isError": True, "text": "search answered something that is not JSON"}
-    if engine == "serpapi" and _get(j, "error"):
+    if engine == "serpapi" and _truthy(_get(j, "error")):
         return {"isError": True, "text": f"search refused: {_clip(_js(_get(j, 'error')), 200)}"}
     if engine == "serpapi":
         rows = _get(j, "organic_results")

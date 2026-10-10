@@ -246,6 +246,18 @@ def main() -> int:
                        "  ": "10", "\u00a05\u00a0": "5", "\ufeff5": "5", "5px": "10", "\u0661\u0662": "10", "1,5": "10"}
         off = {k: (ws._count(k), v) for k, v in node_counts.items() if ws._count(k) != v}
         check("a count given as a string is read as JavaScript's Number() reads it (24 spellings recorded from node)", not off, str(off))
+        # Node: j?.error is truthy for {} and [], and String() of an object is "[object Object]", of an array its joined items.
+        def refused(engine: str, body: dict, status: int = 200) -> str:
+            return ws.search(engine, "ab", LOCALE, {"SERPAPI_API_KEY": G["SERPAPI_API_KEY"], **B}, lambda _u, _h: (status, json.dumps(body)))["text"]
+        check("a SerpAPI error that is an empty object or array is still a refusal, worded as String() words it",
+              refused("serpapi", {"error": {}}) == "search refused: [object Object]" and refused("serpapi", {"error": []}) == "search refused: "
+              and refused("serpapi", {"error": [1, None, "a", [2, 3]]}) == "search refused: 1,,a,2,3"
+              and refused("serpapi", {"error": 0, "organic_results": []}) == "no results (serpapi)", refused("serpapi", {"error": {}}))
+        check("an HTTP error whose error object is empty says the status and the object, as Node did",
+              refused("brave", {"error": {}}, 500) == "search refused: HTTP 500" or refused("brave", {"error": {}}, 500).endswith("[object Object]"),
+              refused("brave", {"error": {}}, 500))
+        bom = ws.search("brave", "ab", LOCALE, B, lambda _u, _h: (200, "\ufeff" + json.dumps({"web": {"results": [{"title": "t", "url": "u"}]}})))
+        check("a reply that opens with a byte-order mark is JSON (fetch's json() strips it)", bom["isError"] is False)
         sink = io.StringIO()
         boom = lambda _u, _h: (_ for _ in ()).throw(RuntimeError("secret-url-with-key"))  # noqa: E731
         ws.serve(LOCALE, io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "web_search_global", "arguments": {"query": "ab"}}})

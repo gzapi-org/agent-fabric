@@ -126,6 +126,15 @@ class Activity(Account):
             self.state(transcript=bad)
             self.assertNotIn("activity", self.row(), repr(bad))
 
+    def test_a_relative_path_is_not_resolved_against_whatever_directory_the_agent_runs_in(self):
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        self.transcript(1)
+        os.chdir(self.dir)             # "t.jsonl" now exists relative to the agent's directory
+        self.assertTrue(os.path.exists("t.jsonl"))
+        self.state(transcript="t.jsonl")
+        self.assertNotIn("activity", self.row())
+
     def test_only_the_modification_time_is_read(self):
         path = self.transcript(600)
         os.chmod(path, 0o000)          # stat needs no read permission on the file itself

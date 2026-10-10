@@ -424,6 +424,9 @@ def build_report(root, environ=None, cred_environ=None):
     # install.sh is invisible anywhere else (review, 2026-09-16).
     moveto = hosttools.moveto_drift(root=root)
     python = pinned_python(root)
+    drift = load("fabric_drift", os.path.join(root, "tools", "fabric", "drift.py"))
+    claude = claude_state(drift, root)
+    inbox = inbox_state(drift, root, ctx)
     journal = episodic_journal(root)
     agentd = agentd_implementation(root, ctx["agent"], environ)
 
@@ -453,7 +456,7 @@ def build_report(root, environ=None, cred_environ=None):
                 "claude_sign_in": claude_sign_in(sign_env, sign_file, environ)},
         "capabilities": classes,
         "routing_check": "clean" if not checks else checks,
-        "host_tools": {"moveto": moveto, "python": python, "journal": journal, "agentd": agentd},
+        "host_tools": {"moveto": moveto, "python": python, "journal": journal, "agentd": agentd, "claude": claude, "inbox": inbox},
         "control_plane": root,
     }
     return report, base
@@ -501,6 +504,53 @@ def agentd_implementation(root, agent, environ):
         return {"status": "python", "detail": "python (the unit's ExecStart)"}
     except Exception as e:  # noqa: BLE001 — a status line, never a traceback
         return {"status": "unknown", "detail": str(e)}
+
+
+def _age_words(s):
+    return f"{s} s" if s < 120 else f"{round(s / 60)} min" if s < 7200 else f"{round(s / 3600)} h" if s < 172800 else f"{round(s / 86400)} days"
+
+
+def claude_state(drift, root):
+    """The Claude Code installed here against the pin (tools/fabric/drift.py): ok, drift, unpinned or unknown."""
+    try:
+        h = drift.harness(root=root)
+    except Exception as e:  # noqa: BLE001 — a status line, never a traceback
+        return {"status": "unknown", "detail": str(e)}
+    if h["status"] != "ok":
+        return {"status": "unknown", "detail": h["error"], "pinned": h.get("pinned")}
+    if h["drift"]:
+        return {"status": "drift", "detail": f"installed {h['installed']}, the fleet pin is {h['pinned']} (fabric-ctl <login> upgrade claude)",
+                "installed": h["installed"], "pinned": h["pinned"]}
+    if h["pinned"] is None:
+        return {"status": "unpinned", "detail": f"{h['installed']} (runtime/claude-code/harness.json pins none)", "installed": h["installed"], "pinned": None}
+    return {"status": "ok", "detail": f"{h['installed']}, as pinned", "installed": h["installed"], "pinned": h["pinned"]}
+
+
+def inbox_state(drift, root, ctx, relay=None, home=None):
+    """This account's GZCoord read position against the relay's newest message: what it has not read, and the
+    age of the oldest, over a day being lag. Read with the account's synced token only (never a working copy's
+    settings), the relay by its own address as the inbox does, and never an acknowledgement."""
+    try:
+        relay = relay or load("fabric_relay", os.path.join(root, "tools", "fabric", "relay.py"))
+        pairs, _none = relay.channels([ctx["project"]] if ctx.get("project") else [], os.environ)
+        if not pairs:
+            return {"status": "none", "detail": f"no GZCoord channel for {ctx.get('project') or 'a project'}"}
+        url, channel = pairs[0]
+        tok = relay.own_token(home or os.path.expanduser("~"))
+        if not tok:
+            return {"status": "unknown", "detail": "no relay token in this account's secrets.env (fabric-secrets sync)"}
+        d = drift.inbox(lambda path: relay.call(url, tok, path), channel, f"{ctx['host']}/{ctx['agent']}")
+    except Exception as e:  # noqa: BLE001 — a status line, never a traceback; the relay's errors name no token
+        return {"status": "unknown", "detail": str(e)[:200]}
+    if d["status"] == "none":
+        return {"status": "none", "detail": d["reason"]}
+    if not d["unread"]:
+        return {**d, "status": "ok", "detail": "nothing unread"}
+    if d["lagging"] is None:
+        return {**d, "status": "unknown", "detail": f"{d['unread']} unread, the age of the oldest could not be read"}
+    cap = "+" if d["capped"] else ""
+    text = f"{d['unread']}{cap} unread, the oldest {_age_words(d['lag_s'])} old (seq {d['oldest_unread_seq']}; relay newest {d['newest_seq']})"
+    return {**d, "status": "lag" if d["lagging"] else "ok", "detail": text}
 
 
 def episodic_journal(root):
@@ -584,6 +634,10 @@ def render(report, base):
     python = report["host_tools"].get("python")
     if python:
         p(f"python       {python['detail']}" if python["status"] == "ok" else f"python       {python['status'].upper()}: {python['detail']}")
+    for name in ("claude", "inbox"):
+        tool = report["host_tools"].get(name)
+        if tool:
+            p(f"{name:<12} {tool['detail']}" if tool["status"] in ("ok", "none", "unpinned") else f"{name:<12} {tool['status'].upper()}: {tool['detail']}")
     agentd = report["host_tools"].get("agentd")
     if agentd:
         p(f"agentd       {agentd['detail']}" if agentd["status"] == "python"

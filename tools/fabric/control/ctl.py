@@ -600,7 +600,9 @@ def rows(expected: list[dict], replies: list[dict]) -> list[dict]:
                     "tokens": g("tokens"), "memory": g("memory"), "machine": g("host"), "disk": g("disk"), "accounts": g("accounts"),
                     "upgrade": g("upgrade"), "secretsSync": g("secrets-sync"), "presence": g("presence"), "jobs": g("jobs"), "tools": g("tools"),
                     "jobsAdd": g("jobs-add"), "toolsInstall": g("tools-install"), "gateway": g("gateway"), "gatewayInstall": g("gateway-install"), "poolAdd": g("pool-add"), "local": g("local"),
-                    "localPrune": g("local-prune"), "selftest": g("secrets-selftest"), "agentd": g("agentd")})
+                    "localPrune": g("local-prune"), "selftest": g("secrets-selftest"), "agentd": g("agentd"),
+                    # Only where the control agent answered them (an older one does not): a row never says null for a section nobody asked.
+                    **{k: g(k) for k in ("harness", "inbox") if dig(d, k) is not UNDEFINED}})
     return out
 
 
@@ -1353,6 +1355,30 @@ def _table_tokens(rs: list) -> list[str]:
     return lines
 
 
+def _drift_cells(r: dict) -> str:
+    """The harness and inbox cells of a status row (tools/fabric/drift.py), named when they are wrong and
+    empty for a control agent that does not answer them: Claude Code installed against the pin, and the
+    oldest message the account has not read, when it is over a day old."""
+    out = ""
+    h = r.get("harness")
+    if isinstance(h, dict):
+        if h.get("status") != "ok":
+            out += "  claude ?"
+        elif h.get("drift") is True:
+            out += f"  claude {esc(h['installed'])} DRIFT (pin {esc(h['pinned'])})"
+        elif h.get("pinned") is None:
+            out += f"  claude {esc(h['installed'])} (no pin)"
+        else:
+            out += f"  claude {esc(h['installed'])}"
+    i = r.get("inbox")
+    if isinstance(i, dict) and i.get("status") != "none":
+        if i.get("status") != "ok" or i.get("lagging") is None:
+            out += "  inbox ?"
+        elif i["lagging"]:
+            out += f"  inbox LAG {_age(i['lag_s'])} ({S(i['unread'])}{'+' if i.get('capped') else ''} unread)"
+    return out
+
+
 def _table_status(rs: list) -> list[str]:
     lines = [f"{pad_end('account', 22)} {pad_end('status', 10)} {pad_end('claude account', 30)} {pad_start('5h', 4)}  {pad_end('5h resets (UTC)', 16)} {pad_start('7d', 4)}  "
              f"{pad_end('7d resets (UTC)', 16)} {pad_end('role', 18)} fabric"]
@@ -1367,7 +1393,8 @@ def _table_status(rs: list) -> list[str]:
             fab = S(nullish(dig(fb, "status"), "-"))
         usage = (f"{pct(r['five_hour'])}  {pad_end(at(r['five_hour']), 16)} {pct(r['seven_day'])}  {pad_end(at(r['seven_day']), 16)}"
                  if r.get("usage_status") == "ok" else pad_end(S(nullish(r.get("usage_status"), "-")), 42))
-        lines.append(f"{pad_end(r['account'], 22)} {pad_end('ok', 10)} {pad_end(S(nullish(r['email'], '-')), 30)} {usage} {pad_end(S(nullish(r['role'], '-')), 18)} {fab}")
+        lines.append(f"{pad_end(r['account'], 22)} {pad_end('ok', 10)} {pad_end(S(nullish(r['email'], '-')), 30)} {usage} {pad_end(S(nullish(r['role'], '-')), 18)} {fab}"
+                     + _drift_cells(r))
     return lines
 
 

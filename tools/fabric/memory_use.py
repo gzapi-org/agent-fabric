@@ -1,0 +1,132 @@
+"""tools/fabric/memory_use.py — what the fabric-memory server wrote in a login's state, read for a drain (ADR-049).
+
+The server (tools/fabric/memory_mcp/) appends two files to agents/<login>/: memory-marks.jsonl (a session's verdict on
+a section: time, id, verdict, note) and memory-calls.jsonl (one line per call: time, tool, hit count, the ids returned,
+and for a read whether the last find returned one of them). Agents live on different hosts and the coordinator never
+reads another account's state, so the harvest (harvest_memory.py) carries both in the bundle: the marks themselves, and
+counts over the calls. Query text is never in either file and never here.
+
+CONTRACT
+  read(state_dir, since_ms, credential_hits, *, project, until_ms)  -> (marks, use)
+      the rows of the window (after since_ms, up to until_ms: a row after the moment the harvest began scanning waits for the
+      next drain) written by sessions of `project` (a row names it; the log is the login's, which works in several)
+      marks   [{"t", "id", "verdict", "note"}], file order; a row in the window that is not a mark of the server's shape is
+              dropped and counted in `unreadable_lines`
+      use     {"since_ms", "until_ms", "calls": {tool: n}, "zero_hit_finds", "finds_followed_by_read", "ids_read": {id: n},
+               "marks": n, "errors", "unreadable_lines", "unattributed_lines", "notes_withheld"}, or None when the window holds
+              no mark, call, refused call, malformed row or withheld note: a drain of a login that never ran the server is
+              the drain it was. `errors` are calls the caller got wrong (never counted as a find that found nothing).
+              `unattributed_lines` are lines that are not JSON or carry no time: they belong to no window and no project, are
+              reported once a drain has something else to report, and never make a drain non-empty alone
+      until_ms the latest row time read (>= since_ms): the watermark covers these rows like memories
+  A missing file is no rows, not an error; an unreadable one is the same.
+  A note that carries a credential by shape (the caller's screen) is withheld, the mark kept."""
+from __future__ import annotations
+
+import datetime
+import json
+import os
+import re
+from collections.abc import Callable
+
+MARKS, CALLS = "memory-marks.jsonl", "memory-calls.jsonl"
+VERDICTS = ("helpful", "wrong", "stale")
+NOTE_CLIP = 300
+# The ids memory_find returns: f:/p: and a path, then #position for a section. Anything else is not a corpus id.
+ID_RE = re.compile(r"[fp]:[A-Za-z0-9._/-]+(#[0-9]+)?")      # used with fullmatch: a "$" would also pass one trailing newline
+
+
+def _ms(stamp: object) -> int | None:
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return int(datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _rows(path: str) -> tuple[list[dict], int]:
+    """(the JSON objects of a jsonl file in order, the count of lines that are not one)."""
+    rows, bad = [], 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return [], 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            bad += 1
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+        else:
+            bad += 1
+    return rows, bad
+
+
+def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] = lambda _text: [], *, project: str | None = None,
+         until_ms: int | None = None) -> tuple[list[dict], dict | None]:
+    """The rows after since_ms, up to until_ms, of one project (a row names the project of the session that wrote it; the log
+    is the login's, which works in several). None for `use` when the window holds nothing at all, so that a drain of a login
+    that never ran the server is the drain it was. until_ms is the time the harvest began scanning the memories: a row after
+    it waits for the next drain, so the watermark never passes a memory the scan did not see."""
+    marks: list[dict] = []
+    use: dict = {"since_ms": since_ms, "until_ms": since_ms, "calls": {}, "zero_hit_finds": 0, "finds_followed_by_read": 0,
+                 "ids_read": {}, "marks": 0, "errors": 0, "unreadable_lines": 0, "unattributed_lines": 0,
+                 "notes_withheld": 0}
+    until = since_ms
+    rows, bad = _rows(os.path.join(state_dir, MARKS))
+    use["unattributed_lines"] += bad          # not JSON: no time, no project, so it belongs to no window
+    for row in rows:
+        at = _ms(row.get("t"))
+        if at is None:
+            use["unattributed_lines"] += 1       # no time, so no window and no project to hold it against
+            continue
+        if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
+            continue
+        ident, verdict, note = row.get("id"), row.get("verdict"), row.get("note", "")
+        if not isinstance(ident, str) or not ID_RE.fullmatch(ident) or verdict not in VERDICTS or not isinstance(note, str):
+            use["unreadable_lines"] += 1
+            continue
+        note = " ".join(note.split())[:NOTE_CLIP]
+        if note and credential_hits(note):
+            note = ""
+            use["notes_withheld"] += 1
+        marks.append({"t": row["t"], "id": ident, "verdict": verdict, "note": note})
+        until = max(until, at)
+    use["marks"] = len(marks)
+    rows, bad = _rows(os.path.join(state_dir, CALLS))
+    use["unattributed_lines"] += bad
+    pending = False       # a find not yet followed by a read of one of its ids
+    for row in rows:
+        at, tool = _ms(row.get("t")), row.get("tool")
+        if at is None:
+            use["unattributed_lines"] += 1
+            continue
+        if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
+            continue
+        if not isinstance(tool, str):
+            use["unreadable_lines"] += 1
+            continue
+        until = max(until, at)
+        if row.get("error") is True:
+            use["errors"] += 1             # the caller got it wrong: neither a call that found nothing nor one that read
+            continue
+        use["calls"][tool] = use["calls"].get(tool, 0) + 1
+        ids = [i for i in row.get("ids") or [] if isinstance(i, str) and ID_RE.fullmatch(i)] if isinstance(row.get("ids"), list) else []
+        if tool == "memory_find":
+            use["zero_hit_finds"] += not row.get("hits")
+            pending = True
+        elif tool == "memory_read":
+            for i in ids:
+                use["ids_read"][i] = use["ids_read"].get(i, 0) + 1
+            if pending and row.get("after_find") is True:
+                use["finds_followed_by_read"] += 1
+                pending = False
+    use["until_ms"] = until
+    quiet = not (marks or use["calls"] or use["errors"] or use["unreadable_lines"] or use["notes_withheld"])
+    return marks, (None if quiet else use)

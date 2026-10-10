@@ -60,3 +60,6 @@ were stale (17 citing a gone path, 19 records of an event) and 325
 sessions in 24 hours read no slice; the same day's drain also left applied
 corrections standing beside the text they replaced. The owner chose
 distributed judgement with a central assist over central evaluation.
+None of the four rules' new behaviour is built yet; each says so in its
+text and what happens until it is, and ADR-050 section 6 names the
+builder of each.

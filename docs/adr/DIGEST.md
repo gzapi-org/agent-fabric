@@ -316,10 +316,11 @@ its record disagree, the record wins. Look it up, never read it whole:
   `merge_target` (rule 12).
 - A 2026-09-28 — a drain-bound memory is judged when written, by a
   user-scope hook (rule 14).
-- A 2026-10-10 — the role's holder judges truth: ADR-050 (rules 11, 12, 14, 15).
+- A 2026-10-10 — the role's holder judges truth: ADR-050 (rules 11, 12, 14,
+  15), decided, not yet built.
 - Keywords: memory, knowledge, slice, drain, harvest, assemble, roles_class,
-  solution, rationale, workflow, threads, INDEX, provenance, watermark,
-  bundle, hygiene, tier.
+  domain, solution, rationale, workflow, threads, INDEX, provenance,
+  watermark, bundle, hygiene, redacted, tier.
 
 ### ADR-014 — The memory assembler's rules: contested claims, same-agent retitle, corrections (Accepted)
 
@@ -337,7 +338,7 @@ its record disagree, the record wins. Look it up, never read it whole:
   class; ambiguous refuses the run, unresolved is reported every drain;
   the correction keeps its own heading (§5 rules 7–8).
 - A 2026-10-10 — a retitle replaces only the section it names; a body-less
-  `merge_target` retires a section (rules 4, 7, ADR-050).
+  `merge_target` retires a section (rules 4, 7, ADR-050); not yet built.
 - Keywords: collision, SUPERSEDING, supersede, keep-both, drop,
   --collision-decisions, same-agent, retitle, merge_target, correction,
   observed, idempotent, budget part.
@@ -1050,24 +1051,26 @@ its record disagree, the record wins. Look it up, never read it whole:
 
 ### ADR-050 — Keeping wisdom true: judgement where the knowledge lives (Proposed)
 
-- Truth is judged by the role that holds the knowledge, not centrally; the
-  drain flags and routes, and applies nothing (§2).
+- Truth is judged by the role that holds the knowledge; the drain flags,
+  routes and applies nothing (§2).
 - A `solution` or `workflow` memory may carry `anchors: [path::symbol]`;
-  `memory_check.py` and a lint warning sort a section stale-hard,
-  maybe-stale (anchor changed since *Observed*) or fresh (§5 rules 1-2).
-- Each flag is a job for the origin agent if it holds the role, else the
-  running holder, else the lowest-numbered; one REQUEST per agent per drain;
-  the agent corrects or confirms by `merge_target`. A `memory_mark` of stale
-  or wrong is routed alike (§5 rules 3-5).
-- An advisory model hint per maybe-stale section; never applied (§5 rule 6).
+  `memory_check.py` sorts a section stale-hard, maybe-stale (anchor changed
+  since *Observed*), fresh, unchecked or no-anchor; only the first two are
+  flags (§5 rules 1-2).
+- Each flag goes to the section's last writer if it holds the role, else
+  the running holder, else the lowest-numbered; one REQUEST per agent per
+  drain, one job by intake. The
+  agent corrects or confirms by `merge_target`; a stale or wrong
+  `memory_mark` is routed alike (§5 rules 3-5).
+- An advisory model hint per maybe-stale flag, never applied (§5 rule 6).
 - Rubric test 6, a lesson, not a record; a lesson a test, lint rule or hook
-  can hold becomes one; a body-less `merge_target` retires a section (§5
-  rule 7).
-- Review horizons (30 days solution, 90 workflow, 8 weeks unretrieved) are
-  listed, never expired (§5 rule 8).
+  can hold becomes one; a body-less `merge_target` retires a section (rule 7).
+- Review horizons (30 days solution, 90 workflow, 8 weeks unread) are
+  listed, never expired, routed like a flag (§5 rule 8).
 - Shared corrections name `shared_with`; authors retire corrected memories;
   a retitle replaces only what it names; hygiene gains private addresses and
-  home paths; the drain runs per project; nothing crosses hosts by a local
-  read (§5 rules 9-14). Amends ADR-013 and ADR-014.
+  home paths; the drain runs per project; no local cross-host reads (§5
+  rules 9-14). Rules not in the tree say so, with what holds until
+  they are. Amends ADR-013, ADR-014.
 - Keywords: stale, anchors, memory_check, maybe-stale, stale-hard, flag,
   memory_mark, horizon, lesson, record, retire, shared_with, drain report.

@@ -204,7 +204,8 @@ arrive, and each can be traced to who learnt it, where and when.
     rendering — and a run that harvested nothing changes none. It also
     lists the section flags and where each went, the helpful marks per
     section, the applied corrections, every same-agent retitle and the
-    sections past a review horizon (ADR-050 rules 3, 5, 8, 10, 11) (A 2026-10-10).
+    sections past a review horizon (ADR-050 rules 3, 5, 8, 10, 11)
+    (A 2026-10-10) (decided, not yet built; until it is, the report lacks these lists).
 12. A slice an agent believes wrong is corrected at the memory it was
     drained from, or by a memory of the same class carrying `merge_target`
     with the stale section's heading (ADR-014 rule 7); a correction
@@ -213,7 +214,7 @@ arrive, and each can be traced to who learnt it, where and when.
     every session so) (A 2026-09-28). A correction into a `shared/` slice
     names `shared_with`, and its author retires the memory it replaces
     and, once a drain has applied it, the correction memory (ADR-050
-    rules 9 and 10) (A 2026-10-10).
+    rules 9 and 10) (A 2026-10-10) (the `shared_with` warning is decided, not yet built; until it is, nothing warns).
 13. Merge mode is the default: a drain reads the existing slices and
     folds new claims into them; regenerating from scratch is never done
     implicitly, an empty delta is a correct outcome, and the same claims
@@ -226,12 +227,12 @@ arrive, and each can be traced to who learnt it, where and when.
     blocks, and names a credential by its kind only (A 2026-09-28). It
     also warns on an event-shaped description (rubric test 6) and asks for
     `anchors` on a `solution` or `workflow` memory (ADR-050 rules 1 and 7)
-    (A 2026-10-10).
-15. Truth is judged where the knowledge lives: a flag of a section whose
-    anchors or cited paths no longer hold becomes a job for the role's
-    holder, who corrects or confirms it by a `merge_target` memory; the
-    drain applies no judgement of its own (ADR-050 rules 1 to 6)
-    (A 2026-10-10).
+    (A 2026-10-10) (decided, not yet built; until it is, the hook does neither).
+15. Truth is judged where the knowledge lives: a stale-hard or
+    maybe-stale flag, or a reader's stale or wrong mark, goes in one
+    REQUEST to the role's holder, who corrects or confirms the section by
+    a `merge_target` memory; the drain applies no judgement of its own
+    (ADR-050 rules 1 to 6) (A 2026-10-10) (decided, not yet built; until it is, `memory_check.py` finds gone paths only and fabric-coordinator sends the flags).
 
 ## 6. Consequences
 
@@ -294,4 +295,4 @@ The body above reads current; each change's full note is in [history/ADR-013-ame
 | 2026-09-28 | What a session is given at start | §7: the known gap closed — the INDEX banner no longer claims the hook gives workflow slices |
 | 2026-09-28 | A correction replaces a section only at its source or with merge_target | §5 rule 12: the two ways, per ADR-014 rule 7 |
 | 2026-09-28 | A memory is judged when it is written | §5 rule 14: the write-time check, at user scope |
-| 2026-10-10 | Truth is judged where it lives: anchors, flags, horizons | §5 rules 11, 12, 14 and 15: the drain report lists flags, marks, applied corrections, retitles and horizons; a shared correction names `shared_with` and its author retires what it replaces; the write-time check asks for anchors and warns on events; rule 15 added, truth judged by the role's holder (agent-fabric ADR-050) |
+| 2026-10-10 | Truth is judged where it lives: anchors, flags, horizons | §5 rules 11, 12, 14 and 15: the drain report lists flags, marks, applied corrections, retitles and horizons; a shared correction names `shared_with` and its author retires what it replaces; the write-time check asks for anchors and warns on events; rule 15 added, truth judged by the role's holder; each unbuilt behaviour is marked decided, not yet built (agent-fabric ADR-050) |

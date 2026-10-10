@@ -109,7 +109,7 @@ case where it could be — two authors, a contested heading, an older text.
    (a) the topic's own files, for a retitle (which replaces only the
    section the claim names by `merge_target` or shares its cue with; a
    claim sharing nothing with the topic's sections is a new topic)
-   (A 2026-10-10), or (b) every file the
+   (A 2026-10-10) (decided, not yet built; until it is, a retitle replaces every section of the topic), or (b) every file the
    pre-pass reads the topic from — the flat class file included, when it
    holds the topic — for a new text under an existing heading — the same-heading supersede replaces one
    section and touches no other memory. It is printed (`SUPERSEDED, same
@@ -132,7 +132,7 @@ case where it could be — two authors, a contested heading, an older text.
    written as the claim's own topic and named on stderr and under
    `merge_target_unresolved` on every drain that brings the memory. A
    `merge_target` memory with no body retires the named section and
-   leaves nothing in its place (A 2026-10-10).
+   leaves nothing in its place (A 2026-10-10) (decided, not yet built; until it is, the claims schema refuses an empty body and the writer would leave an empty heading).
 8. A corrected section carries the correcting memory's own heading, also
    when the stale section sat in another budget part and was retired
    there.
@@ -199,4 +199,4 @@ The body above reads current; each change's full note is in [history/ADR-014-ame
 
 | Date | Amendment | Effect |
 |---|---|---|
-| 2026-10-10 | A retitle replaces only the section it names; a section can be retired | §5 rules 4 and 7: a same-agent retitle replaces only the section it names, a claim sharing nothing is a new topic; a `merge_target` memory with no body retires the section (agent-fabric ADR-050 rules 7 and 11) |
+| 2026-10-10 | A retitle replaces only the section it names; a section can be retired | §5 rules 4 and 7: a same-agent retitle replaces only the section it names, a claim sharing nothing is a new topic; a `merge_target` memory with no body retires the section (agent-fabric ADR-050 rules 7 and 11); each is marked decided, not yet built |

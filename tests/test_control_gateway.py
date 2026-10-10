@@ -370,6 +370,27 @@ class Install(Case):
         self.assertFalse(os.path.exists(old), "the old-name marker is gone, so check 7 sees no session")
         self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "ef")
 
+    def test_a_same_version_install_moves_an_old_name_marker(self):
+        """Every account installed 0.1.0 before the rename: a repeat install
+        answers current, and that answer must move the marker too."""
+        self.release()
+        self.assertEqual(self.install()["status"], "installed")
+        os.replace(os.path.join(self.state, "gateway-install.json"), os.path.join(self.state, "gateway.json"))
+        r = self.install()
+        self.assertEqual(r["status"], "current", r)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "gateway.json")), "no old-name marker for check 7 to read as a session")
+        self.assertTrue(os.path.exists(os.path.join(self.state, "gateway-install.json")))
+
+    def test_a_record_with_a_pid_is_never_a_marker_even_with_install_fields(self):
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 7, "installed_sha256": "ab"}, fh)
+        self.assertIsNone(gw.read_marker(self.state))
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertEqual(json.load(open(record))["pid"], 7, "a record is renamed back, never removed")
+        self.assertEqual(sorted(os.listdir(self.state)), ["gateway-install.json", "gateway.json"], "no file left aside")
+
     def test_a_marker_that_cannot_be_written_leaves_no_temporary_file(self):
         os.makedirs(self.state)
         with unittest.mock.patch.object(gw.json, "dumps", side_effect=ValueError("bad")), self.assertRaises(ValueError):

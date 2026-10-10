@@ -36,8 +36,9 @@ THE SEQUENCE, for one account, as that login and with no root:
   7. os.replace onto the target. A running gateway keeps the inode it started
      from and is never stopped (ADR-014 rule 19); the next launch uses the new
      file;
-  8. the marker (<state>/gateway.json: version, artifact digest, binary digest)
-     is written whole, by rename.
+  8. the marker (<state>/gateway-install.json: version, artifact digest, binary
+     digest) is written whole, by rename; one an install before the rename left
+     at <state>/gateway.json, the launcher's session record, is moved to it.
 
 THE REPLY, data["gateway-install"]: status "installed" | "current" | "refused" |
 "failed"; version; sha256 (the verified artifact digest, the pin's); installed_sha256
@@ -185,14 +186,30 @@ def read_marker(state: str) -> dict | None:
 
 def _drop_legacy_marker(state: str) -> None:
     """A marker left at the old name would make check 7 see a running session;
-    a launcher's record there (it has a pid) is left alone."""
+    a launcher's record there (it has a pid) is left alone. The file is first
+    renamed aside and judged there, so a launch that writes its record between
+    a read and an unlink cannot lose it: a record is renamed back."""
     path = os.path.join(state, LEGACY_MARKER)
-    old = util.read_json(path)
+    aside = os.path.join(state, f".{LEGACY_MARKER}.{os.getpid()}.judge")
+    try:
+        os.rename(path, aside)
+    except OSError:
+        return
+    old = util.read_json(aside)
     if isinstance(old, dict) and "installed_sha256" in old and "pid" not in old:
         try:
-            os.unlink(path)
+            os.unlink(aside)
         except OSError:
             pass
+        return
+    try:
+        if os.path.exists(path):
+            # A launch wrote a newer record meanwhile: it wins; ours is older.
+            os.unlink(aside)
+        else:
+            os.rename(aside, path)
+    except OSError:
+        pass
 
 
 def write_marker(state: str, marker: dict) -> None:
@@ -448,6 +465,10 @@ def _install(version: str, b: dict, target: str, state: str, home: str, fetch: C
     marker = read_marker(state)
     if (marker and marker.get("version") == version and marker.get("sha256") == b["sha256"]
             and isinstance(marker.get("installed_sha256"), str) and _has_digest(target, marker["installed_sha256"])):
+        if not os.path.exists(os.path.join(state, MARKER)):
+            # Read through the old name: every account installed before the
+            # rename answers "current" here, so this is where its marker moves.
+            write_marker(state, marker)
         return {"status": "current", "version": version, "sha256": b["sha256"], "installed_sha256": marker["installed_sha256"],
                 "path": target, "contract": b["reports"]["runtime_contract"]}
     if token is None:

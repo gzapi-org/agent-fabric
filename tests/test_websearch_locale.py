@@ -240,6 +240,12 @@ def main() -> int:
         check("an integer too large for a float is clamped like Infinity, and a dict or a list is NaN (the default)",
               ws._count(10 ** 400) == "20" and ws._count(-(10 ** 400)) == "1" and ws._count({"a": 1}) == "10" and ws._count([5]) == "10"
               and ws._count(None) == "10" and ws._count("7") == "7" and ws._count(True) == "1")
+        # What Node's Number() made of a count that arrives as a string, recorded from node: Python's float() reads more.
+        node_counts = {"7": "7", " 7 ": "7", "1_0": "10", "inf": "10", "Infinity": "20", "-Infinity": "1", "+Infinity": "20", "0x10": "16",
+                       "0X1f": "20", "0b11": "3", "0o17": "15", "1e1": "10", "1e": "10", "5.": "5", "  .5": "1", "+5": "5", "-5": "1", "": "10",
+                       "  ": "10", "\u00a05\u00a0": "5", "\ufeff5": "5", "5px": "10", "\u0661\u0662": "10", "1,5": "10"}
+        off = {k: (ws._count(k), v) for k, v in node_counts.items() if ws._count(k) != v}
+        check("a count given as a string is read as JavaScript's Number() reads it (24 spellings recorded from node)", not off, str(off))
         sink = io.StringIO()
         boom = lambda _u, _h: (_ for _ in ()).throw(RuntimeError("secret-url-with-key"))  # noqa: E731
         ws.serve(LOCALE, io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "web_search_global", "arguments": {"query": "ab"}}})

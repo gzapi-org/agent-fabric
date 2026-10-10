@@ -69,6 +69,7 @@ TIMEOUT_S = 20
 _JS_SPACE = re.compile("[\t\n\v\f\r    -     　﻿]+")
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 _TAG = re.compile(r"</?[A-Za-z][^<>]*>")
+_JS_SPACE_ENDS = re.compile("^[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+|[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+$")
 _FORM_SAFE = frozenset(b"*-._0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
 # A response, as the transport hands it up: (HTTP status, body text). The transport raises TimeoutError for no answer
@@ -117,6 +118,27 @@ def _quote(text: str) -> str:
     return "".join(out)
 
 
+_JS_DECIMAL = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", re.ASCII)
+_JS_RADIX = re.compile(r"0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)", re.ASCII)
+
+
+def _js_number(text: str) -> float:
+    """Number(text) of JavaScript for a string: its whitespace trimmed, empty is 0, a decimal literal, a 0x/0o/0b integer
+    or +/-Infinity; anything else is NaN. Python's float() also reads "inf", "nan" and "1_0", which Number() does not."""
+    t = _JS_SPACE_ENDS.sub("", text)
+    if not t:
+        return 0.0
+    if t in ("Infinity", "+Infinity"):
+        return float("inf")
+    if t == "-Infinity":
+        return float("-inf")
+    if _JS_RADIX.fullmatch(t):
+        return float(int(t[2:], {"x": 16, "o": 8, "b": 2}[t[1].lower()]))
+    if _JS_DECIMAL.fullmatch(t):
+        return float(t)
+    return float("nan")
+
+
 def _count(value: object) -> str:
     """String(Math.min(20, Math.max(1, Number(count) || 10))): NaN and 0 are the default, a fraction stays one, an
     integer too large for a float is Infinity (clamped), and anything that is not a number or a numeric string is NaN."""
@@ -128,10 +150,7 @@ def _count(value: object) -> str:
         except OverflowError:
             n = float("inf") if value > 0 else float("-inf")
     elif isinstance(value, str):
-        try:
-            n = float(value.strip() or 0)
-        except ValueError:
-            n = float("nan")
+        n = _js_number(value)
     elif value is None:
         n = 0.0
     else:

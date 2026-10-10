@@ -39,9 +39,10 @@ class Validator(unittest.TestCase):
     def test_unreadable_is_accepted_and_nothing_else_that_is_not_a_list(self):
         want = {"h/a"}
         self.assertIsNotNone(ctl.state_record_of(record("unreadable"), want))
-        for bad in ("none", "Unreadable", " unreadable", "unreadable ", "", "x", {}, None, 7, True, ["unreadable"] if False else {"unreadable": 1}):
+        for bad in ("none", "Unreadable", " unreadable", "unreadable ", "", "x", {}, None, 7, True, {"unreadable": 1}):
             self.assertIsNone(ctl.state_record_of(record(bad), want), repr(bad))
         self.assertIsNotNone(ctl.state_record_of(record([]), want), "positive control: a list still passes")
+        self.assertIsNone(ctl.state_record_of(record(["unreadable"]), want), "a list holding the word is a list of non-sessions")
 
     def test_a_record_that_says_unreadable_is_still_judged_on_its_other_fields(self):
         want = {"h/a"}

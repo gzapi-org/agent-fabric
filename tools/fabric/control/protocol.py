@@ -66,11 +66,13 @@ Up = TypedDict("Up", {"v": int, "kind": str, "from": str, "ts": str})
 # State: what an account's sessions are doing (sessions.mjs), posted when
 # it changes and on a heartbeat (ADR-029 rule 16). `sessions` holds
 # {"session", "state": working|blocked|idle, "since"} per live session,
-# empty when none runs; `waits_on` the GZCoord ids the account's blocked
-# jobs wait on (ADR-037 rule 8).
+# empty when none runs, or the string "unreadable" when the account cannot
+# read its own session state (j68; ctl shows that account unknown, never
+# none); `waits_on` the GZCoord ids the account's blocked jobs wait on
+# (ADR-037 rule 8).
 _StateOptional = TypedDict("_StateOptional", {"role": str, "project": str, "last_session": str, "resumable": bool,
                                               "waits_on": list}, total=False)
-_StateRequired = TypedDict("_StateRequired", {"v": int, "kind": str, "from": str, "ts": str, "sessions": list})
+_StateRequired = TypedDict("_StateRequired", {"v": int, "kind": str, "from": str, "ts": str, "sessions": list | str})
 
 
 class State(_StateRequired, _StateOptional):

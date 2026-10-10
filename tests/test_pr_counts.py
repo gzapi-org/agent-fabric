@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,7 @@ def pr_doc(number: int, commits: list, *, state: str = "OPEN", draft: bool = Fal
            more: bool = False) -> dict:
     return {"number": number, "state": state, "isDraft": draft, "mergedAt": "2026-10-10T00:00:00Z" if merged else None,
             "headRefOid": head, "baseRefName": "main",
+            "mergeCommit": {"parents": {"nodes": [{"oid": "b" * 40}, {"oid": head}]}} if merged else None,
             "autoMergeRequest": {"enabledAt": "x"} if armed else None, "mergeQueueEntry": {"state": "QUEUED"} if queued else None,
             "commits": {"totalCount": len(commits), "pageInfo": {"hasNextPage": more}, "nodes": commits},
             "tip": {"nodes": [{"commit": {"statusCheckRollup": {"state": rollup} if rollup else None}}]},
@@ -143,6 +145,7 @@ def api_commits(repo: str, base: str, head: str) -> list:
 
 def main() -> int:
     fails = 0
+    cleanup: list[str] = []
 
     def check(label: str, good: bool, detail: object = "") -> None:
         nonlocal fails
@@ -152,6 +155,7 @@ def main() -> int:
     print("the counts are the gate's")
     repo, base, shas = git_fixture()
     saved_cwd = os.getcwd()
+    cleanup.append(repo)
     os.chdir(repo)
     try:
         want = pr_split.split_range(7, "o/this", f"{base}..{shas[-1]}", shas[-1], base)
@@ -240,7 +244,9 @@ def main() -> int:
     check("a name two projects answer to is refused, both named", "twin-a" in by["same#1"]["line"] and "twin-b" in by["same#1"]["line"], by["same#1"]["line"])
     check("a project with no GitHub remote is no repository", "no-remote#2" in by and not by["no-remote#2"]["ok"], by["no-remote#2"])
     check("a repository GitHub does not know", not by["gzapp#5"]["ok"] and "cannot be read" in by["gzapp#5"]["line"], by["gzapp#5"]["line"])
-    check("owner/repo/extra is not a ref; #0 and 0 are not numbers", not by["o/p/q#1"]["ok"] and not by["0"]["ok"] and not by["#0"]["ok"] or True)
+    check("owner/repo/extra is not a ref; #0 and 0 are not numbers",
+          all(not by[k]["ok"] and "is not a ref" in by[k]["line"] or "is not owner/repo" in by[k]["line"] for k in ("o/p/q#1", "0", "#0")),
+          [by[k]["line"] for k in ("o/p/q#1", "0", "#0")])
     check("every failure has ok False and a line that names the ref", all((not r["ok"]) and r["line"].startswith(r["ref"] + " cannot be read: ")
                                                                            for r in rows if not r["ok"]))
     hub = Hub({"o/this": {1: docs[1], 2: docs[2]}}, fail_batches=True)
@@ -297,6 +303,65 @@ def main() -> int:
     run_counts(["1"], hub, timeout=7)
     check("each gh call gets what is left of the time, at most the whole", 0 < hub.graphql_calls[0][2] <= 7, hub.graphql_calls)
 
+    print("what the gate reads is what is read")
+    wrapped = commit("w" * 40, "add parser\nfor the review findings\n\nbody text")
+    r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [wrapped])}}))[0]
+    check("a subject wrapped onto a second line is one subject, as git's %s has it: \"review findings\" in its 2nd line reads it as a fix",
+          r["ok"] and (r["work"], r["fix"]) == (0, 1), r)
+    subj, body = pr_counts.split_message("add parser\nfor the review findings\n\nbody\n\nKind: work\n")
+    check("subject and body are split as git's %s and %b", (subj, body) == ("add parser for the review findings", "body\n\nKind: work"), (subj, body))
+    mixed = commit("m" * 40, "small change\n\n(cherry picked from commit abcdef1)\nKind: review-fix")
+    r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [mixed])}}))[0]
+    check("a trailer block that git reads and the gate's reader rejects is unreadable, not a guessed work",
+          not r["ok"] and "mixes Kind:" in r["line"], r)
+    clean = commit("c" * 40, "small change\n\nbody\n\nKind: review-fix\nAnswers: F1")
+    r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [clean])}}))[0]
+    check("…while a pure block reads: the same shape without the extra line is a fix", r["ok"] and (r["work"], r["fix"]) == (0, 1), r)
+    prose = commit("p" * 40, "small change\n\nAnswers: nothing here is a trailer, it is prose\nand more prose")
+    r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [prose])}}))[0]
+    check("a prose paragraph naming the key is refused too, whichever way git would read it", not r["ok"], r)
+
+    print("folded pull requests: the base, the time, the unread")
+    saved_view = gh.pr_view
+    folds = commit("f" * 40, "review fix (#12 F1): the probe")
+    closed12 = {"state": "CLOSED", "mergedAt": None, "headRefOid": "9" * 40}
+    cmp_ahead = {"status": "ahead"}
+    try:
+        gh.pr_view = lambda n, fields, repo=None, timeout=None: closed12
+        head = "h" * 40
+        rest = {f"repos/o/this/compare/{'9' * 40}...{head}?per_page=1": cmp_ahead,
+                f"repos/o/this/compare/{'9' * 40}...main?per_page=1": {"status": "diverged"}}
+        r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [folds], head=head)}}, rest=rest))[0]
+        check("an open pull request: a closed one whose head is in the range is folded: the fix reads as a fix", (r["work"], r["fix"]) == (0, 1), r)
+        rest[f"repos/o/this/compare/{'9' * 40}...{'b' * 40}?per_page=1"] = cmp_ahead
+        r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [folds], head=head, state="MERGED", merged=True)}}, rest=rest))[0]
+        check("a merged one: a head already in the merge's first parent was folded earlier: the follow-up is work",
+              r["ok"] and (r["work"], r["fix"]) == (1, 0), r)
+        no_parent = pr_doc(1, [folds], head=head, state="MERGED", merged=True)
+        no_parent["mergeCommit"] = None
+        r = run_counts(["1"], Hub({"o/this": {1: no_parent}}, rest=rest))[0]
+        check("a merged one whose first parent GitHub does not list is unreadable, not read against no base",
+              not r["ok"] and "first parent" in r["line"], r)
+        r = run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [folds], head=head)}}))[0]
+        check("a fold the compare cannot answer: counted as work, and the line says so",
+              r["ok"] and r["work"] == 1 and r["unread_folds"] == ["12"] and "#12 could not be read" in r["line"], r)
+        seen = []
+        gh.pr_view = lambda n, fields, repo=None, timeout=None: (seen.append(timeout), closed12)[1]
+        run_counts(["1"], Hub({"o/this": {1: pr_doc(1, [folds], head=head)}}, rest=rest), timeout=7)
+        check("the fold's gh calls are bounded by the call's time, not their own 30 s", seen and all(0 < t <= 7 for t in seen), seen)
+        clock = iter([0.0, 0.1, 0.2, 99.0, 99.0, 99.0, 99.0, 99.0])
+        budget = pr_counts.Budget(5, clock=lambda: next(clock))
+        budget.left()
+        f = pr_counts.BudgetedFolds("o/this", head, "", budget)
+        try:
+            f(("12"))
+            got = "no error"
+        except pr_counts.Unreadable as e:
+            got = str(e)
+        check("a spent budget stops the fold check: unreadable, not a 30 s wait", got == "the time allowed ran out", got)
+    finally:
+        gh.pr_view = saved_view
+
     print("the command")
     env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "AGENT_FABRIC_PYTHON": sys.executable}
     tool = os.path.join(HERE, "bin", "fabric-pr")
@@ -312,6 +377,8 @@ def main() -> int:
     check("--json: one object per ref; an unreadable ref exits 2 with a line, no traceback",
           r.returncode == 2 and json.loads(r.stdout.splitlines()[0])["ok"] is False and "Traceback" not in r.stderr, (r.returncode, r.stdout, r.stderr))
 
+    for d in cleanup:
+        shutil.rmtree(d, ignore_errors=True)
     print(f"\n{'FAILED' if fails else 'all passed'}")
     return 1 if fails else 0
 

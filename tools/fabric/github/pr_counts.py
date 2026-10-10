@@ -66,6 +66,7 @@ REF = re.compile(r"(?:(?P<where>[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)?#|(?=[0-9]
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 FIELDS = """number state isDraft mergedAt headRefOid baseRefName
   autoMergeRequest { enabledAt } mergeQueueEntry { state }
+  mergeCommit { parents(first: 2) { nodes { oid } } }
   commits(first: 100) { totalCount pageInfo { hasNextPage } nodes { commit { oid message parents(first: 3) { totalCount } } } }
   tip: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   reviews(last: 50) { nodes { body commit { oid } } }"""
@@ -209,6 +210,29 @@ def fetch_repo(repo: str, numbers: list[int], budget: Budget) -> dict[int, dict 
     return out
 
 
+def split_message(message: str) -> tuple[str, str]:
+    """(subject, body) as git's %s and %b have them: the subject is the first
+    paragraph with its lines joined by a space, the body what follows the
+    blank line after it."""
+    parts = re.split(r"\n[ \t]*\n", message.strip("\n"), maxsplit=1)
+    return " ".join(parts[0].split("\n")), (parts[1].strip("\n") if len(parts) > 1 else "")
+
+
+def check_trailers(sha: str, body: str) -> None:
+    """The gate reads Kind: and Answers: where git finds them; commit_class
+    reads them only from a block of pure `Key: value` lines. Where the last
+    paragraph names either key yet that reading finds none, git may report
+    what this cannot, so the count would be a guess."""
+    paragraphs = [p for p in re.split(r"\n[ \t]*\n", body.strip("\n")) if p.strip()]
+    if not paragraphs:
+        return
+    for key in ("Kind", "Answers"):
+        named = any(re.match(rf"{key}:", ln, re.I) for ln in paragraphs[-1].split("\n"))
+        if named and not commit_class.trailer_values(body, key):
+            raise Unreadable(f"commit {sha[:10]}'s trailer block mixes {key}: with other lines, which git and the "
+                             "gate may read differently; read it with fabric-pr gate")
+
+
 def commit_rows(pr: dict, repo: str, number: int, budget: Budget) -> tuple[list[tuple], dict[str, str]]:
     """(rows newest first for pr_split.split_rows, sha -> body) from the
     pull request's commit list; GitHub lists them oldest first."""
@@ -226,9 +250,9 @@ def commit_rows(pr: dict, repo: str, number: int, budget: Budget) -> tuple[list[
             nodes.append((c["oid"], (c.get("parents") or {}).get("totalCount", 1), c["message"]))
     rows, bodies = [], {}
     for sha, parents, message in reversed(nodes):
-        subject, _, body = message.partition("\n")
-        body = body.strip("\n")
+        subject, body = split_message(message)
         bodies[sha] = body
+        check_trailers(sha, body)
         rows.append((sha, " ".join(["p"] * max(int(parents), 1)), subject, commit_class.answers_of(body),
                      commit_class.kind_of(body)))
     return rows, bodies
@@ -251,6 +275,37 @@ def head_reviewed(pr: dict, markers: list[str]) -> bool:
     return False
 
 
+class BudgetedFolds(commit_class.Folds):
+    """Folds whose every gh call is bounded by what is left of the call's
+    time, and which remembers the folds it could not read: the gate counts
+    such a commit as work and says so on stderr, which a caller of
+    count_lines never sees, so the line says it."""
+
+    def __init__(self, repo: str, head: str, base: str, budget: Budget):
+        def ancestor(oid: str, tip: str) -> bool:
+            return commit_class.on_github(repo, timeout=budget.left())(oid, tip)
+        super().__init__(repo, head, base=base, ancestor=ancestor)
+        self.budget, self.unread_prs = budget, []
+
+    def _look(self, n: str) -> bool:
+        self.timeout = self.budget.left()
+        return super()._look(n)
+
+    def _unread(self, n: str, why: str) -> bool:
+        self.unread_prs.append(n)
+        return super()._unread(n, why)
+
+
+def merge_base_of(pr: dict) -> str:
+    """The first parent of a merged pull request's merge commit: the base the
+    gate's merged split uses (<merge>^1)."""
+    nodes = (((pr.get("mergeCommit") or {}).get("parents") or {}).get("nodes")) or []
+    oid = nodes[0].get("oid") if nodes and isinstance(nodes[0], dict) else None
+    if not isinstance(oid, str) or not oid:
+        raise Unreadable("it is merged, but GitHub does not list its merge commit's first parent")
+    return oid
+
+
 def describe(label: str, repo: str, pid: str | None, number: int, pr: dict, budget: Budget) -> dict:
     rows, bodies = commit_rows(pr, repo, number, budget)
     state = str(pr.get("state") or "").upper()
@@ -259,15 +314,18 @@ def describe(label: str, repo: str, pid: str | None, number: int, pr: dict, budg
     head = str(pr.get("headRefOid") or "")
     # A review fix of a closed, folded pull request reads as a fix when its
     # head is inside this range: asked of GitHub's compare, lazily, once per
-    # pull request a commit names (commit_class.Folds); an open pull request's
-    # base is its branch, a merged one's first parent is not known here.
-    folded = (commit_class.Folds(repo, head, base="" if merged else base, ancestor=commit_class.on_github(repo))
-              if head else None)
+    # pull request a commit names (commit_class.Folds). The range's base is
+    # the branch for an open pull request and the merge's first parent for a
+    # merged one, as the gate's two splits have it.
+    folded = BudgetedFolds(repo, head, merge_base_of(pr) if merged else base, budget) if head else None
     c = split_rows(number, repo, rows, folded, lambda sha: bodies.get(sha, ""))
     row = {"ref": label, "repo": repo, "number": number, "ok": True, "work": c["work"], "fix": c["fix"],
            "merge": c["merge"], "netted": c["netted"], "fix_subjects": c["fix_subjects"],
            "netted_subjects": c["netted_subjects"], "state": "merged" if merged else "closed" if state == "CLOSED" else "open"}
     parts = [f"{label} ({c['work']} work, {c['fix']} fix)"]
+    if folded is not None and folded.unread_prs:
+        row["unread_folds"] = sorted(set(folded.unread_prs), key=int)
+        parts.append("(a review's fixes counted as work: " + ", ".join(f"#{n}" for n in row["unread_folds"]) + " could not be read)")
     if row["state"] != "open":
         parts.append(row["state"])
     else:

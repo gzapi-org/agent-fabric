@@ -618,9 +618,8 @@ its record disagree, the record wins. Look it up, never read it whole:
 
 ### ADR-029 — The control plane: a control agent per account answers signed actions over the relay (Accepted)
 
-- Every account runs `agentd.mjs` under a lingering user unit, answering
-  on the relay's `fabric:control` channel; no cursor, so a request made
-  while it is down is lost (§2, §5 rules 1–2).
+- Each account's agentd answers on `fabric:control`; no cursor: a
+  request made while it is down is lost (§2, §5 rules 1–2).
 - A closed op set; no request field reaches a shell; actions carry the
   operator's fresh Ed25519 signature, newer than the last (§5 rules 3–5).
 - Replies carry no secret; a gap is named; silence or a failure exits 1
@@ -629,7 +628,7 @@ its record disagree, the record wins. Look it up, never read it whole:
 - A 2026-09-27 — each op's answer budget (§5 rule 12).
 - A 2026-09-28 — `jobs`, `jobs-add` (§5 rule 13).
 - A 2026-09-29 — secrets-migrate (§5 rule 14).
-- A 2026-09-30 — rule 14 withdrawn; signing key in the operator's store (§5 rule 5).
+- A 2026-09-30 — rule 14 withdrawn; key in the operator's store (§5 rule 5).
 - A 2026-10-06 — local, local-prune (§5 rule 15).
 - A 2026-10-07 — session state (rule 16).
 - A 2026-10-07 — secrets-selftest (§5 rule 17).
@@ -639,8 +638,9 @@ its record disagree, the record wins. Look it up, never read it whole:
 - A 2026-10-09 — Scope: runtime/control/.
 - A 2026-10-09 — `tools-install` (§5 rules 3, 12).
 - A 2026-10-09 — views' closed-job read (§2).
-- Keywords: agentd, fabric-ctl, ops, ping, keys, usage, recall, tokens,
-  memory, bundle, drain, keygen, operator_key, herdr, status, resume.
+- A 2026-10-10 — gateway ops (§2, §5 rules 3, 12).
+- Keywords: agentd, fabric-ctl, ops, keys, keygen, operator_key, usage,
+  tokens, herdr, resume, gateway.
 ### ADR-030 — Presence replaces HELLO and GOODBYE (Accepted)
 
 - Whether a session runs is the control agent's answer from its process

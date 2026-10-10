@@ -36,8 +36,9 @@ THE SEQUENCE, for one account, as that login and with no root:
   7. os.replace onto the target. A running gateway keeps the inode it started
      from and is never stopped (ADR-014 rule 19); the next launch uses the new
      file;
-  8. the marker (<state>/gateway.json: version, artifact digest, binary digest)
-     is written whole, by rename.
+  8. the marker (<state>/gateway-install.json: version, artifact digest, binary
+     digest) is written whole, by rename; one an install before the rename left
+     at <state>/gateway.json, the launcher's session record, is moved to it.
 
 THE REPLY, data["gateway-install"]: status "installed" | "current" | "refused" |
 "failed"; version; sha256 (the verified artifact digest, the pin's); installed_sha256
@@ -79,7 +80,13 @@ from control.upgrade import VERSION_RE
 
 BIN_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 PIN_REL = os.path.join("runtime", "gateway.json")
-MARKER = "gateway.json"
+# Not gateway.json: that is the launcher's record of a running gateway session
+# (launcher/gateway.py record_state), which a launch overwrites and its end
+# removes, and which live check 7 reads as "a session is running".
+MARKER = "gateway-install.json"
+# The name the marker had before: read while no new marker exists, and only
+# when it holds an install's fields, never a launcher's record (it has a pid).
+LEGACY_MARKER = "gateway.json"
 LOCK = "gateway-install.lock"
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
@@ -171,7 +178,42 @@ def file_sha256(path: str) -> str:
 
 def read_marker(state: str) -> dict | None:
     d = util.read_json(os.path.join(state, MARKER))
-    return d if isinstance(d, dict) else None
+    if isinstance(d, dict):
+        return d
+    old = util.read_json(os.path.join(state, LEGACY_MARKER))
+    return old if _is_install_marker(old) else None
+
+
+def _is_install_marker(d: Any) -> bool:
+    return isinstance(d, dict) and "installed_sha256" in d and "pid" not in d
+
+
+def _drop_legacy_marker(state: str) -> None:
+    """A marker left at the old name would make check 7 see a running session.
+    The launcher's record lives there too (it has a pid), so the file is judged
+    where it is and a record is never moved: a running session stays visible
+    and its end can still remove it. Only a marker is renamed aside and judged
+    again; if a launch replaced it in between, the record goes back by link,
+    which refuses rather than overwrite a newer record."""
+    path = os.path.join(state, LEGACY_MARKER)
+    if not _is_install_marker(util.read_json(path)):
+        return
+    aside = os.path.join(state, f".{LEGACY_MARKER}.{os.getpid()}.judge")
+    try:
+        os.rename(path, aside)
+    except OSError:
+        return
+    try:
+        if not _is_install_marker(util.read_json(aside)):
+            try:
+                os.link(aside, path)
+            except FileExistsError:
+                pass                      # a newer record landed: it wins
+    finally:
+        try:
+            os.unlink(aside)
+        except OSError:
+            pass
 
 
 def write_marker(state: str, marker: dict) -> None:
@@ -184,6 +226,7 @@ def write_marker(state: str, marker: dict) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, os.path.join(state, MARKER))
+        _drop_legacy_marker(state)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -426,6 +469,10 @@ def _install(version: str, b: dict, target: str, state: str, home: str, fetch: C
     marker = read_marker(state)
     if (marker and marker.get("version") == version and marker.get("sha256") == b["sha256"]
             and isinstance(marker.get("installed_sha256"), str) and _has_digest(target, marker["installed_sha256"])):
+        if not os.path.exists(os.path.join(state, MARKER)):
+            # Read through the old name: every account installed before the
+            # rename answers "current" here, so this is where its marker moves.
+            write_marker(state, marker)
         return {"status": "current", "version": version, "sha256": b["sha256"], "installed_sha256": marker["installed_sha256"],
                 "path": target, "contract": b["reports"]["runtime_contract"]}
     if token is None:

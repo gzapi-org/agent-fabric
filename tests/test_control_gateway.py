@@ -346,6 +346,81 @@ class Install(Case):
             os.chmod(self.target, 0o000)      # a binary this account cannot read is not shown to be the release
             self.assertEqual(self.install()["status"], "installed")
 
+    def test_the_marker_is_not_the_launchers_session_record(self):
+        """Both lived at <state>/gateway.json: a launch overwrote the marker,
+        its end removed it, and live check 7 read the marker as a running
+        session. The marker has its own name; the record is left alone."""
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 4242, "plan_digest": "d"}, fh)
+        self.assertIsNone(gw.read_marker(self.state), "a launcher record is never read as the marker")
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "ab"})
+        self.assertEqual(json.load(open(record))["pid"], 4242, "writing the marker leaves the launcher record alone")
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "ab")
+        self.assertTrue(os.path.exists(os.path.join(self.state, "gateway-install.json")))
+
+    def test_a_marker_at_the_old_name_is_read_then_moved(self):
+        os.makedirs(self.state)
+        old = os.path.join(self.state, "gateway.json")
+        with open(old, "w") as fh:
+            json.dump({"version": VERSION, "installed_sha256": "cd"}, fh)
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "cd", "an install before the rename still reads")
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "ef"})
+        self.assertFalse(os.path.exists(old), "the old-name marker is gone, so check 7 sees no session")
+        self.assertEqual(gw.read_marker(self.state)["installed_sha256"], "ef")
+
+    def test_a_same_version_install_moves_an_old_name_marker(self):
+        """Every account installed 0.1.0 before the rename: a repeat install
+        answers current, and that answer must move the marker too."""
+        self.release()
+        self.assertEqual(self.install()["status"], "installed")
+        os.replace(os.path.join(self.state, "gateway-install.json"), os.path.join(self.state, "gateway.json"))
+        r = self.install()
+        self.assertEqual(r["status"], "current", r)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "gateway.json")), "no old-name marker for check 7 to read as a session")
+        self.assertTrue(os.path.exists(os.path.join(self.state, "gateway-install.json")))
+
+    def test_a_record_with_a_pid_is_never_a_marker_even_with_install_fields(self):
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 7, "installed_sha256": "ab"}, fh)
+        self.assertIsNone(gw.read_marker(self.state))
+        gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertEqual(json.load(open(record))["pid"], 7, "a record is renamed back, never removed")
+        self.assertEqual(sorted(os.listdir(self.state)), ["gateway-install.json", "gateway.json"], "no file left aside")
+
+    def test_a_running_sessions_record_is_never_moved_by_an_install(self):
+        """Its end must find it where it is, and readers must keep seeing it."""
+        os.makedirs(self.state)
+        record = os.path.join(self.state, "gateway.json")
+        with open(record, "w") as fh:
+            json.dump({"pid": 7}, fh)
+        real_rename = os.rename
+        moved = []
+        with unittest.mock.patch.object(gw.os, "rename", side_effect=lambda a, b: (moved.append(a), real_rename(a, b))):
+            gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertNotIn(record, moved, "the record was renamed aside")
+
+    def test_a_launch_racing_the_migration_keeps_its_newer_record(self):
+        os.makedirs(self.state)
+        path = os.path.join(self.state, "gateway.json")
+        with open(path, "w") as fh:
+            json.dump({"version": VERSION, "installed_sha256": "ab"}, fh)
+        real_rename = os.rename
+
+        def rename_then_launch(a, b):
+            real_rename(a, b)
+            with open(b, "w") as fh:          # the marker aside becomes a record (the judge reads a pid)
+                json.dump({"pid": 7}, fh)
+            with open(path, "w") as fh:       # and a newer launch has written its own
+                json.dump({"pid": 999}, fh)
+        with unittest.mock.patch.object(gw.os, "rename", side_effect=rename_then_launch):
+            gw.write_marker(self.state, {"version": VERSION, "installed_sha256": "cd"})
+        self.assertEqual(json.load(open(path))["pid"], 999, "the newer record is never overwritten")
+        self.assertEqual(sorted(os.listdir(self.state)), ["gateway-install.json", "gateway.json"], "nothing left aside")
+
     def test_a_marker_that_cannot_be_written_leaves_no_temporary_file(self):
         os.makedirs(self.state)
         with unittest.mock.patch.object(gw.json, "dumps", side_effect=ValueError("bad")), self.assertRaises(ValueError):

@@ -209,7 +209,11 @@ def main() -> int:
                                env=env, capture_output=True, text=True, timeout=60)
             v = json.loads(r.stdout)["validation"]
             check(f"--validate: the gateway {label}: exit {want_rc}, its verdict reported", r.returncode == want_rc and v["exit"] == code and v["note"] == f"note {code}", r.stdout + r.stderr)
-        r = subprocess.run([sys.executable, "-I", TOOL, "--login", ME, "--role", "python-dev", "--out", out, "--validate"], env=env, capture_output=True, text=True, timeout=60)
+        # A PATH that holds no gateway binary, whatever this host has installed (the real one is on some hosts).
+        nowhere = os.path.join(t, "empty-path")
+        os.makedirs(nowhere)
+        r = subprocess.run([sys.executable, "-I", TOOL, "--login", ME, "--role", "python-dev", "--out", out, "--validate"],
+                           env={**env, "PATH": nowhere}, capture_output=True, text=True, timeout=60)
         check("--validate with no binary on PATH says so and is not a failure", r.returncode == 0 and json.loads(r.stdout)["validation"]["ran"] is False, r.stdout + r.stderr)
 
     print("test_gateway_plan:", "OK" if not fails else f"{fails} FAILED")

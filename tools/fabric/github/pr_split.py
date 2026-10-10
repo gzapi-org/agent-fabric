@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Callable
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -61,12 +62,24 @@ def split_range(num: int, repo: str, rev_range: str, head: str = "", base: str =
     r = git.run(".", "log", "--format=%H%x09%P%x09%s%x09%(trailers:key=Answers,valueonly,unfold,separator=%x20)"
                 "%x09%(trailers:key=Kind,valueonly,unfold,separator=%x1f)",
                 rev_range, check=False)
-    shas, cls, subj = [], {}, {}
+    rows = []
     for line in r.stdout.splitlines():
         fields = line.split("\t", 4) + [""] * 4
-        sha, parents, subject, answers, kind = fields[:5]
-        if not sha:
-            continue
+        if fields[0]:
+            rows.append(tuple(fields[:5]))
+    return split_rows(num, repo, rows, folded,
+                      lambda sha: git.run(".", "log", "-1", "--format=%b", sha, check=False).stdout)
+
+
+def split_rows(num: int, repo: str, rows: list[tuple[str, str, str, str, str]], folded,
+               body_of: Callable[[str], str]) -> dict:
+    """The split of commits given newest first as (sha, parents, subject,
+    Answers values, Kind values), their message bodies asked of `body_of`
+    only for the netting. One function for the clone's git log and for
+    GitHub's commit list (pr_counts), so a count read either way is the
+    same count."""
+    shas, cls, subj = [], {}, {}
+    for sha, parents, subject, answers, kind in rows:
         shas.append(sha)
         cls[sha] = commit_class.classify(parents, subject, answers, str(num), repo, kind, folded)
         subj[sha] = subject
@@ -82,7 +95,7 @@ def split_range(num: int, repo: str, rev_range: str, head: str = "", base: str =
     for sha in shas:
         if sha in skip:
             continue
-        body = git.run(".", "log", "-1", "--format=%b", sha, check=False).stdout
+        body = body_of(sha)
         for target in commit_class.revert_targets(body):
             for other in shas:
                 if other.startswith(target) and other != sha and other not in skip and sha not in skip:

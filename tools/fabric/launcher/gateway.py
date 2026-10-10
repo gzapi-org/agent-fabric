@@ -329,7 +329,7 @@ def approve_key(path: str, key: str) -> None:
     """The interactive harness asks "Do you want to use this API key?" (default No)
     about any ANTHROPIC_API_KEY it has not been told it may use, and a gateway-local
     key is new on every launch. It records an answer as the key's last 20 characters in
-    ~/.claude.json's customApiKeyResponses.approved (read back on 2.1.285: with the
+    ~/.claude.json's customApiKeyResponses.approved (read back on 2.1.285, and on 2.1.296 in a trial: with the
     entry there, the session opens with no question). The first-run wizard is marked
     done as well: a login on the gateway has no /login to onboard. Atomic, mode 0600;
     the list keeps the latest APPROVED_KEEP entries, since each launch adds one."""

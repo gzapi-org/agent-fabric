@@ -440,6 +440,42 @@ def main() -> int:
         check("the fable export is code-plan's pin; the reviewer never rides it",
               has(r"export ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1$", out), out)
 
+        print("launch: a caller's --settings — ori's refusal stays ori's; elsewhere it is tested for model pins")
+        hook = '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"true"}]}]}}'
+        mkfabric()
+        rc, out = run("--settings", hook)
+        check("on openrouter a --settings is still refused: it would replace ori's provider fence",
+              rc != 0 and "ori's provider fence" in out, out)
+        for provider in ("anthropic",):
+            mkfabric()
+            rc, out = run("--provider", provider, "--settings", hook, "--version")
+            check(f"on {provider} a --settings that carries no pin reaches claude, unchanged",
+                  rc == 0 and f"--settings {hook}" in out.replace("CLAUDE-EXECCED:", ""), out)
+            mkfabric()
+            rc, out = run("--provider", provider, "--settings", '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:1"}}', "--version")
+            check(f"on {provider} a --settings JSON carrying env.ANTHROPIC_* is refused, naming the key",
+                  rc != 0 and "env.ANTHROPIC_BASE_URL" in out and "CLAUDE-EXECCED" not in out, out)
+            mkfabric()
+            put(f"{repo}/pin.json", '{"modelOverrides":{"a":"b"}}\n')
+            rc, out = run("--provider", provider, "--settings=pin.json", "--version")
+            check(f"on {provider} a --settings file with a pin is refused, relative to the launch directory",
+                  rc != 0 and "modelOverrides" in out and "CLAUDE-EXECCED" not in out, out)
+            rm(f"{repo}/pin.json")
+            mkfabric()
+            put(f"{repo}/hook.json", hook + "\n")
+            rc, out = run("--provider", provider, "--settings", "hook.json", "--version")
+            check(f"on {provider} a clean --settings file reaches claude", rc == 0 and "CLAUDE-EXECCED" in out, out)
+            rm(f"{repo}/hook.json")
+            mkfabric()
+            check(f"on {provider} --setting-sources is still refused",
+                  run("--provider", provider, "--setting-sources", "user", "--version")[0] != 0)
+        mkfabric()
+        rc, out = run("--provider", "gateway", "--settings", '{"env":{"ANTHROPIC_API_KEY":"x"}}', "--print")
+        check("on the gateway a pinning --settings is refused before anything starts", rc != 0 and "env.ANTHROPIC_API_KEY" in out, out)
+        mkfabric()
+        rc, out = run("--provider", "gateway", "--settings", hook, "--print")
+        check("…and one with only a hook passes the refusals (the --print plan is printed)", rc == 0 and "provider anthropic" in out, out)
+
         print("launch: the session's effort — resolved, stamped, overridable, and never from the environment")
         mkfabric()
         out = out_of("--provider", "anthropic", "--print")

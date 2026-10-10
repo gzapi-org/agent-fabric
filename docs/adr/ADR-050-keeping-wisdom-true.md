@@ -75,8 +75,9 @@ reading a few lines of a section against the tree. Routing the flag to the
 role's holder gives the check an owner and a place in the job list
 (ADR-037); a flag nobody is assigned is the state `memory_check.py`
 already left the corpus in. A reader who meets a wrong section is the best
-sensor the fabric has, and ADR-049's `memory_mark` is already collected;
-this record gives it somewhere to go.
+sensor the fabric has, and ADR-049 decides a `memory_mark` for it; this
+record gives the mark somewhere to go once ADR-049's server and harvest
+carry it.
 
 The rubric gains the test the stale count points at: 19 of 69 slices were
 events, which the tree, git, the PR or the job list already record. Of the
@@ -111,7 +112,8 @@ builder of each.
 2. **Mechanical detection** (decided, not yet built; until it is,
    `memory_check.py` sorts by cited path only and no lint warning exists).
    `tools/fabric/memory_check.py` sorts every section as exactly one of
-   five outcomes. `stale-hard`: an anchor's path is gone, an anchor's
+   five outcomes, and a slice it cannot read is reported `unreadable`,
+   never routed. `stale-hard`: an anchor's path is gone, an anchor's
    symbol or literal is no longer in its file, or a path the section cites
    is gone. `maybe-stale`: an anchor's file changed after the section's
    *Observed* date; the finding names the commit that changed it, and it
@@ -125,9 +127,11 @@ builder of each.
    model, and is also a lint warning from `lint_rules/slices.py`, never an
    error.
 3. **A flag is routed to one agent** (decided, not yet built; until it is,
-   fabric-coordinator reads the flags in the drain and sends them by
-   hand). The routing key is per section: the agent that last wrote the
-   section, which the assembler records in the section's provenance, if it
+   fabric-coordinator runs `fabric-memory-check` beside the drain and sends
+   its `stale-hard` findings by hand). The routing key is per section: the agent that last wrote the
+   section, which the drain keeps per section in its own state beside
+   `memory-drain-reads.json` (a slice's provenance names the role, never
+   the login, as it travels into every repository), if it
    still holds the section's role; else the role's running holder; else its
    lowest-numbered holder. Until the assembler records it, the key is the
    role's running holder, else its lowest-numbered holder. A `shared/`
@@ -149,7 +153,9 @@ builder of each.
    `test_the_same_claim_again_is_never_a_collision_whatever_its_date`). The
    drain never edits a flagged section itself.
 5. **The reader's judgement** (decided, not yet built; until it is, the
-   marks are in the drain report and nobody is routed them). A
+   no mark exists: ADR-049's server and harvest that carry them are not
+   built; once they are, the marks are listed in the drain report and
+   nobody is routed them). A
    `memory_mark` of `stale` or `wrong` (ADR-049 rule 3) is carried in the
    harvest bundle, from each login's own `memory-marks.jsonl`, through
    `fabric-ctl <login> memory`, and is routed as rule 3 routes a flag, by
@@ -185,7 +191,8 @@ builder of each.
    than 90 days whose *Observed* date no confirmation has re-dated, and
    each section no `memory_read` returned in the last 8 weeks. The horizon
    counts reads, not finds: the ids a read returned, which ADR-049 rule 7
-   already carries in each login's counts. The drain keeps the per-section
+   decides the harvest bundle carries; until ADR-049 is built there is
+   nothing to count and the list is empty. The drain keeps the per-section
    last-read date in its own state file, `memory-drain-reads.json`, in the
    drain's agent state directory (`agents/<login>/`, beside
    `memory-calls.jsonl`), and writes it on every drain. Nothing is
@@ -239,8 +246,10 @@ builder of each.
   (rules 3, 8, 10, 11) and the manual (`memory/README.md`,
   `identities/prompt/memory.md`). The model hint (rule 6) is
   fabric-coordinator's, last, and can be left out without changing any
-  other rule. The assembler's retitle change (rule 11) waits on the
-  report's list, which covers it until then.
+  other rule. python-dev-03 also builds the assembler's retitle change
+  (rule 11, ADR-014 rule 4(a); the report's list covers it until then) and
+  the lint warning of rule 2, with s8. Rules 5 and 8 need ADR-049's server
+  and harvest (plan s4) first.
 - fabric-coordinator's drain gains work (routing, the report's lists) and
   loses the work it could not do well: judging a section it cannot see
   the code of.

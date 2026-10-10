@@ -123,6 +123,8 @@ def main() -> int:
         check("a plain word", synced("export K=abc\n") == "abc")
         check("single-quoted, with the shell's own escape of a quote", synced("export K='a'\"'\"'b'\n") == "a'b")
         check("double-quoted with an escaped quote", synced('export K="a\\"b"\n') == 'a"b')
+        check("the first word is the value: a stray quote later in the line does not lose it; one in the first word still does",
+              synced("export K=abc 'def\n") == "abc" and synced("export K=abc # a comment\n") == "abc" and synced("export K='abc def\n") is None)
         check("the first line that names it wins", synced("export K=one\nexport K=two\n") == "one")
         check("a name that is only a prefix of another is not it", synced("export KK=x\n") is None)
         check("an empty value is none; an unterminated quote is none, never a guess", synced("export K=\n") is None and synced("export K='abc\n") is None)

@@ -199,11 +199,15 @@ def synced_var(name: str, home: str | None = None) -> str | None:
             for line in fh.read().split("\n"):
                 if not line.startswith(prefix):
                     continue
+                # The first word only, as the Node reader took it: a stray quote later in the line is no reason to lose the value.
+                lexer = shlex.shlex(line[len(prefix):], posix=True)
+                lexer.whitespace_split = True
+                lexer.commenters = ""
                 try:
-                    words = shlex.split(line[len(prefix):])
+                    word = lexer.get_token()
                 except ValueError:
                     return None
-                return words[0] if words and words[0] else None
+                return word or None
     except (OSError, UnicodeDecodeError):
         pass       # not enrolled, or no sync yet
     return None

@@ -103,16 +103,17 @@ class Context(Account):
             self.assertNotIn("context", self.row(), repr(bad))
 
     def test_the_sample_is_read_beside_the_state_file_not_in_its_parent_or_the_working_directory(self):
-        self.state()
-        sample = {"sessions": {"s-one-aaaa": {"pct": 77, "at": AT}}}
-        for wrong in (os.path.dirname(self.dir), os.getcwd()):
-            path = os.path.join(wrong, sessions.CONTEXT_FILE)
-            if os.path.exists(path):
-                self.skipTest(f"{path} exists on this machine")
-            with open(path, "w") as fh:
-                json.dump(sample, fh)
-            self.addCleanup(os.remove, path)
+        # The state file lives one level down, so its parent and the working directory are scratch places of this test.
+        os.mkdir(os.path.join(self.dir, "state"))
+        self.file = os.path.join(self.dir, "state", "session-state.json")
+        self.write("state/session-state.json", {"sessions": {"s-one-aaaa": {"state": "blocked", "since": iso(NOW_MS - 60_000)}}})
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.dir)
+        self.write(sessions.CONTEXT_FILE, {"sessions": {"s-one-aaaa": {"pct": 77, "at": AT}}})
         self.assertNotIn("context", self.row())
+        self.write("state/" + sessions.CONTEXT_FILE, {"sessions": {"s-one-aaaa": {"pct": 12, "at": AT}}})
+        self.assertEqual(self.row()["context"]["pct"], 12, "positive control: beside the state file it is read")
 
     def test_a_sample_time_in_a_form_fleet_would_drop_is_left_out_here_too(self):
         self.state()

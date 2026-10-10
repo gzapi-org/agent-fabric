@@ -8,5 +8,8 @@ from memory_mcp import calls
 LOG = "memory-marks.jsonl"
 
 
-def record(state_dir: str, ident: str, verdict: str, note: str) -> str | None:
-    return calls.append_line(state_dir, LOG, {"t": calls.now(), "id": ident, "verdict": verdict, "note": note})
+def record(state_dir: str, ident: str, verdict: str, note: str, project: str | None = None) -> str | None:
+    row = {"t": calls.now(), "id": ident, "verdict": verdict, "note": note}
+    if project:
+        row["project"] = project
+    return calls.append_line(state_dir, LOG, row)

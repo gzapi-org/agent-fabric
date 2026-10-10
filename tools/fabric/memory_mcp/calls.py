@@ -25,12 +25,17 @@ def append_line(state_dir: str, filename: str, row: dict) -> str | None:
 
 
 def now(clock=lambda: datetime.datetime.now(datetime.UTC)) -> str:
-    return clock().isoformat(timespec="seconds").replace("+00:00", "Z")
+    return clock().isoformat(timespec="milliseconds").replace("+00:00", "Z")      # not whole seconds: a watermark at one must not drop a row of the same second
 
 
-def record(state_dir: str, tool: str, ids: list[str], after_find: bool | None = None) -> None:
+def record(state_dir: str, tool: str, ids: list[str], after_find: bool | None = None, project: str | None = None,
+           error: bool = False) -> None:
     """The log is for counting: a failure to write it is said once on stderr and never fails the call."""
     row: dict = {"t": now(), "tool": tool, "hits": len(ids), "ids": ids}
+    if project:
+        row["project"] = project         # the harvest of one project carries the rows of that project alone
+    if error:
+        row["error"] = True              # a call the caller got wrong: counted apart, never as a zero-hit find
     if after_find is not None:
         row["after_find"] = after_find       # a read of an id the last find returned: what the read-through rate needs
     failed = append_line(state_dir, LOG, row)

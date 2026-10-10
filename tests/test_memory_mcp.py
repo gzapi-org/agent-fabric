@@ -185,8 +185,11 @@ def main() -> int:
         check("several ids in one call, each served", len(two[1]) == 2 and "Pass timeout=" in two[0] and "refuses an older one" in two[0])
         check("an id among several that is not found is said in its place",
               "p:python-dev/solution/nope: no such slice" in tools.read(corpus, sess, {"ids": [ref + "#1", "p:python-dev/solution/nope"]})[0])
-        cut = tools.read(corpus, sess, {"ids": [ref + "#1"], "max_tokens": 20})[0]
-        check("max_tokens cuts the reply and says so", cut.endswith("[cut at max_tokens 20]") and len(cut) < 200, cut)
+        cut = tools.read(corpus, sess, {"ids": [ref + "#1"], "max_tokens": tools.MIN_TOKENS})[0]
+        check("max_tokens cuts the reply and says so, and the marker is inside the budget", cut.endswith(f"[cut at max_tokens {tools.MIN_TOKENS}]")
+              and len(cut) * tools.TOKENS_PER_CHAR <= tools.MIN_TOKENS + 1, f"{len(cut)} chars: {cut}")
+        tiny = tools.find(corpus, sess, {"query": "subprocess timeouts", "max_tokens": 1})[0]
+        check("a max_tokens below the floor is the floor, so one hit line always fits", len(tiny) * tools.TOKENS_PER_CHAR <= tools.MIN_TOKENS + 15, tiny)
         for bad in ("../../etc/passwd", "/etc/passwd", "f:../../../outside", "f:domains/python-dev/domain/link-out", "p:../../x", "nope"):
             try:
                 out = tools.read(corpus, sess, {"ids": [bad]})[0]
@@ -218,10 +221,18 @@ def main() -> int:
         print("memory_mark")
         marks_log = f"{state}/{marks.LOG}"
         ok_id = "p:python-dev/solution/launcher-pin#1"
+        try:
+            tools.mark(corpus, tools.Session(role="python-dev", project="agent-fabric", state_dir=state), {"id": ok_id, "verdict": "stale"})
+            unseen = ""
+        except tools.ToolError as e:
+            unseen = str(e)
+        check("an id that exists but this session was never shown is refused, and nothing is recorded (ADR-049 rule 3)",
+              "not shown in this session" in unseen and not os.path.exists(marks_log), unseen)
+        tools.read(corpus, sess, {"ids": [ok_id]})
         out, ids = tools.mark(corpus, sess, {"id": ok_id, "verdict": "stale", "note": "the pin moved to 3.14"})
         row = json.loads(open(marks_log).read().splitlines()[-1])
         check("a mark is one line in the login's state: time, id, verdict, note", out == f"marked {ok_id} stale" and ids == [ok_id]
-              and set(row) == {"t", "id", "verdict", "note"} and row["id"] == ok_id and row["verdict"] == "stale" and row["note"] == "the pin moved to 3.14", str(row))
+              and set(row) == {"t", "id", "verdict", "note", "project"} and row["project"] == "agent-fabric" and row["id"] == ok_id and row["verdict"] == "stale" and row["note"] == "the pin moved to 3.14", str(row))
         check("…private, and the corpus is untouched", oct(os.stat(marks_log).st_mode & 0o777) == "0o600"
               and "stale" not in open(f"{wc}/.agent-fabric/memory/python-dev/solution/launcher-pin.md").read())
         for label, args in (("a verdict outside helpful | wrong | stale", {"id": ok_id, "verdict": "bad"}),
@@ -237,10 +248,34 @@ def main() -> int:
             check(f"{label}: refused in one line, nothing recorded", err != "" and open(marks_log).read() == before, err)
         long_note = tools.mark(corpus, sess, {"id": ok_id, "verdict": "helpful", "note": "x" * 1000})
         check("a long note is cut", len(json.loads(open(marks_log).read().splitlines()[-1])["note"]) <= tools.NOTE_CLIP and long_note[1] == [ok_id])
+        shown_sess = tools.Session(role="python-dev", state_dir=state)
+        tools.index(corpus, tools.Session(role="python-dev", project="agent-fabric", working_copy=wc, state_dir=state, shown=shown_sess.shown), {})
+        check("a slice id the index showed covers its sections for a mark", tools.mark(corpus, shown_sess, {"id": ok_id, "verdict": "helpful"})[1] == [ok_id])
+        read_sess = tools.Session(role="python-dev", state_dir=state)
+        tools.read(corpus, read_sess, {"ids": ["f:domains/python-dev/domain/subprocess-timeouts#1"], "max_tokens": tools.MIN_TOKENS})
+        try:
+            tools.mark(corpus, read_sess, {"id": ok_id, "verdict": "wrong"})
+            other = ""
+        except tools.ToolError as e:
+            other = str(e)
+        check("what another section showed does not license a mark on this one", "not shown in this session" in other, other)
+        for how, call in (("memory_find", lambda s: tools.find(corpus, s, {"query": "launcher interpreter pin"})),
+                          ("memory_read", lambda s: tools.read(corpus, s, {"ids": [ok_id]}))):
+            fresh = tools.Session(role="python-dev", project="agent-fabric", state_dir=state)
+            call(fresh)
+            check(f"an id shown by {how} may be marked", tools.mark(corpus, fresh, {"id": ok_id, "verdict": "helpful"})[1] == [ok_id])
+        dropped = tools.Session(role="python-dev", state_dir=state)
+        both = ["f:domains/python-dev/domain/subprocess-timeouts#1", ok_id]
+        first_alone = tools.read(corpus, tools.Session(role="python-dev"), {"ids": [both[0]]})[0]
+        text, served = tools.read(corpus, dropped, {"ids": both, "max_tokens": max(tools.MIN_TOKENS, tools._cost(first_alone) + 3)})
+        check("a part the budget dropped was not read: not in the ids logged, and not licensed for a mark",
+              served == [both[0]] and ok_id not in dropped.shown and both[0] in dropped.shown, f"{served} {dropped.shown}")
+        listing = tools.read(corpus, tools.Session(role="python-dev", state_dir=state), {"ids": ["p:python-dev/solution/launcher-pin"]})
+        check("a bare slice id lists its sections and logs the slice, not every section as read", listing[1] == ["p:python-dev/solution/launcher-pin"], str(listing[1]))
         ro = f"{t}/state-ro"
         os.makedirs(ro, mode=0o500)
         try:
-            tools.mark(corpus, tools.Session(role="python-dev", state_dir=f"{ro}/agent"), {"id": ok_id, "verdict": "helpful"})
+            tools.mark(corpus, tools.Session(role="python-dev", state_dir=f"{ro}/agent", shown={ok_id}), {"id": ok_id, "verdict": "helpful"})
             lost = ""
         except tools.ToolError as e:
             lost = str(e)

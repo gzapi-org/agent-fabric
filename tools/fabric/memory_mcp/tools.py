@@ -3,7 +3,7 @@ memory_mark writes, and only to the login's own state."""
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import memory_index as mi
 from memory_index import INDEX_LINE, Index, section_id, slice_ref
@@ -11,6 +11,7 @@ from memory_mcp import marks
 
 DEFAULT_LIMIT, MAX_LIMIT = 8, 20
 FIND_TOKENS, READ_TOKENS, MAX_TOKENS = 200, 1500, 8000
+MIN_TOKENS = 40         # a reply smaller than this cannot hold one hit line or the marker that says it was cut
 RELATED = 2
 WEAK_NOTICE = "weak match: read only if the cue fits"
 TAIL_TOKENS = 15       # the "+N more" line: counted in the budget, or a reply of the budget's size overruns it
@@ -26,6 +27,8 @@ class Session:
     project: str | None = None
     working_copy: str | None = None
     state_dir: str | None = None
+    # Every id this session has been shown, by find, read or index: memory_mark refuses any other (ADR-049 rule 3).
+    shown: set[str] = field(default_factory=set, compare=False, repr=False)
 
 
 class ToolError(Exception):
@@ -84,7 +87,7 @@ def find(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
     role = _text(args.get("role"), "role") or session.role
     project = _text(args.get("project"), "project") or session.project
     limit = _int(args.get("limit"), "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)
-    budget = _int(args.get("max_tokens"), "max_tokens", FIND_TOKENS, 1, MAX_TOKENS)
+    budget = _int(args.get("max_tokens"), "max_tokens", FIND_TOKENS, MIN_TOKENS, MAX_TOKENS)
     hits = index.find(query, role, project)
     if not hits:
         return _try(index, query), []
@@ -106,7 +109,9 @@ def find(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
         for h in rest:
             scopes[h.section.scope] = scopes.get(h.section.scope, 0) + 1
         lines.append(f"+{len(rest)} more: " + ", ".join(f"{scope} {n}" for scope, n in sorted(scopes.items())))
-    return "\n".join(lines), [section_id(h.section) for h in shown]
+    ids = [section_id(h.section) for h in shown]
+    session.shown.update(ids)
+    return "\n".join(lines), ids
 
 
 def read(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
@@ -115,42 +120,42 @@ def read(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
         ids = [ids]
     if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i.strip() for i in ids):
         raise ToolError("ids is required: one or more ids memory_find returned")
-    budget = _int(args.get("max_tokens"), "max_tokens", READ_TOKENS, 1, MAX_TOKENS)
-    parts: list[str] = []
-    served: list[str] = []
+    budget = _int(args.get("max_tokens"), "max_tokens", READ_TOKENS, MIN_TOKENS, MAX_TOKENS)
+    # (text, the ids the call logs as read, every id the part shows the model): a listing reads the slice, not its sections.
+    parts: list[tuple[str, list[str], list[str]]] = []
     for ident in ids:
         ref, _, position = ident.partition("#")
-        try:
-            sections = index.slice_sections(mi.slice_id_of(ref))
-        except ToolError as e:
-            parts.append(f"{ident}: {e}")
-            continue
+        sections = index.slice_sections(mi.slice_id_of(ref))
         if not sections:
-            parts.append(f"{ident}: no such slice")
+            parts.append((f"{ident}: no such slice", [], []))
         elif not position:
-            parts.append("\n".join(f"{section_id(s)} | {clip(s.heading, 100)} | ~{s.tokens}t" for s in sections))
-            served.extend(section_id(s) for s in sections)
+            listing = [section_id(s) for s in sections]
+            parts.append(("\n".join(f"{section_id(s)} | {clip(s.heading, 100)} | ~{s.tokens}t" for s in sections), [ref], [ref, *listing]))
         else:
             wanted = [s for s in sections if str(s.position) == position]
             if not wanted:
-                parts.append(f"{ident}: no such section")
+                parts.append((f"{ident}: no such section", [], []))
                 continue
             s = wanted[0]
             head = f"{section_id(s)} · {s.kind} · {s.scope} · {s.role}" + (f" · observed {s.observed}" if s.observed else "")
             head += f" · {DECAY}" if s.kind == "solution" else ""
             related = "".join(f"\nrelated: {section_id(r)} | {clip(r.heading, HEADING_CLIP)}" for r in index.related(s, RELATED))
-            parts.append(f"{head}\n## {s.heading}\n{s.text}{related}")
-            served.append(section_id(s))
-    if not served:
-        raise ToolError("; ".join(parts))
-    text, kept = "", []
-    for part in parts:
+            parts.append((f"{head}\n## {s.heading}\n{s.text}{related}", [section_id(s)], [section_id(s)]))
+    if not any(read_ids for _t, read_ids, _s in parts):
+        raise ToolError("; ".join(t for t, _r, _s in parts))
+    cut = f"\n[cut at max_tokens {budget}]"
+    kept: list[str] = []
+    served: list[str] = []
+    text = ""
+    for part, read_ids, shown_ids in parts:
         if _cost(text + part) > budget:
-            room = max(0, int(budget / TOKENS_PER_CHAR) - len(text))
-            kept.append(part[:room].rstrip() + f"\n[cut at max_tokens {budget}]")
+            room = max(0, int(budget / TOKENS_PER_CHAR) - len(text) - len(cut))      # the marker is inside the budget too
+            kept.append(part[:room].rstrip() + cut)
             break
         kept.append(part)
         text += part + "\n\n"
+        served.extend(read_ids)             # only what the reply holds: a part the budget dropped was not read
+        session.shown.update(shown_ids)
     return "\n\n".join(kept), served
 
 
@@ -173,6 +178,7 @@ def index(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
         if s is None or (project and s.projects and project not in s.projects):
             continue
         out.append((slice_ref(s.slice_id), f"{slice_ref(s.slice_id)} | {s.kind} | {clip(m.group(2), CUE_CLIP)}"))
+    session.shown.update(o[0] for o in out)
     return ("\n".join(o[1] for o in out) or f"no indexed slices for role {role}"), [o[0] for o in out]
 
 
@@ -190,10 +196,13 @@ def mark(index: Index, session: Session, args: dict) -> tuple[str, list[str]]:
         raise ToolError("verdict must be one of " + " | ".join(VERDICTS))
     ref, _, position = ident.partition("#")
     if not any(str(s.position) == position for s in index.slice_sections(mi.slice_id_of(ref))):
-        raise ToolError(f"id {ident!r}: not a section memory_find returned")
+        raise ToolError(f"id {ident!r}: not a section of the corpus")
+    # ADR-049 rule 3: only what find, read or index showed this session; a slice id from the index covers its sections.
+    if ident not in session.shown and ref not in session.shown:
+        raise ToolError(f"id {ident!r}: not shown in this session by memory_find, memory_read or memory_index")
     if not session.state_dir:
         raise ToolError("mark not recorded: this session has no state directory")
-    failed = marks.record(session.state_dir, ident, verdict, clip(note, NOTE_CLIP) if note else "")
+    failed = marks.record(session.state_dir, ident, verdict, clip(note, NOTE_CLIP) if note else "", session.project)
     if failed:
         raise ToolError(f"mark not recorded: {failed}")
     return f"marked {ident} {verdict}", [ident]
@@ -204,10 +213,10 @@ TOOLS = {
                           "Ask before changing something the fleet may already know.",
                     {"query": {"type": "string"}, "role": {"type": "string"}, "project": {"type": "string"},
                      "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT},
-                     "max_tokens": {"type": "integer", "minimum": 1, "maximum": MAX_TOKENS}}, ["query"]),
+                     "max_tokens": {"type": "integer", "minimum": MIN_TOKENS, "maximum": MAX_TOKENS}}, ["query"]),
     "memory_read": (read, "Sections by id (from memory_find), each with its provenance and its related slices' cue lines, cut at "
                           "max_tokens; a slice id alone lists its sections.",
-                    {"ids": {"type": "array", "items": {"type": "string"}}, "max_tokens": {"type": "integer", "minimum": 1,
+                    {"ids": {"type": "array", "items": {"type": "string"}}, "max_tokens": {"type": "integer", "minimum": MIN_TOKENS,
                                                                                             "maximum": MAX_TOKENS}}, ["ids"]),
     "memory_index": (index, "The index cue lines for a role (default: this session's) and project.",
                      {"role": {"type": "string"}, "project": {"type": "string"}}, []),

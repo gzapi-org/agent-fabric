@@ -67,14 +67,14 @@ class Server:
         try:
             text, ids = entry[0](self.corpus, self.session, args)
         except tools.ToolError as e:
-            calls.record(self.state_dir, name, [])
+            calls.record(self.state_dir, name, [], project=self.session.project, error=True)
             return _result(str(e), error=True)
         after_find = None
         if name == "memory_find":
             self.last_find = set(ids)
         elif name == "memory_read":
             after_find = bool(self.last_find & set(ids))
-        calls.record(self.state_dir, name, ids, after_find)
+        calls.record(self.state_dir, name, ids, after_find, self.session.project)
         return _result(text)
 
     def handle(self, message: object) -> dict | None:

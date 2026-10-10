@@ -1,17 +1,59 @@
-"""tools/fabric/control/agentd.py — the control agent, in Python (ADR-040
-Wave 8, step s6): runtime/control/agentd.mjs ported, behind no command until
-the cutover (s7 switches the unit). One process per account, run as the
+"""tools/fabric/control/agentd.py — the control agent (ADR-040 Wave 8): the
+Python port of runtime/control/agentd.mjs, which step s8 deleted; the unit
+runs this file under the pinned fabric-python. One process per account, run as the
 login: it answers the coordinator's requests on the control channel with
 what the account can say about itself (control/ops), and carries out the
 signed actions (upgrade, secrets-sync, jobs-add, local-prune,
-secrets-selftest, pool-add, tools-install).
+secrets-selftest, pool-add, tools-install, gateway-install).
 
   python3 tools/fabric/control/agentd.py          the daemon: block, answer, repeat
   python3 tools/fabric/control/agentd.py --once   answer what is pending, then exit
   python3 tools/fabric/control/agentd.py --self   print this account's status, no relay
 
-CONTRACT, frozen from agentd.mjs (its header is the rules of the channel,
-the read and the fence; they are not repeated). Kept byte for byte: every
+THE RULES OF THE CHANNEL, THE READ AND THE FENCE (carried over from the Node's
+header, deleted in step s8):
+
+THE CHANNEL. runtime/control/config.json names it (fabric:control) and
+the relay — the same one the fleet's GZCoord traffic rides. A control
+channel carries JSON records, not GZCOORD/1 messages, and no session
+ever drains it (inbox.py refuses a channel ending in :control). There
+is no point-to-point delivery: every agent reads every record and
+answers the ones addressed to it (`to` its address, a list holding it,
+or "*"); the coordinator reads the replies by `in_reply_to`.
+
+THE READ. No consumer cursor and no ack: the relay's `since_id` is an
+explicit cursor, so a restart never replays history — the agent primes
+from the newest record on the channel and waits after it, 55 s a poll.
+A `since_id_not_found` (the relay's history was cleared) re-primes.
+
+THE FENCE, v1. A request is answered only when its `from` is a host
+operator's address as runtime/hosts/registry.json places it — except a
+PUBLIC op (control/ops PUBLIC_OPS: `presence`, `pool-list` and `pool-claim`), answered for any placed
+<host>/<login>, since every sender needs it and a relay-token holder
+could already get it by forging an operator's `from` on an unsigned
+read op (pool-claim is the one unsigned op that writes: one field, the
+claimant, ADR-029 §5 rule 4) — read
+again for every record, so a pull that changes the registry counts at
+once, and the identity section asks whoami() per request, so a rebind
+shows without a restart (review, 2026-09-17) — (a claim,
+not a proof — the relay verifies no sender; it stops any other session
+from asking), its op is one of the closed set, its `ts` plus `ttl_s` is
+not in the past, and its id was not seen before (an LRU of 256). An
+ACTION op (sign.ACTION_OPS) additionally needs `sig`, an Ed25519
+signature by the operator's committed key, lives at most 10 minutes,
+and must be newer than the last action accepted from that operator (a
+ledger in the account's fabric state), and no more than a minute in
+its future. A read op takes no argument but `tokens`'s `days` (a number
+capped at 90), pool-list's `role` and pool-claim's `id`; an action takes
+only its closed set (check_args in control/upgrade.py and control/secrets.py,
+check_job_args in control/jobs.py, check_pool_args in control/pool.py). No field of a
+request ever reaches a shell; the answer carries no secret (control/ops).
+
+Every reply arrives: a section that cannot be read says so inline.
+Relay down: one line on stderr, retry every 30 s; a refused token is
+re-read once from the synced file (a rotation), then reported.
+
+CONTRACT, frozen from agentd.mjs. Kept byte for byte: every
 record posted (key order, ids, timestamps' shape), every refusal's reason
 text, every stderr line, the exit codes (0; 1 the relay failed in --once or
 an unforeseen error; 3 no token or no host operator; 4 --once and the token
@@ -46,6 +88,9 @@ WHERE THE PORT DIFFERS (each listed because a reader of the Node would look):
     traceback.
   - tools_opts (the `tools` op) and install_opts (the `tools-install` op) are
     two keys of the context; the Node's toolsOpts served both.
+  - gateway-install (control/gateway.py, after the Node was deleted) and the
+    `gateway` read are Python-only: gateway_install_opts and gateway_opts are
+    their context keys.
 """
 from __future__ import annotations
 
@@ -64,7 +109,7 @@ if sys.path and os.path.realpath(sys.path[0] or ".") == os.path.dirname(os.path.
     sys.path[0] = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 else:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from control import gzcoord, js, ops, pressure, sessions, tools as tools_mod  # noqa: E402
+from control import gateway as gateway_mod, gzcoord, js, ops, pressure, sessions, tools as tools_mod  # noqa: E402
 from control.gzcoord import FABRIC_ROOT  # noqa: E402
 from control.jobs import jobs_add  # noqa: E402
 from control.local import local_prune  # noqa: E402
@@ -174,8 +219,9 @@ ACCOUNTS_KEEPALIVE_MS = 4 * 3600 * 1000
 ACTION_CLOCK_SKEW_MS = 60 * 1000
 ACCOUNTS_CACHE_MS = 5 * 60 * 1000
 # Reads that run beside the read loop, like the actions: each can take
-# minutes, and the loop must keep answering behind it.
-BESIDE_LOOP_OPS = ["disk"]
+# minutes, and the loop must keep answering behind it. `gateway` hashes
+# the installed binary and runs it, up to ten seconds.
+BESIDE_LOOP_OPS = ["disk", "gateway"]
 # One disk scan per daemon, shared by every request that arrives while it
 # runs, and its answer kept a minute: any placed account may post the read
 # unsigned, and fifty requests started a hundred du (review of #92, round 4).
@@ -557,6 +603,8 @@ def answer(request: dict, ctx: dict) -> dict:
                                          **_only(ctx, "pool_opts", "role_of", "now"))}
     elif op == "tools-install":
         data = {"tools-install": tools_mod.tools_install(request, home=home, root=root, **(ctx.get("install_opts") or {}))}
+    elif op == "gateway-install":
+        data = {"gateway-install": gateway_mod.gateway_install(request, home=home, root=root, **(ctx.get("gateway_install_opts") or {}))}
     elif op == "local-prune":
         data = {"local-prune": local_prune(request, home=home, root=root)}
     elif op == "secrets-selftest":

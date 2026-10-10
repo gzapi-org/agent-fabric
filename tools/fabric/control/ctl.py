@@ -1,7 +1,7 @@
 """tools/fabric/control/ctl.py — the coordinator's side of the control plane:
 post one request on the control channel, read the replies, print them
-(ADR-040 Wave 8, from runtime/control/ctl.mjs, which this replaces at the
-cutover; bin/fabric-ctl runs the Node until then).
+(ADR-040 Wave 8, ported from runtime/control/ctl.mjs, deleted in step s8;
+bin/fabric-ctl runs this on the pinned Python).
 
     fabric-ctl <login|all> [status|usage|identity|keys|fabric|session|script|recall|host|disk|accounts|ping] [--json] [--timeout S]
     fabric-ctl <login|all> tokens [--days N]
@@ -10,6 +10,7 @@ cutover; bin/fabric-ctl runs the Node until then).
     fabric-ctl <login|all> secrets-sync [--expect SHA12] [--restart]
     fabric-ctl <login|all> presence | jobs | tools | local | local-prune | secrets-selftest
     fabric-ctl <login|all> tools-install <tool>
+    fabric-ctl <login|all> gateway | gateway-install --version V
     fabric-ctl <login> jobs-add [--topic T] [--project P] [--priority P] [--] "<title>"
     fabric-ctl <holder> pool-add --role R [--topic T] [--project P] [--priority P] [--] "<title>"
     fabric-ctl <login|all> states [--follow] [--json]
@@ -26,9 +27,9 @@ row that says so, and the exit code is 1 — a table is never short.
 Stateless: a run leaves one request record and the agents' replies on the
 channel, and nothing else anywhere.
 
-THE CONTRACT, as the Node's, frozen by its tests (runtime/control/tests/
-ctl.test.mjs, ported case for case in tests/test_control_ctl.py) and the
-parity cases (tests/parity_cases_ctl.py): argv and its refusals, the
+THE CONTRACT, as the Node's, frozen by its tests (ctl.test.mjs, ported case
+for case in tests/test_control_ctl.py) and held to the Node's tables by
+parity cases until the Node was deleted (git history has them): argv and its refusals, the
 request sent (keys and their order), the rows, every table byte for byte —
 JavaScript's padEnd and padStart by UTF-16 code unit, toFixed's rounding
 half up, String() of whatever an account sent — the bundles written by a
@@ -98,6 +99,7 @@ from control.jobs import check_job_args
 from control.selftest import SELFTEST_BUDGET_S
 from control.sessions import SESSION_ID
 from control.sign import ACTION_OPS, ACTION_TTL_MAX_S, generate_operator_key, public_key_from, sign_request
+from control.gateway import GATEWAY_INSTALL_BUDGET_S
 from control.tools import TOOL_NAME, TOOLS_INSTALL_BUDGET_S
 from control.upgrade import FABRIC_UPGRADE_BUDGET_S, PIECES, UPGRADE_BUDGET_S, VERSION_RE, pinned_version
 import roots
@@ -114,6 +116,8 @@ USAGE = (
     "       fabric-ctl <login|all> jobs\n"
     "       fabric-ctl <login|all> tools   (each account: its missing required tools, from its hourly report)\n"
     "       fabric-ctl <login|all> tools-install <tool>   (an action: install the tool its registry pin names, on the accounts with a working copy of a project that declares it)\n"
+    "       fabric-ctl <login|all> gateway   (each account: the gateway binary it has, its version and digest)\n"
+    "       fabric-ctl <login|all> gateway-install --version V   (an action: install the gateway release the reviewed pin names, SHA-256 checked; a running gateway is never stopped)\n"
     "       fabric-ctl <login> jobs-add [--topic T] [--project P] [--priority P] [--] \"<title>\"\n"
     "       fabric-ctl <holder> pool-add --role R [--topic T] [--project P] [--priority P] [--] \"<title>\"\n"
     "       fabric-ctl <login|all> secrets-selftest\n"
@@ -265,6 +269,8 @@ def build_request(args: dict, *, id: str, from_: str, to: Any, cfg: dict, ts: st
         req["args"] = job_args(args)
     if op == "tools-install":
         req["args"] = {"tool": args["tool"]}
+    if op == "gateway-install":
+        req["args"] = {"version": args["version"]}
     if op == "pool-add":
         req["args"] = {**({"role": args["role"]} if args["role"] is not None else {}), **job_args(args)}
     if op == "secrets-sync" and (js.truthy(args["expect"]) or args["restart"]):
@@ -375,12 +381,15 @@ def parse_args(argv: list[str]) -> dict:
         out["timeout"] = (5 if op == "ping" else 120 if op == "memory" else 60 if op == "tokens" else 300 if op == "accounts"
                           else 200 if op == "disk" else (FABRIC_UPGRADE_BUDGET_S if out["piece"] == "fabric" else UPGRADE_BUDGET_S) if op == "upgrade"
                           else 240 if op == "secrets-sync" else TOOLS_INSTALL_BUDGET_S if op == "tools-install"
+                          else GATEWAY_INSTALL_BUDGET_S if op == "gateway-install"
                           else SELFTEST_BUDGET_S if op == "secrets-selftest" else 20)
     if op == "upgrade" and out["piece"] not in PIECES:
         raise CtlError(f"upgrade takes a piece: {', '.join(PIECES)}")
     version = out["version"]
-    if version is not None and (op != "upgrade" or not (isinstance(version, str) and VERSION_RE.fullmatch(version))):
-        raise CtlError("--version takes digits.digits.digits, with upgrade only")
+    if version is not None and (op not in ("upgrade", "gateway-install") or not (isinstance(version, str) and VERSION_RE.fullmatch(version))):
+        raise CtlError("--version takes digits.digits.digits, with upgrade and gateway-install only")
+    if op == "gateway-install" and version is None:
+        raise CtlError("gateway-install takes --version V: the release the reviewed pin names")
     if version is not None and out["piece"] == "fabric":
         raise CtlError("upgrade fabric takes no --version: it moves every account to this checkout's origin/main")
     if (out["expect"] is not None or out["restart"]) and op != "secrets-sync":
@@ -590,14 +599,15 @@ def rows(expected: list[dict], replies: list[dict]) -> list[dict]:
                     "keys": g("keys"), "fabric": g("fabric"), "session": g("session"), "script": g("script"), "recall": g("recall"),
                     "tokens": g("tokens"), "memory": g("memory"), "machine": g("host"), "disk": g("disk"), "accounts": g("accounts"),
                     "upgrade": g("upgrade"), "secretsSync": g("secrets-sync"), "presence": g("presence"), "jobs": g("jobs"), "tools": g("tools"),
-                    "jobsAdd": g("jobs-add"), "toolsInstall": g("tools-install"), "poolAdd": g("pool-add"), "local": g("local"),
+                    "jobsAdd": g("jobs-add"), "toolsInstall": g("tools-install"), "gateway": g("gateway"), "gatewayInstall": g("gateway-install"), "poolAdd": g("pool-add"), "local": g("local"),
                     "localPrune": g("local-prune"), "selftest": g("secrets-selftest"), "agentd": g("agentd")})
     return out
 
 
 # What counts as success for each action; anything else fails the run.
 ACTION_OK = {"upgrade": ["current", "upgraded"], "secrets-sync": ["synced"], "jobs-add": ["added"], "local-prune": ["pruned", "clean"],
-             "secrets-selftest": ["pass"], "pool-add": ["added"], "tools-install": ["installed", "current", "skipped"]}
+             "secrets-selftest": ["pass"], "pool-add": ["added"], "tools-install": ["installed", "current", "skipped"],
+             "gateway-install": ["installed", "current"]}
 
 
 def targets_of(targets: list[str], placed: list[dict]) -> dict:
@@ -845,6 +855,33 @@ def _table_tools_install(rs: list) -> list[str]:
         u = r.get("toolsInstall")
         body = r["status"] if _unless(r, u) else f"{pad_end(S(dig(u, 'status')), 9)} {S(nullish(dig(u, 'tool'), ''))} {S(nullish(dig(u, 'version'), ''))}{' ' + S(u['reason']) if T(dig(u, 'reason')) else ''}"
         lines.append(esc(trim_end(f"{pad_end(r['account'], 22)} {body}")))
+    return lines
+
+
+def _table_gateway(rs: list) -> list[str]:
+    lines = [f"{pad_end('account', 22)} {pad_end('status', 10)} {pad_end('version', 9)} {pad_end('contract', 8)} digest"]
+    for r in rs:
+        u = r.get("gateway")
+        if _unless(r, u):
+            lines.append(_row(r))
+            continue
+        digest = S(dig(u, "installed_sha256"))[:12] if T(dig(u, "installed_sha256")) else "-"
+        why = f"  {S(u['reason'])}" if T(dig(u, "reason")) else ""
+        lines.append(esc(trim_end(f"{pad_end(r['account'], 22)} {pad_end(S(nullish(dig(u, 'status'), 'no status')), 10)} "
+                                  f"{pad_end(S(nullish(dig(u, 'version'), '-')), 9)} {pad_end(S(nullish(dig(u, 'contract'), '-')), 8)} {digest}{why}")))
+    return lines
+
+
+def _table_gateway_install(rs: list) -> list[str]:
+    lines = [f"{pad_end('account', 22)} {pad_end('status', 10)} {pad_end('version', 9)} {pad_end('verified sha256', 16)} reason"]
+    for r in rs:
+        u = r.get("gatewayInstall")
+        if _unless(r, u):
+            lines.append(_row(r))
+            continue
+        digest = S(dig(u, "sha256"))[:12] if T(dig(u, "sha256")) else "-"
+        lines.append(esc(trim_end(f"{pad_end(r['account'], 22)} {pad_end(S(nullish(dig(u, 'status'), 'no status')), 10)} "
+                                  f"{pad_end(S(nullish(dig(u, 'version'), '-')), 9)} {pad_end(digest, 16)} {S(nullish(dig(u, 'reason'), ''))}")))
     return lines
 
 
@@ -1347,6 +1384,10 @@ def table(op: str, rs: list) -> str:
         lines = _table_tools(rs)
     elif op == "tools-install":
         lines = _table_tools_install(rs)
+    elif op == "gateway":
+        lines = _table_gateway(rs)
+    elif op == "gateway-install":
+        lines = _table_gateway_install(rs)
     elif op == "jobs-add":
         lines = _table_jobs_add(rs)
     elif op == "pool-add":

@@ -21,7 +21,10 @@ expect and whether to act on it now:
            restart asked for and not done is a failed reply. The requester's
            own session is never stopped (it is waiting for the reply).
            Without it a running session keeps the sign-in it started with,
-           and the reply says it needs a relaunch.
+           and the reply says it needs a relaunch. A session on the gateway
+           is never stopped: its token file was replaced by the sync, and the
+           reply says whether the gateway's own log confirms the switch
+           (control/gateway_switch.py), also beside sessions that need a relaunch.
 
 So a move is messages end to end: `fabric-accounts assign` writes the
 reference, and every account applies, verifies and restarts by itself. What
@@ -86,18 +89,22 @@ def session_env(pid: int, env_of: Callable[[int], bytes | str] | None = None) ->
     launcher removes the token — so it is never "not on" one: restarting it
     would bring it back just as tokenless, on every run (re-review of #37). A
     session without the stamp is taken as plain claude, the only path a token
-    reaches."""
+    reaches. A session on the gateway (the launcher stamps AGENT_FABRIC_LAUNCH_TRANSPORT)
+    holds no token either, by design: the gateway re-reads the account's token file on
+    every request, so a move reaches it with no restart."""
     if env_of is None:
         with open(f"/proc/{pid}/environ", "rb") as fh:
             raw: bytes | str = fh.read()
     else:
         raw = env_of(pid)
-    out: dict[str, str | None] = {"token": None, "provider": None}
+    out: dict[str, str | None] = {"token": None, "provider": None, "transport": None}
     for kv in util.decode(raw if isinstance(raw, bytes) else raw.encode("utf-8")).split("\0"):
         if kv.startswith("CLAUDE_CODE_OAUTH_TOKEN="):
             out["token"] = kv[len("CLAUDE_CODE_OAUTH_TOKEN="):] or None
         elif kv.startswith("AGENT_FABRIC_LAUNCH_PROVIDER="):
             out["provider"] = kv[len("AGENT_FABRIC_LAUNCH_PROVIDER="):] or None
+        elif kv.startswith("AGENT_FABRIC_LAUNCH_TRANSPORT="):
+            out["transport"] = kv[len("AGENT_FABRIC_LAUNCH_TRANSPORT="):] or None
     return out
 
 
@@ -144,6 +151,7 @@ def secrets_sync_once(
     sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
     stop_wait_ms: int | None = None, env_of: Callable[[int], bytes | str] | None = None,
     upgrading: Callable[[], bool] | None = None, pgrep: Callable[..., Any] | None = None,
+    gateway_file: str | None = None,
 ) -> dict:
     from datetime import datetime, timezone
     home = os.path.expanduser("~") if home is None else home
@@ -172,8 +180,11 @@ def secrets_sync_once(
                             else {"via": "none: its next session is refused"})
     missing = {"missing": report["missing"]} if isinstance(report.get("missing"), list) and report["missing"] else {}
 
+    # Filled once a gateway session is found; every reply after that carries it, whichever way the sync ends.
+    extra: dict = {}
+
     def fail(reason: str) -> dict:
-        return {"status": "failed", "claude_sign_in": sign, **missing, "reason": reason}
+        return {"status": "failed", "claude_sign_in": sign, **missing, **extra, "reason": reason}
 
     if expect and sign.get("token_sha256_12") != expect:
         held = f"setup-token {sign['token_sha256_12']}" if sign.get("token_sha256_12") else "no token"
@@ -192,7 +203,7 @@ def secrets_sync_once(
         return {"status": "synced", "claude_sign_in": sign, **missing, "session": "unknown", "reason": why}
 
     def done(session: str) -> dict:
-        return {"status": "synced", "claude_sign_in": sign, **missing, "session": session}
+        return {"status": "synced", "claude_sign_in": sign, **missing, **extra, "session": session}
 
     if not running:
         return done("none")
@@ -203,19 +214,36 @@ def secrets_sync_once(
         except OSError:
             envs[pid] = None
     broker = [p for p in running if envs[p] and envs[p]["provider"] and envs[p]["provider"] != "anthropic"]
+    gateway = [p for p in running if p not in broker and envs[p] and envs[p]["transport"] == "gateway"]
 
     def token_of(p: int) -> str | None:
         return envs[p]["token"] if envs[p] else None
 
-    stale = [p for p in running if p not in broker
+    # A session on the gateway already runs on the new account once the token file is replaced (fabric-secrets
+    # sync did it): the controller joins that file's generation to the token's fingerprint and asks the gateway's
+    # own log whether it has taken the file up (control/gateway_switch.py), and says which.
+    proof = None
+    if gateway:
+        import gateway_token
+        from control import gateway_switch
+        proof = gateway_switch.prove(directory or util.state_dir(), gateway_file or gateway_token.token_path(os.getuid()),
+                                     util.sha12(tok) if tok else None,
+                                     now().isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+        extra["gateway"] = proof["detail"]
+    stale = [p for p in running if p not in broker and p not in gateway
              and not ((t := token_of(p)) and tok and util.sha12(t) == util.sha12(tok))]
     if not stale:
-        return done("running (broker): no Claude account to move" if len(broker) == len(running)
-                    else "running, already on it")
+        if len(broker) == len(running):
+            return done("running (broker): no Claude account to move")
+        if gateway and len(broker) + len(gateway) == len(running):
+            return done(proof["session"])
+        # A mixed set: each kind said in its own words, the gateway's by what was proved, not by "already on it".
+        return done("running, already on it" + (f"; {proof['session']}" if proof else ""))
+    gw_words = f"; {proof['session']}" if proof else ""
     if me and request.get("from") == me:
-        return done("yours: relaunch to use it")
+        return done("yours: relaunch to use it" + gw_words)
     if not restart:
-        return done("running: relaunch to use it")
+        return done("running: relaunch to use it" + gw_words)
     up = upgrade()
     if (upgrading or up.upgrade_running)():
         return fail("an upgrade is running on this account (it owns the restart marker); synced, nothing stopped — run it again after")
@@ -253,6 +281,6 @@ def secrets_sync_once(
                     pass
             return fail(f"synced, but the session (pid {', '.join(map(str, left))}) did not stop within "
                         f"{round(wait_ms / 1000)} s; nothing forced — run it again, or relaunch it")
-        return done("restarting")
+        return done("restarting" + gw_words)
     finally:
         up.restart_in_flight(False)

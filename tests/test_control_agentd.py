@@ -903,6 +903,52 @@ class Actions(Daemon):
         self.assertEqual(len([x for x in r.replies() if x["op"] == "upgrade"]), 1, f"a replay after a restart got a reply\n{again.stderr}")
         self.assertRegex(again.stderr, r"not newer than the last action accepted .* \(a replay\)")
 
+    def test_once_each_action_refused_by_its_argument_check_answers_the_words_the_node_gave(self):
+        # Frozen from runtime/control/agentd.mjs (deleted in step s8): the
+        # reply of each signed action whose arguments its own module refuses.
+        # An accepted action reaches the account, so only refusals are
+        # deterministic enough to freeze.
+        frozen = [("upgrade", {"piece": "nope"}, 'piece "nope" is not one of claude, fabric'),
+                  ("secrets-sync", {"x": 1}, "secrets-sync takes only expect and restart, not x"),
+                  ("jobs-add", {}, "jobs-add names one login, never all"),
+                  ("tools-install", {"tool": "../x"}, "tools-install takes one argument, a tool name"),
+                  ("secrets-selftest", {"x": 1}, "secrets-selftest takes no arguments"),
+                  ("pool-add", {"x": 1}, "pool-add names the account that holds the pool, and only it"),
+                  ("local-prune", {"x": 1}, "local-prune takes no arguments")]
+        k = sign.generate_operator_key()
+        reg = self.signed_registry(k)
+        over = {"HOME": self.home(), "AGENT_FABRIC_HOSTS_REGISTRY": reg, "AGENT_FABRIC_STATE_DIR": self.scratch("agentd-state-")}
+        r = self.with_relay()
+        base = time.time() * 1000
+        posts = [(SELF, json.dumps(sign.sign_request(request_body(**{"id": f"frozen-{i}", "from": SELF, "op": op, "args": args,
+                                                                      "ttl_s": 60, "ts": iso(base + i * 50)}), k["privateKeySpec"])))
+                 for i, (op, args, _) in enumerate(frozen)]
+        out = self.once_after_wait(r, posts, **over)
+        self.assertEqual(out.status, 0, out.stderr)
+        got = {x["in_reply_to"]: x for x in r.replies() if x["op"] != "ping"}
+        for i, (op, args, reason) in enumerate(frozen):
+            self.assertEqual(got[f"frozen-{i}"]["data"][op], {"status": "refused", "reason": reason}, op)
+            self.assertIs(got[f"frozen-{i}"]["ok"], True)
+
+    def test_once_a_signed_gateway_install_is_an_action_and_an_unsigned_one_is_ignored(self):
+        # Python-only, after the Node was deleted (control/gateway.py). A version the pin lacks is
+        # refused by the module with nothing downloaded, so the whole path (the fence, the
+        # signature, the ledger, the dispatch, the reply) runs without a network.
+        k = sign.generate_operator_key()
+        reg = self.signed_registry(k)
+        over = {"HOME": self.home(), "AGENT_FABRIC_HOSTS_REGISTRY": reg, "AGENT_FABRIC_STATE_DIR": self.scratch("agentd-state-")}
+        r = self.with_relay()
+        base = request_body(**{"id": "gw-signed", "from": SELF, "op": "gateway-install", "args": {"version": "9.9.9"}, "ttl_s": 60})
+        unsigned = request_body(**{"id": "gw-unsigned", "from": SELF, "op": "gateway-install", "args": {"version": "9.9.9"}, "ttl_s": 60})
+        out = self.once_after_wait(r, [(SELF, json.dumps(sign.sign_request(base, k["privateKeySpec"]))), (SELF, json.dumps(unsigned))], **over)
+        self.assertEqual(out.status, 0, out.stderr)
+        got = {x["in_reply_to"]: x for x in r.replies() if x["op"] != "ping"}
+        self.assertEqual(list(got), ["gw-signed"], "the unsigned order got no reply")
+        reply = got["gw-signed"]["data"]["gateway-install"]
+        self.assertEqual(reply["status"], "refused")
+        self.assertRegex(reply["reason"], r"^version 9\.9\.9 is not in the reviewed pin \(it has ")
+        self.assertIn("gateway-install: not signed by", out.stderr)
+
     def test_once_an_action_whose_ledger_cannot_be_written_is_refused_by_name_not_blamed_on_the_relay(self):
         k = sign.generate_operator_key()
         reg = self.signed_registry(k)

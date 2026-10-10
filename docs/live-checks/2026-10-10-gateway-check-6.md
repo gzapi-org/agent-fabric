@@ -14,6 +14,11 @@ second run.
 
 ## Result
 
+Requests are numbered as the gateway logs them: request 1 is the
+harness's keyless `HEAD /api/hello` probe, which the gateway refuses by
+design (`local_auth_failed`), so the first tool-use turn is request 2 and
+the turn after the first tool result is request 3.
+
 | run | harness exit | turns | upstream statuses | swap | first request after the swap |
 |---|---|---|---|---|---|
 | control | 0 | 4 (tool_use ×3, text) | 200 ×4 | none | — |
@@ -27,6 +32,9 @@ second run.
 - **Not measured** (`measured: false`): `thinking_before_hook` was false in
   both runs, so no signed thinking block from A was handed back to B. The
   case the check exists for is still open.
-- **Unexplained:** every run's first request was refused locally
-  (`refused`, 401, `local_auth_failed`) before the harness's retry
-  succeeded; passed to rust-services-dev-01.
+- **Expected:** every run's request 1 is refused locally (401,
+  `local_auth_failed`): the harness's keyless probe, refused by the
+  gateway's operation-inventory decision (rust-services-dev-01, pinned by
+  tests/anthropic-passthrough/tests/operations.rs); nothing is retried.
+- **Next:** check-6 now defaults to claude-sonnet-4-5, whose turns return
+  signed thinking (gateway #36); the owner reruns it once #36 merges.

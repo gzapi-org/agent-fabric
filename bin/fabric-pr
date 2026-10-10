@@ -5,14 +5,14 @@
 # --help` is that module's help.
 #
 #   fabric-pr gate|review-status|post-review|reply|arm|sessions|
-#             trial-merge|wait-merged|owed-supply|compliance  [args…]
+#             trial-merge|wait-merged|owed-supply|compliance|counts  [args…]
 #   fabric-pr help          # the verbs; so does no verb
 #
 # A verb the list lacks exits 2 and names the list. The environment is the
 # old shims': nothing is exported, so a module reads what it always read.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-verbs="gate review-status post-review reply arm sessions trial-merge wait-merged owed-supply compliance"
+verbs="gate review-status post-review reply arm sessions trial-merge wait-merged owed-supply compliance counts"
 # ${1-…}, not ${1:-…}: an empty verb is an unknown one, not no verb.
 verb="${1-help}"
 case "$verb" in
@@ -27,6 +27,7 @@ case "$verb" in
   wait-merged) mod=wait_merged ;;
   owed-supply) mod=owed_supply ;;
   compliance) mod=pr_compliance ;;
+  counts) mod=pr_counts ;;
   *) echo "fabric-pr: unknown verb '$verb'; verbs: ${verbs// /, }" >&2; exit 2 ;;
 esac
 shift

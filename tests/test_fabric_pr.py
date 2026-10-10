@@ -21,7 +21,8 @@ VERBS = {"gate": ("pr_gate", "pr-gate"), "review-status": ("pr_review_status", "
          "post-review": ("post_review", "post-review"), "reply": ("pr_reply", "pr-reply"),
          "arm": ("arm", "arm"), "sessions": ("pr_sessions", "pr-sessions"),
          "trial-merge": ("trial_merge", "trial-merge"), "wait-merged": ("wait_merged", "wait-merged"),
-         "owed-supply": ("owed_supply", "owed-supply"), "compliance": ("pr_compliance", "pr-compliance")}
+         "owed-supply": ("owed_supply", "owed-supply"), "compliance": ("pr_compliance", "pr-compliance"),
+         "counts": ("pr_counts", "pr-counts")}
 LIST = ", ".join(VERBS)
 FAKE = ('import os, sys\n'
         'print("module=%s argv=%r" % (os.path.basename(__file__), sys.argv[1:]))\n'

@@ -42,6 +42,7 @@ CONTRACT
 """
 from __future__ import annotations
 
+import decimal
 import http.client
 import json
 import os
@@ -69,7 +70,8 @@ TIMEOUT_S = 20
 _JS_SPACE = re.compile("[\t\n\v\f\r    -     　﻿]+")
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 _TAG = re.compile(r"</?[A-Za-z][^<>]*>")
-_JS_SPACE_ENDS = re.compile("^[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+|[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+$")
+# JavaScript's StrWhiteSpaceChar: what trim() and Number() take off the ends of a string.
+_JS_TRIM_CHARS = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _FORM_SAFE = frozenset(b"*-._0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
 # A response, as the transport hands it up: (HTTP status, body text). The transport raises TimeoutError for no answer
@@ -125,7 +127,7 @@ _JS_RADIX = re.compile(r"0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)", re.ASCII)
 def _js_number(text: str) -> float:
     """Number(text) of JavaScript for a string: its whitespace trimmed, empty is 0, a decimal literal, a 0x/0o/0b integer
     or +/-Infinity; anything else is NaN. Python's float() also reads "inf", "nan" and "1_0", which Number() does not."""
-    t = _JS_SPACE_ENDS.sub("", text)
+    t = text.strip(_JS_TRIM_CHARS)       # str.strip with a set is linear; a regex anchored at the end is quadratic on a long run
     if not t:
         return 0.0
     if t in ("Infinity", "+Infinity"):
@@ -133,7 +135,10 @@ def _js_number(text: str) -> float:
     if t == "-Infinity":
         return float("-inf")
     if _JS_RADIX.fullmatch(t):
-        return float(int(t[2:], {"x": 16, "o": 8, "b": 2}[t[1].lower()]))
+        try:
+            return float(int(t[2:], {"x": 16, "o": 8, "b": 2}[t[1].lower()]))
+        except OverflowError:
+            return float("inf")             # Number("0x" + "f" * 300) is Infinity, clamped to 20
     if _JS_DECIMAL.fullmatch(t):
         return float(t)
     return float("nan")
@@ -261,8 +266,42 @@ def _js(value: object) -> str:
     if isinstance(value, dict):
         return "[object Object]"
     if isinstance(value, list):
-        return ",".join(_js(x) for x in value)      # Array.prototype.toString: null is empty, nested arrays flatten
-    return json.dumps(value, ensure_ascii=False)
+        # Array.prototype.toString: null is empty, nested arrays flatten. An explicit stack, not recursion: a reply nested
+        # hundreds deep must not end the search (and with it the fall-back to the other engine).
+        out: list[str] = []
+        stack: list[object] = [iter(value)]
+        while stack:
+            for item in stack[-1]:
+                if isinstance(item, list):
+                    if not item:
+                        out.append("")          # [] is an empty element of its parent: String([[], 1]) is ",1"
+                    stack.append(iter(item))
+                    break
+                out.append("" if item is None else _js(item))
+            else:
+                stack.pop()
+        return ",".join(out)
+    return _js_number_text(value)
+
+
+def _js_number_text(value: object) -> str:
+    """String(n) of JavaScript for a JSON number: no ".0" on an integral value, decimal notation from 1e-6 up to 1e21 and an
+    exponent beyond, written 1e+21 and 1e-7. Anything else JSON can hold is dumped as JSON."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return json.dumps(value, ensure_ascii=False)
+    x = float(value) if not isinstance(value, int) or abs(value) < 10 ** 300 else float("inf")
+    if x != x or x in (float("inf"), float("-inf")):
+        return "null" if x != x else ("Infinity" if x > 0 else "-Infinity")
+    if x == 0:
+        return "0"
+    if 1e-6 <= abs(x) < 1e21:
+        text = format(decimal.Decimal(repr(x)), "f")
+        return text[:-2] if text.endswith(".0") else text
+    mantissa, _, exponent = repr(x).partition("e")
+    if not exponent:                        # repr chose decimal where JavaScript wants an exponent (>= 1e21 prints as 1e+21 in both)
+        mantissa, _, exponent = f"{x:e}".partition("e")
+        mantissa = mantissa.rstrip("0").rstrip(".")
+    return f"{mantissa.removesuffix('.0')}e{'-' if exponent.startswith('-') else '+'}{exponent.lstrip('+-').lstrip('0') or '0'}"
 
 
 def _truthy(value: object) -> bool:
@@ -441,7 +480,7 @@ def serve(locale: Mapping[str, Any], stdin=None, stdout=None, secrets: Mapping[s
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     for raw in stdin:
-        line = raw.strip()
+        line = raw.strip(_JS_TRIM_CHARS)
         if not line:
             continue
         try:

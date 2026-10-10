@@ -245,7 +245,7 @@ def main() -> int:
         # What Node's Number() made of a count that arrives as a string, recorded from node: Python's float() reads more.
         node_counts = {"7": "7", " 7 ": "7", "1_0": "10", "inf": "10", "Infinity": "20", "-Infinity": "1", "+Infinity": "20", "0x10": "16",
                        "0X1f": "20", "0b11": "3", "0o17": "15", "1e1": "10", "1e": "10", "5.": "5", "  .5": "1", "+5": "5", "-5": "1", "": "10",
-                       "  ": "10", "\u00a05\u00a0": "5", "\ufeff5": "5", "5px": "10", "\u0661\u0662": "10", "1,5": "10"}
+                       "  ": "10", "\u00a05\u00a0": "5", "\ufeff5": "5", "0x" + "f" * 300: "20", "5px": "10", "\u0661\u0662": "10", "1,5": "10"}
         off = {k: (ws._count(k), v) for k, v in node_counts.items() if ws._count(k) != v}
         check("a count given as a string is read as JavaScript's Number() reads it (24 spellings recorded from node)", not off, str(off))
         # Node: j?.error is truthy for {} and [], and String() of an object is "[object Object]", of an array its joined items.
@@ -255,9 +255,41 @@ def main() -> int:
               refused("serpapi", {"error": {}}) == "search refused: [object Object]" and refused("serpapi", {"error": []}) == "search refused: "
               and refused("serpapi", {"error": [1, None, "a", [2, 3]]}) == "search refused: 1,,a,2,3"
               and refused("serpapi", {"error": 0, "organic_results": []}) == "no results (serpapi)", refused("serpapi", {"error": {}}))
-        check("an HTTP error whose error object is empty says the status and the object, as Node did",
-              refused("brave", {"error": {}}, 500) == "search refused: HTTP 500" or refused("brave", {"error": {}}, 500).endswith("[object Object]"),
+        # Node: why = j.error if a string, else j.message ?? j.error.message ?? j.error.detail ?? ""; and `why ? " — " + why : ""`
+        # where an object or array is truthy even when empty. So an empty error object says nothing (why is ""), and an empty or
+        # array message says "[object Object]" or nothing after the dash.
+        check("an HTTP error whose error object is empty says the status alone, as Node did", refused("brave", {"error": {}}, 500) == "search refused: HTTP 500",
               refused("brave", {"error": {}}, 500))
+        check("…a message that is an empty object is truthy: the status, a dash and String() of it; an empty array, the dash and nothing",
+              refused("brave", {"message": {}}, 500) == "search refused: HTTP 500 — [object Object]"
+              and refused("brave", {"message": []}, 500) == "search refused: HTTP 500 — "
+              and refused("brave", {"error": {"detail": [1, [], 2]}}, 500) == "search refused: HTTP 500 — 1,,2", refused("brave", {"message": {}}, 500))
+        # The numbers String() writes, recorded from node.
+        node_numbers = [(1.0, "1"), (1, "1"), (1.5, "1.5"), (1e21, "1e+21"), (1e22, "1e+22"), (123456789012345680000, "123456789012345680000"),
+                        (1e-6, "0.000001"), (1e-7, "1e-7"), (0.000001234, "0.000001234"), (1.5e-7, "1.5e-7"), (-2.5, "-2.5"), (100, "100"), (0, "0"),
+                        (12345678901234567890, "12345678901234567000"), (-1e21, "-1e+21"), (0.1, "0.1"), (1e300, "1e+300"), (5e-324, "5e-324")]
+        wrong = [(n, ws._js(n), e) for n, e in node_numbers if ws._js(n) != e]
+        check("a number in an error text is worded as String() words it (18 values recorded from node)", not wrong, str(wrong))
+        nested: list = [1]
+        for _ in range(899):
+            nested = [nested]
+        check("a nested array flattens as Array.prototype.toString does, an empty one as an empty element, and a deep one does not recurse",
+              ws._js([[], 1]) == ",1" and ws._js([1, []]) == "1," and ws._js([[], []]) == "," and ws._js([[1], [2]]) == "1,2"
+              and ws._js(nested) == "1", ws._js([[], 1]))
+        deep = "[" * 480 + "]" * 480
+        r = ws.search("serpapi", "ab", LOCALE, G, lambda _u, _h: (200, '{"error": ' + deep + "}"))
+        check("a reply nested hundreds deep is a refusal the search reports, not an exception out of it (the fall-back must still run)",
+              r["isError"] is True and r["text"].startswith("search refused"), str(r)[:80])
+        slow = time.monotonic()
+        ws._count("1" + " " * 200000 + "x")
+        check("a count with a long run of spaces inside it is read in linear time (a regex trim took seconds)", time.monotonic() - slow < 1.0)
+        check("a count that is a hexadecimal, octal or binary integer too large for a float is Infinity, clamped (Node: 20)",
+              ws._count("0x" + "f" * 300) == "20" and ws._count("0b" + "1" * 1100) == "20" and ws._count("0o" + "7" * 400) == "20")
+        sink3 = io.StringIO()
+        ws.serve(LOCALE, io.StringIO("\ufeff" + json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\u00a0\n"
+                                     + "\x1c" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"), sink3)
+        check("a line is trimmed of JavaScript's whitespace (a byte-order mark, a no-break space) and of nothing else (a file separator is not)",
+              [json.loads(x).get("result", json.loads(x).get("error", {}).get("code")) for x in sink3.getvalue().splitlines()] == [{}, -32700], sink3.getvalue())
         bom = ws.search("brave", "ab", LOCALE, B, lambda _u, _h: (200, "\ufeff" + json.dumps({"web": {"results": [{"title": "t", "url": "u"}]}})))
         check("a reply that opens with a byte-order mark is JSON (fetch's json() strips it)", bom["isError"] is False)
         sink = io.StringIO()

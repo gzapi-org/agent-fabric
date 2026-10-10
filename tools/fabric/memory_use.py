@@ -62,10 +62,15 @@ def _rows(path: str) -> tuple[list[dict], int]:
     return rows, bad
 
 
-def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] = lambda _text: []) -> tuple[list[dict], dict]:
+def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] = lambda _text: [], *, project: str | None = None,
+         until_ms: int | None = None) -> tuple[list[dict], dict | None]:
+    """The rows after since_ms, up to until_ms, of one project (a row names the project of the session that wrote it; the log
+    is the login's, which works in several). None for `use` when the window holds nothing at all, so that a drain of a login
+    that never ran the server is the drain it was. until_ms is the time the harvest began scanning the memories: a row after
+    it waits for the next drain, so the watermark never passes a memory the scan did not see."""
     marks: list[dict] = []
     use: dict = {"since_ms": since_ms, "until_ms": since_ms, "calls": {}, "zero_hit_finds": 0, "finds_followed_by_read": 0,
-                 "ids_read": {}, "marks": 0, "unreadable_lines": 0, "notes_withheld": 0}
+                 "ids_read": {}, "marks": 0, "errors": 0, "unreadable_lines": 0, "notes_withheld": 0}
     until = since_ms
     rows, bad = _rows(os.path.join(state_dir, MARKS))
     use["unreadable_lines"] += bad
@@ -75,7 +80,7 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
         if at is None or not isinstance(ident, str) or not ID_RE.fullmatch(ident) or verdict not in VERDICTS or not isinstance(note, str):
             use["unreadable_lines"] += 1
             continue
-        if at <= since_ms:
+        if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
             continue
         note = " ".join(note.split())[:NOTE_CLIP]
         if note and credential_hits(note):
@@ -92,9 +97,12 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
         if at is None or not isinstance(tool, str):
             use["unreadable_lines"] += 1
             continue
-        if at <= since_ms:
+        if at <= since_ms or (until_ms is not None and at > until_ms) or (row.get("project") or None) != project:
             continue
         until = max(until, at)
+        if row.get("error") is True:
+            use["errors"] += 1             # the caller got it wrong: neither a call that found nothing nor one that read
+            continue
         use["calls"][tool] = use["calls"].get(tool, 0) + 1
         ids = [i for i in row.get("ids") or [] if isinstance(i, str) and ID_RE.fullmatch(i)] if isinstance(row.get("ids"), list) else []
         if tool == "memory_find":
@@ -107,4 +115,5 @@ def read(state_dir: str, since_ms: int, credential_hits: Callable[[str], list] =
                 use["finds_followed_by_read"] += 1
                 pending = False
     use["until_ms"] = until
-    return marks, use
+    quiet = not (marks or use["calls"] or use["errors"] or use["unreadable_lines"] or use["notes_withheld"])
+    return marks, (None if quiet else use)

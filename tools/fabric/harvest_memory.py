@@ -419,6 +419,8 @@ def main() -> int:
     # newer than the last watermark for this host are in scope (all of
     # them under --all, or when there is no report yet), and the report
     # carries the max mtime read as the next watermark.
+    # The moment the scan of the memories begins: the memory server's rows after it wait for the next drain (memory_use.read).
+    scan_start_ms = int(time.time() * 1000)
     store = store_key(ctx["agent"], host, args.store)
     since_ms, since_report = (0, None) if args.all else previous_watermark(working_copy, host, ctx["agent"], store)
     next_ms = since_ms
@@ -513,8 +515,10 @@ def main() -> int:
     marks: list[dict] = []
     use = None
     if not args.store:
-        marks, use = memory_use.read(identity.agent_state_dir(ctx["agent"]), since_ms, credential_hits)
-        next_ms = max(next_ms, use["until_ms"])
+        marks, use = memory_use.read(identity.agent_state_dir(ctx["agent"]), since_ms, credential_hits, project=project,
+                                     until_ms=scan_start_ms)
+        if use is not None:
+            next_ms = max(next_ms, use["until_ms"])
     # The watermark stops below the oldest unrendered memory, whatever drained
     # after it: the next incremental drain names it again (the charter:
     # "never dropped"), at the price of re-reading what came after — which

@@ -498,7 +498,8 @@ def _state(*, marks: list | None = None, calls: list | None = None, raw: str = "
     for name, rows in (("memory-marks.jsonl", marks), ("memory-calls.jsonl", calls)):
         if rows is not None:
             with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
-                fh.write("".join(json.dumps(r) + "\n" for r in rows) + raw)
+                # The server names the project of the session on each row; the harvests of these cases are of "demo".
+                fh.write("".join(json.dumps({"project": "demo", **r}) + "\n" for r in rows) + raw)
     return d
 
 
@@ -551,8 +552,8 @@ def test_marks_and_counts_after_the_watermark_enter_the_bundle_and_earlier_ones_
     assert use["ids_read"] == {"f:domains/x/domain/a#1": 1, "f:domains/x/domain/b#1": 2}, use
     assert manifest["next_watermark"] == _ms("2026-10-10T08:00:00Z"), manifest
     # The same window again from the watermark it left: nothing new.
-    r, members, _ = _bundle(tmp, "m1b", manifest["next_watermark"])
-    assert members["marks.jsonl"] == b"" and json.loads(members["harvest-report.json"])["memory_use"]["calls"] == {}, members["marks.jsonl"]
+    r, members, manifest = _bundle(tmp, "m1b", manifest["next_watermark"])
+    assert "marks.jsonl" not in members and "memory_use" not in json.loads(members["harvest-report.json"]) and "marks.jsonl" not in manifest["files"], members.keys()
 
 
 def test_an_id_with_a_trailing_newline_is_not_an_id(tmp: str) -> None:
@@ -568,9 +569,9 @@ def test_an_id_with_a_trailing_newline_is_not_an_id(tmp: str) -> None:
 
 def test_a_missing_or_damaged_log_is_no_rows_and_no_error(tmp: str) -> None:
     _state()
-    r, members, _ = _bundle(tmp, "m2", None)
-    use = json.loads(members["harvest-report.json"])["memory_use"]
-    assert r.returncode == 0 and members["marks.jsonl"] == b"" and use["calls"] == {} and use["unreadable_lines"] == 0, (r.stderr, use)
+    r, members, manifest = _bundle(tmp, "m2", None)
+    assert r.returncode == 0 and "marks.jsonl" not in members and "memory_use" not in json.loads(members["harvest-report.json"]), (r.stderr, members.keys())
+    assert set(manifest["files"]) == {"harvest-report.json", "references.json", "observations.jsonl", "claims/architect-cto.json"}, manifest["files"]
     _state(marks=[{"t": "2026-10-10T07:00:00Z", "id": "../../etc/passwd", "verdict": "stale", "note": ""},
                   {"t": "2026-10-10T07:00:01Z", "id": "f:a/b#1", "verdict": "nonsense", "note": ""},
                   {"t": "yesterday", "id": "f:a/b#1", "verdict": "stale", "note": ""}],
@@ -580,6 +581,43 @@ def test_a_missing_or_damaged_log_is_no_rows_and_no_error(tmp: str) -> None:
     assert r.returncode == 0 and members["marks.jsonl"] == b"", r.stderr
     # Three marks that are not the server's, and two broken lines in each of the two files.
     assert use["unreadable_lines"] == 3 + 2 + 2 and use["ids_read"] == {"f:a/b#1": 1}, use
+
+
+def test_a_drain_carries_the_rows_of_its_own_project_alone(tmp: str) -> None:
+    """The log is the login's and the login works in several projects: a mark on one project's section must not be committed
+    into another's report. A row names its project; the harvest of a project takes its rows."""
+    rows = [{"t": "2026-10-10T07:00:00Z", "id": "p:a/b/c#1", "verdict": "stale", "note": "mine"},
+            {"t": "2026-10-10T07:00:01Z", "id": "p:a/b/c#1", "verdict": "wrong", "note": "theirs", "project": "other"},
+            {"t": "2026-10-10T07:00:02Z", "id": "p:a/b/c#1", "verdict": "wrong", "note": "nobody's", "project": None}]
+    calls = [{"t": "2026-10-10T07:00:00Z", **FIND}, {"t": "2026-10-10T07:00:01Z", **FIND, "project": "other"},
+             {"t": "2026-10-10T07:00:02Z", **FIND, "project": "other"}]
+    _state(marks=rows, calls=calls)
+    r, members, _ = _bundle(tmp, "m8", None)
+    got = [json.loads(ln) for ln in members["marks.jsonl"].decode().splitlines()]
+    use = json.loads(members["harvest-report.json"])["memory_use"]
+    assert [x["note"] for x in got] == ["mine"] and use["calls"] == {"memory_find": 1}, (got, use)
+    # The other project's drain takes its own, and a session with no project (an unregistered clone) takes the rows that have none.
+    r, members, _ = _bundle(tmp, "m8b", None, "--project", "other")
+    got = [json.loads(ln) for ln in members["marks.jsonl"].decode().splitlines()]
+    assert [x["note"] for x in got] == ["theirs"] and json.loads(members["harvest-report.json"])["memory_use"]["calls"] == {"memory_find": 2}, got
+
+
+def test_rows_after_the_scan_began_wait_and_the_watermark_stays_behind_them(tmp: str) -> None:
+    """A call logged after the scan of the memories began is read by the next drain: the watermark passing it could pass a
+    memory written after the scan listed the directory, which would then never be drained."""
+    future = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _state(marks=[{"t": future, "id": "f:a/b#1", "verdict": "stale", "note": ""}], calls=[{"t": future, **FIND}])
+    r, members, manifest = _bundle(tmp, "m9", 5)
+    assert "marks.jsonl" not in members and "memory_use" not in json.loads(members["harvest-report.json"]), members.keys()
+    assert manifest["next_watermark"] == 5, manifest
+
+
+def test_a_call_the_caller_got_wrong_is_counted_apart(tmp: str) -> None:
+    _state(calls=[{"t": "2026-10-10T07:00:00Z", "tool": "memory_find", "hits": 0, "ids": [], "error": True},
+                  {"t": "2026-10-10T07:00:01Z", "tool": "memory_find", "hits": 0, "ids": []}])
+    r, members, _ = _bundle(tmp, "m10", None)
+    use = json.loads(members["harvest-report.json"])["memory_use"]
+    assert use["errors"] == 1 and use["calls"] == {"memory_find": 1} and use["zero_hit_finds"] == 1, use
 
 
 def test_a_note_with_a_credential_is_withheld_and_a_query_is_never_carried(tmp: str) -> None:
@@ -811,6 +849,9 @@ def main() -> int:
         test_a_co_owner_that_is_not_a_slug_refuses_the_drain,
         test_marks_and_counts_after_the_watermark_enter_the_bundle_and_earlier_ones_do_not,
         test_a_missing_or_damaged_log_is_no_rows_and_no_error,
+        test_a_drain_carries_the_rows_of_its_own_project_alone,
+        test_rows_after_the_scan_began_wait_and_the_watermark_stays_behind_them,
+        test_a_call_the_caller_got_wrong_is_counted_apart,
         test_an_id_with_a_trailing_newline_is_not_an_id,
         test_a_note_with_a_credential_is_withheld_and_a_query_is_never_carried,
         test_a_second_store_of_the_login_carries_no_marks,
